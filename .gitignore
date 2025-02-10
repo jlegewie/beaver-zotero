@@ -1,0 +1,13 @@
+# dot files
+.DS_Store
+
+# Node.js
+node_modules
+pnpm-lock.yaml
+yarn.lock
+
+# Scaffold
+.env
+.scaffold
+build
+logs
