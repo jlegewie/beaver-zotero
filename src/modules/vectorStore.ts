@@ -122,7 +122,7 @@ export class VectorStoreDB {
         // Insert
         await this.db.queryAsync(
             `INSERT INTO documents (item_id, parent_id, status, summary, embedding, embedding_model, timestamp)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
                 doc.item_id,
                 doc.parent_id,
