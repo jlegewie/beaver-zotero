@@ -8,6 +8,7 @@ import {
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { BeaverMenuFactory } from "./modules/beaver/ui/menu";
 
 async function onStartup() {
 	await Promise.all([
@@ -18,21 +19,21 @@ async function onStartup() {
 	
 	initLocale();
 	
-	BasicExampleFactory.registerPrefs();
+	// BasicExampleFactory.registerPrefs();
 	
-	BasicExampleFactory.registerNotifier();
+	// BasicExampleFactory.registerNotifier();
 	
-	KeyExampleFactory.registerShortcuts();
+	// KeyExampleFactory.registerShortcuts();
 	
-	await UIExampleFactory.registerExtraColumn();
+	// await UIExampleFactory.registerExtraColumn();
 	
-	await UIExampleFactory.registerExtraColumnWithCustomCell();
+	// await UIExampleFactory.registerExtraColumnWithCustomCell();
 	
-	UIExampleFactory.registerItemPaneCustomInfoRow();
+	// UIExampleFactory.registerItemPaneCustomInfoRow();
 	
-	UIExampleFactory.registerItemPaneSection();
+	// UIExampleFactory.registerItemPaneSection();
 	
-	UIExampleFactory.registerReaderItemPaneSection();
+	// UIExampleFactory.registerReaderItemPaneSection();
 	
 	await Promise.all(
 		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -47,61 +48,64 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	win.MozXULElement.insertFTLIfNeeded(
 		`${addon.data.config.addonRef}-mainWindow.ftl`,
 	);
+
+	// Register Beaver UI elements
+	BeaverMenuFactory.registerMenuItems();
+
+	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
+	// 	closeOnClick: true,
+	// 	closeTime: -1,
+	// })
+	// .createLine({
+	// 	text: getString("startup-begin"),
+	// 	type: "default",
+	// 	progress: 0,
+	// })
+	// .show();
 	
-	const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
-		closeOnClick: true,
-		closeTime: -1,
-	})
-	.createLine({
-		text: getString("startup-begin"),
-		type: "default",
-		progress: 0,
-	})
-	.show();
+	// await Zotero.Promise.delay(1000);
+	// popupWin.changeLine({
+	// 	progress: 30,
+	// 	text: `[30%] ${getString("startup-begin")}`,
+	// });
 	
-	await Zotero.Promise.delay(1000);
-	popupWin.changeLine({
-		progress: 30,
-		text: `[30%] ${getString("startup-begin")}`,
-	});
+	// UIExampleFactory.registerStyleSheet(win);
 	
-	UIExampleFactory.registerStyleSheet(win);
+	// UIExampleFactory.registerRightClickMenuItem();
 	
-	UIExampleFactory.registerRightClickMenuItem();
+	// UIExampleFactory.registerRightClickMenuPopup(win);
 	
-	UIExampleFactory.registerRightClickMenuPopup(win);
+	// UIExampleFactory.registerWindowMenuWithSeparator();
 	
-	UIExampleFactory.registerWindowMenuWithSeparator();
+	// PromptExampleFactory.registerNormalCommandExample();
 	
-	PromptExampleFactory.registerNormalCommandExample();
+	// PromptExampleFactory.registerAnonymousCommandExample(win);
 	
-	PromptExampleFactory.registerAnonymousCommandExample(win);
+	// PromptExampleFactory.registerConditionalCommandExample();
+		
+	// await Zotero.Promise.delay(1000);
 	
-	PromptExampleFactory.registerConditionalCommandExample();
+	// popupWin.changeLine({
+	// 	progress: 100,
+	// 	text: `[100%] ${getString("startup-finish")}`,
+	// });
+	// popupWin.startCloseTimer(5000);
 	
-	await Zotero.Promise.delay(1000);
-	
-	popupWin.changeLine({
-		progress: 100,
-		text: `[100%] ${getString("startup-finish")}`,
-	});
-	popupWin.startCloseTimer(5000);
-	
-	addon.hooks.onDialogEvents("dialogExample");
+	// addon.hooks.onDialogEvents("dialogExample");
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
+	// Remove Beaver menu items
+	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
 }
 
 function onShutdown(): void {
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
-	// Remove addon object
 	addon.data.alive = false;
-	// @ts-ignore - Plugin instance is not typed
-	delete Zotero[addon.data.config.addonInstance];
+	delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
 }
 
 /**
