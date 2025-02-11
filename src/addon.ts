@@ -4,7 +4,7 @@ import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { VectorStoreDB } from "./modules/vectorStore";
-import { VoyageClient } from "./lib/voyage";
+import { VoyageClient } from "./services/voyage";
 
 class Addon {
     public data: {

@@ -10,7 +10,7 @@ import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverMenuFactory } from "./modules/ui/menu";
 import { VectorStoreDB } from "./modules/vectorStore";
-import { VoyageClient } from "./lib/voyage";
+import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 
 async function createDatabase() {
