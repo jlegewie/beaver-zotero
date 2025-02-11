@@ -3,6 +3,7 @@ import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTab
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
+import { VectorStoreDB } from "./modules/vectorStore";
 
 class Addon {
     public data: {
@@ -20,6 +21,8 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
+        db?: Zotero.DBConnection;
+        vectorStore?: VectorStoreDB;
     };
     // Lifecycle hooks
     public hooks: typeof hooks;

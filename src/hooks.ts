@@ -9,6 +9,32 @@ import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverMenuFactory } from "./modules/beaver/ui/menu";
+import { VectorStoreDB } from "./modules/vectorStore";
+
+async function createDatabase() {
+	try {
+		ztoolkit.log('Initializing Beaver database...');
+		
+		// Create database connection
+		const db = new Zotero.DBConnection("beaver");
+		
+		// Initialize vector store
+		const vectorStore = new VectorStoreDB(db);
+		
+		// Test connection and initialize schema
+		await db.test();
+		await vectorStore.initDatabase();
+		
+		// Store references for later use
+		addon.data.db = db;
+		addon.data.vectorStore = vectorStore;
+		
+		ztoolkit.log("Database initialized successfully");
+	} catch (error) {
+		ztoolkit.log("Failed to initialize database:", error);
+		throw error; // Re-throw to handle in onStartup
+	}
+}
 
 async function onStartup() {
 	await Promise.all([
@@ -18,6 +44,8 @@ async function onStartup() {
 	]);
 	
 	initLocale();
+
+	await createDatabase();
 	
 	// BasicExampleFactory.registerPrefs();
 	
@@ -101,7 +129,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
 }
 
-function onShutdown(): void {
+async function onShutdown(): Promise<void> {
+	try {
+		// Close database connection if it exists
+		if (addon.data.db) {
+			await addon.data.db.closeDatabase(false);
+		}
+	} catch (error) {
+		ztoolkit.log("Error closing database:", error);
+	}
+	
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
 	addon.data.alive = false;
