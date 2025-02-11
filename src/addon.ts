@@ -21,7 +21,7 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
-        db?: Zotero.DBConnection;
+        db?: typeof Zotero.DBConnection;
         vectorStore?: VectorStoreDB;
     };
     // Lifecycle hooks
