@@ -10,6 +10,8 @@ import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverMenuFactory } from "./modules/beaver/ui/menu";
 import { VectorStoreDB } from "./modules/vectorStore";
+import { VoyageClient } from "./lib/voyage";
+import { getPref } from "./utils/prefs";
 
 async function createDatabase() {
 	try {
@@ -45,7 +47,20 @@ async function onStartup() {
 	
 	initLocale();
 
+	// Initialize database
 	await createDatabase();
+	
+	// Initialize Voyage client
+	const voyageApiKey = getPref("voyageApiKey");
+	if (voyageApiKey) {
+		addon.data.voyage = new VoyageClient({
+			apiKey: voyageApiKey,
+		});
+		ztoolkit.log("Voyage client initialized");
+	} else {
+		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
+	}
+	
 	
 	// BasicExampleFactory.registerPrefs();
 	
