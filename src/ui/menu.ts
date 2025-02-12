@@ -1,7 +1,5 @@
-import { getString } from "../../utils/locale";
-import { collectItemData, processAndStoreItem } from "../../services/itemProcessing";
-import { VoyageClient } from "../../lib/voyage";
-import { VectorStoreDB } from "../vectorStore";
+import { getString } from "../utils/locale";
+import { DocumentServiceFactory } from "../services/DocumentServiceFactory";
 
 export class BeaverMenuFactory {
     static registerMenuItems() {
@@ -25,10 +23,25 @@ export class BeaverMenuFactory {
                         return;
                     }
 
+                    // Create document service
+                    const documentService = DocumentServiceFactory.create({
+                        mode: 'local',
+                        vectorStore: addon.data.vectorStore,
+                        voyageClient: addon.data.voyage
+                    });
+
                     // Process each selected item
                     for (const item of items) {
-                        const data = await collectItemData(item);
-                        await processAndStoreItem(data, addon.data.voyage, addon.data.vectorStore);
+                        const metadata = {
+                            title: item.getField('title') as string,
+                            abstract: item.getField('abstract') as string,
+                            year: parseInt(item.getField('year') as string) || undefined,
+                            author: item.getCreators()[0]?.lastName || undefined,
+                            publication: item.getField('publicationTitle') as string,
+                            itemType: item.itemType
+                        };
+
+                        await documentService.processDocument(item.id, metadata);
                     }
 
                     ztoolkit.log("Items processed successfully");
