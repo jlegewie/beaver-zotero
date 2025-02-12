@@ -283,61 +283,47 @@ export class VectorStoreDB {
     * 1) Retrieving embeddings from DB
     * 2) Computing cosine distance (or 1 - similarity)
     * 
-    * @param queryEmbedding The query embedding (Float16Array)
+    * @param queryEmbedding The query embedding (Float32Array)
     * @param limit Max results to return
-    * @returns Array of ItemMetadata, sorted by ascending distance
+    * @returns Array of item_ids, sorted by ascending distance
     */
     public async findSimilarItems(
         queryEmbedding: Float32Array,
         limit = 5
-    ): Promise<ItemMetadata[]> {
+    ): Promise<number[]> {
         try {
             return await Zotero.DB.executeTransaction(async () => {
                 // Get document embeddings
-                const embeddings = await this.conn.queryAsync(
-                    `SELECT metadata_id, embedding 
-                     FROM embeddings 
-                     WHERE type = ?`,
+                const embeddingsProxy = await this.conn.queryAsync(
+                    `SELECT e.id, e.metadata_id, e.embedding, i.item_id
+                    FROM embeddings e
+                    JOIN items i ON e.metadata_id = i.id
+                    WHERE e.type = ?`,
                     ['document']
                 );
+
+                // Convert proxy objects to plain objects
+                const embeddings = embeddingsProxy.map((proxy: any) => ({
+                    embedding_id: proxy.id,
+                    item_id: proxy.item_id,
+                    embedding: this.blobToFloat32(proxy.embedding)
+                }));
+                
+                ztoolkit.log("Embeddings:", embeddings);
 
                 if (!embeddings?.length) {
                     return [];
                 }
 
-                // Get corresponding items
-                const itemIds = embeddings.map((e: any) => e.metadata_id);
-                const placeholders = itemIds.map(() => '?').join(',');
-                const items = await this.conn.queryAsync(
-                    `SELECT id, item_id, type, status_local, status_remote, error, context, timestamp 
-                     FROM items 
-                     WHERE id IN (${placeholders})`,
-                    itemIds
-                );
-
-                if (!items?.length) {
-                    return [];
-                }
-
-                // Create a map for efficient item lookup
-                const itemMap = new Map(items.map((item: any) => [item.id, item]));
-
                 // Calculate distances and prepare results
                 const results = embeddings
-                    .map((embedding: any) => {
-                        const item = itemMap.get(embedding.metadata_id);
-                        if (!item) return null;
-
-                        const embeddingVector = this.blobToFloat32(embedding.embedding);
-                        return {
-                            item: VectorStoreDB.rowToItemMetadata(item),
-                            distance: this.cosineDistance(queryEmbedding, embeddingVector)
-                        };
-                    })
-                    .filter((result: any) => result !== null)
-                    .sort((a: any, b: any) => a!.distance - b!.distance)
+                    .map((embedding: any) => ({
+                        item_id: embedding.item_id,
+                        distance: this.cosineDistance(queryEmbedding, embedding.embedding)
+                    }))
+                    .sort((a: any, b: any) => a.distance - b.distance)
                     .slice(0, limit)
-                    .map((result: any) => result!.item);
+                    .map((result: any) => result.item_id);
 
                 return results;
             });

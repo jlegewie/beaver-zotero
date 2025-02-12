@@ -45,9 +45,8 @@ export class BeaverUIFactory {
                 label: "Beaver",
                 callback(prompt) {
                     addon.itemService?.query(prompt.inputNode.value, 1)
-                        .then(results => {
-                            ztoolkit.log("Search results:", results);
-                            ztoolkit.log("Search results:", results.map((r: any) => Zotero.Items.get(r.item_id).getDisplayTitle()));
+                        .then(items => {
+                            ztoolkit.log("Search results:", items.map((item: Zotero.Item) => item.getDisplayTitle()));
                         })
                         .catch(error => {
                             ztoolkit.log("Search error:", error);

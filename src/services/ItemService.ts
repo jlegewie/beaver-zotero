@@ -146,14 +146,15 @@ export class ItemService {
      *  1) Embeds the query text
      *  2) Calls vectorStore.findSimilarItems
      */
-    public async query(text: string, limit: number = 5): Promise<any[]> {
+    public async query(text: string, limit: number = 5): Promise<Zotero.Item[]> {
         if (!this.embedClient) {
             throw new Error('Embedding client not initialized');
         }
         const queryEmbedding = await this.embedClient.embedQuery(text);
         const results = await this.db.findSimilarItems(new Float32Array(queryEmbedding), limit);
+        const items = await Zotero.Items.get(results);
         
         // Return them as raw item metadata or transform further if you like
-        return results;
+        return items;
     }
 }
