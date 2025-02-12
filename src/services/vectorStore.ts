@@ -227,29 +227,40 @@ export class VectorStoreDB {
     /**
     * Update an existing item
     */
-    public async updateItemMetadata(item: ItemMetadata): Promise<void> {
-        await this.db.queryAsync(`
-            UPDATE items
-            SET item_id=?1,
-                status_local=?2,
-                status_remote=?3,
-                error=?4,
-                context=?5,
-                type=?6,
-                timestamp=?7
-            WHERE id=?8`,
-            [
-                item.item_id,
-                item.status_local,
-                item.status_remote,
-                item.error,
-                item.context,
-                item.type,
-                item.timestamp,
-                item.id
-            ]
-        );
+    public async updateItemMetadata(id: string, updates: Partial<ItemMetadata>): Promise<void> {
+        // Define which fields can be updated
+        const allowedFields: (keyof Omit<ItemMetadata, 'id'>)[] = [
+            "item_id",
+            "status_local",
+            "status_remote",
+            "error",
+            "context",
+            "type",
+            "timestamp"
+        ];
+
+        // Build the update clauses and corresponding values dynamically.
+        const fieldsToUpdate = allowedFields.filter(field => updates[field] !== undefined);
+
+        // If nothing to update, simply return.
+        if (fieldsToUpdate.length === 0) {
+            return;
+        }
+
+        // Create the SET clauses, e.g., "status_local = ?, item_id = ?"
+        const setClauses = fieldsToUpdate.map(field => `${field} = ?`).join(', ');
+
+        // Gather the corresponding values in the same order.
+        const values = fieldsToUpdate.map(field => updates[field]);
+
+        // Append the id for the WHERE clause.
+        values.push(id);
+
+        // Construct and execute the query.
+        const query = `UPDATE items SET ${setClauses} WHERE id = ?`;
+        await this.db.queryAsync(query, values);
     }
+
                 
     /**
     * Delete methods
