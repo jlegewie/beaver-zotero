@@ -52,7 +52,7 @@ export interface IDocumentRepository {
      * Insert a new document into storage
      * @returns The ID of the inserted document
      */
-    insert(doc: ProcessedDocument): Promise<number>;
+    insert(doc: ProcessedDocument): Promise<string>;
     
     /**
      * Retrieve a document by its ID
@@ -81,7 +81,7 @@ export interface IDocumentService {
      * Process a Zotero item and store its document representation
      * @returns The ID of the processed document
      */
-    processDocument(itemId: number, metadata: ItemMetadata): Promise<number>;
+    processDocument(itemId: number, metadata: ItemMetadata): Promise<string>;
     
     /**
      * Retrieve a processed document

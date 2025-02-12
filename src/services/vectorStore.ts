@@ -113,7 +113,7 @@ export class VectorStoreDB {
     * @param doc Partial document data (without 'id')
     * @returns The new 'id' (primary key) of the inserted document
     */
-    public async insertDocument(doc: DocumentTable): Promise<number> {
+    public async insertDocument(doc: DocumentTable): Promise<string> {
         // Convert doc.embedding (Float16Array) to a BLOB
         const blob = this.float32ToBlob(doc.embedding);
         
@@ -134,7 +134,7 @@ export class VectorStoreDB {
         
         // Retrieve new row ID
         const newId = await this.db.valueQueryAsync("SELECT last_insert_rowid()");
-        return Number(newId);
+        return newId;
     }
     
     /**

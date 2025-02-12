@@ -8,7 +8,7 @@ export class LocalDocumentService implements IDocumentService {
         private embedder: VoyageClient
     ) {}
     
-    async processDocument(itemId: number, metadata: ItemMetadata): Promise<number> {
+    async processDocument(itemId: number, metadata: ItemMetadata): Promise<string> {
         // Create combined text for embedding
         const combinedText = `${metadata.title}\n\n${metadata.abstract}`;
         

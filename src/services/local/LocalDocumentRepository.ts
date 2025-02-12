@@ -6,7 +6,7 @@ import { VectorStoreDB } from '../vectorStore';
 export class LocalDocumentRepository implements IDocumentRepository {
     constructor(private vectorStore: VectorStoreDB) {}
     
-    async insert(doc: ProcessedDocument): Promise<number> {
+    async insert(doc: ProcessedDocument): Promise<string> {
         return await this.vectorStore.insertDocument(toDocumentTable(doc));
     }
     
