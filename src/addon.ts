@@ -23,6 +23,7 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
+        _itemStatuses: Map<number, string>;
     };
     public itemService?: ItemService;
     // Lifecycle hooks
@@ -36,6 +37,7 @@ class Addon {
             config,
             env: __env__,
             ztoolkit: createZToolkit(),
+            _itemStatuses: new Map()
         };
         this.hooks = hooks;
         this.api = {};

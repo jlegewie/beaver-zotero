@@ -1,6 +1,7 @@
 import { ItemMetadata, Embedding, VectorStoreDB } from './vectorStore';
 import { VoyageClient } from './voyage';
 import { generateUUID } from '../utils/uuid';
+import { BeaverUIFactory } from '../ui/ui';
 
 /**
  * Simplified service to manage items (and their embeddings) directly with VectorStoreDB.
@@ -96,6 +97,9 @@ export class ItemService {
         // Insert (or update) the item row
         await this.db.insertItemMetadata(itemMetadata);
 
+        // Update the item status cache
+        BeaverUIFactory.updateItemPaneStatus(item.id, itemMetadata.status_local);
+
         // Generate embedding
         if (this.mode === 'local') {
             const embeddings = await this.generateEmbeddings(item, itemMetadata);
@@ -105,6 +109,10 @@ export class ItemService {
                 await this.db.insertEmbedding(embedding);
             }
         }
+
+        // Update the item status cache
+        await this.db.updateItemMetadata(itemMetadata.id, { status_local: 'completed' });
+        BeaverUIFactory.updateItemPaneStatus(item.id, itemMetadata.status_local);
 
         // Return the newly-created item ID
         return itemMetadata.id;

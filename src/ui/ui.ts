@@ -1,4 +1,4 @@
-import { getString } from "../utils/locale";
+import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
 
 export class BeaverUIFactory {
@@ -40,16 +40,30 @@ export class BeaverUIFactory {
 
     static registerInfoRow() {
         const rowID = Zotero.ItemPaneManager.registerInfoRow({
-            rowID: 'beaver-document-id',
-            pluginID: 'beaver@test.com',
-            label: { l10nID: 'beaver-item-pane-status' },
-            position: 'start',
+            rowID: 'beaver-item-pane-status',
+            pluginID: addon.data.config.addonID,
+            label: { l10nID: getLocaleID("item-pane-status") },
+            position: 'afterCreators',
             multiline: false,
             nowrap: false,
             editable: false,
             onGetData({ item }) {
-                // const status = await addon?.data?.documentService?.getDocumentStatusByItemId(item.id);
-                return 'test';
+                
+                // Check cache first
+                if (addon.data._itemStatuses.has(item.id)) {
+                    ztoolkit.log(`Returning status for item ${item.id}: ${addon.data._itemStatuses.get(item.id)}`);
+                    return addon.data._itemStatuses.get(item.id) || '';
+                }
+                // Set initial loading state
+                addon.data._itemStatuses.set(item.id, 'Loading...');
+
+                // Fetch status asynchronously
+                addon.itemService?.getItemStatusByZoteroId(item.id)
+                    .then(status => {
+                        BeaverUIFactory.updateItemPaneStatus(item.id, status || 'Not in database');
+                    });
+                
+                return 'Loading...';
             },
             /*
             onSetData({ rowID, item, tabType, editable, value }) {
@@ -57,5 +71,10 @@ export class BeaverUIFactory {
             },
             */
         })
+    }
+
+    static updateItemPaneStatus(itemId: number, status: string) {
+        addon.data._itemStatuses.set(itemId, status);
+        Zotero.ItemPaneManager.refreshInfoRow('beaver-item-pane-status');
     }
 }

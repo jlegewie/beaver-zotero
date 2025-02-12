@@ -127,6 +127,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	addon.data.dialog?.window?.close();
 	// Remove Beaver menu items
 	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
+	Zotero.ItemPaneManager.unregisterInfoRow('beaver-item-pane-status');
 }
 
 async function onShutdown(): Promise<void> {
