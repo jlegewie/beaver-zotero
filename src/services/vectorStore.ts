@@ -261,7 +261,6 @@ export class VectorStoreDB {
         await this.conn.queryAsync(query, values);
     }
 
-                
     /**
     * Delete methods
     */
