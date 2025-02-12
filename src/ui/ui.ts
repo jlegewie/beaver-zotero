@@ -65,12 +65,21 @@ export class BeaverUIFactory {
                 
                 return 'Loading...';
             },
-            /*
-            onSetData({ rowID, item, tabType, editable, value }) {
-                Zotero.debug(`Set custom info row ${rowID} of item ${item.id} to ${value}`);
-            },
-            */
         })
+    }
+
+    static registerExtraColumn() {
+        Zotero.ItemTreeManager.registerColumn({
+            pluginID: addon.data.config.addonID,
+            dataKey: 'beaver-status',
+            // label: getLocaleID("item-pane-status"),
+            label: "Status",
+            dataProvider: (item: Zotero.Item, dataKey: string) => {
+                return item.id.toString();
+                // return addon.data._itemStatuses.get(item.id) || '';
+            }
+            // iconPath: "chrome://zotero/skin/cross.png",
+        });
     }
 
     static updateItemPaneStatus(itemId: number, status: string) {
