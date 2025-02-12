@@ -5,6 +5,7 @@ import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
+import { IDocumentService } from "./types/document";
 
 class Addon {
     public data: {
@@ -25,6 +26,7 @@ class Addon {
         db?: typeof Zotero.DBConnection;
         vectorStore?: VectorStoreDB;
         voyage?: VoyageClient;
+        documentService?: IDocumentService;
     };
     // Lifecycle hooks
     public hooks: typeof hooks;

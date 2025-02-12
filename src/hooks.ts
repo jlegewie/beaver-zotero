@@ -12,11 +12,10 @@ import { BeaverMenuFactory } from "./ui/menu";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
+import { DocumentServiceFactory } from "./services/DocumentServiceFactory";
 
 async function createDatabase() {
 	try {
-		ztoolkit.log('Initializing Beaver database...');
-		
 		// Create database connection
 		const db = new Zotero.DBConnection("beaver");
 		
@@ -57,6 +56,16 @@ async function onStartup() {
 			apiKey: voyageApiKey,
 		});
 		ztoolkit.log("Voyage client initialized");
+		
+		// Initialize document service if both vectorStore and voyage are available
+		if (addon.data.vectorStore) {
+			addon.data.documentService = DocumentServiceFactory.create({
+				mode: 'local',
+				vectorStore: addon.data.vectorStore,
+				voyageClient: addon.data.voyage
+			});
+			ztoolkit.log("Document service initialized");
+		}
 	} else {
 		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
 	}
@@ -150,8 +159,10 @@ async function onShutdown(): Promise<void> {
 		if (addon.data.db) {
 			await addon.data.db.closeDatabase(false);
 		}
+		// Clear document service
+		addon.data.documentService = undefined;
 	} catch (error) {
-		ztoolkit.log("Error closing database:", error);
+		ztoolkit.log("Error during shutdown:", error);
 	}
 	
 	ztoolkit.unregisterAll();

@@ -1,5 +1,5 @@
 import { getString } from "../utils/locale";
-import { DocumentServiceFactory } from "../services/DocumentServiceFactory";
+
 
 export class BeaverMenuFactory {
     static registerMenuItems() {
@@ -8,9 +8,9 @@ export class BeaverMenuFactory {
             tag: "menuitem",
             id: "zotero-itemmenu-beaver-upsert",
             label: getString("beaver-menu-upsert"),
-            commandListener: async (ev) => {
+            commandListener: async (ev: any) => {
                 try {
-                    ztoolkit.log("Upserting item to Beaver...");
+                    ztoolkit.log("Processing items...");
                     // Get selected items
                     const items = Zotero.getActiveZoteroPane().getSelectedItems();
                     if (!items.length) {
@@ -18,19 +18,12 @@ export class BeaverMenuFactory {
                         return;
                     }
 
-                    if (!addon.data.voyage || !addon.data.vectorStore) {
-                        ztoolkit.log("Voyage or vector store not initialized");
+                    if (!addon.data.documentService) {
+                        ztoolkit.log("Document service not initialized");
                         return;
                     }
 
-                    // Create document service
-                    const documentService = DocumentServiceFactory.create({
-                        mode: 'local',
-                        vectorStore: addon.data.vectorStore,
-                        voyageClient: addon.data.voyage
-                    });
-
-                    // Process each selected item
+                    // Process each selected item using the initialized service
                     for (const item of items) {
                         const metadata = {
                             title: item.getField('title') as string,
@@ -41,7 +34,7 @@ export class BeaverMenuFactory {
                             itemType: item.itemType
                         };
 
-                        await documentService.processDocument(item.id, metadata);
+                        await addon.data.documentService.processDocument(item.id, metadata);
                     }
 
                     ztoolkit.log("Items processed successfully");
@@ -52,4 +45,4 @@ export class BeaverMenuFactory {
             },
         });
     }
-} 
+}
