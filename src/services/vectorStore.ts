@@ -109,7 +109,7 @@ export class VectorStoreDB {
     * @param item Item data
     * @returns The new 'id' of the inserted item
     */
-    public async insertItem(item: ItemMetadata): Promise<string> {
+    public async insertItemMetadata(item: ItemMetadata): Promise<string> {
         await this.db.queryAsync(
             `INSERT INTO items (id, item_id, status_local, status_remote, error, context, type, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -156,7 +156,7 @@ export class VectorStoreDB {
     /**
     * Helper method to construct ItemMetadata from a database row
     */
-    private static rowToItem(row: any): ItemMetadata {
+    private static rowToItemMetadata(row: any): ItemMetadata {
         return {
             id: row.id,
             item_id: row.item_id,
@@ -170,14 +170,25 @@ export class VectorStoreDB {
     }
     
     /**
-    * Retrieve an item by ID.
+    * Retrieve an item metadata by ID.
     */
-    public async getItemById(id: string): Promise<ItemMetadata | null> {
+    public async getItemMetadataById(id: string): Promise<ItemMetadata | null> {
         const rows = await this.db.queryAsync(
             `SELECT * FROM items WHERE id=?1`,
             [id]
         );
-        return rows.length === 0 ? null : VectorStoreDB.rowToItem(rows[0]);
+        return rows.length === 0 ? null : VectorStoreDB.rowToItemMetadata(rows[0]);
+    }
+
+    /**
+    * Retrieve an item metadata by Zotero item ID.
+    */
+    public async getItemMetadataByItemId(itemId: number): Promise<ItemMetadata | null> {
+        const rows = await this.db.queryAsync(
+            `SELECT * FROM items WHERE item_id=?1`,
+            [itemId]
+        );
+        return rows.length === 0 ? null : VectorStoreDB.rowToItemMetadata(rows[0]);
     }
     
     /**
@@ -209,7 +220,7 @@ export class VectorStoreDB {
     /**
     * Update an existing item
     */
-    public async updateItem(item: ItemMetadata): Promise<void> {
+    public async updateItemMetadata(item: ItemMetadata): Promise<void> {
         await this.db.queryAsync(`
             UPDATE items
             SET item_id=?1,
@@ -236,7 +247,7 @@ export class VectorStoreDB {
     /**
     * Delete methods
     */
-    public async deleteItem(id: string): Promise<void> {
+    public async deleteItemMetadata(id: string): Promise<void> {
         await this.db.queryAsync(
             `DELETE FROM items WHERE id=?1`,
             [id]
@@ -272,7 +283,7 @@ export class VectorStoreDB {
             const embedding = this.blobToFloat32(row.embedding);
             const distance = this.cosineDistance(queryEmbedding, embedding);
             results.push({
-                item: VectorStoreDB.rowToItem(row),
+                item: VectorStoreDB.rowToItemMetadata(row),
                 distance,
             });
         }
@@ -338,7 +349,7 @@ export class VectorStoreDB {
     await vectorStore.initDatabase(); // Run migrations
 
     // 4) Insert a document
-    const newDocId = await vectorStore.insertItem({
+    const newDocId = await vectorStore.insertItemMetadata({
         id: "1234",
         item_id: 1234,
         type: "regular" as const,
@@ -364,7 +375,7 @@ export class VectorStoreDB {
     console.log("Inserted chunk ID:", newChunkId);
 
     // 6) Fetch the document or chunk by ID
-    const fetchedDoc = await vectorStore.getItemById(newDocId);
+    const fetchedDoc = await vectorStore.getItemMetadataById(newDocId);
     const fetchedChunk = await vectorStore.getEmbeddingById(newChunkId);
     console.log("Fetched doc:", fetchedDoc);
     console.log("Fetched chunk:", fetchedChunk);
