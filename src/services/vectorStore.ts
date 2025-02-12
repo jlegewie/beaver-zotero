@@ -271,7 +271,7 @@ export class VectorStoreDB {
             [id]
         );
         await this.conn.queryAsync(
-            `DELETE FROM embeddings WHERE item_id=?1`,
+            `DELETE FROM embeddings WHERE metadata_id=?1`,
             [id]
         );
     }
