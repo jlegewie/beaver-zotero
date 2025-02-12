@@ -44,6 +44,11 @@ export class LocalDocumentService implements IDocumentService {
     async getDocument(id: string): Promise<ProcessedDocument | null> {
         return await this.repository.getById(id);
     }
+
+    async getDocumentStatusByItemId(itemId: number): Promise<string | null> {
+        const doc = await this.repository.getByItemId(itemId);
+        return doc?.status || null;
+    }
     
     async deleteDocument(id: string): Promise<void> {
         await this.repository.deleteById(id);
