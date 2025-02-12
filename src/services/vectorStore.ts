@@ -1,36 +1,31 @@
-/**
-* Current schema version for migrations.
-*/
+// Current schema version for migrations.
 const CURRENT_SCHEMA_VERSION = 1;
 
-/**
-* Document-level interface (matches 'documents' table)
-*/
-export interface DocumentTable {
+// Item-level interface (matches 'items' table)
+export interface ItemMetadata {
     id: string;
-    item_id: number;          // Zotero attachment/item ID
-    status: string;
-    summary: string;
-    embedding: Float32Array;  // stored in DB as BLOB
-    embedding_model: string;
-    timestamp: number;        // store as a numeric Unix timestamp
+    item_id: number;          // Zotero item ID
+    type: 'regular' | 'attachment' | 'note' | 'annotation';
+    status_local: string;     // Local processing status
+    status_remote: string;    // Remote processing status
+    error: string | null;     // Error message if any
+    context: string | null;   // Short description of item used as document-level context for chunks
+    timestamp: number;        // Unix timestamp
 }
 
-/**
-* Chunk-level interface (matches 'chunks' table)
-*/
-export interface ChunkTable {
+// Embedding-level interface (matches 'embeddings' table)
+export interface Embedding {
     id: string;
-    document_id: number;      // references DocumentTable.id
+    metadata_id: string;      // references ItemMetadata.id
+    type: 'chunk' | 'document';
     content: string;
-    page_no: number | null;
     embedding: Float32Array;  // stored as BLOB in DB
-    embedding_model: string;
+    model: string;
     timestamp: number;
 }
 
 /**
-* This class manages an SQLite-based vector store using
+* Class that manages an SQLite-based vector store using
 * Zotero's DBConnection for queries and migrations.
 */
 export class VectorStoreDB {
@@ -78,138 +73,119 @@ export class VectorStoreDB {
     }
         
     /**
-    * Migration 1: Create the 'documents' and 'chunks' tables.
+    * Migration 1: Create the 'items' and 'embeddings' tables.
     */
     private async runMigration1() {
-        // Documents table
+        // Items table
         await this.db.queryAsync(`
-            CREATE TABLE IF NOT EXISTS documents (
+            CREATE TABLE IF NOT EXISTS items (
                 id              TEXT(36) PRIMARY KEY,
                 item_id         INTEGER NOT NULL,
-                status          TEXT,
-                summary         TEXT,
-                embedding       BLOB,
-                embedding_model TEXT,
+                type            TEXT NOT NULL,
+                status_local    TEXT,
+                status_remote   TEXT,
+                error           TEXT,
+                context         TEXT,
                 timestamp       INTEGER
             );
         `);
                 
-        // Chunks table
+        // Embeddings table
         await this.db.queryAsync(`
-            CREATE TABLE IF NOT EXISTS chunks (
-                id              TEXT(36) PRIMARY KEY,
-                document_id     INTEGER NOT NULL,
-                content         TEXT,
-                page_no         INTEGER,
-                embedding       BLOB,
-                embedding_model TEXT,
-                timestamp       INTEGER
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id            TEXT(36) PRIMARY KEY,
+                metadata_id   TEXT NOT NULL,
+                type          TEXT NOT NULL,
+                content       TEXT,
+                embedding     BLOB,
+                model         TEXT,
+                timestamp     INTEGER
             );
         `);
     }
     
     /**
-    * Insert a document record into the 'documents' table.
-    * @param doc Partial document data (without 'id')
-    * @returns The new 'id' (primary key) of the inserted document
+    * Insert an item record into the 'items' table.
+    * @param item Item data
+    * @returns The new 'id' of the inserted item
     */
-    public async insertDocument(doc: DocumentTable): Promise<string> {
-        // Convert doc.embedding (Float16Array) to a BLOB
-        const blob = this.float32ToBlob(doc.embedding);
-        
-        // Insert
+    public async insertItem(item: ItemMetadata): Promise<string> {
         await this.db.queryAsync(
-            `INSERT INTO documents (id, item_id, status, summary, embedding, embedding_model, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO items (id, item_id, status_local, status_remote, error, context, type, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                doc.id,
-                doc.item_id,
-                doc.status,
-                doc.summary,
-                blob,
-                doc.embedding_model,
-                doc.timestamp
+                item.id,
+                item.item_id,
+                item.status_local,
+                item.status_remote,
+                item.error,
+                item.context,
+                item.type,
+                item.timestamp
             ]
         );
         
-        // Retrieve new row ID
-        const newId = await this.db.valueQueryAsync("SELECT last_insert_rowid()");
-        return newId;
+        return item.id;
     }
     
     /**
-    * Insert a chunk record into the 'chunks' table.
-    * @param chunk Partial chunk data (without 'id')
-    * @returns The new 'id' (primary key) of the inserted chunk
+    * Insert an embedding record into the 'embeddings' table.
+    * @param embedding Embedding data
+    * @returns The new 'id' of the inserted embedding
     */
-    public async insertChunk(chunk: ChunkTable): Promise<number> {
-        // Convert chunk.embedding (Float16Array) to BLOB
-        const blob = this.float32ToBlob(chunk.embedding);
+    public async insertEmbedding(embedding: Embedding): Promise<string> {
+        const blob = this.float32ToBlob(embedding.embedding);
         
-        // Insert
         await this.db.queryAsync(
-            `INSERT INTO chunks (id, document_id, content, page_no, embedding, embedding_model, timestamp)
+            `INSERT INTO embeddings (id, metadata_id, type, content, embedding, model, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
-                chunk.id,
-                chunk.document_id,
-                chunk.content,
-                chunk.page_no,
+                embedding.id,
+                embedding.metadata_id,
+                embedding.type,
+                embedding.content,
                 blob,
-                chunk.embedding_model,
-                chunk.timestamp
+                embedding.model,
+                embedding.timestamp
             ]
         );
         
-        // Retrieve new row ID
-        const newId = await this.db.valueQueryAsync("SELECT last_insert_rowid()");
-        return Number(newId);
+        return embedding.id;
     }
     
     /**
-    * Retrieve a document by ID.
-    * @param id Document table primary key
+    * Helper method to construct ItemMetadata from a database row
     */
-    public async getDocumentById(id: string): Promise<DocumentTable | null> {
-        const rows = await this.db.queryAsync(
-            `SELECT * FROM documents WHERE id=?1`,
-            [id]
-        );
-        if (rows.length === 0) {
-            return null;
-        }
-        
-        const row = rows[0];
-        // Convert the BLOB back into Float16Array
-        const embeddingBlob = row.embedding; // typically a Uint8Array
-        const embedding = this.blobToFloat32(embeddingBlob);
-        
+    private static rowToItem(row: any): ItemMetadata {
         return {
             id: row.id,
             item_id: row.item_id,
-            status: row.status,
-            summary: row.summary,
-            embedding: embedding,
-            embedding_model: row.embedding_model,
+            status_local: row.status_local,
+            status_remote: row.status_remote,
+            error: row.error,
+            context: row.context,
+            type: row.type,
             timestamp: row.timestamp
         };
     }
-
-    public async getDocumentByItemId(itemId: number): Promise<DocumentTable | null> {
+    
+    /**
+    * Retrieve an item by ID.
+    */
+    public async getItemById(id: string): Promise<ItemMetadata | null> {
         const rows = await this.db.queryAsync(
-            `SELECT * FROM documents WHERE item_id=?1`,
-            [itemId]
+            `SELECT * FROM items WHERE id=?1`,
+            [id]
         );
-        return this.getDocumentById(rows[0].id);
+        return rows.length === 0 ? null : VectorStoreDB.rowToItem(rows[0]);
     }
     
     /**
-    * Retrieve a chunk by ID.
-    * @param id Chunks table primary key
+    * Retrieve an embedding by ID.
     */
-    public async getChunkById(id: string): Promise<ChunkTable | null> {
+    public async getEmbeddingById(id: string): Promise<Embedding | null> {
         const rows = await this.db.queryAsync(
-            `SELECT * FROM chunks WHERE id=?1`,
+            `SELECT * FROM embeddings WHERE id=?1`,
             [id]
         );
         if (rows.length === 0) {
@@ -217,44 +193,42 @@ export class VectorStoreDB {
         }
         
         const row = rows[0];
-        // Convert BLOB back to Float16Array
-        const embeddingBlob = row.embedding;
-        const embedding = this.blobToFloat32(embeddingBlob);
+        const embedding = this.blobToFloat32(row.embedding);
         
         return {
             id: row.id,
-            document_id: row.document_id,
+            metadata_id: row.metadata_id,
+            type: row.type as 'chunk' | 'document',
             content: row.content,
-            page_no: row.page_no,
             embedding: embedding,
-            embedding_model: row.embedding_model,
+            model: row.model,
             timestamp: row.timestamp
-        };
+        } as Embedding;
     }
     
     /**
-    * Optional: an update method if you need to change an existing document or chunk.
-    * Example for documents:
+    * Update an existing item
     */
-    public async updateDocument(doc: DocumentTable): Promise<void> {
-        const blob = this.float32ToBlob(doc.embedding);
+    public async updateItem(item: ItemMetadata): Promise<void> {
         await this.db.queryAsync(`
-            UPDATE documents
+            UPDATE items
             SET item_id=?1,
-                status=?3,
-                summary=?4,
-                embedding=?5,
-                embedding_model=?6,
+                status_local=?2,
+                status_remote=?3,
+                error=?4,
+                context=?5,
+                type=?6,
                 timestamp=?7
             WHERE id=?8`,
             [
-                doc.item_id,
-                doc.status,
-                doc.summary,
-                blob,
-                doc.embedding_model,
-                doc.timestamp,
-                doc.id
+                item.item_id,
+                item.status_local,
+                item.status_remote,
+                item.error,
+                item.context,
+                item.type,
+                item.timestamp,
+                item.id
             ]
         );
     }
@@ -262,26 +236,19 @@ export class VectorStoreDB {
     /**
     * Delete methods
     */
-    public async deleteDocument(id: string): Promise<void> {
+    public async deleteItem(id: string): Promise<void> {
         await this.db.queryAsync(
-            `DELETE FROM documents WHERE id=?1`,
+            `DELETE FROM items WHERE id=?1`,
             [id]
         );
         await this.db.queryAsync(
-            `DELETE FROM chunks WHERE document_id=?1`,
+            `DELETE FROM embeddings WHERE item_id=?1`,
             [id]
         );
     }
     
-    public async deleteChunk(id: string): Promise<void> {
-        await this.db.queryAsync(
-            `DELETE FROM chunks WHERE id=?1`,
-            [id]
-        );
-    }
-
     /**
-    * Similarity search for documents to a given embedding.
+    * Similarity search for items to a given embedding.
     * 
     * Search is done in memory by:
     * 1) Retrieving embeddings from DB
@@ -289,31 +256,23 @@ export class VectorStoreDB {
     * 
     * @param queryEmbedding The query embedding (Float16Array)
     * @param limit Max results to return
-    * @returns Array of DocumentTable, sorted by ascending distance
+    * @returns Array of ItemMetadata, sorted by ascending distance
     */
-    public async findSimilarDocuments(
+    public async findSimilarItems(
         queryEmbedding: Float32Array,
         limit = 5
-    ): Promise<DocumentTable[]> {
-        // 1) Load all documents
-        const rows = await this.db.queryAsync(`SELECT * FROM documents`);
+    ): Promise<ItemMetadata[]> {
+        // 1) Load all items
+        const rows = await this.db.queryAsync(`SELECT * FROM items`);
         
         // 2) Calculate distances
-        const results: Array<{ doc: DocumentTable; distance: number }> = [];
+        const results: Array<{ item: ItemMetadata; distance: number }> = [];
         
         for (const row of rows) {
             const embedding = this.blobToFloat32(row.embedding);
             const distance = this.cosineDistance(queryEmbedding, embedding);
             results.push({
-                doc: {
-                    id: row.id,
-                    item_id: row.item_id,
-                    status: row.status,
-                    summary: row.summary,
-                    embedding: embedding,
-                    embedding_model: row.embedding_model,
-                    timestamp: row.timestamp
-                },
+                item: VectorStoreDB.rowToItem(row),
                 distance,
             });
         }
@@ -322,49 +281,9 @@ export class VectorStoreDB {
         results.sort((a, b) => a.distance - b.distance);
         
         // 4) Take top N
-        return results.slice(0, limit).map(item => item.doc);
+        return results.slice(0, limit).map(item => item.item);
     }
     
-    /**
-    * Find similar chunks to a given embedding.
-    * @param queryEmbedding The query embedding (Float16Array)
-    * @param limit Max results
-    * @returns Array of ChunkTable, sorted by ascending distance
-    */
-    public async findSimilarChunks(
-        queryEmbedding: Float32Array,
-        limit = 5
-    ): Promise<ChunkTable[]> {
-        // 1) Load all chunks
-        const rows = await this.db.queryAsync(`SELECT * FROM chunks`);
-        
-        // 2) Calculate distances
-        const results: Array<{ chunk: ChunkTable; distance: number }> = [];
-        
-        for (const row of rows) {
-            const embedding = this.blobToFloat32(row.embedding);
-            const distance = this.cosineDistance(queryEmbedding, embedding);
-            results.push({
-                chunk: {
-                    id: row.id,
-                    document_id: row.document_id,
-                    content: row.content,
-                    page_no: row.page_no,
-                    embedding: embedding,
-                    embedding_model: row.embedding_model,
-                    timestamp: row.timestamp
-                },
-                distance,
-            });
-        }
-        
-        // 3) Sort by ascending distance
-        results.sort((a, b) => a.distance - b.distance);
-        
-        // 4) Return top N
-        return results.slice(0, limit).map(item => item.chunk);
-    }
-        
     /**
     * Convert a Float32Array to a Uint8Array for BLOB storage.
     */
@@ -419,45 +338,41 @@ export class VectorStoreDB {
     await vectorStore.initDatabase(); // Run migrations
 
     // 4) Insert a document
-    const docEmbedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
-    const newDocId = await vectorStore.insertDocument({
+    const newDocId = await vectorStore.insertItem({
         id: "1234",
         item_id: 1234,
-        status: "ready",
-        summary: "This is a test document",
-        embedding: docEmbedding,
-        embedding_model: "modelA",
+        type: "regular" as const,
+        status_local: "ready",
+        status_remote: "",
+        error: null,
+        context: "This is a test document",
         timestamp: Date.now()
     });
     console.log("Inserted document ID:", newDocId);
 
     // 5) Insert a chunk
     const chunkEmbedding = new Float32Array([0.5, 0.6, 0.7, 0.8]);
-    const newChunkId = await vectorStore.insertChunk({
+    const newChunkId = await vectorStore.insertEmbedding({
         id: "5678",
-        document_id: newDocId,
+        metadata_id: "1234",
+        type: "chunk" as const,
         content: "Chunk content goes here...",
-        page_no: 1,
         embedding: chunkEmbedding,
-        embedding_model: "modelA",
+        model: "modelA",
         timestamp: Date.now()
     });
     console.log("Inserted chunk ID:", newChunkId);
 
     // 6) Fetch the document or chunk by ID
-    const fetchedDoc = await vectorStore.getDocumentById(newDocId);
-    const fetchedChunk = await vectorStore.getChunkById(newChunkId);
+    const fetchedDoc = await vectorStore.getItemById(newDocId);
+    const fetchedChunk = await vectorStore.getEmbeddingById(newChunkId);
     console.log("Fetched doc:", fetchedDoc);
     console.log("Fetched chunk:", fetchedChunk);
 
     // 7) Similarity search for documents
     const queryEmbedding = new Float32Array([0.15, 0.25, 0.35, 0.45]);
-    const similarDocs = await vectorStore.findSimilarDocuments(queryEmbedding, 3);
+    const similarDocs = await vectorStore.findSimilarItems(queryEmbedding, 3);
     console.log("Top 3 similar docs:", similarDocs);
-
-    // 8) Similarity search for chunks
-    const similarChunks = await vectorStore.findSimilarChunks(queryEmbedding, 3);
-    console.log("Top 3 similar chunks:", similarChunks);
 
 })();
 */
