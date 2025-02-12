@@ -1,4 +1,4 @@
-import { VectorStoreDB } from './vectorStore';
+import { ItemMetadata, Embedding, VectorStoreDB } from './vectorStore';
 import { VoyageClient } from './voyage';
 import { generateUUID } from '../utils/uuid';
 
@@ -21,75 +21,93 @@ export class ItemService {
     }
 
     /**
+     * Get the type of a Zotero item
+     */
+    private getItemType(item: Zotero.Item): 'regular' | 'attachment' | 'note' | 'annotation' {
+        return item.isRegularItem() ? 'regular' :
+            item.isAttachment() ? 'attachment' :
+            item.isNote() ? 'note' :
+            item.isAnnotation() ? 'annotation' :
+            'regular';
+    }
+
+    /**
+     * Generate item metadata from a Zotero item
+     */
+    private itemMetadataFromItem(item: Zotero.Item): ItemMetadata {
+        return {
+            id: generateUUID(),
+            item_id: item.id,
+            type: this.getItemType(item),
+            status_local: 'processing',
+            status_remote: '',
+            error: null,
+            context: item.getDisplayTitle() || null,
+            timestamp: Date.now()
+        } as ItemMetadata;
+    }
+
+    /**
+     * Generate an embedding from a Zotero item
+     */
+    private async generateEmbeddings(item: Zotero.Item, itemMetadata: ItemMetadata): Promise<Embedding[]> {
+
+        const embeddings: Embedding[] = [];
+
+        // Combine title and abstract for item-level embedding
+        const combinedText = `${item.getDisplayTitle()}\n\n${item.getField('abstractNote') ?? ''}`;
+
+        // Generate item-level embedding
+        const embeddingVector = await this.embedClient?.embedDocument(combinedText);
+        if (!embeddingVector) {
+            throw new Error('Failed to generate item-level embedding');
+        }
+
+        // Create item-level embedding
+        const itemEmbedding = {
+            id: generateUUID(),
+            metadata_id: itemMetadata.id,
+            type: 'document',
+            content: combinedText,
+            embedding: new Float32Array(embeddingVector),
+            model: this.embedClient?.getModel() || '',
+            timestamp: Date.now()
+        }  as Embedding;
+
+        embeddings.push(itemEmbedding);
+
+        return embeddings;
+    }
+
+    /**
      * Process an item from Zotero:
      *  1) Create or update row in 'items' table
      *  2) Generate embedding (local or remote)
      *  3) Insert a row in 'embeddings' table
      * 
-     * @param zoteroItem A Zotero item object, which contains fields like .title, .abstract, etc.
+     * @param item A Zotero item object
      * @returns The unique ID (UUID) used for the 'items' entry
      */
-    public async processItem(zoteroItem: any): Promise<string> {
-        // Generate a local ID for the DB 'items' table
-        const itemDbId = generateUUID();
+    public async processItem(item: Zotero.Item): Promise<string> {
+        
+        // Generate item metadata
+        const itemMetadata = this.itemMetadataFromItem(item);
 
-        // Decide local vs. remote embedding
-        let embedding: Float32Array;
-        try {
-            if (this.mode === 'remote') {
-                // Placeholder for future remote logic
-                // e.g. embedding = await remoteApi.getEmbedding(zoteroItem);
-                throw new Error('Remote embedding not yet implemented');
+        // Insert (or update) the item row
+        await this.db.insertItemMetadata(itemMetadata);
+
+        // Generate embedding
+        if (this.mode === 'local') {
+            const embeddings = await this.generateEmbeddings(item, itemMetadata);
+
+            // Insert the embedding row
+            for (const embedding of embeddings) {
+                await this.db.insertEmbedding(embedding);
             }
-            if (this.mode === 'local' && this.embedClient) {
-                // "Local" embedding via your VoyageClient
-                const combinedText = `${zoteroItem.title}\n\n${zoteroItem.abstract ?? ''}`;
-                const embedArray = await this.embedClient.embedDocument(combinedText);
-                embedding = new Float32Array(embedArray);
-            }
-            if (this.mode === 'local' && !this.embedClient) {
-                throw new Error('Local embedding not yet implemented');
-            }
-        } catch (err) {
-            // If embedding fails, store error on the item row
-            await this.db.insertItemMetadata({
-                id: itemDbId,
-                item_id: zoteroItem.id,        // Zotero item ID
-                type: zoteroItem.itemType || 'regular',
-                status_local: 'error',
-                status_remote: '',
-                error: (err as Error).message,
-                context: null,   // or you could store .title, .abstract, etc.
-                timestamp: Date.now()
-            });
-            return itemDbId;
         }
 
-        // 1) Insert (or update) the item row
-        await this.db.insertItemMetadata({
-            id: itemDbId,
-            item_id: zoteroItem.id,
-            type: zoteroItem.itemType || 'regular',
-            status_local: 'processed',
-            status_remote: '',
-            error: null,
-            context: zoteroItem.title || null, // optionally store some context text
-            timestamp: Date.now()
-        });
-
-        // 2) Insert the embedding row
-        await this.db.insertEmbedding({
-            id: generateUUID(),
-            metadata_id: itemDbId,
-            type: 'document',       // let 'document' represent the item-level embedding
-            content: zoteroItem.title || '',
-            embedding: embedding,
-            model: 'voyage-model',
-            timestamp: Date.now()
-        });
-
         // Return the newly-created item ID
-        return itemDbId;
+        return itemMetadata.id;
     }
 
     /**
@@ -101,7 +119,7 @@ export class ItemService {
     }
 
     /**
-     * Retrieve the item’s local status by Zotero item ID
+     * Retrieve the item's local status by Zotero item ID
      */
     public async getItemStatusByZoteroId(zoteroItemId: number): Promise<string | null> {
         const item = await this.db.getItemMetadataByItemId(zoteroItemId);
