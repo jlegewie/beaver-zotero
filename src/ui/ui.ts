@@ -38,12 +38,31 @@ export class BeaverUIFactory {
         });
     }
 
+    static registerSearchCommand() {
+        ztoolkit.Prompt.register([
+            {
+                name: "Semantic Search",
+                label: "Beaver",
+                callback(prompt) {
+                    addon.itemService?.query(prompt.inputNode.value, 1)
+                        .then(results => {
+                            ztoolkit.log("Search results:", results);
+                            ztoolkit.log("Search results:", results.map((r: any) => Zotero.Items.get(r.item_id).getDisplayTitle()));
+                        })
+                        .catch(error => {
+                            ztoolkit.log("Search error:", error);
+                        });
+                },
+            },
+        ]);
+    }
+
     static registerInfoRow() {
         const rowID = Zotero.ItemPaneManager.registerInfoRow({
             rowID: 'beaver-item-pane-status',
             pluginID: addon.data.config.addonID,
             label: { l10nID: getLocaleID("item-pane-status") },
-            position: 'afterCreators',
+            position: 'start',
             multiline: false,
             nowrap: false,
             editable: false,

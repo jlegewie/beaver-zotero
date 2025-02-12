@@ -107,7 +107,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	
 	// UIExampleFactory.registerWindowMenuWithSeparator();
 	
-	PromptExampleFactory.registerNormalCommandExample();
+	// PromptExampleFactory.registerNormalCommandExample();
 	
 	// PromptExampleFactory.registerAnonymousCommandExample(win);
 	
