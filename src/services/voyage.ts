@@ -81,6 +81,10 @@ export class VoyageClient {
         this.maxRetries = config.maxRetries ?? 3;
     }
     
+    public getModel(): string {
+        return this.model;
+    }
+
     /**
     * Generate an embedding for a single query string.
     * @param query The query to embed.
