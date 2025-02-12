@@ -1,5 +1,5 @@
 import { getString } from "../utils/locale";
-
+import { getItemMetadata } from "../utils/metadata";
 
 export class BeaverMenuFactory {
     static registerMenuItems() {
@@ -11,6 +11,7 @@ export class BeaverMenuFactory {
             commandListener: async (ev: any) => {
                 try {
                     ztoolkit.log("Processing items...");
+
                     // Get selected items
                     const items = Zotero.getActiveZoteroPane().getSelectedItems();
                     if (!items.length) {
@@ -23,19 +24,14 @@ export class BeaverMenuFactory {
                         return;
                     }
 
-                    // Process each selected item using the initialized service
+                    // Process each selected item
                     for (const item of items) {
-                        const metadata = {
-                            title: item.getField('title') as string,
-                            abstract: item.getField('abstract') as string,
-                            year: parseInt(item.getField('year') as string) || undefined,
-                            author: item.getCreators()[0]?.lastName || undefined,
-                            publication: item.getField('publicationTitle') as string,
-                            itemType: item.itemType
-                        };
-
+                        const metadata = getItemMetadata(item);
                         await addon.data.documentService.processDocument(item.id, metadata);
                     }
+
+                    // set item status to processing
+                    // ...
 
                     ztoolkit.log("Items processed successfully");
                 } catch (error: any) {

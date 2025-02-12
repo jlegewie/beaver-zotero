@@ -41,7 +41,7 @@ export function getIdentifiers(item: Zotero.Item) {
  * @param item - The Zotero item
  * @returns The metadata of the item as an ItemMetadata object
  */
-export function getMetadata(item: Zotero.Item): ItemMetadata {
+export function getItemMetadata(item: Zotero.Item): ItemMetadata {
     return {
         itemId: item.id,
         title: item.getField('title'),

@@ -7,12 +7,11 @@ const CURRENT_SCHEMA_VERSION = 1;
 * Document-level interface (matches 'documents' table)
 */
 export interface DocumentTable {
-    id: number;               // primary key
+    id: string;
     item_id: number;          // Zotero attachment/item ID
-    parent_id: number | null; // optional parent
     status: string;
     summary: string;
-    embedding: Float32Array;  // stored in DB as BLOB, typed as Float16Array in memory
+    embedding: Float32Array;  // stored in DB as BLOB
     embedding_model: string;
     timestamp: number;        // store as a numeric Unix timestamp
 }
@@ -21,7 +20,7 @@ export interface DocumentTable {
 * Chunk-level interface (matches 'chunks' table)
 */
 export interface ChunkTable {
-    id: number;               // primary key
+    id: string;
     document_id: number;      // references DocumentTable.id
     content: string;
     page_no: number | null;
@@ -85,9 +84,8 @@ export class VectorStoreDB {
         // Documents table
         await this.db.queryAsync(`
             CREATE TABLE IF NOT EXISTS documents (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              TEXT(36) PRIMARY KEY,
                 item_id         INTEGER NOT NULL,
-                parent_id       INTEGER,
                 status          TEXT,
                 summary         TEXT,
                 embedding       BLOB,
@@ -99,7 +97,7 @@ export class VectorStoreDB {
         // Chunks table
         await this.db.queryAsync(`
             CREATE TABLE IF NOT EXISTS chunks (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              TEXT(36) PRIMARY KEY,
                 document_id     INTEGER NOT NULL,
                 content         TEXT,
                 page_no         INTEGER,
@@ -115,17 +113,17 @@ export class VectorStoreDB {
     * @param doc Partial document data (without 'id')
     * @returns The new 'id' (primary key) of the inserted document
     */
-    public async insertDocument(doc: Omit<DocumentTable, "id">): Promise<number> {
+    public async insertDocument(doc: DocumentTable): Promise<number> {
         // Convert doc.embedding (Float16Array) to a BLOB
         const blob = this.float32ToBlob(doc.embedding);
         
         // Insert
         await this.db.queryAsync(
-            `INSERT INTO documents (item_id, parent_id, status, summary, embedding, embedding_model, timestamp)
+            `INSERT INTO documents (id, item_id, status, summary, embedding, embedding_model, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
+                doc.id,
                 doc.item_id,
-                doc.parent_id,
                 doc.status,
                 doc.summary,
                 blob,
@@ -144,15 +142,16 @@ export class VectorStoreDB {
     * @param chunk Partial chunk data (without 'id')
     * @returns The new 'id' (primary key) of the inserted chunk
     */
-    public async insertChunk(chunk: Omit<ChunkTable, "id">): Promise<number> {
+    public async insertChunk(chunk: ChunkTable): Promise<number> {
         // Convert chunk.embedding (Float16Array) to BLOB
         const blob = this.float32ToBlob(chunk.embedding);
         
         // Insert
         await this.db.queryAsync(
-            `INSERT INTO chunks (document_id, content, page_no, embedding, embedding_model, timestamp)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+            `INSERT INTO chunks (id, document_id, content, page_no, embedding, embedding_model, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
+                chunk.id,
                 chunk.document_id,
                 chunk.content,
                 chunk.page_no,
@@ -171,7 +170,7 @@ export class VectorStoreDB {
     * Retrieve a document by ID.
     * @param id Document table primary key
     */
-    public async getDocumentById(id: number): Promise<DocumentTable | null> {
+    public async getDocumentById(id: string): Promise<DocumentTable | null> {
         const rows = await this.db.queryAsync(
             `SELECT * FROM documents WHERE id=?1`,
             [id]
@@ -188,7 +187,6 @@ export class VectorStoreDB {
         return {
             id: row.id,
             item_id: row.item_id,
-            parent_id: row.parent_id,
             status: row.status,
             summary: row.summary,
             embedding: embedding,
@@ -201,7 +199,7 @@ export class VectorStoreDB {
     * Retrieve a chunk by ID.
     * @param id Chunks table primary key
     */
-    public async getChunkById(id: number): Promise<ChunkTable | null> {
+    public async getChunkById(id: string): Promise<ChunkTable | null> {
         const rows = await this.db.queryAsync(
             `SELECT * FROM chunks WHERE id=?1`,
             [id]
@@ -235,7 +233,6 @@ export class VectorStoreDB {
         await this.db.queryAsync(`
             UPDATE documents
             SET item_id=?1,
-                parent_id=?2,
                 status=?3,
                 summary=?4,
                 embedding=?5,
@@ -244,7 +241,6 @@ export class VectorStoreDB {
             WHERE id=?8`,
             [
                 doc.item_id,
-                doc.parent_id,
                 doc.status,
                 doc.summary,
                 blob,
@@ -258,7 +254,7 @@ export class VectorStoreDB {
     /**
     * Delete methods
     */
-    public async deleteDocument(id: number): Promise<void> {
+    public async deleteDocument(id: string): Promise<void> {
         await this.db.queryAsync(
             `DELETE FROM documents WHERE id=?1`,
             [id]
@@ -269,7 +265,7 @@ export class VectorStoreDB {
         );
     }
     
-    public async deleteChunk(id: number): Promise<void> {
+    public async deleteChunk(id: string): Promise<void> {
         await this.db.queryAsync(
             `DELETE FROM chunks WHERE id=?1`,
             [id]
@@ -304,7 +300,6 @@ export class VectorStoreDB {
                 doc: {
                     id: row.id,
                     item_id: row.item_id,
-                    parent_id: row.parent_id,
                     status: row.status,
                     summary: row.summary,
                     embedding: embedding,
@@ -418,8 +413,8 @@ export class VectorStoreDB {
     // 4) Insert a document
     const docEmbedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
     const newDocId = await vectorStore.insertDocument({
+        id: "1234",
         item_id: 1234,
-        parent_id: null,
         status: "ready",
         summary: "This is a test document",
         embedding: docEmbedding,
@@ -431,6 +426,7 @@ export class VectorStoreDB {
     // 5) Insert a chunk
     const chunkEmbedding = new Float32Array([0.5, 0.6, 0.7, 0.8]);
     const newChunkId = await vectorStore.insertChunk({
+        id: "5678",
         document_id: newDocId,
         content: "Chunk content goes here...",
         page_no: 1,

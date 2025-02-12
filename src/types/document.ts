@@ -1,33 +1,46 @@
 /**
  * Metadata about a document that can be processed
  */
-export interface DocumentMetadata {
+export interface ItemMetadata {
+    itemId: number;
     title: string;
     abstract: string;
     year?: number;
-    author?: string;
+    authors?: string;
     publication?: string;
     itemType: string;
+    identifiers?: string;
 }
 
 /**
- * A processed document with embedding and status
+ * A processed Zotero item with embedding and status
  */
-export interface Document extends DocumentMetadata {
-    id: number;           // Internal ID in our system
-    itemId: number;      // Zotero item ID
+export interface ProcessedDocument extends ItemMetadata {
+    id: string;
     embedding?: Float32Array;
     status: 'pending' | 'processed' | 'error';
     timestamp: number;
-    error?: string;      // Optional error message if status is 'error'
+    error?: string;
+}
+
+/**
+ * A chunk of text extracted from a Zotero item or its attachments
+ */
+export interface DocumentChunk {
+    documentId: number;
+    content: string;
+    embedding: Float32Array;
+    sourceFile?: string;
+    pageNumber?: number;
+    timestamp: number;
 }
 
 /**
  * Query results when searching documents
  */
 export interface QueryResult {
-    document: Document;
-    score: number;       // Similarity score
+    document: ProcessedDocument;
+    score: number;
 }
 
 
@@ -39,17 +52,17 @@ export interface IDocumentRepository {
      * Insert a new document into storage
      * @returns The ID of the inserted document
      */
-    insert(doc: Document): Promise<number>;
+    insert(doc: ProcessedDocument): Promise<number>;
     
     /**
      * Retrieve a document by its ID
      */
-    getById(id: number): Promise<Document | null>;
+    getById(id: string): Promise<ProcessedDocument | null>;
     
     /**
      * Delete a document by its ID
      */
-    deleteById(id: number): Promise<void>;
+    deleteById(id: string): Promise<void>;
     
     /**
      * Find similar documents using embedding
@@ -68,17 +81,17 @@ export interface IDocumentService {
      * Process a Zotero item and store its document representation
      * @returns The ID of the processed document
      */
-    processDocument(itemId: number, metadata: DocumentMetadata): Promise<number>;
+    processDocument(itemId: number, metadata: ItemMetadata): Promise<number>;
     
     /**
      * Retrieve a processed document
      */
-    getDocument(id: number): Promise<Document | null>;
+    getDocument(id: string): Promise<ProcessedDocument | null>;
     
     /**
      * Delete a document and its associated data
      */
-    deleteDocument(id: number): Promise<void>;
+    deleteDocument(id: string): Promise<void>;
     
     /**
      * Search for similar documents using text query

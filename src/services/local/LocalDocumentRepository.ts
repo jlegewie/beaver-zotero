@@ -1,29 +1,16 @@
-import { Document, QueryResult, IDocumentRepository } from '../../types/document';
+import { ProcessedDocument, QueryResult, IDocumentRepository } from '../../types/document';
+import { toDocumentTable } from '../../types/local_mappers';
 import { VectorStoreDB } from '../vectorStore';
+
 
 export class LocalDocumentRepository implements IDocumentRepository {
     constructor(private vectorStore: VectorStoreDB) {}
     
-    async insert(doc: Document): Promise<number> {
-        return await this.vectorStore.insertDocument({
-            item_id: doc.itemId,
-            parent_id: null,
-            status: doc.status,
-            summary: JSON.stringify({
-                title: doc.title,
-                abstract: doc.abstract,
-                year: doc.year,
-                author: doc.author,
-                publication: doc.publication,
-                itemType: doc.itemType
-            }),
-            embedding: doc.embedding!,
-            embedding_model: 'voyage-3-lite',
-            timestamp: doc.timestamp
-        });
+    async insert(doc: ProcessedDocument): Promise<number> {
+        return await this.vectorStore.insertDocument(toDocumentTable(doc));
     }
     
-    async getById(id: number): Promise<Document | null> {
+    async getById(id: string): Promise<ProcessedDocument | null> {
         const doc = await this.vectorStore.getDocumentById(id);
         if (!doc) return null;
         
@@ -34,7 +21,7 @@ export class LocalDocumentRepository implements IDocumentRepository {
             title: metadata.title,
             abstract: metadata.abstract,
             year: metadata.year,
-            author: metadata.author,
+            authors: metadata.author,
             publication: metadata.publication,
             itemType: metadata.itemType,
             embedding: doc.embedding,
@@ -43,7 +30,7 @@ export class LocalDocumentRepository implements IDocumentRepository {
         };
     }
     
-    async deleteById(id: number): Promise<void> {
+    async deleteById(id: string): Promise<void> {
         await this.vectorStore.deleteDocument(id);
     }
     

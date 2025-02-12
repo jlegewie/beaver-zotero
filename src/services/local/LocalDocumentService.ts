@@ -1,5 +1,6 @@
-import { Document, DocumentMetadata, QueryResult, IDocumentRepository, IDocumentService } from '../../types/document';
+import { ProcessedDocument, ItemMetadata, QueryResult, IDocumentRepository, IDocumentService } from '../../types/document';
 import { VoyageClient } from '../voyage';
+import { generateUUID } from '../../utils/uuid';
 
 export class LocalDocumentService implements IDocumentService {
     constructor(
@@ -7,7 +8,7 @@ export class LocalDocumentService implements IDocumentService {
         private embedder: VoyageClient
     ) {}
     
-    async processDocument(itemId: number, metadata: DocumentMetadata): Promise<number> {
+    async processDocument(itemId: number, metadata: ItemMetadata): Promise<number> {
         // Create combined text for embedding
         const combinedText = `${metadata.title}\n\n${metadata.abstract}`;
         
@@ -16,9 +17,9 @@ export class LocalDocumentService implements IDocumentService {
             const embedding = await this.embedder.embedDocument(combinedText);
             
             // Create document
-            const doc: Document = {
+            const doc: ProcessedDocument = {
+                id: generateUUID(),
                 ...metadata,
-                itemId,
                 embedding: new Float32Array(embedding),
                 status: 'processed',
                 timestamp: Date.now()
@@ -28,9 +29,9 @@ export class LocalDocumentService implements IDocumentService {
             return await this.repository.insert(doc);
         } catch (error) {
             // Create error document
-            const doc: Document = {
+            const doc: ProcessedDocument = {
+                id: generateUUID(),
                 ...metadata,
-                itemId,
                 status: 'error',
                 error: (error as Error).message,
                 timestamp: Date.now()
@@ -40,11 +41,11 @@ export class LocalDocumentService implements IDocumentService {
         }
     }
     
-    async getDocument(id: number): Promise<Document | null> {
+    async getDocument(id: string): Promise<ProcessedDocument | null> {
         return await this.repository.getById(id);
     }
     
-    async deleteDocument(id: number): Promise<void> {
+    async deleteDocument(id: string): Promise<void> {
         await this.repository.deleteById(id);
     }
     
