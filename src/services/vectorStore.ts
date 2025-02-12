@@ -103,6 +103,13 @@ export class VectorStoreDB {
             );
         `);
     }
+
+    /**
+    * Close the database connection.
+    */
+    public async closeDatabase(): Promise<void> {
+        await this.db.closeDatabase();
+    }
     
     /**
     * Insert an item record into the 'items' table.
