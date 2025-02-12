@@ -211,7 +211,7 @@ export class VectorStoreDB {
         }
         
         const row = rows[0];
-        const embedding = this.blobToFloat32(row.embedding);
+        const embedding = this.blobToFloat32(new Uint8Array(row.embedding));
         
         return {
             id: row.id,
@@ -305,7 +305,7 @@ export class VectorStoreDB {
                 const embeddings = embeddingsProxy.map((proxy: any) => ({
                     embedding_id: proxy.id,
                     item_id: proxy.item_id,
-                    embedding: this.blobToFloat32(proxy.embedding)
+                    embedding: this.blobToFloat32(new Uint8Array(proxy.embedding))
                 }));
                 
                 ztoolkit.log("Embeddings:", embeddings);
