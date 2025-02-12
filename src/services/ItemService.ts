@@ -113,7 +113,7 @@ export class ItemService {
     /**
      * Retrieve the item metadata from DB by its DB ID
      */
-    public async getItemByDbId(dbId: string): Promise<any | null> {
+    public async getItemMetadataById(dbId: string): Promise<ItemMetadata | null> {
         const item = await this.db.getItemMetadataById(dbId);
         return item || null;
     }
@@ -122,8 +122,8 @@ export class ItemService {
      * Retrieve the item's local status by Zotero item ID
      */
     public async getItemStatusByZoteroId(zoteroItemId: number): Promise<string | null> {
-        const item = await this.db.getItemMetadataByItemId(zoteroItemId);
-        return item ? item.status_local : null;
+        const itemMetadata = await this.db.getItemMetadataByItemId(zoteroItemId);
+        return itemMetadata ? itemMetadata.status_local : null;
     }
 
     /**
