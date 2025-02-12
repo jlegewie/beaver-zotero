@@ -39,4 +39,24 @@ export class BeaverUIFactory {
         });
     }
 
+    static registerInfoRow() {
+        const rowID = Zotero.ItemPaneManager.registerInfoRow({
+            rowID: 'beaver-document-id',
+            pluginID: 'beaver@test.com',
+            label: { l10nID: 'beaver-item-pane-status' },
+            position: 'start',
+            multiline: false,
+            nowrap: false,
+            editable: false,
+            onGetData({ item }) {
+                // const status = await addon?.data?.documentService?.getDocumentStatusByItemId(item.id);
+                return 'test';
+            },
+            /*
+            onSetData({ rowID, item, tabType, editable, value }) {
+                Zotero.debug(`Set custom info row ${rowID} of item ${item.id} to ${value}`);
+            },
+            */
+        })
+    }
 }

@@ -103,6 +103,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 	// Register Beaver UI elements
 	BeaverUIFactory.registerMenuItems();
+	BeaverUIFactory.registerInfoRow();
 
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
