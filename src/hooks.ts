@@ -8,7 +8,7 @@ import {
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
-import { BeaverMenuFactory } from "./ui/menu";
+import { BeaverUIFactory } from "./ui/ui";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
@@ -102,7 +102,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	);
 
 	// Register Beaver UI elements
-	BeaverMenuFactory.registerMenuItems();
+	BeaverUIFactory.registerMenuItems();
 
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,

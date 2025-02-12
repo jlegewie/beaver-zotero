@@ -1,7 +1,7 @@
 import { getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
 
-export class BeaverMenuFactory {
+export class BeaverUIFactory {
     static registerMenuItems() {
         // Add to Beaver menu item
         ztoolkit.Menu.register("item", {
@@ -30,9 +30,6 @@ export class BeaverMenuFactory {
                         await addon.data.documentService.processDocument(item.id, metadata);
                     }
 
-                    // set item status to processing
-                    // ...
-
                     ztoolkit.log("Items processed successfully");
                 } catch (error: any) {
                     ztoolkit.log(`Error processing items: ${error.message}`);
@@ -41,4 +38,5 @@ export class BeaverMenuFactory {
             },
         });
     }
+
 }
