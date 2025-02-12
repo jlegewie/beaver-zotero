@@ -29,10 +29,10 @@ export interface Embedding {
 * Zotero's DBConnection for queries and migrations.
 */
 export class VectorStoreDB {
-    private db: any; // Instance of Zotero.DBConnection
+    private conn: any; // Instance of Zotero.DBConnection
     
     constructor(dbConnection: any) {
-        this.db = dbConnection;
+        this.conn = dbConnection;
     }
     
     /**
@@ -43,21 +43,21 @@ export class VectorStoreDB {
     */
     public async initDatabase(): Promise<void> {
         // 1) Create migrations table if not exists
-        await this.db.queryAsync(`
+        await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS migrations (
                 version INTEGER NOT NULL
             );
         `);
             
         // 2) See if the migrations table has an entry
-        const rows = await this.db.queryAsync(`SELECT version FROM migrations`);
+        const rows = await this.conn.queryAsync(`SELECT version FROM migrations`);
         let currentVersion = 0;
         
         if (rows.length > 0) {
             currentVersion = rows[0].version;
         } else {
             // Insert row if table is empty
-            await this.db.queryAsync(`INSERT INTO migrations (version) VALUES (0)`);
+            await this.conn.queryAsync(`INSERT INTO migrations (version) VALUES (0)`);
         }
         
         // 3) Run migrations from current version up to CURRENT_SCHEMA_VERSION
@@ -69,7 +69,7 @@ export class VectorStoreDB {
         // Additional migrations `if (currentVersion < 2) {...}`
         
         // 4) Update migrations table with the final version
-        await this.db.queryAsync(`UPDATE migrations SET version=?1`, [currentVersion]);
+        await this.conn.queryAsync(`UPDATE migrations SET version=?1`, [currentVersion]);
     }
         
     /**
@@ -77,7 +77,7 @@ export class VectorStoreDB {
     */
     private async runMigration1() {
         // Items table
-        await this.db.queryAsync(`
+        await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS items (
                 id              TEXT(36) PRIMARY KEY,
                 item_id         INTEGER NOT NULL,
@@ -91,7 +91,7 @@ export class VectorStoreDB {
         `);
                 
         // Embeddings table
-        await this.db.queryAsync(`
+        await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS embeddings (
                 id            TEXT(36) PRIMARY KEY,
                 metadata_id   TEXT NOT NULL,
@@ -108,7 +108,7 @@ export class VectorStoreDB {
     * Close the database connection.
     */
     public async closeDatabase(): Promise<void> {
-        await this.db.closeDatabase();
+        await this.conn.closeDatabase();
     }
     
     /**
@@ -117,7 +117,7 @@ export class VectorStoreDB {
     * @returns The new 'id' of the inserted item
     */
     public async insertItemMetadata(item: ItemMetadata): Promise<string> {
-        await this.db.queryAsync(
+        await this.conn.queryAsync(
             `INSERT INTO items (id, item_id, status_local, status_remote, error, context, type, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
@@ -143,7 +143,7 @@ export class VectorStoreDB {
     public async insertEmbedding(embedding: Embedding): Promise<string> {
         const blob = this.float32ToBlob(embedding.embedding);
         
-        await this.db.queryAsync(
+        await this.conn.queryAsync(
             `INSERT INTO embeddings (id, metadata_id, type, content, embedding, model, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
@@ -180,7 +180,7 @@ export class VectorStoreDB {
     * Retrieve an item metadata by ID.
     */
     public async getItemMetadataById(id: string): Promise<ItemMetadata | null> {
-        const rows = await this.db.queryAsync(
+        const rows = await this.conn.queryAsync(
             `SELECT * FROM items WHERE id=?1`,
             [id]
         );
@@ -191,7 +191,7 @@ export class VectorStoreDB {
     * Retrieve an item metadata by Zotero item ID.
     */
     public async getItemMetadataByItemId(itemId: number): Promise<ItemMetadata | null> {
-        const rows = await this.db.queryAsync(
+        const rows = await this.conn.queryAsync(
             `SELECT * FROM items WHERE item_id=?1`,
             [itemId]
         );
@@ -202,7 +202,7 @@ export class VectorStoreDB {
     * Retrieve an embedding by ID.
     */
     public async getEmbeddingById(id: string): Promise<Embedding | null> {
-        const rows = await this.db.queryAsync(
+        const rows = await this.conn.queryAsync(
             `SELECT * FROM embeddings WHERE id=?1`,
             [id]
         );
@@ -258,7 +258,7 @@ export class VectorStoreDB {
 
         // Construct and execute the query.
         const query = `UPDATE items SET ${setClauses} WHERE id = ?`;
-        await this.db.queryAsync(query, values);
+        await this.conn.queryAsync(query, values);
     }
 
                 
@@ -266,11 +266,11 @@ export class VectorStoreDB {
     * Delete methods
     */
     public async deleteItemMetadata(id: string): Promise<void> {
-        await this.db.queryAsync(
+        await this.conn.queryAsync(
             `DELETE FROM items WHERE id=?1`,
             [id]
         );
-        await this.db.queryAsync(
+        await this.conn.queryAsync(
             `DELETE FROM embeddings WHERE item_id=?1`,
             [id]
         );
@@ -292,12 +292,13 @@ export class VectorStoreDB {
         limit = 5
     ): Promise<ItemMetadata[]> {
         // 1) Load items joined to their 'document'-type embedding
-        const rows = await this.db.queryAsync(`
+        const rows = await this.conn.queryAsync(`
             SELECT i.*, e.embedding
             FROM items i
             JOIN embeddings e ON i.id = e.metadata_id
             WHERE e.type = 'document'
         `);
+        ztoolkit.log("Rows:", rows);
 
         // 2) Calculate distances
         const results: Array<{ item: ItemMetadata; distance: number }> = [];

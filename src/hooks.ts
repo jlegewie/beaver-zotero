@@ -25,11 +25,11 @@ async function onStartup() {
 	initLocale();
 
 	// Initialize database and vector store
-	const db = new Zotero.DBConnection("beaver");
-	const vectorStore = new VectorStoreDB(db);
+	const dbConnection = new Zotero.DBConnection("beaver");
+	const vectorStore = new VectorStoreDB(dbConnection);
 	
 	// Test connection and initialize schema
-	await db.test();
+	await dbConnection.test();
 	await vectorStore.initDatabase();
 	
 	// Initialize Voyage client
@@ -80,7 +80,8 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	BeaverUIFactory.registerMenuItems();
 	BeaverUIFactory.registerInfoRow();
 	// BeaverUIFactory.registerExtraColumn();
-	
+	BeaverUIFactory.registerSearchCommand();
+
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
 	// 	closeTime: -1,
@@ -106,7 +107,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	
 	// UIExampleFactory.registerWindowMenuWithSeparator();
 	
-	// PromptExampleFactory.registerNormalCommandExample();
+	PromptExampleFactory.registerNormalCommandExample();
 	
 	// PromptExampleFactory.registerAnonymousCommandExample(win);
 	
