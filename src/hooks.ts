@@ -39,21 +39,12 @@ async function onStartup() {
 	if(!voyageApiKey)
 		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
 	
-	
-	// Instantiate item service
+	// Instantiate item service and store reference
 	const itemService = new ItemService(vectorStore, voyageClient, 'local');
 	addon.itemService = itemService;
 
-
-	// Store references for later use
-	// addon.data.db = db;
-	// addon.data.vectorStore = vectorStore;
-	// addon.data.voyage = voyageClient;
-
-
 	ztoolkit.log("Beaver initialized successfully");
 
-	
 	
 	// BasicExampleFactory.registerPrefs();
 	
