@@ -1,5 +1,5 @@
-import { VoyageClient } from "../lib/voyage";
-import { VectorStoreDB } from "../modules/vectorStore";
+import { VoyageClient } from "./voyage";
+import { VectorStoreDB } from "./vectorStore";
 
 export interface ProcessingData {
     itemId: number;

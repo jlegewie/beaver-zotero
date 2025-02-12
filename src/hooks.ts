@@ -9,7 +9,7 @@ import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverMenuFactory } from "./modules/ui/menu";
-import { VectorStoreDB } from "./modules/vectorStore";
+import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 

@@ -3,7 +3,7 @@ import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTab
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
-import { VectorStoreDB } from "./modules/vectorStore";
+import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 
 class Addon {
