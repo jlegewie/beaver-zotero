@@ -280,27 +280,32 @@ export class VectorStoreDB {
         queryEmbedding: Float32Array,
         limit = 5
     ): Promise<ItemMetadata[]> {
-        // 1) Load all items
-        const rows = await this.db.queryAsync(`SELECT * FROM items`);
-        
+        // 1) Load items joined to their 'document'-type embedding
+        const rows = await this.db.queryAsync(`
+            SELECT i.*, e.embedding
+            FROM items i
+            JOIN embeddings e ON i.id = e.metadata_id
+            WHERE e.type = 'document'
+        `);
+
         // 2) Calculate distances
         const results: Array<{ item: ItemMetadata; distance: number }> = [];
-        
         for (const row of rows) {
             const embedding = this.blobToFloat32(row.embedding);
             const distance = this.cosineDistance(queryEmbedding, embedding);
-            results.push({
-                item: VectorStoreDB.rowToItemMetadata(row),
-                distance,
-            });
+
+            // Convert row → ItemMetadata (existing helper)
+            const itemMetadata: ItemMetadata = VectorStoreDB.rowToItemMetadata(row);
+            results.push({ item: itemMetadata, distance });
         }
-        
-        // 3) Sort by ascending distance (lowest distance = most similar)
+
+        // 3) Sort by ascending distance
         results.sort((a, b) => a.distance - b.distance);
-        
-        // 4) Take top N
-        return results.slice(0, limit).map(item => item.item);
+
+        // 4) Return top N items
+        return results.slice(0, limit).map(r => r.item);
     }
+
     
     /**
     * Convert a Float32Array to a Uint8Array for BLOB storage.
