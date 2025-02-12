@@ -194,6 +194,14 @@ export class VectorStoreDB {
             timestamp: row.timestamp
         };
     }
+
+    public async getDocumentByItemId(itemId: number): Promise<DocumentTable | null> {
+        const rows = await this.db.queryAsync(
+            `SELECT * FROM documents WHERE item_id=?1`,
+            [itemId]
+        );
+        return this.getDocumentById(rows[0].id);
+    }
     
     /**
     * Retrieve a chunk by ID.

@@ -29,6 +29,26 @@ export class LocalDocumentRepository implements IDocumentRepository {
             timestamp: doc.timestamp
         };
     }
+
+    async getByItemId(itemId: number): Promise<ProcessedDocument | null> {
+        const doc = await this.vectorStore.getDocumentByItemId(itemId);
+        if (!doc) return null;
+        
+        const metadata = JSON.parse(doc.summary);
+        return {
+            id: doc.id,
+            itemId: doc.item_id,
+            title: metadata.title,
+            abstract: metadata.abstract,
+            year: metadata.year,
+            authors: metadata.author,
+            publication: metadata.publication,
+            itemType: metadata.itemType,
+            embedding: doc.embedding,
+            status: doc.status as 'pending' | 'processed' | 'error',
+            timestamp: doc.timestamp
+        };
+    }
     
     async deleteById(id: string): Promise<void> {
         await this.vectorStore.deleteDocument(id);

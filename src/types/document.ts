@@ -58,6 +58,11 @@ export interface IDocumentRepository {
      * Retrieve a document by its ID
      */
     getById(id: string): Promise<ProcessedDocument | null>;
+
+    /**
+     * Retrieve a document by its item ID
+     */
+    getByItemId(itemId: number): Promise<ProcessedDocument | null>;
     
     /**
      * Delete a document by its ID
@@ -87,6 +92,11 @@ export interface IDocumentService {
      * Retrieve a processed document
      */
     getDocument(id: string): Promise<ProcessedDocument | null>;
+
+    /**
+     * Retrieve a processed document
+     */
+    getDocumentStatusByItemId(itemId: number): Promise<string | null>;
     
     /**
      * Delete a document and its associated data
