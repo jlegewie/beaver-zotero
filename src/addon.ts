@@ -5,7 +5,7 @@ import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
-import { IDocumentService } from "./types/document";
+import { ItemService } from "./services/ItemService";
 
 class Addon {
     public data: {
@@ -23,11 +23,8 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
-        db?: typeof Zotero.DBConnection;
-        vectorStore?: VectorStoreDB;
-        voyage?: VoyageClient;
-        documentService?: IDocumentService;
     };
+    public itemService?: ItemService;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

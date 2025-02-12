@@ -19,15 +19,14 @@ export class BeaverUIFactory {
                         return;
                     }
 
-                    if (!addon.data.documentService) {
-                        ztoolkit.log("Document service not initialized");
+                    if (!addon.itemService) {
+                        ztoolkit.log("Item service not initialized");
                         return;
                     }
 
                     // Process each selected item
                     for (const item of items) {
-                        const metadata = getItemMetadata(item);
-                        await addon.data.documentService.processDocument(item.id, metadata);
+                        await addon.itemService.processItem(item);
                     }
 
                     ztoolkit.log("Items processed successfully");

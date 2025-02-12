@@ -12,30 +12,8 @@ import { BeaverUIFactory } from "./ui/ui";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
-import { DocumentServiceFactory } from "./services/DocumentServiceFactory";
+import { ItemService } from "./services/ItemService";
 
-async function createDatabase() {
-	try {
-		// Create database connection
-		const db = new Zotero.DBConnection("beaver");
-		
-		// Initialize vector store
-		const vectorStore = new VectorStoreDB(db);
-		
-		// Test connection and initialize schema
-		await db.test();
-		await vectorStore.initDatabase();
-		
-		// Store references for later use
-		addon.data.db = db;
-		addon.data.vectorStore = vectorStore;
-		
-		ztoolkit.log("Database initialized successfully");
-	} catch (error) {
-		ztoolkit.log("Failed to initialize database:", error);
-		throw error; // Re-throw to handle in onStartup
-	}
-}
 
 async function onStartup() {
 	await Promise.all([
@@ -46,29 +24,35 @@ async function onStartup() {
 	
 	initLocale();
 
-	// Initialize database
-	await createDatabase();
+	// Initialize database and vector store
+	const db = new Zotero.DBConnection("beaver");
+	const vectorStore = new VectorStoreDB(db);
+	
+	// Test connection and initialize schema
+	await db.test();
+	await vectorStore.initDatabase();
 	
 	// Initialize Voyage client
 	const voyageApiKey = getPref("voyageApiKey");
-	if (voyageApiKey) {
-		addon.data.voyage = new VoyageClient({
-			apiKey: voyageApiKey,
-		});
-		ztoolkit.log("Voyage client initialized");
-		
-		// Initialize document service if both vectorStore and voyage are available
-		if (addon.data.vectorStore) {
-			addon.data.documentService = DocumentServiceFactory.create({
-				mode: 'local',
-				vectorStore: addon.data.vectorStore,
-				voyageClient: addon.data.voyage
-			});
-			ztoolkit.log("Document service initialized");
-		}
-	} else {
+	const voyageClient = voyageApiKey ? new VoyageClient({apiKey: voyageApiKey}) : null;
+	
+	if(!voyageApiKey)
 		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
-	}
+	
+	
+	// Instantiate item service
+	const itemService = new ItemService(vectorStore, voyageClient, 'local');
+	addon.itemService = itemService;
+
+
+	// Store references for later use
+	// addon.data.db = db;
+	// addon.data.vectorStore = vectorStore;
+	// addon.data.voyage = voyageClient;
+
+
+	ztoolkit.log("Beaver initialized successfully");
+
 	
 	
 	// BasicExampleFactory.registerPrefs();
@@ -157,11 +141,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 async function onShutdown(): Promise<void> {
 	try {
 		// Close database connection if it exists
-		if (addon.data.db) {
-			await addon.data.db.closeDatabase(false);
+		if (addon.itemService) {
+			await addon.itemService.closeDatabase();
 		}
-		// Clear document service
-		addon.data.documentService = undefined;
+		// Clear item service
+		addon.itemService = undefined;
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}
