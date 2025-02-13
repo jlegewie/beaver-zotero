@@ -45,24 +45,8 @@ async function onStartup() {
 
 	ztoolkit.log("Beaver initialized successfully");
 
-	// Initialize QuickChat with items and callbacks
-	const items = [
-		{
-			author: "Doe",
-			year: 2024,
-			title: "My Article",
-			citation: "Doe. 2024. My Article. American Journal of Science",
-		},
-		{
-			author: "Meyer",
-			year: 2020,
-			title: "Another Paper",
-			citation: "Meyer. 2020. Another Paper. Journal of Testing",
-		},
-	];
-
 	// Initialize QuickChat UI
-	addon.data.quickChat = new QuickChat(items, {
+	addon.data.quickChat = new QuickChat({
 		deepSearch: () => {
 			ztoolkit.log("Performing deep search...");
 		},

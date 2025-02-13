@@ -1,16 +1,7 @@
 import { BasicOptions } from "zotero-plugin-toolkit/dist/basic";
 import { BasicTool, ManagerTool } from "zotero-plugin-toolkit/dist/basic";
 import { UITool } from "zotero-plugin-toolkit/dist/tools/ui";
-
-/**
-* Describes each item to be shown in the QuickChat list.
-*/
-export interface InputItem {
-    author: string;
-    year: number;
-    title: string;
-    citation: string;
-}
+import { getFormattedReferences } from "../utils/citations"
 
 /**
 * Options for the QuickChat's callbacks.
@@ -38,7 +29,7 @@ export class QuickChat extends BasicTool {
     private inputField!: HTMLInputElement;  // Input for the user's question
     private itemsContainer!: HTMLDivElement; // Where items are rendered
     
-    private items: InputItem[] = [];
+    private items: Zotero.Item[] = [];
     
     /** Callback references */
     private deepSearchCallback?: (q: string) => void;
@@ -50,10 +41,9 @@ export class QuickChat extends BasicTool {
     /** Placeholder text for the user's question */
     private placeholderText = "How can I help you today?";
     
-    constructor(items: InputItem[], options?: QuickChatOptions, base?: BasicOptions | BasicTool) {
+    constructor(options?: QuickChatOptions, base?: BasicOptions | BasicTool) {
         super(base);
         this.ui = new UITool(base);
-        this.items = items || [];
         
         this.deepSearchCallback = options?.deepSearch;
         this.sendCallback = options?.send;
@@ -216,18 +206,20 @@ export class QuickChat extends BasicTool {
     private renderItems(): void {
         this.itemsContainer.innerHTML = "";
         const doc = this.getGlobal("document");
+
+        const formatedItems = getFormattedReferences(this.items);
         
-        this.items.forEach((item, idx) => {
+        formatedItems.forEach((item, idx) => {
             const itemEl = this.ui.createElement(doc, "span", {
                 classList: ["quick-chat-item"],
                 attributes: {
-                    title: item.citation, // tooltip
+                    title: `${item.bibliography}`,
                 },
                 children: [
                     {
                         tag: "span",
                         properties: {
-                            innerText: `${item.author} ${item.year}`,
+                            innerText: item.inTextCitation,
                         },
                     },
                     {
@@ -264,6 +256,12 @@ export class QuickChat extends BasicTool {
     * Show the UI (overlay + container).
     */
     public show(): void {
+        // Get current context
+        this.items = Zotero.getActiveZoteroPane().getSelectedItems();
+
+        // Render
+        this.renderItems();
+
         this.overlay.style.display = "block";
         // Force a reflow to ensure the transition works
         void this.overlay.offsetHeight;
@@ -295,6 +293,7 @@ export class QuickChat extends BasicTool {
         if (this.deepSearchCallback) {
             this.deepSearchCallback(this.inputField.value || "");
         }
+        this.hide();
     }
     
     /**
@@ -304,6 +303,7 @@ export class QuickChat extends BasicTool {
         if (this.sendCallback) {
             this.sendCallback(this.inputField.value || "");
         }
+        this.hide();
     }
     
     /**
