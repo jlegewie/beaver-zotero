@@ -13,7 +13,7 @@ import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
-
+import { QuickChat } from "./ui/quickChat";
 
 async function onStartup() {
 	await Promise.all([
@@ -45,7 +45,42 @@ async function onStartup() {
 
 	ztoolkit.log("Beaver initialized successfully");
 
-	
+	// Initialize QuickChat with items and callbacks
+	const items = [
+		{
+			author: "Doe",
+			year: 2024,
+			title: "My Article",
+			citation: "Doe. 2024. My Article. American Journal of Science",
+		},
+		{
+			author: "Meyer",
+			year: 2020,
+			title: "Another Paper",
+			citation: "Meyer. 2020. Another Paper. Journal of Testing",
+		},
+	];
+
+	// Initialize QuickChat UI
+	addon.data.quickChat = new QuickChat(items, {
+		deepSearch: () => {
+			ztoolkit.log("Performing deep search...");
+		},
+		send: () => {
+			ztoolkit.log("Sending message...");
+		}
+	});
+
+	// Register keyboard shortcut for quick chat
+	ztoolkit.Keyboard.register(
+		(ev, keyOptions) => {
+			if (keyOptions.keyboard?.equals("shift,p")) {
+				ztoolkit.log('calling quickChat.show');
+				addon.data.quickChat?.show();
+			}
+		}
+	);
+
 	// BasicExampleFactory.registerPrefs();
 	
 	// BasicExampleFactory.registerNotifier();
@@ -80,7 +115,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	BeaverUIFactory.registerMenuItems();
 	BeaverUIFactory.registerInfoRow();
 	// BeaverUIFactory.registerExtraColumn();
-	BeaverUIFactory.registerSearchCommand();
+	// BeaverUIFactory.registerSearchCommand();
 
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
@@ -125,6 +160,9 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+	// Clean up QuickChat before unregistering
+	addon.data.quickChat?.hide();
+	
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
 	// Remove Beaver menu items
@@ -134,6 +172,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 async function onShutdown(): Promise<void> {
 	try {
+		// Clean up QuickChat
+		addon.data.quickChat?.hide();
+		addon.data.quickChat = undefined;
+
 		// Close database connection if it exists
 		if (addon.itemService) {
 			await addon.itemService.closeDatabase();
