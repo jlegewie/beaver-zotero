@@ -13,6 +13,8 @@ export interface QuickChatOptions {
 
 /**
 * UI element that gives quick access to chat
+* (refactor of prompt.ts from windingwind/zotero-plugin-toolkit)
+* 
 * 1. Shows a text input.
 * 2. Displays a list of items (citations) as sources
 * 3. Displays footer with buttons
