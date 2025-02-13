@@ -380,6 +380,7 @@ export class QuickChat extends BasicTool {
                 margin-left: -3px;
             }
             .quick-chat-input {
+                color: #888;
                 width: calc(100% - 28px);
                 font-size: 16px;
                 padding: 10px 12px;
