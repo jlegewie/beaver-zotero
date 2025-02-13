@@ -81,6 +81,8 @@ export class QuickChat extends BasicTool {
                 backgroundColor: "rgba(0, 0, 0, 0.5)",
                 zIndex: "99998",
                 cursor: "pointer",
+                opacity: "0",  // Start fully transparent
+                transition: "opacity 0.2s ease", // Add smooth transition
             },
             listeners: [
                 {
@@ -263,6 +265,9 @@ export class QuickChat extends BasicTool {
     */
     public show(): void {
         this.overlay.style.display = "block";
+        // Force a reflow to ensure the transition works
+        void this.overlay.offsetHeight;
+        this.overlay.style.opacity = "1";
         this.container.style.display = "flex";
         
         // auto-focus on the input
@@ -275,8 +280,12 @@ export class QuickChat extends BasicTool {
     * Hide the UI.
     */
     public hide(): void {
-        this.overlay.style.display = "none";
-        this.container.style.display = "none";
+        this.overlay.style.opacity = "0";
+        // Wait for transition to complete before hiding
+        setTimeout(() => {
+            this.overlay.style.display = "none";
+            this.container.style.display = "none";
+        }, 200); // Match transition duration
     }
     
     /**
