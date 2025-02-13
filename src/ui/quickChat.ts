@@ -490,39 +490,3 @@ export class QuickChat extends BasicTool {
         doc.documentElement.appendChild(style);
     }
 }
-
-/**
-* Optional Manager class to mimic the pattern of `PromptManager`.
-* If you don't need a manager, you can remove this.
-*/
-export class QuickChatManager extends ManagerTool {
-    private quickChat?: QuickChat;
-    private items: InputItem[] = [];
-    
-    /**
-    * Create the manager. You can pass items here or set them later.
-    */
-    constructor(items?: InputItem[], base?: BasicTool | BasicOptions) {
-        super(base);
-        if (items) {
-            this.items = items;
-        }
-    }
-    
-    /**
-    * Initialize and show the QuickChat with the given callbacks.
-    */
-    public open(options?: QuickChatOptions) {
-        this.quickChat = new QuickChat(this.items, options, this);
-        this.quickChat.show();
-    }
-    
-    public close() {
-        this.quickChat?.hide();
-    }
-    
-    // Typically you'd track "registration" but here it's optional
-    public register(..._data: any[]): void { /* no-op */ }
-    public unregister(..._data: any[]): void { /* no-op */ }
-    public unregisterAll(): void { /* no-op */ }
-}
