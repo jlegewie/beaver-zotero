@@ -12,21 +12,17 @@ export interface QuickChatOptions {
 }
 
 /**
-* A simplified UI element that:
-* 1. Shows a text input to ask "How can I help you today?" (placeholder).
-* 2. Displays a list of items (citations) with an "x" to remove items.
-* 3. Displays instructions (footer) with:
-*    - `esc` on the left to close
-*    - `Deep Search ⌘ ⏎` & `Send ⏎` on the right
-*      - By default, `Send ⏎` is highlighted
-*      - If user holds the ⌘ key, `Deep Search ⌘ ⏎` is highlighted
+* UI element that gives quick access to chat
+* 1. Shows a text input.
+* 2. Displays a list of items (citations) as sources
+* 3. Displays footer with buttons
 */
 export class QuickChat extends BasicTool {
     private ui: UITool;
     
-    private overlay!: HTMLDivElement;       // Overlay (click-away zone)
-    private container!: HTMLDivElement;     // Main container
-    private inputField!: HTMLInputElement;  // Input for the user's question
+    private overlay!: HTMLDivElement;        // Overlay (click-away zone)
+    private container!: HTMLDivElement;      // Main container
+    private inputField!: HTMLInputElement;   // Input for the user's question
     private itemsContainer!: HTMLDivElement; // Where items are rendered
     
     private items: Zotero.Item[] = [];
@@ -309,6 +305,7 @@ export class QuickChat extends BasicTool {
     * Listen for global key events:
     * - Track if ⌘ is pressed to highlight the `Deep Search` button
     * - Close UI on ESC
+    * - Enter to send
     */
     private attachGlobalKeyEvents(): void {
         const doc = this.getGlobal("document");
