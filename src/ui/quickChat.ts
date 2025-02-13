@@ -261,7 +261,6 @@ export class QuickChat extends BasicTool {
 
         // Render
         this.renderItems();
-
         this.overlay.style.display = "block";
         // Force a reflow to ensure the transition works
         void this.overlay.offsetHeight;
@@ -325,6 +324,18 @@ export class QuickChat extends BasicTool {
                 // Only hide if this container is visible
                 if (this.container.style.display === "flex") {
                     this.hide();
+                }
+            }
+
+            // Pressing Enter send message
+            if (evt.key === "Enter") {
+                if (this.container.style.display === "flex") {
+                    if(this.isMetaKeyHeld) {
+                        this.deepSearch()
+                    }
+                    else {
+                        this.send();
+                    }
                 }
             }
         });
