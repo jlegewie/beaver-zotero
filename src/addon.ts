@@ -6,6 +6,7 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { ItemService } from "./services/ItemService";
+import { QuickChat } from "./ui/quickChat"
 
 class Addon {
     public data: {
@@ -23,6 +24,7 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
+        quickChat?: QuickChat;
         _itemStatuses: Map<number, string>;
     };
     public itemService?: ItemService;
