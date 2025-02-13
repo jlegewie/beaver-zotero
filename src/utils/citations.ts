@@ -29,17 +29,14 @@ interface FormattedReference {
     bibliography: string;
 }
 
-function getFormattedReferences(
+export function getInTextCitations(
     items: Zotero.Item[],
     style: string = 'http://www.zotero.org/styles/chicago-author-date'
-): FormattedReference[] {
-    // Get the style
+): string[] {
     const csl_style: ZoteroStyle = Zotero.Styles.get(style);
-    const locale = 'en-US';
+    const cslEngine = csl_style.getCiteProc('en-US', 'text');
     
-    // Process in-text citations
-    let cslEngine = csl_style.getCiteProc(locale, 'text');
-    const inTextCitations = items.map(item => {
+    const citations = items.map(item => {
         const citation: CSLCitation = {
             citationItems: [{ id: item.id }],
             properties: { inText: true }
@@ -47,16 +44,33 @@ function getFormattedReferences(
         return cslEngine.previewCitationCluster(citation, [], [], "text")
             .replace(/^\(|\)$/g, '');
     });
-    cslEngine.free();
     
-    // Process bibliographies
-    cslEngine = csl_style.getCiteProc(locale, 'text');
+    cslEngine.free();
+    return citations;
+}
+
+export function getBibliographies(
+    items: Zotero.Item[],
+    style: string = 'http://www.zotero.org/styles/chicago-author-date'
+): string[] {
+    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
+    const cslEngine = csl_style.getCiteProc('en-US', 'text');
+    
     const bibliographies = items.map(item => 
         Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [item], "text").trim()
     );
-    cslEngine.free();
     
-    // Combine results
+    cslEngine.free();
+    return bibliographies;
+}
+
+export function getFormattedReferences(
+    items: Zotero.Item[],
+    style: string = 'http://www.zotero.org/styles/chicago-author-date'
+): FormattedReference[] {
+    const inTextCitations = getInTextCitations(items, style);
+    const bibliographies = getBibliographies(items, style);
+    
     return items.map((_, index) => ({
         inTextCitation: inTextCitations[index],
         bibliography: bibliographies[index]
