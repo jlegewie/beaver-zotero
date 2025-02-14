@@ -58,7 +58,7 @@ export class BeaverUIFactory {
         const separator = toolbar.querySelector("div.zotero-tb-separator");
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("label", "Chat");
-        chatToggleBtn.setAttribute("id", "zotero-beaver-chat-toggle");
+        chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
         chatToggleBtn.addEventListener("command", () => {
             const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
             // @ts-ignore zotero item-pane is not typed
@@ -84,7 +84,7 @@ export class BeaverUIFactory {
     static removeChatPanel(win: Window) {
         const chatPanel = win.document.querySelector("#zotero-beaver-chat");
         chatPanel?.remove();
-        const chatToggleBtn = win.document.querySelector("#zotero-beaver-chat-toggle");
+        const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
         chatToggleBtn?.remove();
         const separator = win.document.querySelector("#beaver-tb-separator");
         separator?.remove();
