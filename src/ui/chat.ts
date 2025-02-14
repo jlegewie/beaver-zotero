@@ -35,6 +35,7 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // @ts-ignore zotero item-pane is not typed
         itemPane.dataset.beaverChatActive = "true";
 
+        // Highlight the chat toggle button
         const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
         if (chatToggleBtn) {
             chatToggleBtn.setAttribute("selected", "true");
@@ -63,6 +64,8 @@ export function toggleChat(win: Window, turnOn: boolean) {
             // @ts-ignore zotero item-pane is not typed
             sidenav.hidden = false;
         // }
+
+        // Unhighlight the chat toggle button
         const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
         if (chatToggleBtn) {
             chatToggleBtn.removeAttribute("selected");
