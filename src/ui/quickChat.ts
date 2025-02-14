@@ -39,7 +39,7 @@ export class QuickChat extends BasicTool {
     /** Placeholder text for the user's question */
     private placeholderText = "How can I help you today?";
     
-    constructor(options?: QuickChatOptions, base?: BasicOptions | BasicTool) {
+    constructor(win: Window, options?: QuickChatOptions, base?: BasicOptions | BasicTool) {
         super(base);
         this.ui = new UITool(base);
         
@@ -47,15 +47,16 @@ export class QuickChat extends BasicTool {
         this.sendCallback = options?.send;
         
         this.injectStyles();
-        this.createUI();
+        this.createUI(win);
         this.attachGlobalKeyEvents();
     }
     
     /**
     * Creates the HTML structure for the QuickChat.
     */
-    private createUI(): void {
-        const doc = this.getGlobal("document");
+    private createUI(win: Window): void {
+        // const doc = this.getGlobal("document");
+        const doc = win.document;
         
         // A semi-transparent overlay that closes the UI on click
         this.overlay = this.ui.createElement(doc, "div", {

@@ -24,7 +24,6 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
-        quickChat?: QuickChat;
         _itemStatuses: Map<number, string>;
     };
     public itemService?: ItemService;
