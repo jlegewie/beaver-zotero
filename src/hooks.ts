@@ -146,6 +146,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 async function onMainWindowUnload(win: Window): Promise<void> {
 	// Clean up QuickChat for this window
 	BeaverUIFactory.removeQuickChat(win);
+	BeaverUIFactory.removeChatPanel(win);
 
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();

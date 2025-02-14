@@ -7,7 +7,9 @@ const windowQuickChats = new WeakMap<Window, QuickChat>();
 
 export class BeaverUIFactory {
     static registerQuickChat(win: Window) {
-        // Initialize QuickChat for this window
+        // Remove existing QuickChat if present
+        this.removeQuickChat(win);
+        
         const quickChat = new QuickChat(win, {
             deepSearch: () => {
                 ztoolkit.log("Performing deep search...");
@@ -26,8 +28,11 @@ export class BeaverUIFactory {
             windowQuickChats.delete(win);
         }
     }
-    
+
     static registerChatPanel(win: Window) {
+        // Remove existing panel if present
+        this.removeChatPanel(win);
+
         const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
         if (!itemPane) {
             ztoolkit.log("Item pane not found");
@@ -56,6 +61,13 @@ export class BeaverUIFactory {
             toggleChat(win, !chatActive);
         });
         toolbar?.appendChild(chatToggleBtn);
+    }
+
+    static removeChatPanel(win: Window) {
+        const chatPanel = win.document.querySelector("#zotero-beaver-chat");
+        chatPanel?.remove();
+        const chatToggleBtn = win.document.querySelector("#zotero-beaver-chat-toggle");
+        chatToggleBtn?.remove();
     }
 
     static registerMenuItems() {
@@ -157,6 +169,10 @@ export class BeaverUIFactory {
     }
 
     static registerShortcuts() {
+        // Unregister existing shortcuts
+        // ztoolkit.Keyboard.unregisterAll();
+        
+        // Then register new ones
         ztoolkit.Keyboard.register(
             (ev, keyOptions) => {
                 if (keyOptions.keyboard?.equals("shift,p")) {
