@@ -1,0 +1,24 @@
+#zotero-beaver-tb-chat-toggle {
+    list-style-image: url("chrome://beaver/content/icons/chatting.svg");
+    -moz-context-properties: fill, fill-opacity, stroke, stroke-opacity;
+    fill: var(--fill-secondary);
+    stroke: var(--fill-secondary);
+    
+    /* Standard toolbarbutton dimensions */
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+}
+
+#zotero-beaver-tb-chat-toggle:hover {
+    background-color: var(--fill-quinary);
+}
+
+#zotero-beaver-tb-chat-toggle:active,
+#zotero-beaver-tb-chat-toggle[selected="true"] {
+    background-color: var(--fill-quarternary);
+}
+
+#zotero-beaver-tb-chat-toggle[disabled="true"] {
+    opacity: .5;
+}

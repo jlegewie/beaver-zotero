@@ -25,6 +25,10 @@ async function onStartup() {
 	
 	initLocale();
 
+	// Load styles
+	loadStylesheet();
+	ztoolkit.log("Styles loaded");
+
 	// Initialize database and vector store
 	const dbConnection = new Zotero.DBConnection("beaver");
 	const vectorStore = new VectorStoreDB(dbConnection);
@@ -162,8 +166,34 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	
 }
 
+function loadStylesheet() {
+	// Load the stylesheet
+	const styleURI = `chrome://beaver/content/styles/beaver.css`;
+    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+        .getService(Ci.nsIStyleSheetService);
+    const styleSheet = Services.io.newURI(styleURI);
+	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
+		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	}
+    ssService.loadAndRegisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+}
+
+
+function unloadStylesheet() {
+	// Unload the stylesheet
+	const styleURI = `chrome://beaver/content/styles/beaver.css`;
+	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+		.getService(Ci.nsIStyleSheetService);
+	const styleSheet = Services.io.newURI(styleURI);
+	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
+		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	}	
+}
+
 async function onShutdown(): Promise<void> {
 	try {
+		// Unload the stylesheet
+		unloadStylesheet();
 		// Close database connection if it exists
 		if (addon.itemService) {
 			await addon.itemService.closeDatabase();
