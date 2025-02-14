@@ -1,9 +1,30 @@
 import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
 import { toggleChat } from "./chat";
+import { QuickChat } from "./quickChat";
+
+const windowQuickChats = new WeakMap<Window, QuickChat>();
 
 export class BeaverUIFactory {
     static registerQuickChat(win: Window) {
+        // Initialize QuickChat for this window
+        const quickChat = new QuickChat(win, {
+            deepSearch: () => {
+                ztoolkit.log("Performing deep search...");
+            },
+            send: () => {
+                ztoolkit.log("Sending message...");
+            }
+        });
+        windowQuickChats.set(win, quickChat);
+    }
+
+    static removeQuickChat(win: Window) {
+        const quickChat = windowQuickChats.get(win);
+        if (quickChat) {
+            quickChat.hide();
+            windowQuickChats.delete(win);
+        }
     }
     
     static registerChatPanel(win: Window) {
@@ -133,6 +154,17 @@ export class BeaverUIFactory {
             }
             // iconPath: "chrome://zotero/skin/cross.png",
         });
+    }
+
+    static registerShortcuts() {
+        ztoolkit.Keyboard.register(
+            (ev, keyOptions) => {
+                if (keyOptions.keyboard?.equals("shift,p")) {
+                    const win = Zotero.getMainWindow();
+                    windowQuickChats.get(win)?.show();
+                }
+            }
+        );
     }
 
     static updateItemPaneStatus(itemId: number, status: string) {

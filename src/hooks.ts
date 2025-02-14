@@ -13,11 +13,8 @@ import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
-import { QuickChat } from "./ui/quickChat";
 import { watchPane, watchItemPaneCollapse } from "./ui/chat";
 
-// Add a WeakMap to store QuickChat instances per window
-const windowQuickChats = new WeakMap<Window, QuickChat>();
 
 async function onStartup() {
 	await Promise.all([
@@ -47,6 +44,8 @@ async function onStartup() {
 	const itemService = new ItemService(vectorStore, voyageClient, 'local');
 	addon.itemService = itemService;
 	ztoolkit.log("itemService initialized successfully");
+
+	BeaverUIFactory.registerShortcuts();
 
 	// BasicExampleFactory.registerPrefs();
 	
@@ -100,26 +99,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	watchItemPaneCollapse(win);
 
 	// Initialize QuickChat for this window
-	const quickChat = new QuickChat(win, {
-		deepSearch: () => {
-			ztoolkit.log("Performing deep search...");
-		},
-		send: () => {
-			ztoolkit.log("Sending message...");
-		}
-	});
-	windowQuickChats.set(win, quickChat);
-
-	// Register keyboard shortcut for quick chat
-	ztoolkit.Keyboard.register(
-		(ev, keyOptions) => {
-			if (keyOptions.keyboard?.equals("shift,p")) {
-				ztoolkit.log('calling quickChat.show');
-				windowQuickChats.get(win)?.show();
-			}
-		}
-	);
-	ztoolkit.log("quickChat initialized and keyboard shortcut registered");
+	BeaverUIFactory.registerQuickChat(win);
 	
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
@@ -165,11 +145,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 async function onMainWindowUnload(win: Window): Promise<void> {
 	// Clean up QuickChat for this window
-	const quickChat = windowQuickChats.get(win);
-	if (quickChat) {
-		quickChat.hide();
-		windowQuickChats.delete(win);
-	}
+	BeaverUIFactory.removeQuickChat(win);
 
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
