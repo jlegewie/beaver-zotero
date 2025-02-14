@@ -45,9 +45,36 @@ export class BeaverUIFactory {
         chatPanel.setAttribute("id", "zotero-beaver-chat");
         chatPanel.setAttribute("flex", "1");
         chatPanel.setAttribute("hidden", "true");
-        chatPanel.innerHTML = `<description>Beaver AI Chat panel</description>`;
+        // chatPanel.innerHTML = `<description>Beaver AI Chat panel</description>`;
+        const root = win.document.createElement("div");
+        root.setAttribute("id", "beaver-chat-root");
+        chatPanel.appendChild(root);
 
         itemPane?.appendChild(chatPanel);
+
+        // Inject  Svelte bundle
+        ztoolkit.log("Injecting Svelte bundle");
+        const svelteScript = win.document.createElement("script");
+        svelteScript.src = "chrome://beaver/content/svelte-dist/bundle.js";
+        // svelteScript.setAttribute("type", "text/javascript");
+        // svelteScript.setAttribute(
+        //     "src",
+        //     "chrome://beaver/content/svelte-dist/bundle.js"
+        // );
+        svelteScript.addEventListener("load", () => {
+            // Access the global object from IIFE
+            const Chat = win.BeaverSvelteBundle.Chat;
+            const root = chatPanel.querySelector("#beaver-chat-root");
+            ztoolkit.log("Chat component loaded", root);
+            // BeaverSvelteBundle exports { Chat } from main.js
+            new Chat({
+                target: root,
+                props: {
+                    title: "Beaver Chat!"
+                }
+            });
+        });
+        win.document.documentElement.appendChild(svelteScript);
 
         // 2) Add a toggle button in the top toolbar (or from your extension logic)
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
