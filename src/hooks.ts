@@ -156,9 +156,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	// Remove chat panel from item pane
 	const chatPanel = win.document.querySelector("#zotero-beaver-chat");
 	chatPanel?.remove();
-	// Remove chat toggle button from toolbar
-	const chatToggleBtn = win.document.querySelector("#zotero-beaver-chat-toggle");
-	chatToggleBtn?.remove();
 	// Remove watchers
 	// unwatchPane(win);
 	// unwatchItemPaneCollapse(win);
