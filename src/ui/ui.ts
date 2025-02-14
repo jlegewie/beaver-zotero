@@ -51,6 +51,11 @@ export class BeaverUIFactory {
 
         // 2) Add a toggle button in the top toolbar (or from your extension logic)
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
+        if (!toolbar) {
+            ztoolkit.log("Toolbar not found");
+            return;
+        }
+        const separator = toolbar.querySelector("div.zotero-tb-separator");
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("label", "Chat");
         chatToggleBtn.setAttribute("id", "zotero-beaver-chat-toggle");
@@ -60,7 +65,23 @@ export class BeaverUIFactory {
             const chatActive = itemPane?.dataset.beaverChatActive === "true";
             toggleChat(win, !chatActive);
         });
-        toolbar?.appendChild(chatToggleBtn);
+
+        const syncButton = toolbar.querySelector("#zotero-tb-sync");
+        if (syncButton) {
+            toolbar.insertBefore(chatToggleBtn, syncButton);
+            if (separator) {
+                const clonedSeparator = separator.cloneNode(true) as HTMLElement;
+                toolbar.insertBefore(clonedSeparator, syncButton);
+            } else {
+                const newSeparator = win.document.createXULElement("div");
+                newSeparator.setAttribute("class", "zotero-tb-separator");
+                toolbar.insertBefore(newSeparator, syncButton);
+            }
+        } else {
+            toolbar.appendChild(chatToggleBtn);
+            ztoolkit.log("Sync button not found, appending chat toggle button to the end of the toolbar.");
+        }
+
     }
 
     static removeChatPanel(win: Window) {
