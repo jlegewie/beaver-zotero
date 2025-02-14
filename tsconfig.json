@@ -5,7 +5,11 @@
     "target": "ES2016",
     "resolveJsonModule": true,
     "skipDefaultLibCheck": true,
-    "strict": true
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"]
+    },
   },
   "include": ["src", "typings", "node_modules/zotero-types"],
   "exclude": ["build", "addon"]
