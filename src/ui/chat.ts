@@ -34,6 +34,11 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // 5) Mark that chat is active
         // @ts-ignore zotero item-pane is not typed
         itemPane.dataset.beaverChatActive = "true";
+
+        const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
+        if (chatToggleBtn) {
+            chatToggleBtn.setAttribute("selected", "true");
+        }
     }
     else {
         // Turn chat off
@@ -58,6 +63,10 @@ export function toggleChat(win: Window, turnOn: boolean) {
             // @ts-ignore zotero item-pane is not typed
             sidenav.hidden = false;
         // }
+        const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
+        if (chatToggleBtn) {
+            chatToggleBtn.removeAttribute("selected");
+        }
     }
 }
 
