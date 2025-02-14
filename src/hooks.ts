@@ -42,28 +42,7 @@ async function onStartup() {
 	// Instantiate item service and store reference
 	const itemService = new ItemService(vectorStore, voyageClient, 'local');
 	addon.itemService = itemService;
-
-	ztoolkit.log("Beaver initialized successfully");
-
-	// Initialize QuickChat UI
-	addon.data.quickChat = new QuickChat({
-		deepSearch: () => {
-			ztoolkit.log("Performing deep search...");
-		},
-		send: () => {
-			ztoolkit.log("Sending message...");
-		}
-	});
-
-	// Register keyboard shortcut for quick chat
-	ztoolkit.Keyboard.register(
-		(ev, keyOptions) => {
-			if (keyOptions.keyboard?.equals("shift,p")) {
-				ztoolkit.log('calling quickChat.show');
-				addon.data.quickChat?.show();
-			}
-		}
-	);
+	ztoolkit.log("itemService initialized successfully");
 
 	// BasicExampleFactory.registerPrefs();
 	
@@ -101,6 +80,29 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	// BeaverUIFactory.registerExtraColumn();
 	// BeaverUIFactory.registerSearchCommand();
 
+
+	// Initialize QuickChat for this window
+	const quickChat = new QuickChat(win, {
+		deepSearch: () => {
+			ztoolkit.log("Performing deep search...");
+		},
+		send: () => {
+			ztoolkit.log("Sending message...");
+		}
+	});
+	windowQuickChats.set(win, quickChat);
+
+	// Register keyboard shortcut for quick chat
+	ztoolkit.Keyboard.register(
+		(ev, keyOptions) => {
+			if (keyOptions.keyboard?.equals("shift,p")) {
+				ztoolkit.log('calling quickChat.show');
+				windowQuickChats.get(win)?.show();
+			}
+		}
+	);
+	ztoolkit.log("quickChat initialized and keyboard shortcut registered");
+	
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
 	// 	closeTime: -1,
