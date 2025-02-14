@@ -1,7 +1,41 @@
 import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
+import { toggleChat } from "./chat";
 
 export class BeaverUIFactory {
+    static registerQuickChat(win: Window) {
+    }
+    
+    static registerChatPanel(win: Window) {
+        const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
+        if (!itemPane) {
+            ztoolkit.log("Item pane not found");
+            return;
+        }
+        ztoolkit.log("onMainWindowLoad: item pane found");
+
+        // 1) Initialize UI and add chat panel to item pane
+        const chatPanel = win.document.createXULElement("vbox");
+        chatPanel.setAttribute("id", "zotero-beaver-chat");
+        chatPanel.setAttribute("flex", "1");
+        chatPanel.setAttribute("hidden", "true");
+        chatPanel.innerHTML = `<description>Beaver AI Chat panel</description>`;
+
+        itemPane?.appendChild(chatPanel);
+
+        // 2) Add a toggle button in the top toolbar (or from your extension logic)
+        const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
+        const chatToggleBtn = win.document.createXULElement("toolbarbutton");
+        chatToggleBtn.setAttribute("label", "Chat");
+        chatToggleBtn.addEventListener("command", () => {
+            const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
+            // @ts-ignore zotero item-pane is not typed
+            const chatActive = itemPane?.dataset.beaverChatActive === "true";
+            toggleChat(win, !chatActive);
+        });
+        toolbar?.appendChild(chatToggleBtn);
+    }
+
     static registerMenuItems() {
         // Add to Beaver menu item
         ztoolkit.Menu.register("item", {
