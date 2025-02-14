@@ -57,8 +57,21 @@ export class BeaverUIFactory {
         }
         const separator = toolbar.querySelector("div.zotero-tb-separator");
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
-        chatToggleBtn.setAttribute("label", "Chat");
+        // chatToggleBtn.setAttribute("label", "Chat");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
+
+        chatToggleBtn.style.setProperty('list-style-image', 'url("chrome://beaver/content/icons/chatting.svg")');
+        chatToggleBtn.style.setProperty('fill', 'var(--fill-secondary)');
+        chatToggleBtn.style.setProperty('stroke', 'var(--fill-secondary)');
+        chatToggleBtn.style.setProperty('-moz-context-properties', 'fill, fill-opacity, stroke, stroke-opacity');
+        
+        // Set standard toolbarbutton dimensions
+        chatToggleBtn.style.setProperty('width', '28px');
+        chatToggleBtn.style.setProperty('height', '28px');
+        // chatToggleBtn.style.setProperty('margin', '0');
+        chatToggleBtn.style.setProperty('padding', '4px');
+
+
         chatToggleBtn.addEventListener("command", () => {
             const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
             // @ts-ignore zotero item-pane is not typed
