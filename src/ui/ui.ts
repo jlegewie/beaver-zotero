@@ -71,11 +71,8 @@ export class BeaverUIFactory {
             toolbar.insertBefore(chatToggleBtn, syncButton);
             if (separator) {
                 const clonedSeparator = separator.cloneNode(true) as HTMLElement;
+                clonedSeparator.setAttribute("id", "beaver-tb-separator");
                 toolbar.insertBefore(clonedSeparator, syncButton);
-            } else {
-                const newSeparator = win.document.createXULElement("div");
-                newSeparator.setAttribute("class", "zotero-tb-separator");
-                toolbar.insertBefore(newSeparator, syncButton);
             }
         } else {
             toolbar.appendChild(chatToggleBtn);
@@ -89,6 +86,8 @@ export class BeaverUIFactory {
         chatPanel?.remove();
         const chatToggleBtn = win.document.querySelector("#zotero-beaver-chat-toggle");
         chatToggleBtn?.remove();
+        const separator = win.document.querySelector("#beaver-tb-separator");
+        separator?.remove();
     }
 
     static registerMenuItems() {
