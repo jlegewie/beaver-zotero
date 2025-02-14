@@ -1,5 +1,5 @@
 #zotero-beaver-tb-chat-toggle {
-    list-style-image: url("chrome://beaver/content/icons/chatting.svg");
+    list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
     -moz-context-properties: fill, fill-opacity, stroke, stroke-opacity;
     fill: var(--fill-secondary);
     stroke: var(--fill-secondary);
