@@ -20,6 +20,7 @@
     "homepage": "https://github.com/jlegewie/beaver-zotero#readme",
     "license": "AGPL-3.0-or-later",
     "scripts": {
+        "build:svelte": "rollup -c rollup.config.js",
         "start": "zotero-plugin serve",
         "build": "zotero-plugin build && tsc --noEmit",
         "lint:check": "prettier --check . && eslint .",
@@ -33,9 +34,15 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.19.0",
+        "@rollup/plugin-commonjs": "^28.0.2",
+        "@rollup/plugin-node-resolve": "^16.0.0",
         "@types/node": "^22.13.0",
         "eslint": "^9.19.0",
         "prettier": "^3.4.2",
+        "rollup": "^4.34.7",
+        "rollup-plugin-css-only": "^4.5.2",
+        "rollup-plugin-svelte": "^7.2.2",
+        "svelte": "^3.59.2",
         "typescript": "^5.7.3",
         "typescript-eslint": "^8.23.0",
         "zotero-plugin-scaffold": "^0.2.2",
