@@ -14,6 +14,10 @@ import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
 import { QuickChat } from "./ui/quickChat";
+import { watchPane, watchItemPaneCollapse } from "./ui/chat";
+
+// Add a WeakMap to store QuickChat instances per window
+const windowQuickChats = new WeakMap<Window, QuickChat>();
 
 async function onStartup() {
 	await Promise.all([
@@ -74,12 +78,26 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 		`${addon.data.config.addonRef}-mainWindow.ftl`,
 	);
 
+	// Wait for the UI to be ready
+	await Promise.all([
+    	Zotero.initializationPromise,
+		Zotero.unlockPromise,
+		Zotero.uiReadyPromise,
+	]);
+
 	// Register Beaver UI elements
 	BeaverUIFactory.registerMenuItems();
 	BeaverUIFactory.registerInfoRow();
+	// BeaverUIFactory.registerQuickChat(win);
+	BeaverUIFactory.registerChatPanel(win);
 	// BeaverUIFactory.registerExtraColumn();
 	// BeaverUIFactory.registerSearchCommand();
 
+	ztoolkit.log("UI ready");
+
+	// 3) Create watchers
+	watchPane(win);
+	watchItemPaneCollapse(win);
 
 	// Initialize QuickChat for this window
 	const quickChat = new QuickChat(win, {
@@ -146,22 +164,32 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-	// Clean up QuickChat before unregistering
-	addon.data.quickChat?.hide();
-	
+	// Clean up QuickChat for this window
+	const quickChat = windowQuickChats.get(win);
+	if (quickChat) {
+		quickChat.hide();
+		windowQuickChats.delete(win);
+	}
+
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
 	// Remove Beaver menu items
 	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
 	Zotero.ItemPaneManager.unregisterInfoRow('beaver-item-pane-status');
+	// Remove chat panel from item pane
+	const chatPanel = win.document.querySelector("#zotero-beaver-chat");
+	chatPanel?.remove();
+	// Remove chat toggle button from toolbar
+	const chatToggleBtn = win.document.querySelector("#zotero-beaver-chat-toggle");
+	chatToggleBtn?.remove();
+	// Remove watchers
+	// unwatchPane(win);
+	// unwatchItemPaneCollapse(win);
+	
 }
 
 async function onShutdown(): Promise<void> {
 	try {
-		// Clean up QuickChat
-		addon.data.quickChat?.hide();
-		addon.data.quickChat = undefined;
-
 		// Close database connection if it exists
 		if (addon.itemService) {
 			await addon.itemService.closeDatabase();

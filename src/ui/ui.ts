@@ -27,6 +27,7 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("label", "Chat");
+        chatToggleBtn.setAttribute("id", "zotero-beaver-chat-toggle");
         chatToggleBtn.addEventListener("command", () => {
             const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
             // @ts-ignore zotero item-pane is not typed
