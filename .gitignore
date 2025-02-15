@@ -12,3 +12,7 @@ yarn.lock
 build
 logs
 .cursorrules
+
+# compiled files
+reactBundle.js
+reactBundle.js.map
