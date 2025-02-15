@@ -1,55 +1,85 @@
 import React, { useState } from 'react';
 
 const styles = {
+    chatApp: {
+        width: '100%',
+        height: '100%',
+        fontFamily: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif',
+        padding: '12px',
+    },
     container: {
-        width: '80%',
-        maxWidth: '64rem',
+        width: '100%',
+        // maxWidth: '64rem',
         margin: '0 auto',
         padding: '1rem',
-        backgroundColor: '#1a1a1a',
-        borderRadius: '0.5rem'
+        // backgroundColor: '#1a1a1a',
+        border: '1px solid #333',
+        borderRadius: '6px',
+        // borderRadius: '0.5rem'
     },
     form: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem'
     },
-    inputWrapper: {
-        position: 'relative',
-        width: '100%'
+    inputContainer: {
+        marginBottom: '6px',
+        marginLeft: '-3px',
     },
     input: {
-        width: '100%',
-        padding: '1rem',
-        backgroundColor: '#2a2a2a',
-        color: '#e0e0e0',
-        borderRadius: '0.5rem',
-        border: 'none',
+        width: 'calc(100% - 23px)',
+        fontSize: '13px',
+        padding: '6px 8px',
+        border: '1px solid #333',
+        backgroundColor: '#222',
+        borderRadius: '6px',
+        marginRight: '-2px',
         outline: 'none',
-        fontSize: '1rem'
+        color: '#888',
     },
-    buttonContainer: {
+    sourcesContainer: {
+        marginBottom: '18px',
+        minHeight: '24px',
+    },
+    buttonsContainer: {
         display: 'flex',
-        justifyContent: 'space-between',
+        flexDirection: 'row',
         alignItems: 'center',
-        gap: '1rem'
+        paddingTop: '10px',
     },
-    rightButtons: {
+    buttonsLeft: {
         display: 'flex',
-        gap: '1rem'
+        flex: 1,
+    },
+    buttonsRight: {
+        display: 'flex',
+        gap: '6px',
     },
     button: {
-        padding: '0.5rem 1rem',
-        backgroundColor: '#2a2a2a',
-        color: '#9ca3af',
-        borderRadius: '0.5rem',
-        border: 'none',
+        border: '1px solid #666',
+        backgroundColor: '#444',
+        padding: '3px 4px',
+        borderRadius: '4px',
         cursor: 'pointer',
-        fontSize: '1rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        transition: 'background-color 0.2s'
+        fontSize: '12px',
+        fontWeight: 400,
+        color: '#c3c3c3',
+        transition: 'background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease',
+    },
+    escButton: {
+        opacity: 0.4,
+        '&:hover': {
+            opacity: 0.7,
+        }
+    },
+    deepSearchButton: {
+        marginRight: '4px',
+        opacity: 0.4,
+        '&:hover': {
+            opacity: 0.7,
+        }
+    },
+    sendButton: {
+        color: '#d3d3d3',
     }
 };
 
@@ -71,46 +101,52 @@ const ChatApp = () => {
     };
     
     return (
-        <div>
+        <div style={styles.chatApp}>
             <div style={styles.container}>
                 <form onSubmit={handleSubmit} style={styles.form}>
-            <div style={styles.inputWrapper}>
-            <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="How can I help you today?"
-                style={styles.input}
-            />
-            </div>
-            
-            <div style={styles.buttonContainer}>
-            <button
-                type="button"
-                onClick={handleEscape}
-                style={styles.button}
-            >
-                esc
-            </button>
-            
-            <div style={styles.rightButtons}>
-            <button
-                type="button"
-                onClick={handleDeepSearch}
-                style={styles.button}
-            >
-                Library Search ⌘ ⏎
-            </button>
-            
-            <button
-            type="submit"
-            style={styles.button}
-            >
-            Send ⏎
-            </button>
-            </div>
-            </div>
-            </form>
+                    <div style={styles.inputContainer}>
+                        <input
+                            type="text"
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
+                            placeholder="How can I help you today?"
+                            style={styles.input}
+                        />
+                    </div>
+                    
+                    <div style={styles.sourcesContainer}>
+                        {/* Items will be rendered here */}
+                    </div>
+                    
+                    <div style={styles.buttonsContainer}>
+                        <div style={styles.buttonsLeft}>
+                            <button
+                                type="button"
+                                onClick={handleEscape}
+                                style={{...styles.button, ...styles.escButton}}
+                            >
+                                esc
+                            </button>
+                        </div>
+                        
+                        <div style={styles.buttonsRight}>
+                            <button
+                                type="button"
+                                onClick={handleDeepSearch}
+                                style={{...styles.button, ...styles.deepSearchButton}}
+                            >
+                                Deep Search ⌘ ⏎
+                            </button>
+                            
+                            <button
+                                type="submit"
+                                style={{...styles.button, ...styles.sendButton}}
+                            >
+                                Send ⏎
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </div>
     );

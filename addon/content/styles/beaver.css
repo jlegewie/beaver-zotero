@@ -22,3 +22,8 @@
 #zotero-beaver-tb-chat-toggle[disabled="true"] {
     opacity: .5;
 }
+
+#beaver-react-root {
+    width: calc(100% - 53px);
+    height: 100%;
+}
