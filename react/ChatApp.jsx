@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "./components/button.tsx"
 
 const styles = {
@@ -68,7 +68,18 @@ const ChatApp = () => {
     const [message, setMessage] = useState('');
     const [sendCount, setSendCount] = useState(0);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
+    const inputRef = useRef(null);
     
+    useEffect(() => {
+        window.focusChatInput = () => {
+            inputRef.current?.focus();
+        };
+        
+        return () => {
+            delete window.focusChatInput;
+        };
+    }, []);
+
     const handleSubmit = (e) => {
         e.preventDefault();
         if (isCommandPressed) {
@@ -106,6 +117,7 @@ const ChatApp = () => {
                 <form onSubmit={handleSubmit} style={styles.form}>
                     <div style={styles.inputContainer}>
                         <input
+                            ref={inputRef}
                             type="text"
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}

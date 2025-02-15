@@ -1,4 +1,3 @@
-
 /**
 * Toggle the chat panel on and off.
 * 
@@ -40,6 +39,13 @@ export function toggleChat(win: Window, turnOn: boolean) {
         if (chatToggleBtn) {
             chatToggleBtn.setAttribute("selected", "true");
         }
+
+        // Focus the input after showing chat
+        // (use delay to ensure React has mounted)
+        win.setTimeout(() => {
+            // @ts-ignore focusChatInput is added by React
+            win.focusChatInput?.();
+        }, 50);
     }
     else {
         // Turn chat off

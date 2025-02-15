@@ -25,9 +25,7 @@ async function onStartup() {
 	
 	initLocale();
 
-	// Load styles
-	loadStylesheet();
-	ztoolkit.log("Styles loaded");
+	ztoolkit.log("Startup");
 
 	// Initialize database and vector store
 	const dbConnection = new Zotero.DBConnection("beaver");
@@ -104,6 +102,10 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 	// Initialize QuickChat for this window
 	BeaverUIFactory.registerQuickChat(win);
+	
+	// Load styles for this window
+	loadStylesheet();
+	ztoolkit.log("Styles loaded for window");
 	
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
