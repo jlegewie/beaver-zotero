@@ -8,7 +8,8 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"]
+      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"],
+      "../../addon/content/reactBundle": ["typings/reactBundle.d.ts"]
     },
   },
   "include": ["src", "typings", "node_modules/zotero-types"],
