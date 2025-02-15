@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Button } from "./components/button.tsx"
 
 const styles = {
     chatApp: {
@@ -50,33 +51,29 @@ const styles = {
         display: 'flex',
         gap: '6px',
     },
-    button: {
-        border: '1px solid #666',
-        backgroundColor: '#444',
-        padding: '3px 4px',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        fontSize: '12px',
-        fontWeight: 400,
-        color: '#c3c3c3',
-        transition: 'background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease',
-    },
+    button: undefined,
     escButton: {
         opacity: 0.4,
-        '&:hover': {
-            opacity: 0.7,
-        }
     },
     deepSearchButton: {
         marginRight: '4px',
         opacity: 0.4,
-        '&:hover': {
-            opacity: 0.7,
-        }
     },
     sendButton: {
         color: '#d3d3d3',
     }
+};
+
+// Add custom button style
+const darkButtonStyle = {
+    border: '1px solid #666',
+    backgroundColor: '#444',
+    padding: '3px 4px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: '#c3c3c3',
+    height: 'auto', // Override default height
 };
 
 const ChatApp = () => {
@@ -121,30 +118,42 @@ const ChatApp = () => {
                     
                     <div style={styles.buttonsContainer}>
                         <div style={styles.buttonsLeft}>
-                            <button
+                            <Button
                                 type="button"
                                 onClick={handleEscape}
-                                style={{...styles.button, ...styles.escButton}}
+                                style={{
+                                    ...darkButtonStyle,
+                                    opacity: 0.4,
+                                    '&:hover': { opacity: 0.7 }
+                                }}
                             >
                                 esc
-                            </button>
+                            </Button>
                         </div>
                         
                         <div style={styles.buttonsRight}>
-                            <button
+                            <Button
                                 type="button"
                                 onClick={handleDeepSearch}
-                                style={{...styles.button, ...styles.deepSearchButton}}
+                                style={{
+                                    ...darkButtonStyle,
+                                    opacity: 0.4,
+                                    marginRight: '4px',
+                                    '&:hover': { opacity: 0.7 }
+                                }}
                             >
                                 Deep Search ⌘ ⏎
-                            </button>
+                            </Button>
                             
-                            <button
+                            <Button
                                 type="submit"
-                                style={{...styles.button, ...styles.sendButton}}
+                                style={{
+                                    ...darkButtonStyle,
+                                    color: '#d3d3d3'
+                                }}
                             >
                                 Send ⏎
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </form>
