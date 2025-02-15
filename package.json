@@ -26,18 +26,30 @@
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",
         "test": "echo \"Error: no test specified\" && exit 1",
-        "update-deps": "npm update --save"
+        "update-deps": "npm update --save",
+        "build-react": "webpack --config webpack.config.js"
     },
     "dependencies": {
+        "react": "^16.14.0",
+        "react-dom": "^16.14.0",
         "zotero-plugin-toolkit": "^4.1.1"
     },
     "devDependencies": {
+        "@babel/core": "^7.26.9",
+        "@babel/plugin-transform-runtime": "^7.26.9",
+        "@babel/preset-env": "^7.26.9",
+        "@babel/preset-react": "^7.26.3",
         "@eslint/js": "^9.19.0",
         "@types/node": "^22.13.0",
+        "@types/react": "^19.0.8",
+        "@types/react-dom": "^19.0.3",
+        "babel-loader": "^9.2.1",
         "eslint": "^9.19.0",
         "prettier": "^3.4.2",
         "typescript": "^5.7.3",
         "typescript-eslint": "^8.23.0",
+        "webpack": "^5.98.0",
+        "webpack-cli": "^6.0.1",
         "zotero-plugin-scaffold": "^0.2.2",
         "zotero-types": "^3.1.7"
     },
