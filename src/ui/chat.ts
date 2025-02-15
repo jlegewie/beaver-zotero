@@ -1,3 +1,5 @@
+import eventBus from '../../react/eventBus';
+
 /**
 * Toggle the chat panel on and off.
 * 
@@ -43,8 +45,13 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // Focus the input after showing chat
         // (use delay to ensure React has mounted)
         win.setTimeout(() => {
-            // @ts-ignore focusChatInput is added by React
-            win.focusChatInput?.();
+            // win.focusChatInput?.();
+            // Make sure we're using the window's event bus
+            if (!win.__beaverEventBus) {
+                win.__beaverEventBus = eventBus;
+            }
+            const event = new win.CustomEvent("focusChatInput");
+            win.__beaverEventBus.dispatchEvent(event);
         }, 50);
     }
     else {

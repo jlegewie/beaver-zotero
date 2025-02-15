@@ -70,13 +70,28 @@ const ChatApp = () => {
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const inputRef = useRef(null);
     
+    // Subscribe to events from Zotero
     useEffect(() => {
-        window.focusChatInput = () => {
+        // Get the event bus from the window
+        const eventBus = window.__beaverEventBus;
+        if (!eventBus) return;
+
+        const handleFocus = () => {
             inputRef.current?.focus();
         };
-        
+
+        // "itemSelected" event to update our log
+        const handleItemSelected = (e) => {
+            const { detail } = e;
+        };
+
+        eventBus.addEventListener('focusChatInput', handleFocus);
+        eventBus.addEventListener('itemSelected', handleItemSelected);
+
+        // Clean up the event listeners when the component unmounts.
         return () => {
-            delete window.focusChatInput;
+            eventBus.removeEventListener('focusChatInput', handleFocus);
+            eventBus.removeEventListener('itemSelected', handleItemSelected);
         };
     }, []);
 

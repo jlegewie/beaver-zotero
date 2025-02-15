@@ -14,6 +14,7 @@ import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
 import { watchPane, watchItemPaneCollapse } from "./ui/chat";
+import eventBus from "../react/eventBus";
 
 
 async function onStartup() {
@@ -65,6 +66,9 @@ async function onStartup() {
 	
 	// UIExampleFactory.registerReaderItemPaneSection();
 	
+	// Add event bus to window
+	Zotero.getMainWindow().__beaverEventBus = eventBus;
+	
 	await Promise.all(
 		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
 	);
@@ -90,6 +94,12 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	BeaverUIFactory.registerMenuItems();
 	BeaverUIFactory.registerInfoRow();
 	// BeaverUIFactory.registerQuickChat(win);
+
+	// Create (or reuse) an EventTarget for this window
+	if (!win.__beaverEventBus) {
+		win.__beaverEventBus = new EventTarget();
+	}
+
 	BeaverUIFactory.registerChatPanel(win);
 	// BeaverUIFactory.registerExtraColumn();
 	// BeaverUIFactory.registerSearchCommand();
@@ -106,7 +116,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	// Load styles for this window
 	loadStylesheet();
 	ztoolkit.log("Styles loaded for window");
-	
+
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
 	// 	closeOnClick: true,
 	// 	closeTime: -1,
@@ -222,16 +232,34 @@ async function onNotify(
 	ids: Array<string | number>,
 	extraData: { [key: string]: any },
 ) {
-	// You can add your code to the corresponding notify type
+	// Skip if addon is not alive
+	if (!addon?.data.alive) return;
 	ztoolkit.log("notify", event, type, ids, extraData);
-	if (
-		event == "select" &&
-		type == "tab" &&
-		extraData[ids[0]].type == "reader"
-	) {
-		BasicExampleFactory.exampleNotifierCallback();
-	} else {
-		return;
+
+	
+	// Get all main windows
+	const windows = Zotero.getMainWindows();
+	
+	// Handle different notification types
+	switch (type) {
+		case "item":
+			// Dispatch itemSelected event to all windows
+			if (event === "select") {
+				windows.forEach(win => {
+					if (win.__beaverEventBus) {
+						win.__beaverEventBus.dispatchEvent(
+							new win.CustomEvent("itemSelected", { 
+								detail: { itemIDs: ids } 
+							})
+						);
+					}
+				});
+			}
+			break;
+			
+		// Add other notification types as needed
+		default:
+			break;
 	}
 }
 
