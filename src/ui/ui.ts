@@ -209,12 +209,27 @@ export class BeaverUIFactory {
         // Unregister existing shortcuts
         // ztoolkit.Keyboard.unregisterAll();
         
-        // Then register new ones
+        // Register keyboard shortcut for quick chat
         ztoolkit.Keyboard.register(
             (ev, keyOptions) => {
                 if (keyOptions.keyboard?.equals("shift,p")) {
                     const win = Zotero.getMainWindow();
                     windowQuickChats.get(win)?.show();
+                }
+            }
+        );
+
+        // Register keyboard shortcut for chat panel
+        ztoolkit.Keyboard.register(
+            (ev, keyOptions) => {
+                if (keyOptions.keyboard?.equals("accel,l")) {
+                    const win = Zotero.getMainWindow();
+                    const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
+                    // @ts-ignore zotero item-pane is not typed
+                    const chatActive = itemPane?.dataset.beaverChatActive === "true";
+                    toggleChat(win, !chatActive);
+                    // Prevent default behavior
+                    ev.preventDefault();
                 }
             }
         );
