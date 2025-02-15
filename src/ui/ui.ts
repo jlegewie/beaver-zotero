@@ -45,9 +45,26 @@ export class BeaverUIFactory {
         chatPanel.setAttribute("id", "zotero-beaver-chat");
         chatPanel.setAttribute("flex", "1");
         chatPanel.setAttribute("hidden", "true");
-        chatPanel.innerHTML = `<description>Beaver AI Chat panel</description>`;
+        // chatPanel.innerHTML = `<description>Beaver AI Chat panel</description>`;
 
         itemPane?.appendChild(chatPanel);
+
+        // Create a normal div inside that vbox as mount point for the React component
+        const reactContainer = win.document.createElement("div");
+        reactContainer.setAttribute("id", "beaver-react-root");
+        chatPanel.appendChild(reactContainer);
+
+        /**
+        * Load the React bundle into the XUL window by injecting a <script> tag
+        * This ensures that React runs in the context of the real XUL window
+        */
+        const script = win.document.createElement("script");
+        script.type = "text/javascript";
+        script.src = "chrome://beaver/content/reactBundle.js";
+        win.document.documentElement.appendChild(script);
+        script.onload = () => {
+            win.renderChatApp(reactContainer);
+        };
 
         // 2) Add a toggle button in the top toolbar (or from your extension logic)
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
