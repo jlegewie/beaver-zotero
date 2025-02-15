@@ -1,9 +1,12 @@
-const path = require('path');
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-module.exports = {
-    mode: 'development',    // or 'development' for easier debugging
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default {
+    mode: 'development',    // 'development' for easier debugging, or 'production' for minified output
     target: 'web',
-    entry: './src/react/index.jsx',  // your entry file
+    entry: './react/index.jsx',
     devtool: 'inline-source-map',
     output: {
         path: path.resolve(__dirname, 'addon', 'content'),

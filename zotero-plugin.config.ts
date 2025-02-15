@@ -3,6 +3,16 @@ import pkg from "./package.json";
 
 export default defineConfig({
   source: ["src", "addon"],
+  // source: {
+  //   paths: ["src", "addon"],
+  //   ignored: ["src/react/**"]
+  // },
+  // source: [
+  //   "src/**/*",          // All files in src
+  //   "!src/react/**",     // Exclude react directory
+  //   "!src/react/**/*",   // Exclude all files in react directory
+  //   "addon/**/*"         // All files in addon
+  // ],
   dist: ".scaffold/build",
   name: pkg.config.addonName,
   id: pkg.config.addonID,

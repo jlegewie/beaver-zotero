@@ -15,6 +15,6 @@
     "esModuleInterop": true,
     "lib": ["DOM", "ES2016"]
   },
-  "include": ["src", "typings", "node_modules/zotero-types"],
+  "include": ["src", "react", "typings", "node_modules/zotero-types"],
   "exclude": ["build", "addon"]
 }
