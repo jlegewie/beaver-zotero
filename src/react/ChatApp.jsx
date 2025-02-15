@@ -2,14 +2,10 @@ import React, { useState } from 'react';
 
 const styles = {
     chatApp: {
-        width: '100%',
-        height: '100%',
         fontFamily: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif',
         padding: '12px',
     },
     container: {
-        width: '100%',
-        // maxWidth: '64rem',
         margin: '0 auto',
         padding: '1rem',
         // backgroundColor: '#1a1a1a',
@@ -85,11 +81,13 @@ const styles = {
 
 const ChatApp = () => {
     const [message, setMessage] = useState('');
+    const [sendCount, setSendCount] = useState(0);
     
     const handleSubmit = (e) => {
         e.preventDefault();
         console.log('Message sent:', message);
         setMessage('');
+        setSendCount(prev => prev + 1);
     };
     
     const handleDeepSearch = () => {
@@ -112,6 +110,9 @@ const ChatApp = () => {
                             placeholder="How can I help you today?"
                             style={styles.input}
                         />
+                    </div>
+                    <div>
+                        Messages sent: {sendCount}
                     </div>
                     
                     <div style={styles.sourcesContainer}>
