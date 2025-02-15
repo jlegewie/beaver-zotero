@@ -153,6 +153,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	// Clean up QuickChat for this window
 	BeaverUIFactory.removeQuickChat(win);
 	BeaverUIFactory.removeChatPanel(win);
+	// Unload the stylesheet
+	unloadStylesheet();
 
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
@@ -183,7 +185,7 @@ function loadStylesheet() {
 
 function unloadStylesheet() {
 	// Unload the stylesheet
-	const styleURI = `chrome://beaver/content/styles/beaver.css`;
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
 	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
 		.getService(Ci.nsIStyleSheetService);
 	const styleSheet = Services.io.newURI(styleURI);
@@ -194,8 +196,6 @@ function unloadStylesheet() {
 
 async function onShutdown(): Promise<void> {
 	try {
-		// Unload the stylesheet
-		unloadStylesheet();
 		// Close database connection if it exists
 		if (addon.itemService) {
 			await addon.itemService.closeDatabase();
