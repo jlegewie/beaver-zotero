@@ -64,18 +64,6 @@ const styles = {
     }
 };
 
-// Add custom button style
-const darkButtonStyle = {
-    border: '1px solid #666',
-    backgroundColor: '#444',
-    padding: '3px 4px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    fontWeight: 400,
-    color: '#c3c3c3',
-    height: 'auto', // Override default height
-};
-
 const ChatApp = () => {
     const [message, setMessage] = useState('');
     const [sendCount, setSendCount] = useState(0);
@@ -121,11 +109,7 @@ const ChatApp = () => {
                             <Button
                                 type="button"
                                 onClick={handleEscape}
-                                style={{
-                                    ...darkButtonStyle,
-                                    opacity: 0.4,
-                                    '&:hover': { opacity: 0.7 }
-                                }}
+                                variant="ghost"
                             >
                                 esc
                             </Button>
@@ -135,22 +119,15 @@ const ChatApp = () => {
                             <Button
                                 type="button"
                                 onClick={handleDeepSearch}
-                                style={{
-                                    ...darkButtonStyle,
-                                    opacity: 0.4,
-                                    marginRight: '4px',
-                                    '&:hover': { opacity: 0.7 }
-                                }}
+                                variant="ghost"
+                                style={{ marginRight: '4px' }}
                             >
                                 Deep Search ⌘ ⏎
                             </Button>
                             
                             <Button
                                 type="submit"
-                                style={{
-                                    ...darkButtonStyle,
-                                    color: '#d3d3d3'
-                                }}
+                                variant="dark"
                             >
                                 Send ⏎
                             </Button>

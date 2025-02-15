@@ -8,7 +8,7 @@ interface ButtonLoadingProps {
 }
 
 interface ButtonProps extends ButtonLoadingProps, React.ButtonHTMLAttributes<HTMLButtonElement> {
-    variant?: 'solid' | 'outline' | 'ghost'
+    variant?: 'solid' | 'outline' | 'ghost' | 'dark'
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
     colorScheme?: string
 }
@@ -95,26 +95,48 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             ...rest
         } = props
         
+        const [isHovered, setIsHovered] = React.useState(false);
+        
         const variantStyles: CSSProperties = React.useMemo(() => {
             switch (variant) {
-                case 'outline':
-                return {
-                    borderColor: `var(--${colorScheme}-500)`,
-                    color: `var(--${colorScheme}-500)`,
-                    backgroundColor: 'transparent'
-                }
                 case 'ghost':
-                return {
-                    color: `var(--${colorScheme}-500)`,
-                    backgroundColor: 'transparent'
-                }
+                    return {
+                        border: '1px solid #666',
+                        backgroundColor: '#444',
+                        padding: '3px 4px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: 400,
+                        color: '#c3c3c3',
+                        height: 'auto',
+                        opacity: isHovered ? 0.7 : 0.4,
+                        transition: 'opacity 0.2s'
+                    }
+                case 'dark':
+                    return {
+                        border: '1px solid #666',
+                        backgroundColor: '#444',
+                        padding: '3px 4px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: 400,
+                        color: '#d3d3d3',
+                        height: 'auto',
+                        transition: 'opacity 0.2s'
+                    }
+                case 'outline':
+                    return {
+                        borderColor: `var(--${colorScheme}-500)`,
+                        color: `var(--${colorScheme}-500)`,
+                        backgroundColor: 'transparent'
+                    }
                 default:
-                return {
-                    backgroundColor: `var(--${colorScheme}-500)`,
-                    color: 'white'
-                }
+                    return {
+                        backgroundColor: `var(--${colorScheme}-500)`,
+                        color: 'white'
+                    }
             }
-        }, [variant, colorScheme])
+        }, [variant, colorScheme, isHovered])
         
         const spinnerElement = spinner || <Spinner />
         
@@ -122,6 +144,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             <button
             ref={ref}
             disabled={disabled || loading}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
             style={{
                 ...baseStyles,
                 ...sizeStyles[size],
