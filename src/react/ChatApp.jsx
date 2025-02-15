@@ -67,12 +67,17 @@ const styles = {
 const ChatApp = () => {
     const [message, setMessage] = useState('');
     const [sendCount, setSendCount] = useState(0);
+    const [isCommandPressed, setIsCommandPressed] = useState(false);
     
     const handleSubmit = (e) => {
         e.preventDefault();
-        console.log('Message sent:', message);
-        setMessage('');
-        setSendCount(prev => prev + 1);
+        if (isCommandPressed) {
+            handleDeepSearch();
+        } else {
+            console.log('Message sent:', message);
+            setMessage('');
+            setSendCount(prev => prev + 1);
+        }
     };
     
     const handleDeepSearch = () => {
@@ -81,6 +86,18 @@ const ChatApp = () => {
     
     const handleEscape = () => {
         setMessage('');
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Meta') {
+            setIsCommandPressed(true);
+        }
+    };
+
+    const handleKeyUp = (e) => {
+        if (e.key === 'Meta') {
+            setIsCommandPressed(false);
+        }
     };
     
     return (
@@ -94,6 +111,8 @@ const ChatApp = () => {
                             onChange={(e) => setMessage(e.target.value)}
                             placeholder="How can I help you today?"
                             style={styles.input}
+                            onKeyDown={handleKeyDown}
+                            onKeyUp={handleKeyUp}
                         />
                     </div>
                     <div>
@@ -119,7 +138,7 @@ const ChatApp = () => {
                             <Button
                                 type="button"
                                 onClick={handleDeepSearch}
-                                variant="ghost"
+                                variant={isCommandPressed ? "dark" : "ghost"}
                                 style={{ marginRight: '4px' }}
                             >
                                 Deep Search ⌘ ⏎
@@ -127,7 +146,7 @@ const ChatApp = () => {
                             
                             <Button
                                 type="submit"
-                                variant="dark"
+                                variant={isCommandPressed ? "ghost" : "dark"}
                             >
                                 Send ⏎
                             </Button>
