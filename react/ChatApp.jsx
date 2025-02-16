@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "./components/button.tsx"
+import { ContextItem } from "./components/contextItem.tsx"
+import { getInTextCitations, getBibliographies } from "../src/utils/citations.ts"
 
 const styles = {
     chatApp: {
@@ -33,9 +35,12 @@ const styles = {
         outline: 'none',
         color: '#888',
     },
-    sourcesContainer: {
+    contextItemsContainer: {
         marginBottom: '18px',
         minHeight: '24px',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '8px',
     },
     buttonsContainer: {
         display: 'flex',
@@ -68,6 +73,7 @@ const ChatApp = () => {
     const [message, setMessage] = useState('');
     const [sendCount, setSendCount] = useState(0);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
+    const [contextItems, setContextItems] = useState([]);
     const inputRef = useRef(null);
     
     // Subscribe to events from Zotero
@@ -108,6 +114,8 @@ const ChatApp = () => {
     
     const handleDeepSearch = () => {
         console.log('Deep search triggered');
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        setContextItems(items);
     };
     
     const handleEscape = () => {
@@ -142,14 +150,19 @@ const ChatApp = () => {
                             onKeyUp={handleKeyUp}
                         />
                     </div>
-                    <div>
-                        Messages sent: {sendCount}
+                    <div style={styles.contextItemsContainer}>
+                        {contextItems.map((item, index) => (
+                            <ContextItem
+                                key={index}
+                                icon={item.getItemTypeIconName()}
+                                tooltip={getBibliographies([item])[0]}
+                                variant="dark"
+                                onRemove={() => alert('test')}
+                            >
+                                {getInTextCitations([item])[0]}
+                            </ContextItem>
+                        ))}
                     </div>
-                    
-                    <div style={styles.sourcesContainer}>
-                        {/* Items will be rendered here */}
-                    </div>
-                    
                     <div style={styles.buttonsContainer}>
                         <div style={styles.buttonsLeft}>
                             <Button
@@ -168,7 +181,7 @@ const ChatApp = () => {
                                 variant={isCommandPressed ? "dark" : "ghost"}
                                 style={{ marginRight: '4px' }}
                             >
-                                Deep Search ⌘ ⏎
+                                Library Search ⌘ ⏎
                             </Button>
                             
                             <Button
