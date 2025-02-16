@@ -40,7 +40,7 @@ const ChatApp = () => {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (isCommandPressed) {
-            handleDeepSearch();
+            handleLibrarySearch();
         } else {
             console.log('Message sent:', message);
             setMessage('');
@@ -48,8 +48,8 @@ const ChatApp = () => {
         }
     };
     
-    const handleDeepSearch = () => {
-        console.log('Deep search triggered');
+    const handleLibrarySearch = () => {
+        console.log('Library search triggered');
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         setContextItems(items);
     };
@@ -81,7 +81,7 @@ const ChatApp = () => {
                 handleSubmit={handleSubmit}
                 handleKeyDown={handleKeyDown}
                 handleKeyUp={handleKeyUp}
-                handleDeepSearch={handleDeepSearch}
+                handleLibrarySearch={handleLibrarySearch}
             />
         </div>
     );

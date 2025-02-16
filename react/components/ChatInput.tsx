@@ -11,7 +11,7 @@ interface ChatInputProps {
     handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
     handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
     handleKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-    handleDeepSearch: () => void;
+    handleLibrarySearch: () => void;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -23,7 +23,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     handleSubmit,
     handleKeyDown,
     handleKeyUp,
-    handleDeepSearch,
+    handleLibrarySearch,
 }) => {
     return (
         <div className="chat-box">
@@ -63,7 +63,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         <button
                             type={isCommandPressed ? "button" : undefined}
                             className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
-                            onClick={handleDeepSearch}
+                            onClick={handleLibrarySearch}
                         >
                             Library Search ⌘ ⏎
                         </button>
