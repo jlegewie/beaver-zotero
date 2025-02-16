@@ -83,6 +83,10 @@ const ChatApp = () => {
         if (!eventBus) return;
 
         const handleFocus = () => {
+            // Add selected items to context
+            const items = Zotero.getActiveZoteroPane().getSelectedItems();
+            setContextItems(items);
+            // Focus on text field
             inputRef.current?.focus();
         };
 
