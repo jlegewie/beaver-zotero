@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button } from "./components/button.tsx"
-import { ContextItem } from "./components/contextItem.tsx"
-import { getInTextCitations, getBibliographies } from "../src/utils/citations.ts"
+import ChatInput from "./components/ChatInput.tsx"
 
 const ChatApp = () => {
     const [message, setMessage] = useState('');
@@ -74,58 +72,17 @@ const ChatApp = () => {
     
     return (
         <div className="chat-container">
-            <div className="chat-box">
-                <form onSubmit={handleSubmit} className="flex flex-col">
-                    {/* Chat Input */}
-                    <div className="mb-2 -ml-1">
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            placeholder="How can I help you today?"
-                            className="chat-input"
-                            onKeyDown={handleKeyDown}
-                            onKeyUp={handleKeyUp}
-                        />
-                    </div>
-                    {/* Context Items */}
-                    {/* TODO: revise context-items-container */}
-                    <div className="context-items-container">
-                        {contextItems.map((item, index) => (
-                            <ContextItem
-                                key={index}
-                                icon={item.getItemTypeIconName()}
-                                tooltip={getBibliographies([item])[0]}
-                                variant="dark"
-                                onRemove={() => alert('test')}
-                            >
-                                {getInTextCitations([item])[0]}
-                            </ContextItem>
-                        ))}
-                    </div>
-                    {/* Button Row */}
-                    <div className="flex flex-row items-center pt-2">
-                        <div className="flex-1" />
-                            <div className="flex gap-2">
-                                <button
-                                    type={isCommandPressed ? "button" : undefined}
-                                    className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
-                                    onClick={handleDeepSearch}
-                                >
-                                    Library Search ⌘ ⏎
-                                </button>
-                                <button
-                                    type={isCommandPressed ? undefined : "button"}
-                                    className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
-                                    onClick={() => alert('test')}
-                                >
-                                    Send ⏎
-                                </button>
-                            </div>
-                    </div>
-                </form>
-            </div>
+            <ChatInput
+                message={message}
+                setMessage={setMessage}
+                inputRef={inputRef}
+                isCommandPressed={isCommandPressed}
+                contextItems={contextItems}
+                handleSubmit={handleSubmit}
+                handleKeyDown={handleKeyDown}
+                handleKeyUp={handleKeyUp}
+                handleDeepSearch={handleDeepSearch}
+            />
         </div>
     );
 };
