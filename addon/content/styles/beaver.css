@@ -27,3 +27,25 @@
     width: calc(100% - 53px);
     height: 100%;
 } */
+
+#zotero-beaver-chat .beaver-button {
+    cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    line-height: 1.2;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-secondary);
+}
+
+#zotero-beaver-chat .beaver-button:hover {
+    color: var(--fill-primary);    
+}
+
+#zotero-beaver-chat .beaver-button.faded {
+    background-color: var(--fill-quinary);
+    color: var(--fill-tertiary);
+    border-color: var(--fill-quinary);
+}
+

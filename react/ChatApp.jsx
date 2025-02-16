@@ -42,20 +42,6 @@ const styles = {
         flexWrap: 'wrap',
         gap: '8px',
     },
-    buttonsContainer: {
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingTop: '10px',
-    },
-    buttonsLeft: {
-        display: 'flex',
-        flex: 1,
-    },
-    buttonsRight: {
-        display: 'flex',
-        gap: '6px',
-    },
     button: undefined,
     escButton: {
         opacity: 0.4,
@@ -167,33 +153,41 @@ const ChatApp = () => {
                             </ContextItem>
                         ))}
                     </div>
-                    <div style={styles.buttonsContainer}>
-                        <div style={styles.buttonsLeft}>
-                            <Button
-                                type="button"
-                                onClick={handleEscape}
-                                variant="ghost"
-                            >
-                                esc
-                            </Button>
-                        </div>
-                        
-                        <div style={styles.buttonsRight}>
-                            <Button
-                                type="button"
+                    <div
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'row',
+                            alignItems: 'right',
+                            paddingTop: '10px',
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: 'flex',
+                                flex: 1,
+                            }}
+                        ></div>
+                        <div
+                            style={{
+                                display: 'flex',
+                                gap: '6px',
+                            }}
+                        >
+                            <button
+                                type={isCommandPressed ? "button" : undefined}
+                                className={isCommandPressed ? "beaver-button" : "beaver-button faded"}
                                 onClick={handleDeepSearch}
-                                variant={isCommandPressed ? "dark" : "ghost"}
                                 style={{ marginRight: '4px' }}
                             >
                                 Library Search ⌘ ⏎
-                            </Button>
-                            
-                            <Button
-                                type="submit"
-                                variant={isCommandPressed ? "ghost" : "dark"}
+                            </button>
+                            <button
+                                type={isCommandPressed ? undefined : "button"}
+                                className={isCommandPressed ? "beaver-button faded" : "beaver-button"}
+                                onClick={() => alert('test')}
                             >
                                 Send ⏎
-                            </Button>
+                            </button>
                         </div>
                     </div>
                 </form>
