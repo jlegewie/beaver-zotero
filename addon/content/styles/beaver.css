@@ -67,13 +67,13 @@
 }
 
 #zotero-beaver-chat .beaver-context-item-icon {
-    margin-right: 0.3rem;
+    margin-right: 0.15rem;
     display: inline-flex;
     align-items: center;
 }
 
 #zotero-beaver-chat .beaver-context-item-icon span {
-    transform: scale(0.85);
+    transform: scale(0.75);
 }
 
 #zotero-beaver-chat .beaver-context-item-remove {
@@ -148,9 +148,11 @@
 #zotero-beaver-chat .justify-end { justify-content: flex-end; }
 
 /* Spacing */
-#zotero-beaver-chat .gap-1 { gap: 0.25rem; }
-#zotero-beaver-chat .gap-2 { gap: 0.5rem; }
-#zotero-beaver-chat .gap-3 { gap: 0.75rem; }
+#zotero-beaver-chat .gap-1 { column-gap: 0.375rem; row-gap: 0.25rem; }
+#zotero-beaver-chat .gap-2 { column-gap: 0.5rem; row-gap: 0.35rem; }
+#zotero-beaver-chat .gap-3 { column-gap: 0.75rem; row-gap: 0.5rem; }
+#zotero-beaver-chat .gap-4 { column-gap: 1rem; row-gap: 0.75rem; }
+#zotero-beaver-chat .gap-5 { column-gap: 1.5rem; row-gap: 1.2rem; }
 #zotero-beaver-chat .p-1 { padding: 0.25rem; }
 #zotero-beaver-chat .p-2 { padding: 0.5rem; }
 #zotero-beaver-chat .p-3 { padding: 0.75rem; }
