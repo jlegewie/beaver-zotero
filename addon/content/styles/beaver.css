@@ -1,10 +1,9 @@
+/* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
     -moz-context-properties: fill, fill-opacity, stroke, stroke-opacity;
     fill: var(--fill-secondary);
     stroke: var(--fill-secondary);
-    
-    /* Standard toolbarbutton dimensions */
     width: 28px;
     height: 28px;
     padding: 4px;
@@ -23,11 +22,7 @@
     opacity: .5;
 }
 
-/* #beaver-react-root {
-    width: calc(100% - 53px);
-    height: 100%;
-} */
-
+/* Component Specific Styles */
 #zotero-beaver-chat .beaver-button {
     cursor: pointer;
     border: 1px solid var(--fill-quarternary);
@@ -37,6 +32,7 @@
     font-size: 0.9rem;
     background-color: var(--fill-quarternary);
     color: var(--fill-secondary);
+    /* padding: 2px 4px; */
 }
 
 #zotero-beaver-chat .beaver-button:hover {
@@ -49,3 +45,88 @@
     border-color: var(--fill-quinary);
 }
 
+#zotero-beaver-chat .chat-container {
+    padding: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+}
+
+#zotero-beaver-chat .chat-box {
+    margin: 0 auto;
+    padding: 16px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+}
+
+#zotero-beaver-chat .chat-input {
+    width: calc(100% - 23px);
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    margin-right: -2px;
+    outline: none;
+    color: var(--fill-secondary);
+    transition: border-color 0.2s ease-in-out;
+}
+
+#zotero-beaver-chat .chat-input:focus {
+    border-color: var(--fill-tertiary);
+}
+
+#zotero-beaver-chat .chat-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
+#zotero-beaver-chat .context-items-container {
+    margin-bottom: 18px;
+    min-height: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Layout Utilities */
+#zotero-beaver-chat .flex { display: flex; }
+#zotero-beaver-chat .flex-row { flex-direction: row; }
+#zotero-beaver-chat .flex-col { flex-direction: column; }
+#zotero-beaver-chat .flex-1 { flex: 1; }
+#zotero-beaver-chat .flex-wrap { flex-wrap: wrap; }
+#zotero-beaver-chat .items-center { align-items: center; }
+#zotero-beaver-chat .items-start { align-items: flex-start; }
+#zotero-beaver-chat .justify-between { justify-content: space-between; }
+#zotero-beaver-chat .justify-end { justify-content: flex-end; }
+
+/* Spacing */
+#zotero-beaver-chat .gap-1 { gap: 0.25rem; }
+#zotero-beaver-chat .gap-2 { gap: 0.5rem; }
+#zotero-beaver-chat .gap-3 { gap: 0.75rem; }
+#zotero-beaver-chat .p-1 { padding: 0.25rem; }
+#zotero-beaver-chat .p-2 { padding: 0.5rem; }
+#zotero-beaver-chat .p-3 { padding: 0.75rem; }
+#zotero-beaver-chat .p-4 { padding: 1rem; }
+#zotero-beaver-chat .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+#zotero-beaver-chat .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+#zotero-beaver-chat .pt-2 { padding-top: 0.5rem; }
+#zotero-beaver-chat .pt-3 { padding-top: 0.75rem; }
+#zotero-beaver-chat .m-1 { margin: 0.25rem; }
+#zotero-beaver-chat .m-2 { margin: 0.5rem; }
+#zotero-beaver-chat .m-3 { margin: 0.75rem; }
+#zotero-beaver-chat .mx-auto { margin-left: auto; margin-right: auto; }
+#zotero-beaver-chat .mb-2 { margin-bottom: 0.5rem; }
+#zotero-beaver-chat .mb-4 { margin-bottom: 1rem; }
+#zotero-beaver-chat .mr-1 { margin-right: 0.25rem; }
+#zotero-beaver-chat .-ml-1 { margin-left: -0.25rem; }
+
+/* Typography */
+#zotero-beaver-chat .text-sm { font-size: 0.875rem; }
+#zotero-beaver-chat .text-base { font-size: 1rem; }
+#zotero-beaver-chat .font-medium { font-weight: 500; }
+
+/* Transitions */
+#zotero-beaver-chat .transition { transition: all 0.2s ease-in-out; }
+#zotero-beaver-chat .transition-colors { transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out; }
+#zotero-beaver-chat .transition-opacity { transition: opacity 0.2s ease-in-out; }
+
+/* States */
+#zotero-beaver-chat .opacity-50 { opacity: 0.5; }
+#zotero-beaver-chat .cursor-pointer { cursor: pointer; }

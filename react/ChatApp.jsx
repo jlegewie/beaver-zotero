@@ -3,58 +3,6 @@ import { Button } from "./components/button.tsx"
 import { ContextItem } from "./components/contextItem.tsx"
 import { getInTextCitations, getBibliographies } from "../src/utils/citations.ts"
 
-const styles = {
-    chatApp: {
-        fontFamily: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif',
-        padding: '12px',
-    },
-    container: {
-        margin: '0 auto',
-        padding: '1rem',
-        // backgroundColor: '#1a1a1a',
-        border: '1px solid #333',
-        borderRadius: '6px',
-        // borderRadius: '0.5rem'
-    },
-    form: {
-        display: 'flex',
-        flexDirection: 'column',
-    },
-    inputContainer: {
-        marginBottom: '6px',
-        marginLeft: '-3px',
-    },
-    input: {
-        width: 'calc(100% - 23px)',
-        fontSize: '13px',
-        padding: '6px 8px',
-        border: '1px solid #333',
-        backgroundColor: '#222',
-        borderRadius: '6px',
-        marginRight: '-2px',
-        outline: 'none',
-        color: '#888',
-    },
-    contextItemsContainer: {
-        marginBottom: '18px',
-        minHeight: '24px',
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '8px',
-    },
-    button: undefined,
-    escButton: {
-        opacity: 0.4,
-    },
-    deepSearchButton: {
-        marginRight: '4px',
-        opacity: 0.4,
-    },
-    sendButton: {
-        color: '#d3d3d3',
-    }
-};
-
 const ChatApp = () => {
     const [message, setMessage] = useState('');
     const [sendCount, setSendCount] = useState(0);
@@ -125,22 +73,25 @@ const ChatApp = () => {
     };
     
     return (
-        <div style={styles.chatApp}>
-            <div style={styles.container}>
-                <form onSubmit={handleSubmit} style={styles.form}>
-                    <div style={styles.inputContainer}>
+        <div className="chat-container">
+            <div className="chat-box">
+                <form onSubmit={handleSubmit} className="flex flex-col">
+                    {/* Chat Input */}
+                    <div className="mb-2 -ml-1">
                         <input
                             ref={inputRef}
                             type="text"
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             placeholder="How can I help you today?"
-                            style={styles.input}
+                            className="chat-input"
                             onKeyDown={handleKeyDown}
                             onKeyUp={handleKeyUp}
                         />
                     </div>
-                    <div style={styles.contextItemsContainer}>
+                    {/* Context Items */}
+                    {/* TODO: revise context-items-container */}
+                    <div className="context-items-container">
                         {contextItems.map((item, index) => (
                             <ContextItem
                                 key={index}
@@ -153,42 +104,25 @@ const ChatApp = () => {
                             </ContextItem>
                         ))}
                     </div>
-                    <div
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'row',
-                            alignItems: 'right',
-                            paddingTop: '10px',
-                        }}
-                    >
-                        <div
-                            style={{
-                                display: 'flex',
-                                flex: 1,
-                            }}
-                        ></div>
-                        <div
-                            style={{
-                                display: 'flex',
-                                gap: '6px',
-                            }}
-                        >
-                            <button
-                                type={isCommandPressed ? "button" : undefined}
-                                className={isCommandPressed ? "beaver-button" : "beaver-button faded"}
-                                onClick={handleDeepSearch}
-                                style={{ marginRight: '4px' }}
-                            >
-                                Library Search ⌘ ⏎
-                            </button>
-                            <button
-                                type={isCommandPressed ? undefined : "button"}
-                                className={isCommandPressed ? "beaver-button faded" : "beaver-button"}
-                                onClick={() => alert('test')}
-                            >
-                                Send ⏎
-                            </button>
-                        </div>
+                    {/* Button Row */}
+                    <div className="flex flex-row items-center pt-2">
+                        <div className="flex-1" />
+                            <div className="flex gap-2">
+                                <button
+                                    type={isCommandPressed ? "button" : undefined}
+                                    className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
+                                    onClick={handleDeepSearch}
+                                >
+                                    Library Search ⌘ ⏎
+                                </button>
+                                <button
+                                    type={isCommandPressed ? undefined : "button"}
+                                    className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
+                                    onClick={() => alert('test')}
+                                >
+                                    Send ⏎
+                                </button>
+                            </div>
                     </div>
                 </form>
             </div>
