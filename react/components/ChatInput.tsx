@@ -28,6 +28,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
     return (
         <div className="chat-box">
             <form onSubmit={handleSubmit} className="flex flex-col">
+
+                {/* Context Items */}
+                <div className="flex flex-wrap gap-3 mb-2">
+                    <button className="beaver-button" onClick={handleLibrarySearch}>+</button>
+                    {contextItems.map((item, index) => (
+                        <ContextItem
+                            key={index}
+                            icon={item.getItemTypeIconName()}
+                            tooltip={getBibliographies([item])[0]}
+                            onRemove={() => alert('test')}
+                        >
+                            {getInTextCitations([item])[0]}
+                        </ContextItem>
+                    ))}
+                </div>
+
                 {/* Chat Input */}
                 <div className="mb-2 -ml-1">
                     <input
@@ -40,20 +56,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         onKeyDown={handleKeyDown}
                         onKeyUp={handleKeyUp}
                     />
-                </div>
-
-                {/* Context Items */}
-                <div className="context-items-container">
-                    {contextItems.map((item, index) => (
-                        <ContextItem
-                            key={index}
-                            icon={item.getItemTypeIconName()}
-                            tooltip={getBibliographies([item])[0]}
-                            onRemove={() => alert('test')}
-                        >
-                            {getInTextCitations([item])[0]}
-                        </ContextItem>
-                    ))}
                 </div>
 
                 {/* Button Row */}

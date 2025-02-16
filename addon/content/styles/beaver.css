@@ -128,14 +128,6 @@
     color: var(--fill-tertiary);
 }
 
-#zotero-beaver-chat .context-items-container {
-    margin-bottom: 18px;
-    min-height: 24px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
 /* Layout Utilities */
 #zotero-beaver-chat .flex { display: flex; }
 #zotero-beaver-chat .flex-row { flex-direction: row; }
