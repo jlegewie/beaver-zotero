@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ChatInput from "./components/ChatInput.tsx"
 import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './components/icons';
+import { toggleChat } from '../src/ui/chat';
 
 const ChatApp = () => {
     const [message, setMessage] = useState('');
@@ -76,7 +77,10 @@ const ChatApp = () => {
             {/* Header */}
             <div className="flex flex-row items-center mb-2">
                 <div className="flex-1">
-                    <button className="icon-button">
+                    <button
+                        className="icon-button"
+                        onClick={() => toggleChat(window, false)}
+                    >
                         <Icon icon={Cancel01Icon} />
                     </button>
                 </div>
