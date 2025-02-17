@@ -3,7 +3,6 @@ import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
 import Header from "./components/Header.tsx"
 
 const ChatApp = () => {
-    const [isCommandPressed, setIsCommandPressed] = useState(false);
     const inputRef = useRef(null);
     
     // Subscribe to events from Zotero
@@ -35,18 +34,6 @@ const ChatApp = () => {
         };
     }, []);
     
-    const handleKeyDown = (e) => {
-        if (e.key === 'Meta') {
-            setIsCommandPressed(true);
-        }
-    };
-
-    const handleKeyUp = (e) => {
-        if (e.key === 'Meta') {
-            setIsCommandPressed(false);
-        }
-    };
-    
     return (
         <div className="chat-container px-3 py-2">
             {/* Header */}
@@ -55,9 +42,6 @@ const ChatApp = () => {
             {/* Chat Input */}
             <UserMessageDisplay
                 inputRef={inputRef}
-                isCommandPressed={isCommandPressed}
-                handleKeyDown={handleKeyDown}
-                handleKeyUp={handleKeyUp}
             />
         </div>
     );

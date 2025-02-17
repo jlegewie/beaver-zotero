@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
 import { useAtom } from 'jotai';
@@ -6,19 +6,14 @@ import { userMessageAtom, userAttachmentsAtom } from '../atoms/messages';
 
 interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
-    isCommandPressed: boolean;
-    handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-    handleKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
-    inputRef,
-    isCommandPressed,
-    handleKeyDown,
-    handleKeyUp,
+    inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
+    const [isCommandPressed, setIsCommandPressed] = useState(false);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -48,6 +43,18 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
 
     const handleRemoveAttachment = (index: number) => {
         setUserAttachments(userAttachments.filter((_, i) => i !== index));
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Meta') {
+            setIsCommandPressed(true);
+        }
+    };
+
+    const handleKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Meta') {
+            setIsCommandPressed(false);
+        }
     };
 
     return (
