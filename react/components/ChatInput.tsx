@@ -49,6 +49,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
         })));
     };
 
+    const handleRemoveAttachment = (index: number) => {
+        setUserAttachments(userAttachments.filter((_, i) => i !== index));
+    };
+
     return (
         <div className="chat-box">
             {/* Context Items */}
@@ -63,7 +67,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <AttachmentButton
                         key={index}
                         attachment={attachment}
-                        onRemove={() => alert('removing context item')}
+                        onRemove={() => handleRemoveAttachment(index)}
                     />
                 ))}
             </div>
