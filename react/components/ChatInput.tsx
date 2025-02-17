@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ContextItem } from "./contextItem";
-import { getInTextCitations, getBibliographies } from "../../src/utils/citations";
 import { Icon, PlusSignIcon } from './icons';
 import type { OpenAI } from 'openai'
 import { useAtom } from 'jotai';
-import { userMessageAtom, userContentPartsAtom } from '../atoms/messages';
+import { userMessageAtom, userAttachmentsAtom } from '../atoms/messages';
 
 const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
@@ -22,8 +21,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     handleKeyUp,
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const [contextItems, setContextItems] = useState<Zotero.Item[]>([]);
-    const [userContentParts, setUserContentParts] = useAtom(userContentPartsAtom);
+    const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -42,8 +40,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
     const handleAddContextItem = () => {
         console.log('Adding context item');
+        // Get selected items from Zotero
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        setContextItems(items);
+        // Add attachments to current user message
+        setUserAttachments(items.map((item) => ({
+            type: 'zotero_item',
+            item: item
+        })));
     };
 
     return (
@@ -56,15 +59,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 >
                     <Icon icon={PlusSignIcon} />
                 </button>
-                {contextItems.map((item, index) => (
+                {userAttachments.map((attachment, index) => (
                     <ContextItem
                         key={index}
-                        icon={item.getItemTypeIconName()}
-                        tooltip={getBibliographies([item])[0]}
+                        attachment={attachment}
                         onRemove={() => alert('removing context item')}
-                    >
-                        {getInTextCitations([item])[0]}
-                    </ContextItem>
+                    />
                 ))}
             </div>
             <form onSubmit={handleSubmit} className="flex flex-col">

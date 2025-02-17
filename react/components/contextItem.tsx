@@ -1,38 +1,59 @@
 import React from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
+import { Attachment } from '../atoms/messages'
+import { getBibliographies, getInTextCitations } from '../../src/utils/citations'
 
 interface ContextItemProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    icon?: string
+    attachment: Attachment
     onRemove?: () => void
-    tooltip?: string
 }
 
-export const ContextItem = React.forwardRef<HTMLButtonElement, ContextItemProps>(
-    function ContextItem(props, ref) {
-        const {
-            children,
-            icon,
-            onRemove,
-            tooltip,
-            className,
-            ...rest
-        } = props
-
+const getIconElement = (attachment: Attachment) => {
+    if (attachment.type === 'zotero_item') {
+        const icon = attachment.item.getItemTypeIconName()
         const iconElement = icon ? (
             <span className="beaver-context-item-icon">
                 <CSSItemTypeIcon itemType={icon} />
             </span>
         ) : null
+        return iconElement
+    }
+    return null
+}
+
+const getTooltip = (attachment: Attachment) => {
+    if (attachment.type === 'zotero_item') {
+        return getBibliographies([attachment.item])[0]
+    }
+    return null
+}
+
+const getLabel = (attachment: Attachment) => {
+    if (attachment.type === 'zotero_item') {
+        return getInTextCitations([attachment.item])[0]
+    }
+    return null
+}
+
+export const ContextItem = React.forwardRef<HTMLButtonElement, ContextItemProps>(
+    function ContextItem(props, ref) {
+        const {
+            attachment,
+            onRemove,
+            className,
+            ...rest
+        } = props
 
         return (
             <button
                 ref={ref}
-                title={tooltip}
+                title={getTooltip(attachment) || ''}
                 className={`beaver-context-item ${className || ''}`}
                 {...rest}
             >
-                {iconElement}
-                {children}
+                {getIconElement(attachment)}
+                {getLabel(attachment)}
+
                 {onRemove && (
                     <span 
                         role="button"
