@@ -78,7 +78,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         <div className="user-message-display">
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
-                {editing && 
+                {editing && (
                     <button
                         className="icon-button scale-11"
                         onClick={handleAddAttachments}
@@ -86,8 +86,8 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                     >
                         <Icon icon={PlusSignIcon} />
                     </button>
-                }
-                {userAttachments.map((attachment, index) => (
+                )}
+                {(message?.attachments || userAttachments).map((attachment, index) => (
                     <AttachmentButton
                         key={index}
                         attachment={attachment}
