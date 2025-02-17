@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ChatInput from "./components/ChatInput.tsx"
+import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './components/icons';
 
 const ChatApp = () => {
     const [message, setMessage] = useState('');
@@ -71,7 +72,30 @@ const ChatApp = () => {
     };
     
     return (
-        <div className="chat-container">
+        <div className="chat-container px-3 py-2">
+            {/* Header */}
+            <div className="flex flex-row items-center mb-2">
+                <div className="flex-1">
+                    <button className="icon-button">
+                        <Icon icon={Cancel01Icon} />
+                    </button>
+                </div>
+                <div className="flex gap-4">
+                    <button className="icon-button">
+                        <Icon icon={Clock02Icon} />
+                    </button>
+                    <button className="icon-button">
+                        <Icon icon={PlusSignIcon} />
+                    </button>
+                </div>
+            </div>
+            
+            {/* Chat Input */}
+            {/* <div className="flex gap-3 mb-2">
+                <button className="beaver-button">
+                    <Icon icon={Cancel01Icon} />
+                </button>
+            </div> */}
             <ChatInput
                 message={message}
                 setMessage={setMessage}
