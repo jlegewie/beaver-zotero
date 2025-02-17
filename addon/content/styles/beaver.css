@@ -33,7 +33,7 @@
     background-color: transparent;
     color: var(--fill-secondary);
     align-items: center;
-    transform: scale(1.2);
+    /* transform: scale(1.2); */
 }
 
 #zotero-beaver-chat .icon-button svg {
@@ -201,3 +201,10 @@
 /* States */
 #zotero-beaver-chat .opacity-50 { opacity: 0.5; }
 #zotero-beaver-chat .cursor-pointer { cursor: pointer; }
+
+/* Scaling */
+#zotero-beaver-chat .scale-11 { transform: scale(1.1); }
+#zotero-beaver-chat .scale-12 { transform: scale(1.2); }
+#zotero-beaver-chat .scale-13 { transform: scale(1.3); }
+#zotero-beaver-chat .scale-14 { transform: scale(1.4); }
+#zotero-beaver-chat .scale-15 { transform: scale(1.5); }

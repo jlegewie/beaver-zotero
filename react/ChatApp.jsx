@@ -78,17 +78,17 @@ const ChatApp = () => {
             <div className="flex flex-row items-center mb-2">
                 <div className="flex-1">
                     <button
-                        className="icon-button"
+                        className="icon-button scale-12"
                         onClick={() => toggleChat(window, false)}
                     >
                         <Icon icon={Cancel01Icon} />
                     </button>
                 </div>
                 <div className="flex gap-4">
-                    <button className="icon-button">
+                    <button className="icon-button scale-12">
                         <Icon icon={Clock02Icon} />
                     </button>
-                    <button className="icon-button">
+                    <button className="icon-button scale-12">
                         <Icon icon={PlusSignIcon} />
                     </button>
                 </div>
