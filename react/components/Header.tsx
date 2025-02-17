@@ -1,12 +1,15 @@
 import React from 'react';
 import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './icons';
 import { toggleChat } from '../../src/ui/chat';
+import { messagesAtom } from '../atoms/messages';
+import { useSetAtom } from 'jotai';
 
 interface HeaderProps {
     onClose?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
+    const setMessages = useSetAtom(messagesAtom);
     return (
         <div className="flex flex-row items-center mb-2">
             <div className="flex-1">
@@ -21,7 +24,11 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                 <button className="icon-button scale-12">
                     <Icon icon={Clock02Icon} />
                 </button>
-                <button className="icon-button scale-12">
+                <button
+                    onClick={() => setMessages([])}
+                    className="icon-button scale-12"
+                >
+                    
                     <Icon icon={PlusSignIcon} />
                 </button>
             </div>
