@@ -60,7 +60,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     };
 
     return (
-        <div className="chat-box">
+        <div className="user-message-display">
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
                 {editing && 
