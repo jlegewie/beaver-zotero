@@ -1,62 +1,80 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ContextItem } from "./contextItem";
 import { getInTextCitations, getBibliographies } from "../../src/utils/citations";
 import { Icon, PlusSignIcon } from './icons';
+import type { OpenAI } from 'openai'
+import { useAtom } from 'jotai';
+import { userMessageAtom, userContentPartsAtom } from '../atoms/messages';
+
+const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
 interface ChatInputProps {
-    message: string;
-    setMessage: (msg: string) => void;
     inputRef: React.RefObject<HTMLInputElement>;
     isCommandPressed: boolean;
-    contextItems: any[];
-    handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
     handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
     handleKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-    handleLibrarySearch: () => void;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
-    message,
-    setMessage,
     inputRef,
     isCommandPressed,
-    contextItems,
-    handleSubmit,
     handleKeyDown,
     handleKeyUp,
-    handleLibrarySearch,
 }) => {
+    const [userMessage, setUserMessage] = useAtom(userMessageAtom);
+    const [contextItems, setContextItems] = useState<Zotero.Item[]>([]);
+    const [userContentParts, setUserContentParts] = useAtom(userContentPartsAtom);
+
+    const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        if (isCommandPressed) {
+            handleLibrarySearch();
+        } else {
+            console.log('Message sent:', userMessage);
+            setUserMessage('');
+        }
+    };
+
+    const handleLibrarySearch = () => {
+        console.log('Message sent with library search:', userMessage);
+        setUserMessage('');
+    };
+
+    const handleAddContextItem = () => {
+        console.log('Adding context item');
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        setContextItems(items);
+    };
+
     return (
         <div className="chat-box">
-            <form onSubmit={handleSubmit} className="flex flex-col">
-
-                {/* Context Items */}
-                <div className="flex flex-wrap gap-3 mb-2">
-                    <button
-                        className="icon-button"
-                        onClick={handleLibrarySearch}
+            {/* Context Items */}
+            <div className="flex flex-wrap gap-3 mb-2">
+                <button
+                    className="icon-button"
+                    onClick={handleAddContextItem}
+                >
+                    <Icon icon={PlusSignIcon} />
+                </button>
+                {contextItems.map((item, index) => (
+                    <ContextItem
+                        key={index}
+                        icon={item.getItemTypeIconName()}
+                        tooltip={getBibliographies([item])[0]}
+                        onRemove={() => alert('removing context item')}
                     >
-                        <Icon icon={PlusSignIcon} />
-                    </button>
-                    {contextItems.map((item, index) => (
-                        <ContextItem
-                            key={index}
-                            icon={item.getItemTypeIconName()}
-                            tooltip={getBibliographies([item])[0]}
-                            onRemove={() => alert('test')}
-                        >
-                            {getInTextCitations([item])[0]}
-                        </ContextItem>
-                    ))}
-                </div>
-
+                        {getInTextCitations([item])[0]}
+                    </ContextItem>
+                ))}
+            </div>
+            <form onSubmit={handleSubmit} className="flex flex-col">
                 {/* Chat Input */}
                 <div className="mb-2 -ml-1">
                     <input
                         ref={inputRef}
                         type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
+                        value={userMessage}
+                        onChange={(e) => setUserMessage(e.target.value)}
                         placeholder="How can I help you today?"
                         className="chat-input"
                         onKeyDown={handleKeyDown}
@@ -78,7 +96,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         <button
                             type={isCommandPressed ? undefined : "button"}
                             className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
-                            onClick={() => alert('test')}
+                            onClick={handleSubmit}
                         >
                             Send ⏎
                         </button>
