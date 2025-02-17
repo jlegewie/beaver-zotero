@@ -6,13 +6,14 @@ import { getBibliographies, getInTextCitations } from '../../src/utils/citations
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     attachment: Attachment
     onRemove?: () => void
+    disabled?: boolean
 }
 
 const getIconElement = (attachment: Attachment) => {
     if (attachment.type === 'zotero_item') {
         const icon = attachment.item.getItemTypeIconName()
         const iconElement = icon ? (
-            <span className="beaver-context-item-icon">
+            <span className="attachment-button-icon">
                 <CSSItemTypeIcon itemType={icon} />
             </span>
         ) : null
@@ -41,6 +42,7 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
             attachment,
             onRemove,
             className,
+            disabled = false,
             ...rest
         } = props
 
@@ -48,16 +50,17 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
             <button
                 ref={ref}
                 title={getTooltip(attachment) || ''}
-                className={`beaver-context-item ${className || ''}`}
+                className={`attachment-button ${className || ''}`}
+                disabled={disabled}
                 {...rest}
             >
                 {getIconElement(attachment)}
                 {getLabel(attachment)}
 
-                {onRemove && (
+                {onRemove && !disabled && (
                     <span 
                         role="button"
-                        className="beaver-context-item-remove"
+                        className="attachment-remove"
                         onClick={(e) => {
                             e.stopPropagation()
                             onRemove()
