@@ -1,20 +1,17 @@
 import React from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
-import type { OpenAI } from 'openai'
 import { useAtom } from 'jotai';
 import { userMessageAtom, userAttachmentsAtom } from '../atoms/messages';
 
-const messages: OpenAI.ChatCompletionMessageParam[] = [];
-
-interface ChatInputProps {
+interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
     isCommandPressed: boolean;
     handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
     handleKeyUp: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({
+const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     inputRef,
     isCommandPressed,
     handleKeyDown,
@@ -58,7 +55,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
                 <button
-                    className="icon-button"
+                    className="icon-button scale-11"
                     onClick={handleAddContextItem}
                 >
                     <Icon icon={PlusSignIcon} />
@@ -111,4 +108,4 @@ const ChatInput: React.FC<ChatInputProps> = ({
     );
 };
 
-export default ChatInput;
+export default UserMessageDisplay;

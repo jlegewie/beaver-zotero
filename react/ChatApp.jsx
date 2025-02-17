@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ChatInput from "./components/ChatInput.tsx"
+import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
 import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './components/icons';
 import { toggleChat } from '../src/ui/chat';
 
@@ -71,7 +71,7 @@ const ChatApp = () => {
             </div>
             
             {/* Chat Input */}
-            <ChatInput
+            <UserMessageDisplay
                 inputRef={inputRef}
                 isCommandPressed={isCommandPressed}
                 handleKeyDown={handleKeyDown}
