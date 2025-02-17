@@ -1,35 +1,50 @@
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
-import { useAtom } from 'jotai';
-import { userMessageAtom, userAttachmentsAtom, ChatMessage } from '../atoms/messages';
+import { useAtom, useSetAtom } from 'jotai';
+import { userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom } from '../atoms/messages';
 
 interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
     editing?: boolean;
+    message?: ChatMessage;
 }
 
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     inputRef,
     editing = false,
+    message
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
+    const setMessages = useSetAtom(messagesAtom);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
+
+        // Add user message to messages atom
+        setMessages((prevMessages) => [
+            ...prevMessages,
+            {
+                role: 'user',
+                content: userMessage,
+                attachments: userAttachments
+            }
+        ]);
+        setUserMessage('');
+        setUserAttachments([]);
+
+        // If command is pressed, handle library search
         if (isCommandPressed) {
             handleLibrarySearch();
         } else {
-            console.log('Message sent:', userMessage);
-            setUserMessage('');
+            console.log('Chat completion:', userMessage);
         }
     };
 
     const handleLibrarySearch = () => {
-        console.log('Message sent with library search:', userMessage);
-        setUserMessage('');
+        console.log('Chat completion with library search:', userMessage);
     };
 
     const handleAddAttachments = () => {
@@ -87,7 +102,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                     <input
                         ref={inputRef}
                         type="text"
-                        value={userMessage}
+                        value={message?.content || userMessage}
                         onChange={(e) => setUserMessage(e.target.value)}
                         placeholder="How can I help you today?"
                         className="chat-input"
