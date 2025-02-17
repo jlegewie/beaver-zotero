@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
 import Header from "./components/Header.tsx"
+import { userAttachmentsAtom } from './atoms/messages';
+import { useSetAtom } from 'jotai';
 
 const ChatApp = () => {
     const inputRef = useRef(null);
+    const setUserAttachments = useSetAtom(userAttachmentsAtom);
     
     // Subscribe to events from Zotero
     useEffect(() => {
@@ -13,8 +16,12 @@ const ChatApp = () => {
 
         const handleFocus = () => {
             // Add selected items to context
-            // const items = Zotero.getActiveZoteroPane().getSelectedItems();
-            // setContextItems(items);
+            const items = Zotero.getActiveZoteroPane().getSelectedItems();
+            // Add attachments to current user message
+            setUserAttachments(items.map((item) => ({
+                type: 'zotero_item',
+                item: item
+            })));
             // Focus on text field
             inputRef.current?.focus();
         };
@@ -42,6 +49,7 @@ const ChatApp = () => {
             {/* Chat Input */}
             <UserMessageDisplay
                 inputRef={inputRef}
+                editing={false}
             />
         </div>
     );
