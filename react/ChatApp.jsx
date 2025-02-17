@@ -95,11 +95,6 @@ const ChatApp = () => {
             </div>
             
             {/* Chat Input */}
-            {/* <div className="flex gap-3 mb-2">
-                <button className="beaver-button">
-                    <Icon icon={Cancel01Icon} />
-                </button>
-            </div> */}
             <ChatInput
                 message={message}
                 setMessage={setMessage}
