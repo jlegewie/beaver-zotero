@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
-import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './components/icons';
-import { toggleChat } from '../src/ui/chat';
+import Header from "./components/Header.tsx"
 
 const ChatApp = () => {
     const [isCommandPressed, setIsCommandPressed] = useState(false);
@@ -51,24 +50,7 @@ const ChatApp = () => {
     return (
         <div className="chat-container px-3 py-2">
             {/* Header */}
-            <div className="flex flex-row items-center mb-2">
-                <div className="flex-1">
-                    <button
-                        className="icon-button scale-12"
-                        onClick={() => toggleChat(window, false)}
-                    >
-                        <Icon icon={Cancel01Icon} />
-                    </button>
-                </div>
-                <div className="flex gap-4">
-                    <button className="icon-button scale-12">
-                        <Icon icon={Clock02Icon} />
-                    </button>
-                    <button className="icon-button scale-12">
-                        <Icon icon={PlusSignIcon} />
-                    </button>
-                </div>
-            </div>
+            <Header />
             
             {/* Chat Input */}
             <UserMessageDisplay
