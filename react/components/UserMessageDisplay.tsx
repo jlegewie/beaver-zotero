@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
 import { useAtom } from 'jotai';
-import { userMessageAtom, userAttachmentsAtom } from '../atoms/messages';
+import { userMessageAtom, userAttachmentsAtom, ChatMessage } from '../atoms/messages';
 
 interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
+    editing?: boolean;
 }
 
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
-    inputRef
+    inputRef,
+    editing = false,
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
@@ -30,7 +32,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         setUserMessage('');
     };
 
-    const handleAddContextItem = () => {
+    const handleAddAttachments = () => {
         console.log('Adding context item');
         // Get selected items from Zotero
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
@@ -61,17 +63,21 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         <div className="chat-box">
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
-                <button
-                    className="icon-button scale-11"
-                    onClick={handleAddContextItem}
-                >
-                    <Icon icon={PlusSignIcon} />
-                </button>
+                {editing && 
+                    <button
+                        className="icon-button scale-11"
+                        onClick={handleAddAttachments}
+                        disabled={!editing}
+                    >
+                        <Icon icon={PlusSignIcon} />
+                    </button>
+                }
                 {userAttachments.map((attachment, index) => (
                     <AttachmentButton
                         key={index}
                         attachment={attachment}
                         onRemove={() => handleRemoveAttachment(index)}
+                        disabled={!editing}
                     />
                 ))}
             </div>
@@ -87,29 +93,32 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                         className="chat-input"
                         onKeyDown={handleKeyDown}
                         onKeyUp={handleKeyUp}
+                        disabled={!editing}
                     />
                 </div>
 
                 {/* Button Row */}
-                <div className="flex flex-row items-center pt-2">
-                    <div className="flex-1" />
-                    <div className="flex gap-2">
-                        <button
-                            type={isCommandPressed ? "button" : undefined}
-                            className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
-                            onClick={handleLibrarySearch}
-                        >
-                            Library Search ⌘ ⏎
-                        </button>
-                        <button
-                            type={isCommandPressed ? undefined : "button"}
-                            className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
-                            onClick={handleSubmit}
-                        >
-                            Send ⏎
-                        </button>
+                {editing && (
+                    <div className="flex flex-row items-center pt-2">
+                        <div className="flex-1" />
+                        <div className="flex gap-2">
+                            <button
+                                type={isCommandPressed ? "button" : undefined}
+                                className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
+                                onClick={handleLibrarySearch}
+                            >
+                                Library Search ⌘ ⏎
+                            </button>
+                            <button
+                                type={isCommandPressed ? undefined : "button"}
+                                className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
+                                onClick={handleSubmit}
+                            >
+                                Send ⏎
+                            </button>
+                        </div>
                     </div>
-                </div>
+                )}
             </form>
         </div>
     );
