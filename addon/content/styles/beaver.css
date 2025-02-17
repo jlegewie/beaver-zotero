@@ -177,26 +177,31 @@
 }
 
 #zotero-beaver-chat .user-message-display {
-    margin: 0 auto;
-    padding: 16px;
-    border: 1px solid var(--fill-quarternary);
+    margin: 0 auto;    
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+    border: 1px solid var(--fill-quinary);
     border-radius: 6px;
+    background-color: var(--fill-quinary);
 }
 
 #zotero-beaver-chat .chat-input {
-    width: calc(100% - 23px);
+    width: calc(100% - 20px);
     font-size: 13px;
     padding: 6px 8px;
     border: 1px solid var(--fill-quarternary);
     border-radius: 6px;
-    margin-right: -2px;
+    /* margin-right: -2px; */
     outline: none;
     color: var(--fill-secondary);
     transition: border-color 0.2s ease-in-out;
+    background-color: transparent;
 }
 
 #zotero-beaver-chat .chat-input:focus {
-    border-color: var(--fill-tertiary);
+    border-color: var(--fill-quarternary);
 }
 
 #zotero-beaver-chat .chat-input::placeholder {
