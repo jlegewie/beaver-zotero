@@ -1,6 +1,7 @@
 import React from 'react';
 import { ContextItem } from "./contextItem";
 import { getInTextCitations, getBibliographies } from "../../src/utils/citations";
+import { Icon, PlusSignIcon } from './icons';
 
 interface ChatInputProps {
     message: string;
@@ -31,7 +32,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
                 {/* Context Items */}
                 <div className="flex flex-wrap gap-3 mb-2">
-                    <button className="beaver-button" onClick={handleLibrarySearch}>+</button>
+                    <button
+                        className="icon-button"
+                        onClick={handleLibrarySearch}
+                    >
+                        <Icon icon={PlusSignIcon} />
+                    </button>
                     {contextItems.map((item, index) => (
                         <ContextItem
                             key={index}
