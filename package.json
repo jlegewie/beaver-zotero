@@ -33,19 +33,19 @@
         "zotero-plugin-toolkit": "^4.1.1"
     },
     "devDependencies": {
-        "@eslint/js": "^9.19.0",
+        "@eslint/js": "^9.20.0",
         "@rollup/plugin-commonjs": "^28.0.2",
         "@rollup/plugin-node-resolve": "^16.0.0",
-        "@types/node": "^22.13.0",
-        "eslint": "^9.19.0",
-        "prettier": "^3.4.2",
+        "@types/node": "^22.13.4",
+        "eslint": "^9.20.1",
+        "prettier": "^3.5.1",
         "rollup": "^4.34.7",
         "rollup-plugin-css-only": "^4.5.2",
         "rollup-plugin-svelte": "^7.2.2",
         "svelte": "^3.59.2",
         "typescript": "^5.7.3",
-        "typescript-eslint": "^8.23.0",
-        "zotero-plugin-scaffold": "^0.2.2",
+        "typescript-eslint": "^8.24.0",
+        "zotero-plugin-scaffold": "^0.2.3",
         "zotero-types": "^3.1.7"
     },
     "prettier": {
