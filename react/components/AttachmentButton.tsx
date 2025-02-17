@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Attachment } from '../atoms/messages'
 import { getBibliographies, getInTextCitations } from '../../src/utils/citations'
 
-interface ContextItemProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     attachment: Attachment
     onRemove?: () => void
 }
@@ -35,8 +35,8 @@ const getLabel = (attachment: Attachment) => {
     return null
 }
 
-export const ContextItem = React.forwardRef<HTMLButtonElement, ContextItemProps>(
-    function ContextItem(props, ref) {
+export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentButtonProps>(
+    function AttachmentButton(props, ref) {
         const {
             attachment,
             onRemove,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ContextItem } from "./contextItem";
+import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
 import type { OpenAI } from 'openai'
 import { useAtom } from 'jotai';
@@ -60,7 +60,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <Icon icon={PlusSignIcon} />
                 </button>
                 {userAttachments.map((attachment, index) => (
-                    <ContextItem
+                    <AttachmentButton
                         key={index}
                         attachment={attachment}
                         onRemove={() => alert('removing context item')}
