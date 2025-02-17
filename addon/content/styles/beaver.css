@@ -22,6 +22,29 @@
     opacity: .5;
 }
 
+/* Component: Beaver Button (Ghost) */
+#zotero-beaver-chat .icon-button {
+    cursor: pointer;
+    /* border: 1px solid var(--fill-quarternary); */
+    border: 0px solid transparent;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    transition: all 0.2s ease-in-out;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    align-items: center;
+    transform: scale(1.2);
+}
+
+#zotero-beaver-chat .icon-button svg {
+    transform: translateY(0.1em);
+}
+
+#zotero-beaver-chat .icon-button:hover {
+    color: var(--fill-primary);
+    background-color: var(--fill-quinary);
+}
+
 /* Component: Beaver Button */
 #zotero-beaver-chat .beaver-button {
     cursor: pointer;
