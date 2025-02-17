@@ -33,6 +33,7 @@
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
+        "jotai": "^2.12.1",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
         "zotero-plugin-toolkit": "^4.1.1"
