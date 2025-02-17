@@ -1,167 +1,99 @@
-import React, { forwardRef, type CSSProperties } from 'react'
+import React, { ButtonHTMLAttributes } from 'react';
+import { Spinner } from './icons';
 
-interface ButtonLoadingProps {
-    loading?: boolean
-    loadingText?: React.ReactNode
-    spinner?: React.ReactNode
-    spinnerPlacement?: 'start' | 'end'
+// Button props interface
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+    loading?: boolean;
+    loadingText?: string;
 }
 
-interface ButtonProps extends ButtonLoadingProps, React.ButtonHTMLAttributes<HTMLButtonElement> {
-    variant?: 'solid' | 'outline' | 'ghost' | 'dark'
-    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
-    colorScheme?: string
-}
-
-const baseStyles: CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    whiteSpace: 'nowrap',
-    verticalAlign: 'middle',
-    cursor: 'pointer',
-    userSelect: 'none',
-    border: '1px solid transparent',
-    borderRadius: '0.375rem',
-    fontWeight: 500,
-    lineHeight: 1.2,
-    transition: 'all 0.2s'
-}
-
-const sizeStyles: Record<string, CSSProperties> = {
-    xs: { height: '24px', padding: '0 0.625rem', fontSize: '0.75rem' },
-    sm: { height: '32px', padding: '0 0.75rem', fontSize: '0.875rem' },
-    md: { height: '40px', padding: '0 1rem', fontSize: '1rem' },
-    lg: { height: '48px', padding: '0 1.5rem', fontSize: '1.125rem' },
-    xl: { height: '56px', padding: '0 1.75rem', fontSize: '1.25rem' }
-}
-
-const Spinner: React.FC = () => (
-    <svg
-    style={{ animation: 'spin 1s linear infinite' }}
-    width="1em"
-    height="1em"
-    viewBox="0 0 24 24"
-    xmlns="http://www.w3.org/2000/svg"
-    >
-    <circle
-    cx="12"
-    cy="12"
-    r="10"
-    stroke="currentColor"
-    strokeWidth="4"
-    fill="none"
-    opacity="0.25"
-    />
-    <circle
-    cx="12"
-    cy="12"
-    r="10"
-    stroke="currentColor"
-    strokeWidth="4"
-    fill="none"
-    strokeDasharray="60"
-    strokeDashoffset="60"
-    strokeLinecap="round"
-    />
-    </svg>
-)
-
-interface SpinnerWrapperProps {
-    children: React.ReactNode
-    placement: 'start' | 'end'
-}
-
-const SpinnerWrapper: React.FC<SpinnerWrapperProps> = ({ children, placement }) => (
-    <span style={{ margin: placement === 'start' ? '0 0.5rem 0 0' : '0 0 0 0.5rem' }}>
-    {children}
-    </span>
-)
-
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-    function Button(props, ref) {
-        const {
-            children,
-            loading = false,
-            loadingText,
-            spinner,
-            spinnerPlacement = 'start',
-            variant = 'solid',
-            size = 'md',
-            colorScheme = 'gray',
-            disabled,
-            style,
-            ...rest
-        } = props
-        
-        const [isHovered, setIsHovered] = React.useState(false);
-        
-        const variantStyles: CSSProperties = React.useMemo(() => {
-            switch (variant) {
-                case 'ghost':
-                    return {
-                        border: '1px solid #666',
-                        backgroundColor: '#444',
-                        padding: '3px 4px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontWeight: 400,
-                        color: '#c3c3c3',
-                        height: 'auto',
-                        opacity: isHovered ? 0.7 : 0.4,
-                        transition: 'opacity 0.2s'
-                    }
-                case 'dark':
-                    return {
-                        border: '1px solid #666',
-                        backgroundColor: '#444',
-                        padding: '3px 4px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontWeight: 400,
-                        color: '#d3d3d3',
-                        height: 'auto',
-                        transition: 'opacity 0.2s'
-                    }
-                case 'outline':
-                    return {
-                        borderColor: `var(--${colorScheme}-500)`,
-                        color: `var(--${colorScheme}-500)`,
-                        backgroundColor: 'transparent'
-                    }
-                default:
-                    return {
-                        backgroundColor: `var(--${colorScheme}-500)`,
-                        color: 'white'
-                    }
+// Base Button component
+const Button: React.FC<ButtonProps> = ({
+    children,
+    disabled,
+    loading = false,
+    loadingText,
+    className = '',
+    ...props
+}) => {
+    // Determine if the button has both text and icon
+    const hasTextAndIcon = React.Children.toArray(children).length > 1;
+    
+    const renderContent = () => {
+        if (loading) {
+            if (loadingText) {
+                return (
+                    <>
+                    {loadingText}
+                    <Spinner className="ml-2" />
+                    </>
+                );
             }
-        }, [variant, colorScheme, isHovered])
+            return <Spinner />;
+        }
         
-        const spinnerElement = spinner || <Spinner />
+        if (hasTextAndIcon) {
+            // Add spacing between icon and text
+            return React.Children.map(children, (child, index) => {
+                if (index !== React.Children.count(children) - 1) {
+                    return <>{child}<span className="mr-2" /></>;
+                }
+                return child;
+            });
+        }
         
-        return (
-            <button
-            ref={ref}
+        return children;
+    };
+    
+    return (
+        <button
+            className={`inline-flex items-center justify-center ${
+                disabled || loading ? 'cursor-not-allowed' : ''
+            } ${className}`}
             disabled={disabled || loading}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            style={{
-                ...baseStyles,
-                ...sizeStyles[size],
-                ...variantStyles,
-                ...style,
-            }}
-            {...rest}
-            >
-            {loading && spinnerPlacement === 'start' && (
-                <SpinnerWrapper placement="start">{spinnerElement}</SpinnerWrapper>
-            )}
-            {loading ? loadingText || children : children}
-            {loading && spinnerPlacement === 'end' && (
-                <SpinnerWrapper placement="end">{spinnerElement}</SpinnerWrapper>
-            )}
-            </button>
-        )
-    }
-)
+            aria-disabled={disabled || loading}
+            aria-busy={loading}
+            {...props}
+        >
+            {renderContent()}
+        </button>
+    );
+};
+
+// IconButton props interface
+interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+    'aria-label': string; // Make aria-label required
+    loading?: boolean;
+}
+
+// IconButton component
+const IconButton: React.FC<IconButtonProps> = ({
+    children,
+    disabled,
+    loading = false,
+    className = '',
+    'aria-label': ariaLabel,
+    ...props
+}) => {
+    return (
+        <button
+            className={`inline-flex items-center justify-center ${
+                disabled || loading ? 'cursor-not-allowed' : ''
+            } ${className}`}
+            disabled={disabled || loading}
+            aria-label={ariaLabel}
+            aria-disabled={disabled || loading}
+            aria-busy={loading}
+            {...props}
+        >
+            {loading ? <Spinner /> : children}
+        </button>
+    );
+};
+
+export {
+    Button,
+    IconButton,
+    type ButtonProps,
+    type IconButtonProps,
+};
