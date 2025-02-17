@@ -1,5 +1,5 @@
 import React from 'react'
-import { CSSItemTypeIcon, CSSIcon } from "./icons.jsx"
+import { CSSItemTypeIcon, CSSIcon } from "./icons"
 
 interface ContextItemProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     icon?: string
