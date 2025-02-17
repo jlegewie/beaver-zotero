@@ -52,6 +52,7 @@ export class BeaverUIFactory {
         // Create a normal div inside that vbox as mount point for the React component
         const reactContainer = win.document.createElement("div");
         reactContainer.setAttribute("id", "beaver-react-root");
+        reactContainer.style.flex = "1";
         chatPanel.appendChild(reactContainer);
 
         /**
