@@ -45,6 +45,16 @@
     background-color: var(--fill-quinary);
 }
 
+#zotero-beaver-chat .icon-button:disabled {
+    color: var(--fill-tertiary);
+    cursor: not-allowed;
+}
+
+#zotero-beaver-chat .icon-button:disabled:hover {
+    color: var(--fill-tertiary);
+    background-color: transparent;
+}
+
 /* Component: Beaver Button */
 #zotero-beaver-chat .beaver-button {
     cursor: pointer;
@@ -103,7 +113,7 @@
 }
 
 /* Component: Beaver Context Item */
-#zotero-beaver-chat .beaver-context-item {
+#zotero-beaver-chat .attachment-button {
     display: inline-flex;
     align-items: center;
     cursor: pointer;
@@ -118,22 +128,31 @@
     font-size: 0.85rem;
 }
 
-#zotero-beaver-chat .beaver-context-item:hover {
+#zotero-beaver-chat .attachment-button:hover {
     border-color: var(--fill-quarternary);
     color: var(--fill-secondary);
 }
 
-#zotero-beaver-chat .beaver-context-item-icon {
+#zotero-beaver-chat .attachment-button:disabled {
+    cursor: default;
+}
+
+#zotero-beaver-chat .attachment-button:hover:disabled {
+    border-color: var(--fill-quinary);
+    color: var(--fill-tertiary);
+}
+
+#zotero-beaver-chat .attachment-button-icon {
     margin-right: 0.15rem;
     display: inline-flex;
     align-items: center;
 }
 
-#zotero-beaver-chat .beaver-context-item-icon span {
+#zotero-beaver-chat .attachment-button-icon span {
     transform: scale(0.75);
 }
 
-#zotero-beaver-chat .beaver-context-item-remove {
+#zotero-beaver-chat .attachment-remove {
     margin-left: 0.25rem;
     padding: 0;
     background: none;
@@ -147,7 +166,7 @@
     transition: all 0.2s ease-in-out;
 }
 
-#zotero-beaver-chat .beaver-context-item-remove:hover {
+#zotero-beaver-chat .attachment-remove:hover {
     opacity: 1;
     color: var(--fill-secondary);
 }
