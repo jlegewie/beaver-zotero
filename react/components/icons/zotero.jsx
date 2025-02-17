@@ -1,4 +1,4 @@
-// from Zotero
+// Copy of /zotero/chrome/content/zotero/components/icons.jsx
 'use strict';
 
 const React = require('react');
