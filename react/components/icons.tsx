@@ -1,5 +1,6 @@
 export { default as Icon } from './icons/Icon';
 export { default as Cancel01Icon } from './icons/Cancel01Icon';
 export { CSSItemTypeIcon, CSSIcon } from './icons/zotero';
+export { default as Spinner } from './icons/Spinner';
 export { default as Clock02Icon } from './icons/Clock02Icon';
 export { default as PlusSignIcon } from './icons/PlusSignIcon';
