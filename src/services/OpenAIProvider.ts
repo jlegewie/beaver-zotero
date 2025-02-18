@@ -46,7 +46,7 @@ export interface ContentPart {
 
 
 // Single chat message
-export interface ChatMessage {
+export interface APIMessage {
     role: string;
     content: string | ContentPart[];
     name?: string;
@@ -55,7 +55,7 @@ export interface ChatMessage {
 // Request parameters
 export interface CreateChatCompletionRequest {
     model: string;
-    messages: ChatMessage[];
+    messages: APIMessage[];
     temperature?: number;
     max_tokens?: number;
     stream?: boolean;
