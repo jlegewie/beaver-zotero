@@ -11,7 +11,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const setMessages = useSetAtom(messagesAtom);
     return (
-        <div className="flex flex-row items-center mb-2">
+        <>
             <div className="flex-1">
                 <button
                     className="icon-button scale-12"
@@ -32,7 +32,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     <Icon icon={PlusSignIcon} />
                 </button>
             </div>
-        </div>
+        </>
     );
 };
 

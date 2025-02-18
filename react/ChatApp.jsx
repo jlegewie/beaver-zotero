@@ -43,43 +43,36 @@ const ChatApp = () => {
     }, [setUserAttachments]);
     
     return (
-        <div className="flex-1 flex flex-col px-3 pt-2 pb-3">
+        <div className="h-full flex flex-col gap-3">
             {/* Header */}
-            <Header />
+            <div id="beaver-header" className="flex flex-row items-center px-3 pt-2">
+                <Header />
+            </div>
 
-            {messages.length === 0 && (
+            {/* Messages area (scrollable) */}
+            <div id="beaver-messages" className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar">
+                {messages.map((message, index) => (
+                    <div key={index} className="px-3">
+                        {message.role === 'user' && (
+                            <UserMessageDisplay
+                                key={index}
+                                inputRef={inputRef}
+                                editing={false}
+                                message={message}
+                            />
+                        )}
+                    </div>
+                ))}
+            </div>
+
+            {/* Prompt area (footer) */}
+            <div id="beaver-prompt" className="flex-none px-3 pb-3">
                 <UserMessageDisplay
                     inputRef={inputRef}
                     editing={true}
                 />
-            )}
+            </div>
 
-            {messages.length > 0 && (
-                <div className="flex flex-col flex-1 justify-between">
-                    {/* Scrollable messages area */}
-                    <div className="flex flex-col gap-2 flex-1 overflow-auto">
-                        {messages.map((message, index) => (
-                            <div key={index}>
-                                {message.role === 'user' && (
-                                    <UserMessageDisplay
-                                        inputRef={inputRef}
-                                        editing={false}
-                                        message={message}
-                                    />
-                                )}
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Footer-like area for the new user prompt */}
-                    <div className="mt-2">
-                        <UserMessageDisplay
-                            inputRef={inputRef}
-                            editing={true}
-                        />
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
