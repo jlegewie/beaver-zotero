@@ -289,7 +289,10 @@ export abstract class AIProvider {
     }
 }
 
-// Generic provider based on OpenAI endpoints (e.g. OpenRouter)
+
+/**
+* Generic provider based on OpenAI endpoints (e.g. OpenRouter)
+*/
 export class GenericProvider extends AIProvider {
     constructor(config: ProviderConfig) {
         super({
@@ -302,7 +305,10 @@ export class GenericProvider extends AIProvider {
 
 }
 
-// OpenAI provider
+/**
+* OpenAI provider
+* https://platform.openai.com/docs/api-reference
+*/
 export class OpenAIProvider extends AIProvider {
     constructor(apiKey: string) {
         super({
@@ -313,7 +319,10 @@ export class OpenAIProvider extends AIProvider {
     }
 }
 
-// Gemini provider
+/**
+* Gemini provider for Google AI
+* https://ai.google.dev/gemini-api/docs/openai
+*/
 export class GeminiProvider extends AIProvider {
     constructor(apiKey: string) {
         super({
