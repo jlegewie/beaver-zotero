@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
+import AssistantMessageDisplay from "./components/AssistantMessageDisplay.tsx"
 import Header from "./components/Header.tsx"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -56,6 +57,11 @@ const ChatApp = () => {
                         {message.role === 'user' && (
                             <UserMessageDisplay
                                 editing={false}
+                                message={message}
+                            />
+                        )}
+                        {message.role === 'assistant' && (
+                            <AssistantMessageDisplay
                                 message={message}
                             />
                         )}
