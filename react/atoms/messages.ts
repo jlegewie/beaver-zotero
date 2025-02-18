@@ -5,6 +5,7 @@ export type ChatMessage = {
     role: 'user' | 'assistant' | 'system';
     content: string;
     attachments?: Attachment[];
+    status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
 }
 
 // Attachment types

@@ -29,7 +29,13 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             {
                 role: 'user',
                 content: userMessage,
-                attachments: userAttachments
+                attachments: userAttachments,
+                status: 'completed'
+            },
+            {
+                role: 'assistant',
+                content: '',
+                status: 'in_progress'
             }
         ]);
         setUserMessage('');
