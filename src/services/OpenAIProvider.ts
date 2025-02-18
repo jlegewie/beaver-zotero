@@ -106,23 +106,6 @@ export abstract class AIProvider {
     }
 
     /**
-    * Prepare messages for the API.
-    * If the content is an array of ContentPart, convert it to a JSON string.
-    */
-    protected prepareMessages(messages: ChatMessage[]): ChatMessage[] {
-        return messages.map((msg) => {
-            if (Array.isArray(msg.content)) {
-                // Convert the structured array to a JSON string
-                return {
-                    ...msg,
-                    content: JSON.stringify(msg.content),
-                };
-            }
-            return msg;
-        });
-    }
-    
-    /**
     * Create a chat completion (non-streaming). Returns the complete text in one shot.
     *
     * @param request A request object specifying model, messages, etc.
@@ -131,9 +114,6 @@ export abstract class AIProvider {
     public async createChatCompletion(request: CreateChatCompletionRequest): Promise<string> {
         // Make sure stream is false
         request.stream = false;
-
-        // Transform messages so 'content' is always string
-        request.messages = this.prepareMessages(request.messages);
         
         const endpoint = `${this.baseUrl}/chat/completions`;
         const headers = this.buildHeaders();
@@ -189,9 +169,6 @@ export abstract class AIProvider {
     ): Promise<void> {
         // Must explicitly request streaming from the API
         request.stream = true;
-
-        // Transform messages so 'content' is always string
-        request.messages = this.prepareMessages(request.messages);
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         const headers = this.buildHeaders();
