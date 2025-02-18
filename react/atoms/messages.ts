@@ -30,6 +30,11 @@ export const userAttachmentsAtom = atom<Attachment[]>([]);
 export const messagesAtom = atom<ChatMessage[]>([]);
 
 // Derived atoms
+export const isStreamingAtom = atom((get) => {
+    const messages = get(messagesAtom);
+    return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
+});
+
 export const systemMessageAtom = atom((get) => {
     const messages = get(messagesAtom);
     return messages.find((message) => message.role === 'system')?.content;
