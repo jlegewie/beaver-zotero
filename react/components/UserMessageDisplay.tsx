@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
-import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom } from '../atoms/messages';
+import { useAtom, useAtomValue } from 'jotai';
+import { isStreamingAtom, userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom, createAssistantMessage, createUserMessage } from '../atoms/messages';
+import { chatCompletion } from '../../src/services/chatCompletion';
+
 
 interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
@@ -18,27 +20,24 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
-    const setMessages = useSetAtom(messagesAtom);
+    const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
 
         // Add user message to messages atom
-        setMessages((prevMessages) => [
-            ...prevMessages,
-            {
-                role: 'user',
+        const newMessages = [
+            ...messages,
+            createUserMessage({
                 content: userMessage,
                 attachments: userAttachments,
-                status: 'completed'
-            },
-            {
-                role: 'assistant',
-                content: '',
-                status: 'in_progress'
-            }
-        ]);
+            }),
+            createAssistantMessage()
+        ];
+        setMessages(newMessages);
+
+        // Clear input
         setUserMessage('');
         setUserAttachments([]);
 
