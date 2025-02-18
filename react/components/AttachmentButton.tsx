@@ -1,7 +1,6 @@
 import React from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { Attachment } from '../atoms/messages'
-import { getBibliographies, getInTextCitations } from '../../src/utils/citations'
+import { Attachment } from '../atoms/attachments'
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     attachment: Attachment
@@ -22,20 +21,6 @@ const getIconElement = (attachment: Attachment) => {
     return null
 }
 
-const getTooltip = (attachment: Attachment) => {
-    if (attachment.type === 'zotero_item') {
-        return getBibliographies([attachment.item])[0]
-    }
-    return null
-}
-
-const getLabel = (attachment: Attachment) => {
-    if (attachment.type === 'zotero_item') {
-        return getInTextCitations([attachment.item])[0]
-    }
-    return null
-}
-
 export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentButtonProps>(
     function AttachmentButton(props, ref) {
         const {
@@ -49,13 +34,13 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
         return (
             <button
                 ref={ref}
-                title={getTooltip(attachment) || ''}
+                title={attachment.fullName}
                 className={`attachment-button ${className || ''}`}
                 disabled={disabled}
                 {...rest}
             >
                 {getIconElement(attachment)}
-                {getLabel(attachment)}
+                <span>{attachment.shortName}</span>
 
                 {onRemove && !disabled && (
                     <span 

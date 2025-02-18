@@ -4,6 +4,7 @@ import AssistantMessageDisplay from "./components/AssistantMessageDisplay.tsx"
 import Header from "./components/Header.tsx"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
+import { createAttachmentFromZoteroItem } from './atoms/attachments';
 
 const ChatApp = () => {
     const inputRef = useRef(null);
@@ -16,14 +17,11 @@ const ChatApp = () => {
         const eventBus = window.__beaverEventBus;
         if (!eventBus) return;
 
-        const handleFocus = () => {
+        const handleFocus = async () => {
             // Add selected items to context
             const items = Zotero.getActiveZoteroPane().getSelectedItems();
             // Add attachments to current user message
-            setUserAttachments(items.map((item) => ({
-                type: 'zotero_item',
-                item: item
-            })));
+            setUserAttachments(await Promise.all(items.map((item) => createAttachmentFromZoteroItem(item))));
             // Focus on text field
             inputRef.current?.focus();
         };

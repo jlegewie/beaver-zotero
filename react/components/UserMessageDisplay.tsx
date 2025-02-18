@@ -14,6 +14,7 @@ import {
     setMessageStatusAtom
 } from '../atoms/messages';
 import { chatCompletion } from '../../src/services/chatCompletion';
+import { createAttachmentFromZoteroItem } from '../atoms/attachments';
 
 
 interface UserMessageDisplayProps {
@@ -39,16 +40,17 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         e.preventDefault();
 
         // Add user message to messages atom
-        const assistantMsg = createAssistantMessage();
         const newMessages = [
             ...messages,
             createUserMessage({
                 content: userMessage,
                 attachments: userAttachments,
-            }),
-            assistantMsg
+            })
         ];
-        setMessages(newMessages);
+
+        // Add assistant message to messages atom
+        const assistantMsg = createAssistantMessage();
+        setMessages([...newMessages, assistantMsg]);
 
         // Chat completion
         chatCompletion(
@@ -82,15 +84,12 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         console.log('Chat completion with library search:', userMessage);
     };
 
-    const handleAddAttachments = () => {
+    const handleAddAttachments = async () => {
         console.log('Adding context item');
         // Get selected items from Zotero
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         // Add attachments to current user message
-        setUserAttachments(items.map((item) => ({
-            type: 'zotero_item',
-            item: item
-        })));
+        setUserAttachments(await Promise.all(items.map((item) => createAttachmentFromZoteroItem(item))));
     };
 
     const handleRemoveAttachment = (index: number) => {

@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { v4 as uuidv4 } from 'uuid';
+import { Attachment } from "./attachments";
 
 // Message types
 export type ChatMessage = {
@@ -31,20 +32,6 @@ export const createAssistantMessage = (message?: Partial<ChatMessage>): ChatMess
         ...message,
     };
 };
-
-// Attachment types
-export type ZoteroAttachment = {
-    type: 'zotero_item';
-    item: Zotero.Item;
-}
-
-export type ImageAttachment = {
-    type: 'image';
-    image_url: string;
-}
-
-export type Attachment = ZoteroAttachment | ImageAttachment;
-
 
 // Current user message and content parts
 export const userMessageAtom = atom<string>('');
