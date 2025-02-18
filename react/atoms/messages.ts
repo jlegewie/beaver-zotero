@@ -63,3 +63,31 @@ export const systemMessageAtom = atom((get) => {
     const messages = get(messagesAtom);
     return messages.find((message) => message.role === 'system')?.content;
 });
+
+// Setter atoms
+export const setMessageContentAtom = atom(
+    null,
+    (get, set, { id, content }: { id: string; content: string }) => {
+        set(messagesAtom, get(messagesAtom).map(message => 
+            message.id === id ? { ...message, content } : message
+        ));
+    }
+);
+
+export const streamToMessageAtom = atom(
+    null,
+    (get, set, { id, chunk }: { id: string; chunk: string }) => {
+        set(messagesAtom, get(messagesAtom).map(message =>
+            message.id === id ? { ...message, content: message.content + chunk } : message
+        ));
+    }
+);
+
+export const setMessageStatusAtom = atom(
+    null,
+    (get, set, { id, status }: { id: string; status: ChatMessage['status'] }) => {
+        set(messagesAtom, get(messagesAtom).map(message =>
+            message.id === id ? { ...message, status } : message
+        ));
+    }
+);
