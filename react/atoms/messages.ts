@@ -39,25 +39,3 @@ export const systemMessageAtom = atom((get) => {
     const messages = get(messagesAtom);
     return messages.find((message) => message.role === 'system')?.content;
 });
-
-
-
-
-
-
-
-
-// messages = [
-//     {"role": "system", "content": system_message},
-//     {
-//         "role": "user", 
-//         "content": [
-//             {
-//                 "type": "image_url",
-//                 "image_url": {"url": f"data:image/png;base64,{image_base64}"}
-//             },
-//             {"role": "user", "content": "This is my image"}
-//         ]
-//     },
-//     {"role": "user", "content": "test"},
-// ]

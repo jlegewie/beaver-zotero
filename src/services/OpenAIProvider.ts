@@ -394,3 +394,20 @@ export async function fileToContentPart(filePath: string): Promise<ContentPart> 
     return { type: 'image_url', image_url: { url: await fileToDataURL(filePath) } } as ContentPart;
 }
 
+/**
+ * Example of a message with an image
+ * messages = [
+ *     {"role": "system", "content": system_message},
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "image_url",
+ *                 "image_url": {"url": f"data:image/png;base64,{image_base64}"}
+ *             },
+ *             {"role": "user", "content": "This is my image"}
+ *         ]
+ *     },
+ *     {"role": "user", "content": "test"},
+ * ]
+ */
