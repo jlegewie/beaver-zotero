@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
-import { useAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom, createAssistantMessage, createUserMessage } from '../atoms/messages';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import {
+    isStreamingAtom,
+    userMessageAtom,
+    userAttachmentsAtom,
+    ChatMessage,
+    messagesAtom,
+    createAssistantMessage,
+    createUserMessage,
+    streamToMessageAtom,
+    setMessageStatusAtom
+} from '../atoms/messages';
 import { chatCompletion } from '../../src/services/chatCompletion';
 
 
@@ -22,20 +32,39 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const streamToMessage = useSetAtom(streamToMessageAtom);
+    const setMessageStatus = useSetAtom(setMessageStatusAtom);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
 
         // Add user message to messages atom
+        const assistantMsg = createAssistantMessage();
         const newMessages = [
             ...messages,
             createUserMessage({
                 content: userMessage,
                 attachments: userAttachments,
             }),
-            createAssistantMessage()
+            assistantMsg
         ];
         setMessages(newMessages);
+
+        // Chat completion
+        chatCompletion(
+            newMessages as ChatMessage[],
+            (chunk: string) => {
+                streamToMessage({ id: assistantMsg.id, chunk: chunk });
+            },
+            () => {
+                setMessageStatus({ id: assistantMsg.id, status: 'completed' })
+            },
+            (error: Error) => {
+                console.error(error);
+                setMessageStatus({ id: assistantMsg.id, status: 'error' })
+                // setMessageError({ id: assistantMsg.id, error: error })
+            }
+        );
 
         // Clear input
         setUserMessage('');
