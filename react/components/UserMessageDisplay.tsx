@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
-import { useAtom, useSetAtom } from 'jotai';
-import { userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom } from '../atoms/messages';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { isStreamingAtom, userMessageAtom, userAttachmentsAtom, ChatMessage, messagesAtom } from '../atoms/messages';
 
 interface UserMessageDisplayProps {
     inputRef: React.RefObject<HTMLInputElement>;
@@ -19,6 +19,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const setMessages = useSetAtom(messagesAtom);
+    const isStreaming = useAtomValue(isStreamingAtom);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -127,6 +128,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                                 type={isCommandPressed ? "button" : undefined}
                                 className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
                                 onClick={handleLibrarySearch}
+                                disabled={isStreaming}
                             >
                                 Library Search ⌘ ⏎
                             </button>
@@ -134,6 +136,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                                 type={isCommandPressed ? undefined : "button"}
                                 className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
                                 onClick={handleSubmit}
+                                disabled={isStreaming}
                             >
                                 Send ⏎
                             </button>
