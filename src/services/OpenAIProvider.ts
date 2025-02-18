@@ -378,8 +378,10 @@ export async function fileToBase64(filePath: string): Promise<string> {
  * @returns Promise<string> - Data URL of the file contents
  */
 export async function fileToDataURL(filePath: string): Promise<string> {
+    const file = Zotero.File.pathToFile(filePath);
+    const contentType = await Zotero.MIME.getMIMETypeFromFile(file);
     const base64 = await fileToBase64(filePath);
-    return `data:image/png;base64,${base64}`;
+    return `data:${contentType};base64,${base64}`;
 }
 
 /**
