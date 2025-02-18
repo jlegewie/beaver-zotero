@@ -10,6 +10,8 @@ declare namespace _ZoteroTypes {
       "enable": boolean;
       "input": string;
       "voyageApiKey": string;
+      "googleGenerativeAiApiKey": string;
+      "openAiApiKey": string;
     };
   }
 }
