@@ -7,6 +7,7 @@ import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { ItemService } from "./services/ItemService";
 import { QuickChat } from "./ui/quickChat"
+import { AIProvider } from "./services/OpenAIProvider";
 
 class Addon {
     public data: {
@@ -27,6 +28,7 @@ class Addon {
         _itemStatuses: Map<number, string>;
     };
     public itemService?: ItemService;
+    public aiProvider?: AIProvider;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

@@ -15,6 +15,7 @@ import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
 import { watchPane, watchItemPaneCollapse } from "./ui/chat";
 import eventBus from "../react/eventBus";
+import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
 
 
 async function onStartup() {
@@ -42,6 +43,15 @@ async function onStartup() {
 	
 	if(!voyageApiKey)
 		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
+
+	// Initialize Generative AI provider
+	let provider;
+	if (getPref("googleGenerativeAiApiKey")) {
+		provider = new GeminiProvider(getPref("googleGenerativeAiApiKey"));
+	} else if (getPref("openAiApiKey")) {
+		provider = new OpenAIProvider(getPref("openAiApiKey"));
+	}
+	addon.aiProvider = provider;
 	
 	// Instantiate item service and store reference
 	const itemService = new ItemService(vectorStore, voyageClient, 'local');
