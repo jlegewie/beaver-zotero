@@ -35,10 +35,20 @@
 */
 
 
+// ContentPart interface for handling text, images, PDFs, etc.
+export interface ContentPart {
+    type: 'text' | 'image_url';
+    text?: string;
+    // For images or PDFs, we can store either a direct link or data URL
+    // e.g. image_url: { url: 'https://...' } or { url: 'data:image/jpeg;base64,...' }
+    image_url?: { url: string } | string;
+}
+
+
 // Single chat message
 export interface ChatMessage {
     role: string;
-    content: string;
+    content: string | ContentPart[];
     name?: string;
 }
 
@@ -94,6 +104,23 @@ export abstract class AIProvider {
         this.apiKey = config.apiKey;
         this.providerName = config.providerName || 'GenericAI';
     }
+
+    /**
+    * Prepare messages for the API.
+    * If the content is an array of ContentPart, convert it to a JSON string.
+    */
+    protected prepareMessages(messages: ChatMessage[]): ChatMessage[] {
+        return messages.map((msg) => {
+            if (Array.isArray(msg.content)) {
+                // Convert the structured array to a JSON string
+                return {
+                    ...msg,
+                    content: JSON.stringify(msg.content),
+                };
+            }
+            return msg;
+        });
+    }
     
     /**
     * Create a chat completion (non-streaming). Returns the complete text in one shot.
@@ -104,6 +131,9 @@ export abstract class AIProvider {
     public async createChatCompletion(request: CreateChatCompletionRequest): Promise<string> {
         // Make sure stream is false
         request.stream = false;
+
+        // Transform messages so 'content' is always string
+        request.messages = this.prepareMessages(request.messages);
         
         const endpoint = `${this.baseUrl}/chat/completions`;
         const headers = this.buildHeaders();
@@ -159,7 +189,10 @@ export abstract class AIProvider {
     ): Promise<void> {
         // Must explicitly request streaming from the API
         request.stream = true;
-        
+
+        // Transform messages so 'content' is always string
+        request.messages = this.prepareMessages(request.messages);
+
         const endpoint = `${this.baseUrl}/chat/completions`;
         const headers = this.buildHeaders();
         let accumulated = ''; // For leftover partial lines when parsing
