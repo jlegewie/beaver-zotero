@@ -15,7 +15,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
             <div className="flex-1">
                 <button
                     className="icon-button scale-12"
-                    onClick={() => toggleChat(window, false)}
+                    onClick={() => toggleChat(Zotero.getMainWindow(), false)}
                 >
                     <Icon icon={Cancel01Icon} />
                 </button>
