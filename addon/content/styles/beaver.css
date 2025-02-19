@@ -302,6 +302,10 @@
 #zotero-beaver-chat .bg-quinary { background-color: var(--fill-quinary); }
 #zotero-beaver-chat .bg-senary { background-color: var(--fill-senary); }
 
+/* Text colors */
+#zotero-beaver-chat .color-red { color:var(--tag-red); opacity: 0.8; }
+#zotero-beaver-chat .color-green { color:var(--tag-green); opacity: 0.8; }
+
 /* Scrollbar */
 #zotero-beaver-chat .scrollbar {
     scrollbar-color: var(--color-scrollbar) var(--color-scrollbar-background);
