@@ -391,7 +391,14 @@ export async function fileToDataURL(filePath: string): Promise<string> {
  * @returns Promise<ContentPart> - Content part of the file
  */
 export async function fileToContentPart(filePath: string): Promise<ContentPart> {
-    return { type: 'image_url', image_url: { url: await fileToDataURL(filePath) } } as ContentPart;
+    return {
+        type: 'image_url',
+        image_url: { url: await fileToDataURL(filePath)}
+    } as ContentPart;
+}
+
+export function urlToContentPart(url: string): ContentPart {
+    return { type: 'image_url', image_url: { url: url } } as ContentPart;
 }
 
 /**

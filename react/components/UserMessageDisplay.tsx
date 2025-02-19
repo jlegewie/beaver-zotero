@@ -44,7 +44,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: userAttachments,
+                attachments: userAttachments.filter((attachment) => attachment.valid),
             })
         ];
 

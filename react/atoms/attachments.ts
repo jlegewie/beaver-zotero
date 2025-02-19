@@ -28,7 +28,7 @@ interface ZoteroAttachment extends BaseAttachment {
     type: 'zotero_item';
     item: Zotero.Item;              // The parent item
     attachmentItem?: Zotero.Item;   // The actual item that will be attached (if different)
-    filePath: string;               // Local file path of the attachment
+    filePath?: string;              // Local file path of the attachment
 }
 
 interface FileAttachment extends BaseAttachment {
@@ -60,6 +60,7 @@ export const createAttachmentFromZoteroItem = async (item: Zotero.Item): Promise
     const attachmentExists = attachmentItem ? await attachmentItem.fileExists() : false;
     // @ts-ignore getAttachmentMIMEType exists
     const mimeType = attachmentItem ? attachmentItem.getAttachmentMIMEType() : '';
+    const filePath = attachmentItem ? await attachmentItem.getFilePath() : undefined;
     
     // Return attachment object
     return {
@@ -68,7 +69,8 @@ export const createAttachmentFromZoteroItem = async (item: Zotero.Item): Promise
         exists: attachmentExists,
         // @ts-ignore getAttachmentMIMEType exists
         mimeType: mimeType,
-        valid: attachmentExists && isValidMimeType(mimeType)
+        filePath: filePath,
+        valid: Boolean(attachmentExists && isValidMimeType(mimeType) && filePath)
     } as ZoteroAttachment;
 
 };
