@@ -5,7 +5,7 @@ import AssistantMessageDisplay from "./components/AssistantMessageDisplay"
 import Header from "./components/Header"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { createAttachmentFromZoteroItem } from './atoms/attachments';
+import { createAttachmentFromZoteroItem } from './types/attachments';
 
 const AiSidebar = () => {
     const inputRef = useRef<HTMLTextAreaElement>(null);

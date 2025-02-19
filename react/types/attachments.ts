@@ -10,7 +10,6 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
     return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
 }
 
-
 // Attachment interface and types
 interface BaseAttachment {
     id: string;               // Unique identifier for tracking
@@ -41,6 +40,9 @@ interface RemoteFileAttachment extends BaseAttachment {
     url: string;
 }
 
+export type Attachment = ZoteroAttachment | FileAttachment | RemoteFileAttachment;
+
+// Factory function to create an attachment from a Zotero item
 export const createAttachmentFromZoteroItem = async (item: Zotero.Item): Promise<Attachment> => {
     // Get the formatted reference from Zotero item
     const formattedReferences = getFormattedReferences([item])[0]

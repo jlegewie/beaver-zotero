@@ -14,7 +14,7 @@ import {
     setMessageStatusAtom
 } from '../atoms/messages';
 import { chatCompletion } from '../../src/services/chatCompletion';
-import { createAttachmentFromZoteroItem } from '../atoms/attachments';
+import { createAttachmentFromZoteroItem } from '../types/attachments';
 
 
 interface InputAreaProps {

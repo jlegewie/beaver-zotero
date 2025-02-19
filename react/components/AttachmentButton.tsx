@@ -1,6 +1,6 @@
 import React from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { Attachment } from '../atoms/attachments'
+import { Attachment } from '../types/attachments'
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     attachment: Attachment

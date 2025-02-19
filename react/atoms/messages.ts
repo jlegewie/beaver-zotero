@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { v4 as uuidv4 } from 'uuid';
-import { Attachment } from "./attachments";
+import { Attachment } from "../types/attachments";
 
 // Message types
 export type ChatMessage = {
