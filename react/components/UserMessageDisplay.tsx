@@ -108,8 +108,18 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         }
     };
 
+    const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        // Check if the click target is a button or within a button
+        const isButtonClick = (e.target as Element).closest('button') !== null;
+        
+        // Only focus if not clicking a button and editing is enabled
+        if (!isButtonClick && editing && inputRef.current) {
+            inputRef.current.focus();
+        }
+    };
+
     return (
-        <div className="user-message-display">
+        <div className="user-message-display" onClick={handleContainerClick}>
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
                 {editing && (
