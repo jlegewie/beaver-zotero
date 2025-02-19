@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
+import InputArea from "./components/InputArea.tsx"
 import AssistantMessageDisplay from "./components/AssistantMessageDisplay.tsx"
 import Header from "./components/Header.tsx"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
@@ -69,7 +70,7 @@ const ChatApp = () => {
 
             {/* Prompt area (footer) */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3">
-                <UserMessageDisplay
+                <InputArea
                     inputRef={inputRef}
                     editing={true}
                 />
