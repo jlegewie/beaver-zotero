@@ -12,35 +12,17 @@ const AiSidebar = () => {
     const setUserAttachments = useSetAtom(userAttachmentsAtom);
     const messages = useAtomValue(messagesAtom);
     
-    // Subscribe to events from Zotero
     useEffect(() => {
-        // Get the event bus from the window
-        const eventBus = Zotero.getMainWindow().__beaverEventBus;
-        if (!eventBus) return;
+        // Focus the input
+        inputRef.current?.focus();
 
-        const handleFocus = async () => {
-            // Add selected items to context
+        // Set user attachments from selected Zotero items
+        const loadSelectedItems = async () => {
             const items = Zotero.getActiveZoteroPane().getSelectedItems();
-            // Add attachments to current user message
             setUserAttachments(await Promise.all(items.map((item) => createAttachmentFromZoteroItem(item))));
-            // Focus on text field
-            inputRef.current?.focus();
         };
-
-        // "itemSelected" event to update our log
-        const handleItemSelected = (e: CustomEvent) => {
-            const { detail } = e;
-        };
-
-        eventBus.addEventListener('focusChatInput', handleFocus);
-        eventBus.addEventListener('itemSelected', handleItemSelected);
-
-        // Clean up the event listeners when the component unmounts.
-        return () => {
-            eventBus.removeEventListener('focusChatInput', handleFocus);
-            eventBus.removeEventListener('itemSelected', handleItemSelected);
-        };
-    }, [setUserAttachments]);
+        loadSelectedItems();
+    }, []); // Run once on mount
     
     return (
         <div className="h-full flex flex-col gap-3">

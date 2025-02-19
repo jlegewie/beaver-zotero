@@ -29,9 +29,11 @@ export function toggleChat(win: Window, turnOn: boolean) {
         deck.hidden = true;
         // @ts-ignore zotero item-pane is not typed
         sidenav.hidden = true;
-        // 4) Show chat
-        // @ts-ignore zotero item-pane is not typed
-        chat.hidden = false;
+
+        // 4) Dispatch event to toggle chat
+        const event = new win.CustomEvent("toggleChat", { detail: { visible: true } });
+        win.__beaverEventBus.dispatchEvent(event);
+
         // 5) Mark that chat is active
         // @ts-ignore zotero item-pane is not typed
         itemPane.dataset.beaverChatActive = "true";
@@ -41,25 +43,14 @@ export function toggleChat(win: Window, turnOn: boolean) {
         if (chatToggleBtn) {
             chatToggleBtn.setAttribute("selected", "true");
         }
-
-        // Focus the input after showing chat
-        // (use delay to ensure React has mounted)
-        win.setTimeout(() => {
-            // win.focusChatInput?.();
-            // Make sure we're using the window's event bus
-            if (!win.__beaverEventBus) {
-                win.__beaverEventBus = eventBus;
-            }
-            const event = new win.CustomEvent("focusChatInput");
-            win.__beaverEventBus.dispatchEvent(event);
-        }, 50);
     }
     else {
         // Turn chat off
         
-        // Hide chat
-        // @ts-ignore zotero item-pane is not typed
-        chat.hidden = true;
+        // Dispatch event to toggle chat
+        const event = new win.CustomEvent("toggleChat", { detail: { visible: false } });
+        win.__beaverEventBus.dispatchEvent(event);
+
         // @ts-ignore zotero item-pane is not typed
         itemPane.dataset.beaverChatActive = "false";
         
