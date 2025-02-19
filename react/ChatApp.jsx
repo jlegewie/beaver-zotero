@@ -55,7 +55,6 @@ const ChatApp = () => {
                     <div key={index} className="px-3">
                         {message.role === 'user' && (
                             <UserMessageDisplay
-                                editing={false}
                                 message={message}
                             />
                         )}
