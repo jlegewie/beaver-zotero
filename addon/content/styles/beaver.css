@@ -196,22 +196,20 @@
 #zotero-beaver-chat .chat-input {
     width: 100%;
     font-size: 13px;
-    /* padding: 6px 8px; */
+    /* color: var(--fill-secondary); */
+    background-color: transparent;
     border: 0px solid transparent;
     border-radius: 8px;
-    /* margin-right: -2px; */
     outline: none;
-    color: var(--fill-secondary);
-    caret-color: var(--fill-secondary);
-    transition: border-color 0.2s ease-in-out;
-    background-color: transparent;
-
+    caret-color: var(--fill-primary);
     resize: none;
-    min-height: 24px;
-    /* height: auto; */
-    /* overflow-y: auto; */
-    max-height: 12.5em;
+    padding: 1px 0;
     line-height: 1.25;
+    height: calc(1.25em + 3px);
+    min-height: calc(1.25em + 2px);
+    max-height: 12.5em;
+    /* transition: all .2s ease-in-out; */
+    /* overflow-y: auto; */
 }
 
 #zotero-beaver-chat .chat-input:focus {
