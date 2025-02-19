@@ -18,26 +18,32 @@ Follow these rules when refering to documents:
 
 const chatMessageToRequestMessage = async (message: ChatMessage): Promise<APIMessage> => {
     if (message.role === 'user') {
+        
         // Convert attachments to content parts
-        const attachmentsContent = await Promise.all(
-            (message.attachments || [])
-                .filter((attachment) => attachment.valid)
-                .map(async (attachment) => {
-                    switch (attachment.type) {
-                        case 'zotero_item':
-                        case 'file':
-                            return await fileToContentPart(attachment.filePath!);
-                        case 'remote_file':
-                            return urlToContentPart(attachment.url);
-                        default:
-                            return undefined;
+        const attachmentsContent: ContentPart[] = [];
+        for (const attachment of message.attachments || []) {
+            if (!attachment.valid) continue;
+            switch (attachment.type) {
+                case 'zotero_item':
+                case 'file':
+                    if (attachment.filePath) {
+                        const contentPart = await fileToContentPart(attachment.filePath);
+                        if (contentPart) {
+                            attachmentsContent.push(contentPart);
+                        }
                     }
-                })
-        );
+                    break;
+                case 'remote_file':
+                    attachmentsContent.push(urlToContentPart(attachment.url));
+                    break;
+                default:
+                    break;
+            }
+        }
         
         // Add the user's message
         const content: ContentPart[] = [
-            ...attachmentsContent.filter((content): content is ContentPart => content !== undefined),
+            ...attachmentsContent,
             {
                 type: 'text',
                 text: message.content
