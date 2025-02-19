@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
-import { selectedItemsAtom } from "../atoms/ui";
+import { selectedItemsAtom } from "../atoms/attachments";
 
 /**
 * Listens to changes in the Zotero item selection and updates

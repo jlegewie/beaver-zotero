@@ -3,4 +3,6 @@ import { Attachment } from "../types/attachments";
 import { ChatMessage } from "../types/messages";
 
 
+export const selectedItemsAtom = atom<Zotero.Item[]>([]);
+
 export const userAttachmentsAtom = atom<Attachment[]>([]);
