@@ -5,7 +5,6 @@ import { ChatMessage } from "../types/messages";
 
 // Current user message and content parts
 export const userMessageAtom = atom<string>('');
-export const userAttachmentsAtom = atom<Attachment[]>([]);
 
 // Messages atom
 export const messagesAtom = atom<ChatMessage[]>([]);

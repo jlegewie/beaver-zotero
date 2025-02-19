@@ -5,11 +5,11 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
     isStreamingAtom,
     userMessageAtom,
-    userAttachmentsAtom,
     messagesAtom,
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
+import { userAttachmentsAtom } from '../atoms/attachments';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { createAttachmentFromZoteroItem } from '../types/attachments';
