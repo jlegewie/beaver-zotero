@@ -6,11 +6,13 @@ import Header from "./components/Header"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { createAttachmentFromZoteroItem } from './types/attachments';
+import { useZoteroSelection } from './hooks/useZoteroSelection';
 
 const AiSidebar = () => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const setUserAttachments = useSetAtom(userAttachmentsAtom);
     const messages = useAtomValue(messagesAtom);
+    useZoteroSelection();
     
     useEffect(() => {
         // Focus the input
