@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon } from './icons';
+import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon, Settings02Icon } from './icons';
 import { toggleChat } from '../../src/ui/chat';
 import { messagesAtom } from '../atoms/messages';
 import { useSetAtom } from 'jotai';
@@ -21,6 +21,9 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                 </button>
             </div>
             <div className="flex gap-4">
+                {/* <button className="icon-button scale-12">
+                    <Icon icon={Settings02Icon} />
+                </button> */}
                 <button className="icon-button scale-12">
                     <Icon icon={Clock02Icon} />
                 </button>
