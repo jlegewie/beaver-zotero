@@ -179,6 +179,7 @@
 #zotero-beaver-chat .assistant-message-display {
     margin: 0 auto;    
     padding: 0.65rem;
+    user-select: text;
 }
 
 #zotero-beaver-chat .user-message-display {
