@@ -1,4 +1,4 @@
-import { ChatMessage } from "react/atoms/messages";
+import { ChatMessage } from "react/types/messages";
 import { fileToContentPart, urlToContentPart, APIMessage, ContentPart } from "./OpenAIProvider";
 
 const SYSTEM_PROMPT = `You are a helpful assistant that helps researchers answer questions related to research papers, reports, and other research-related documents.

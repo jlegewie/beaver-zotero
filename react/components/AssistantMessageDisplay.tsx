@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChatMessage } from '../atoms/messages';
+import { ChatMessage } from '../types/messages';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;

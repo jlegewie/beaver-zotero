@@ -6,16 +6,14 @@ import {
     isStreamingAtom,
     userMessageAtom,
     userAttachmentsAtom,
-    ChatMessage,
     messagesAtom,
-    createAssistantMessage,
-    createUserMessage,
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
+
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { createAttachmentFromZoteroItem } from '../types/attachments';
-
+import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;

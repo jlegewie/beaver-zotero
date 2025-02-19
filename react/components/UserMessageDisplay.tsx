@@ -1,10 +1,8 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { AttachmentButton } from "./AttachmentButton";
-import {
-    isStreamingAtom,
-    ChatMessage,
-} from '../atoms/messages';
+import { ChatMessage } from '../types/messages';
+import { isStreamingAtom } from '../atoms/messages';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;

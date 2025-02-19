@@ -1,37 +1,7 @@
 import { atom } from "jotai";
-import { v4 as uuidv4 } from 'uuid';
 import { Attachment } from "../types/attachments";
+import { ChatMessage } from "../types/messages";
 
-// Message types
-export type ChatMessage = {
-    id: string;
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-    attachments?: Attachment[];
-    status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
-}
-
-export const createUserMessage = (message: Partial<ChatMessage>): ChatMessage => {
-    return {
-        id: uuidv4(),
-        role: 'user',
-        content: '',
-        status: 'completed',
-        attachments: [],
-        ...message,
-    };
-};
-
-export const createAssistantMessage = (message?: Partial<ChatMessage>): ChatMessage => {
-    return {
-        id: uuidv4(),
-        role: 'assistant',
-        content: '',
-        status: 'in_progress',
-        attachments: [],
-        ...message,
-    };
-};
 
 // Current user message and content parts
 export const userMessageAtom = atom<string>('');
