@@ -69,10 +69,7 @@ const ChatApp = () => {
 
             {/* Prompt area (footer) */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3">
-                <InputArea
-                    inputRef={inputRef}
-                    editing={true}
-                />
+                <InputArea inputRef={inputRef}/>
             </div>
 
         </div>

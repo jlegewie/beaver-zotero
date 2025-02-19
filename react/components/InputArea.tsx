@@ -19,14 +19,10 @@ import { createAttachmentFromZoteroItem } from '../atoms/attachments';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement>;
-    editing?: boolean;
-    message?: ChatMessage;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
-    inputRef,
-    editing = false,
-    message
+    inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
     const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
@@ -113,39 +109,38 @@ const InputArea: React.FC<InputAreaProps> = ({
         const isButtonClick = (e.target as Element).closest('button') !== null;
         
         // Only focus if not clicking a button and editing is enabled
-        if (!isButtonClick && editing && inputRef.current) {
+        if (!isButtonClick && inputRef.current) {
             inputRef.current.focus();
         }
     };
 
     return (
         <div className="user-message-display" onClick={handleContainerClick} style={{ minHeight: 'fit-content' }}>
-            {/* Context Items */}
+
+            {/* Message Attachments */}
             <div className="flex flex-wrap gap-3 mb-2">
-                {editing && (
-                    <button
-                        className="icon-button scale-11"
-                        onClick={handleAddAttachments}
-                        disabled={!editing}
-                    >
+                <button
+                    className="icon-button scale-11"
+                    onClick={handleAddAttachments}
+                >
                         <Icon icon={PlusSignIcon} />
-                    </button>
-                )}
-                {(message?.attachments || userAttachments).map((attachment, index) => (
+                </button>
+                {(userAttachments).map((attachment, index) => (
                     <AttachmentButton
                         key={index}
                         attachment={attachment}
                         onRemove={() => handleRemoveAttachment(index)}
-                        disabled={!editing}
                     />
                 ))}
             </div>
+
+            {/* Input Form */}
             <form onSubmit={handleSubmit} className="flex flex-col">
-                {/* Chat Input */}
+                {/* Message Input  */}
                 <div className="mb-2 -ml-1">
                     <textarea
                         ref={inputRef}
-                        value={message?.content || userMessage}
+                        value={userMessage}
                         onChange={(e) => setUserMessage(e.target.value)}
                         onInput={(e) => {
                             e.currentTarget.style.height = 'auto';
@@ -162,35 +157,32 @@ const InputArea: React.FC<InputAreaProps> = ({
                             }
                         }}
                         onKeyUp={handleKeyUp}
-                        disabled={!editing}
                         rows={1}
                     />
                 </div>
 
                 {/* Button Row */}
-                {editing && (
-                    <div className="flex flex-row items-center pt-2">
-                        <div className="flex-1" />
-                        <div className="flex gap-2">
-                            <button
-                                type={isCommandPressed ? "button" : undefined}
-                                className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
-                                onClick={handleLibrarySearch}
-                                disabled={isStreaming}
-                            >
-                                Library Search ⌘ ⏎
-                            </button>
-                            <button
-                                type={isCommandPressed ? undefined : "button"}
-                                className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
-                                onClick={handleSubmit}
-                                disabled={isStreaming}
-                            >
-                                Send ⏎
-                            </button>
-                        </div>
+                <div className="flex flex-row items-center pt-2">
+                    <div className="flex-1" />
+                    <div className="flex gap-2">
+                        <button
+                            type={isCommandPressed ? "button" : undefined}
+                            className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
+                            onClick={handleLibrarySearch}
+                            disabled={isStreaming}
+                        >
+                            Library Search ⌘ ⏎
+                        </button>
+                        <button
+                            type={isCommandPressed ? undefined : "button"}
+                            className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
+                            onClick={handleSubmit}
+                            disabled={isStreaming}
+                        >
+                            Send ⏎
+                        </button>
                     </div>
-                )}
+                </div>
             </form>
         </div>
     );
