@@ -194,8 +194,8 @@
 }
 
 #zotero-beaver-chat .chat-input {
-    width: calc(100% - 5px);
-    font-size: 14px;
+    width: 100%;
+    font-size: 13px;
     /* padding: 6px 8px; */
     border: 0px solid transparent;
     border-radius: 8px;
@@ -208,10 +208,10 @@
 
     resize: none;
     min-height: 24px;
-    height: auto;
-    overflow-y: auto;
-    max-height: 240px;
-    line-height: 1.5;
+    /* height: auto; */
+    /* overflow-y: auto; */
+    max-height: 12.5em;
+    line-height: 1.25;
 }
 
 #zotero-beaver-chat .chat-input:focus {

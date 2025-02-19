@@ -18,7 +18,7 @@ import { createAttachmentFromZoteroItem } from '../atoms/attachments';
 
 
 interface UserMessageDisplayProps {
-    inputRef: React.RefObject<HTMLInputElement>;
+    inputRef: React.RefObject<HTMLTextAreaElement>;
     editing?: boolean;
     message?: ChatMessage;
 }
@@ -96,13 +96,13 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         setUserAttachments(userAttachments.filter((_, i) => i !== index));
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Meta') {
             setIsCommandPressed(true);
         }
     };
 
-    const handleKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Meta') {
             setIsCommandPressed(false);
         }
@@ -119,7 +119,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     };
 
     return (
-        <div className="user-message-display" onClick={handleContainerClick}>
+        <div className="user-message-display" onClick={handleContainerClick} style={{ minHeight: 'fit-content' }}>
             {/* Context Items */}
             <div className="flex flex-wrap gap-3 mb-2">
                 {editing && (
@@ -143,16 +143,27 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             <form onSubmit={handleSubmit} className="flex flex-col">
                 {/* Chat Input */}
                 <div className="mb-2 -ml-1">
-                    <input
+                    <textarea
                         ref={inputRef}
-                        type="text"
                         value={message?.content || userMessage}
                         onChange={(e) => setUserMessage(e.target.value)}
+                        onInput={(e) => {
+                            e.currentTarget.style.height = 'auto';
+                            e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                        }}
                         placeholder="How can I help you today?"
                         className="chat-input"
-                        onKeyDown={handleKeyDown}
+                        onKeyDown={(e) => {
+                            handleKeyDown(e);
+                            // Submit on Enter (without Shift)
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSubmit(e as any);
+                            }
+                        }}
                         onKeyUp={handleKeyUp}
                         disabled={!editing}
+                        rows={1}
                     />
                 </div>
 
