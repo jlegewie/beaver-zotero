@@ -18,7 +18,7 @@ import { createAttachmentFromZoteroItem } from '../atoms/attachments';
 
 
 interface InputAreaProps {
-    inputRef: React.RefObject<HTMLTextAreaElement>;
+    inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({

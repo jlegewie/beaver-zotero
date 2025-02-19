@@ -1,16 +1,16 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import ChatApp from './ChatApp';
+import AiSidebar from './AiSidebar';
 import { createRoot } from 'react-dom/client';
 
-export function renderChatApp(domElement) {
+export function renderAiSidebar(domElement) {
     // For React 16, we use ReactDOM.render(...)
-    // ReactDOM.render(<ChatApp />, domElement);
+    // ReactDOM.render(<AiSidebar />, domElement);
     const root = createRoot(domElement);
-    root.render(<ChatApp />);
+    root.render(<AiSidebar />);
 }
 
 // Unmount the React component
-// export function unmountChatApp(domElement) {
+// export function unmountAiSidebar(domElement) {
 //   ReactDOM.unmountComponentAtNode(domElement);
 // }

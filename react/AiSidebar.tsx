@@ -1,21 +1,21 @@
 import React, { useRef, useEffect } from 'react';
-import UserMessageDisplay from "./components/UserMessageDisplay.tsx"
-import InputArea from "./components/InputArea.tsx"
-import AssistantMessageDisplay from "./components/AssistantMessageDisplay.tsx"
-import Header from "./components/Header.tsx"
+import UserMessageDisplay from "./components/UserMessageDisplay"
+import InputArea from "./components/InputArea"
+import AssistantMessageDisplay from "./components/AssistantMessageDisplay"
+import Header from "./components/Header"
 import { userAttachmentsAtom, messagesAtom } from './atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { createAttachmentFromZoteroItem } from './atoms/attachments';
 
-const ChatApp = () => {
-    const inputRef = useRef(null);
+const AiSidebar = () => {
+    const inputRef = useRef<HTMLTextAreaElement>(null);
     const setUserAttachments = useSetAtom(userAttachmentsAtom);
     const messages = useAtomValue(messagesAtom);
     
     // Subscribe to events from Zotero
     useEffect(() => {
         // Get the event bus from the window
-        const eventBus = window.__beaverEventBus;
+        const eventBus = Zotero.getMainWindow().__beaverEventBus;
         if (!eventBus) return;
 
         const handleFocus = async () => {
@@ -28,7 +28,7 @@ const ChatApp = () => {
         };
 
         // "itemSelected" event to update our log
-        const handleItemSelected = (e) => {
+        const handleItemSelected = (e: CustomEvent) => {
             const { detail } = e;
         };
 
@@ -76,4 +76,4 @@ const ChatApp = () => {
     );
 };
 
-export default ChatApp;
+export default AiSidebar;

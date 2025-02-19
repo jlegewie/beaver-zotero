@@ -63,7 +63,7 @@ export class BeaverUIFactory {
         script.src = "chrome://beaver/content/reactBundle.js";
         win.document.documentElement.appendChild(script);
         script.onload = () => {
-            win.renderChatApp(reactContainer);
+            win.renderAiSidebar(reactContainer);
         };
 
         // 2) Add a toggle button in the top toolbar (or from your extension logic)
