@@ -132,15 +132,19 @@
     display: inline-flex;
     align-items: center;
     cursor: default;
-    border: 1px solid #39bf6849;
-    background-color: #39bf6849;
+    border: 1px solid var(--accent-blue10);
+    background-color: var(--accent-blue10);
     border-radius: 4px;
-    color: #39bf68a9;
+    color: var(--accent-blue);
     user-select: none;
     line-height: 1.2;
     font-size: 0.85rem;
     padding-left: 0.1rem;
     padding-right: 0.2rem;
+}
+
+#zotero-beaver-chat .attachments-info svg {
+    transform: scale(1.2);
 }
 
 #zotero-beaver-chat .attachment-button:hover {
