@@ -201,7 +201,7 @@
 }
 
 #zotero-beaver-chat .assistant-message-display {
-    margin: 0 auto;    
+    margin: 0 auto;
     padding: 0.65rem;
     user-select: text;
 }
@@ -343,30 +343,25 @@
 }
 
 
-#zotero-beaver-char .markdown {
-    font-size: 12px;
-    line-height: 1.25;
-    color: var(--fill-secondary);
+#zotero-beaver-chat .markdown {
     margin-top: 0px !important;
-    margin: 0.2em 0;
-    max-width: 100%;
+    width: 100%;
+    line-height: 1.5;
+}
+
+#zotero-beaver-chat .markdown p {
     margin-block-start: 0px !important;
     margin-block-end: 0px !important;
 }
 
-#zotero-beaver-char .markdown p {
-    margin-block-start: 0px !important;
-    margin-block-end: 0px !important;
-}
-
-#zotero-beaver-char .markdown .katex {
+#zotero-beaver-chat .markdown .katex {
     /* Styles for inline math */
     display: inline-block;
     margin: 0 0.1em;
     font-size: 1.1em !important;
 }
 
-#zotero-beaver-char .markdown .katex-display {
+#zotero-beaver-chat .markdown .katex-display {
     /* Styles for display math */
     /* display: block; */
     margin-top: 5rem !;
@@ -375,181 +370,148 @@
     overflow: auto;
 }
 
-#zotero-beaver-char .markdown a {
+#zotero-beaver-chat .markdown a {
     color: var(--tag-blue);
     opacity: 0.8;
     text-decoration: none;
 }
 
-#zotero-beaver-char .markdown a:hover {
+#zotero-beaver-chat .markdown a:hover {
     text-decoration: underline;
 }
 
-#zotero-beaver-char .markdown h1,
-#zotero-beaver-char .markdown h2,
-#zotero-beaver-char .markdown h3,
-#zotero-beaver-char .markdown h4,
-#zotero-beaver-char .markdown h5,
-#zotero-beaver-char .markdown h6 {
-    margin-top: 10px;
-    margin-bottom: 10px;
+#zotero-beaver-chat .markdown h1,
+#zotero-beaver-chat .markdown h2,
+#zotero-beaver-chat .markdown h3,
+#zotero-beaver-chat .markdown h4,
+#zotero-beaver-chat .markdown h5,
+#zotero-beaver-chat .markdown h6 {
+    margin-top: 6px;
+    margin-bottom: 6px;
     font-weight: 600;
-    line-height: 1.25;
+    line-height: 1.5;
 }
 
-#zotero-beaver-char .markdown h1 {
+#zotero-beaver-chat .markdown h1 {
     font-size: 1.5em;
     padding-top: 0.3em;
-    padding-bottom: 0.3em;
-    border-bottom: 1px solid var(--fill-quinary);
+    padding-bottom: 0.2em;
 }
 
-#zotero-beaver-char .markdown h2 {
+#zotero-beaver-chat .markdown h2 {
     font-size: 1.3em;
     font-weight: 700;
     padding-top: 0.3em;
     padding-bottom: 0.3em;
-    border-bottom: 1px solid var(--fill-quinary);
 }
 
-#zotero-beaver-char .markdown h3 {
+#zotero-beaver-chat .markdown h3 {
     font-size: 1.1em;
 }
 
-#zotero-beaver-char .markdown h4 {
+#zotero-beaver-chat .markdown h4 {
     font-size: 1em;
 }
 
-#zotero-beaver-char .markdown h5 {
+#zotero-beaver-chat .markdown h5 {
     font-size: 0.9em;
 }
 
-#zotero-beaver-char .markdown h6 {
+#zotero-beaver-chat .markdown h6 {
     font-size: 0.8em;
     color: var(--fill-secondary);
 }
 
-#zotero-beaver-char .markdown p:not(:last-child) {
+#zotero-beaver-chat .markdown p:not(:last-child) {
     margin-top: 0px;
     margin-bottom: 15px;
 }
 
-#zotero-beaver-char .markdown ul,
-#zotero-beaver-char .markdown ol {
+#zotero-beaver-chat .markdown ul,
+#zotero-beaver-chat .markdown ol {
     margin: 1em 0;
     padding-left: 2em;
 }
 
-#zotero-beaver-char .markdown ul {
+#zotero-beaver-chat .markdown ul {
     list-style-type: disc;
 }
 
-#zotero-beaver-char .markdown ol {
+#zotero-beaver-chat .markdown ol {
     list-style-type: decimal;
 }
 
-#zotero-beaver-char .markdown li {
+#zotero-beaver-chat .markdown li {
     margin-bottom: 1em;
     line-height: 1.5;
 }
 
-#zotero-beaver-char .markdown ul ul,
-#zotero-beaver-char .markdown ol ul {
+#zotero-beaver-chat .markdown ul ul,
+#zotero-beaver-chat .markdown ol ul {
     list-style-type: circle;
     margin-top: 0.3em;
 }
 
-#zotero-beaver-char .markdown ol ol,
-#zotero-beaver-char .markdown ul ol {
+#zotero-beaver-chat .markdown ol ol,
+#zotero-beaver-chat .markdown ul ol {
     list-style-type: lower-latin;
     margin-top: 0.3em;
 }
 
-#zotero-beaver-char .markdown ul ul ul,
-#zotero-beaver-char .markdown ol ul ul {
+#zotero-beaver-chat .markdown ul ul ul,
+#zotero-beaver-chat .markdown ol ul ul {
     list-style-type: square;
 }
 
-#zotero-beaver-char .markdown ol ol ol,
-#zotero-beaver-char .markdown ul ol ol {
+#zotero-beaver-chat .markdown ol ol ol,
+#zotero-beaver-chat .markdown ul ol ol {
     list-style-type: lower-roman;
 }
 
-#zotero-beaver-char .markdown code {
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-    font-size: 85%;
-    background-color: rgba(27, 31, 35, 0.05);
-    border-radius: 3px;
-    padding: 0.2em 0.4em;
-}
-
-#zotero-beaver-char .markdown pre {
-    margin-top: 0;
-    margin-bottom: 0px;
-    overflow: auto;
-    word-wrap: normal;
-    padding: 10px;
-    font-size: 85%;
+#zotero-beaver-chat .markdown pre {
+    margin: 1.2em 0;
+    padding: 1em;
+    /* width: 100%; */
+    /* max-width: 100%; */
+    overflow-x: auto;
+    font-size: 90%;
     line-height: 1.45;
-    background-color: var(--fill-quinary) !important;
-    border-radius: 6px;
+    background-color: var(--fill-senary) !important;
+    border: 1px solid var(--fill-quinary) !important;
+    border-radius: 2px;
 }
 
-#zotero-beaver-char /* .markdown pre code {
-    display: inline;
-    padding: 10px;
-    border-radius: 6px;
-    margin: 0;
-    overflow: visible;
-    line-height: inherit;
-    word-wrap: normal;
-    background-color: #F5F0ED!;
-    border: 0;
-} */
+#zotero-beaver-chat .markdown :not(pre)>code {
+    font-size: 85%;
+    padding: 0.3em;
+    border-radius: 4px;
+    background-color: var(--fill-quarternary) !important;
+    border: 1px solid var(--fill-quarternary) !important;
+} 
 
-#zotero-beaver-char .markdown pre>div {
-    /* background: #EBE3DF !important; */
-    background: rgba(27, 31, 35, 0.05) !important;
-    background-color: rgba(27, 31, 35, 0.05) !important;
-    border-radius: 10px !important;
-}
-
-#zotero-beaver-char .markdown pre>div>code {
-    /* background: #EBE3DF !important; */
-    background: rgba(27, 31, 35, 0) !important;
-    background-color: rgba(27, 31, 35, 0) !important;
-
-}
-
-#zotero-beaver-char .markdown code {
-    /* background-color: #EBE3DF !important; */
-    padding: 5px;
-    border-radius: 6px;
-}
-
-#zotero-beaver-char .markdown blockquote {
-    margin: 0;
+#zotero-beaver-chat .markdown blockquote {
+    margin-top: 0.75em;
+    margin-bottom: 0.75em;
     padding: 0 1em;
-    color: #6a737d;
-    border-left: 0.25em solid #F5F0ED;
+    border-left: 1px solid var(--fill-quarternary);
 }
 
-#zotero-beaver-char .markdown img {
+#zotero-beaver-chat .markdown img {
     max-width: 100%;
     box-sizing: content-box;
-    background-color: #F5F0ED;
+    background-color: var(--fill-primary);
 }
 
-#zotero-beaver-char .markdown hr {
-    height: 0.25em;
-    padding: 0;
-    margin: 20px 0;
-    background-color: #333333;
-    opacity: 0.075;
+#zotero-beaver-chat .markdown hr {
+    height: 1px;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    background-color: var(--fill-tertiary);
     border: 0;
+    color: var(--fill-tertiary);
 }
 
-#zotero-beaver-char .markdown table {
+#zotero-beaver-chat .markdown table {
     padding-top: 1em;
     padding-bottom: 1em;
     display: block;
@@ -559,16 +521,16 @@
     border-collapse: collapse;
 }
 
-#zotero-beaver-char .markdown table th {
+#zotero-beaver-chat .markdown table th {
     font-weight: 600;
 }
 
-#zotero-beaver-char .markdown table th,
-#zotero-beaver-char .markdown table td {
+#zotero-beaver-chat .markdown table th,
+#zotero-beaver-chat .markdown table td {
     padding: 6px 13px;
-    border: 1px solid #d3ccc8;
+    border: 1px solid var(--fill-secondary);
 }
 
-#zotero-beaver-char .markdown table tr {
-    border-top: 1px solid #d3ccc8;
+#zotero-beaver-chat .markdown table tr {
+    border-top: 1px solid var(--fill-secondary);
 }
