@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon, Settings02Icon } from './icons';
 import { toggleChat } from '../../src/ui/chat';
 import { messagesAtom } from '../atoms/messages';
-import { resetAttachmentsAtom } from '../atoms/attachments';
+import { resetAttachmentsAtom, updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
 import { useSetAtom } from 'jotai';
 
 interface HeaderProps {
@@ -12,10 +12,13 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const setMessages = useSetAtom(messagesAtom);
     const resetAttachments = useSetAtom(resetAttachmentsAtom);
-
+    const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
+    
     const handleNewThread = () => {
         setMessages([]);
         resetAttachments();
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        updateAttachmentsFromSelectedItems(items);
     }
 
     return (
