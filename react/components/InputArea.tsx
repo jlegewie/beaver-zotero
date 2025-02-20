@@ -129,7 +129,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <button
                         className="attachments-info"
                         disabled={true}
-                        // title={attachment.fullName}
+                        title={`This thread has ${threadAttachmentCount} attachments.`}
                     >
                             <Icon icon={AttachmentIcon} />
                             {threadAttachmentCount}
