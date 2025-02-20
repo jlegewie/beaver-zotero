@@ -215,6 +215,7 @@
     border: 1px solid var(--fill-quinary);
     border-radius: 6px;
     background-color: var(--fill-quinary);
+    user-select: text;
 }
 
 #zotero-beaver-chat .chat-input {
