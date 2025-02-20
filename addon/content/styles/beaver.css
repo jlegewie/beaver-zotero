@@ -118,14 +118,43 @@
     align-items: center;
     cursor: pointer;
     border: 1px solid var(--fill-quinary);
-    background-color: var(--fill-quarternary);
+    background-color: var(--fill-quinary);
     /* padding: 3px 4px; */
     border-radius: 4px;
-    color: var(--fill-tertiary);
+    color: var(--fill-secondary);
     transition: all 0.2s ease-in-out;
     user-select: none;
     line-height: 1.2;
     font-size: 0.85rem;
+}
+
+#zotero-beaver-chat .attachment-button:hover {
+    border-color: var(--fill-quarternary);
+    background-color: var(--fill-quarternary);
+    color: var(--fill-primary);
+}
+
+#zotero-beaver-chat .attachment-button:disabled {
+    cursor: default;
+}
+
+#zotero-beaver-chat .attachment-button:hover:disabled {
+    border-color: var(--fill-quarternary);
+    color: var(--fill-primary);
+}
+
+#zotero-beaver-chat .attachment-button .icon:hover {
+    color: var(--fill-primary);
+}
+
+#zotero-beaver-chat .attachment-button-icon {
+    margin-right: 0.15rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+#zotero-beaver-chat .attachment-button-icon span {
+    transform: scale(0.75);
 }
 
 #zotero-beaver-chat .attachments-info {
