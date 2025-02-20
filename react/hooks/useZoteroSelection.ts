@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { selectedItemsAtom } from "../atoms/attachments";
+import { selectedItemsAtom, removedItemKeysAtom } from "../atoms/attachments";
 
 /**
 * Listens to changes in the Zotero item selection and updates
@@ -8,18 +8,29 @@ import { selectedItemsAtom } from "../atoms/attachments";
 */
 export function useZoteroSelection() {
     const setSelectedItems = useSetAtom(selectedItemsAtom);
-        
+    const setRemovedItemKeys = useSetAtom(removedItemKeysAtom);
+    const lastSelectionKeys = useRef<string[]>([]);
+
     useEffect(() => {
         // Handler called whenever the Zotero selection changes
         const handleSelectionChange = () => {
-            Zotero.debug("selected"); // For debugging
-            
             // Retrieve newly selected items from Zotero
             const newSelectedItems: Zotero.Item[] =
             Zotero.getActiveZoteroPane().getSelectedItems() || [];
             
             // Update the selected items atom
             setSelectedItems(newSelectedItems);
+
+            // Remove newly selected items from the removed item keys
+            // Logic: When the user re-selects an item that was previously removed,
+            // we need to remove it from the removed item keys.
+            const newlySelectedKeys = newSelectedItems
+                .map((item) => item.key)
+                .filter((key) => !lastSelectionKeys.current.includes(key));
+            setRemovedItemKeys((prev) => prev.filter((key) => !newlySelectedKeys.includes(key)));
+
+            // Update the last selection keys
+            lastSelectionKeys.current = newSelectedItems.map((item) => item.key);
         };
         
         // Subscribe to Zotero selection events

@@ -1,10 +1,12 @@
 import React from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Attachment } from '../types/attachments'
+import { useSetAtom } from 'jotai'
+import { removedItemKeysAtom, selectedItemsAtom, localFilesAtom, pinnedItemsAtom } from '../atoms/attachments'
+
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     attachment: Attachment
-    onRemove?: () => void
     disabled?: boolean
 }
 
@@ -25,11 +27,24 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
     function AttachmentButton(props, ref) {
         const {
             attachment,
-            onRemove,
             className,
             disabled = false,
             ...rest
         } = props
+        const setRemovedItemKeys = useSetAtom(removedItemKeysAtom);
+        const setLocalFiles = useSetAtom(localFilesAtom);
+        const setPinnedItems = useSetAtom(pinnedItemsAtom);
+
+        const handleRemove = () => {
+            if (attachment.type === 'zotero_item') {
+                setRemovedItemKeys((prev) => [...prev, attachment.item.key])
+                setPinnedItems((prev) => prev.filter((item) => item.key !== attachment.item.key))
+                // setSelectedItems((prev) => prev.filter((item) => item.key !== attachment.item.key))
+            }
+            if (attachment.type === 'file') {
+                setLocalFiles((prev) => prev.filter((file) => file.name !== attachment.filePath))
+            }
+        }
 
         return (
             <button
@@ -44,13 +59,13 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
                     {attachment.shortName}
                 </span>
 
-                {onRemove && !disabled && (
+                {!disabled && (
                     <span 
                         role="button"
                         className="attachment-remove"
                         onClick={(e) => {
                             e.stopPropagation()
-                            onRemove()
+                            handleRemove()
                         }}
                     >
                         <CSSIcon name="x-8" className="icon-16" />
