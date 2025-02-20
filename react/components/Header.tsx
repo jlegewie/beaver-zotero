@@ -25,22 +25,22 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
         <>
             <div className="flex-1">
                 <button
-                    className="icon-button scale-12"
+                    className="icon-button scale-13"
                     onClick={() => toggleChat(Zotero.getMainWindow(), false)}
                 >
                     <Icon icon={Cancel01Icon} />
                 </button>
             </div>
             <div className="flex gap-4">
-                {/* <button className="icon-button scale-12">
+                {/* <button className="icon-button scale-13">
                     <Icon icon={Settings02Icon} />
                 </button> */}
-                <button className="icon-button scale-12">
+                <button className="icon-button scale-13">
                     <Icon icon={Clock02Icon} />
                 </button>
                 <button
                     onClick={handleNewThread}
-                    className="icon-button scale-12"
+                    className="icon-button scale-13"
                 >
                     
                     <Icon icon={PlusSignIcon} />
