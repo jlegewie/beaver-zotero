@@ -1,14 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { selectedItemsAtom, removedItemKeysAtom } from "../atoms/attachments";
+import { updateAttachmentsFromSelectedItemsAtom, removedItemKeysCache } from "../atoms/attachments";
 
 /**
 * Listens to changes in the Zotero item selection and updates
 * the selectedItemsAtom only when the selection differs from the previous one.
 */
 export function useZoteroSelection() {
-    const setSelectedItems = useSetAtom(selectedItemsAtom);
-    const setRemovedItemKeys = useSetAtom(removedItemKeysAtom);
+    const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
     const lastSelectionKeys = useRef<string[]>([]);
 
     useEffect(() => {
@@ -17,17 +16,17 @@ export function useZoteroSelection() {
             // Retrieve newly selected items from Zotero
             const newSelectedItems: Zotero.Item[] =
             Zotero.getActiveZoteroPane().getSelectedItems() || [];
-            
-            // Update the selected items atom
-            setSelectedItems(newSelectedItems);
 
-            // Remove newly selected items from the removed item keys
+            // Remove newly selected items from the removed item keys cache
             // Logic: When the user re-selects an item that was previously removed,
-            // we need to remove it from the removed item keys.
+            // we need to remove it from the removed item keys cache.
             const newlySelectedKeys = newSelectedItems
                 .map((item) => item.key)
                 .filter((key) => !lastSelectionKeys.current.includes(key));
-            setRemovedItemKeys((prev) => prev.filter((key) => !newlySelectedKeys.includes(key)));
+            newlySelectedKeys.forEach((key) => removedItemKeysCache.delete(key));
+
+            // Update the selected items atom
+            updateAttachmentsFromSelectedItems(newSelectedItems);
 
             // Update the last selection keys
             lastSelectionKeys.current = newSelectedItems.map((item) => item.key);
@@ -42,5 +41,5 @@ export function useZoteroSelection() {
             // @ts-ignore itemsView is not fully typed
             Zotero.getActiveZoteroPane().itemsView.onSelect.removeListener(handleSelectionChange);
         };
-    }, [setSelectedItems]);
+    }, [updateAttachmentsFromSelectedItems]);
 }

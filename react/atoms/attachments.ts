@@ -1,106 +1,162 @@
+import { v4 as uuidv4 } from 'uuid';
 import { atom } from "jotai";
-import { Attachment, createAttachmentFromFile, createAttachmentFromZoteroItem, resolveZoteroItemAttachmentAsync } from "../types/attachments";
+import { Attachment, ZoteroAttachment, FileAttachment, RemoteFileAttachment } from "../types/attachments";
 import { threadAttachmentKeysAtom } from "./messages";
+import { getFormattedReferences } from '../../src/utils/citations'
 
-// Selected items
-export const selectedItemsAtom = atom<Zotero.Item[]>([]);
+/**
+ * Factory functions to create attachments from Zotero items and files
+ */
+export function createAttachmentFromZoteroItem(
+    item: Zotero.Item,
+    pinned: boolean = false
+): ZoteroAttachment {
+    // Get the formatted reference from Zotero item
+    const formattedReferences = getFormattedReferences([item])[0]
+    
+    // Return attachment object
+    return {
+        id: uuidv4(),
+        type: "zotero_item",
+        shortName: formattedReferences.inTextCitation,
+        fullName: formattedReferences.bibliography,
+        pinned: pinned,
+        item: item,
+        timestamp: Date.now()
+    } as ZoteroAttachment;
+}
 
-// Pinned and removed attachments
-export const pinnedItemsAtom = atom<Zotero.Item[]>([]);
-export const removedItemKeysAtom = atom<string[]>([]);
-
-// File attachments
-export const localFilesAtom = atom<File[]>([]);
-
-
-// "base" attachments with synchronous data (without the async fields resolved)
-export const baseAttachmentsAtom = atom<Attachment[]>((get) => {
-    const selectedItems = get(selectedItemsAtom);
-    const pinnedItems = get(pinnedItemsAtom);
-    const removedItemKeys = get(removedItemKeysAtom);
-    const localFiles = get(localFilesAtom);
-    // Attachments from previous messages
-    const threadAttachmentKeys = get(threadAttachmentKeysAtom);
-
-    // Filter out any items that appear in `removedItemKeys`
-    const removedIDs = new Set(removedItemKeys);
-
-    // For pinned or selected Zotero items, create a minimal "base" attachment
-    const pinned = pinnedItems
-        .filter((itm) => !removedIDs.has(itm.key))
-        .filter((itm) => !threadAttachmentKeys.includes(itm.key))
-        .map((itm) => createAttachmentFromZoteroItem(itm, /*pinned*/ true));
-
-    const selected = selectedItems
-        .filter((itm) => !removedIDs.has(itm.key))
-        .filter((itm) => !threadAttachmentKeys.includes(itm.key))
-        .map((itm) => createAttachmentFromZoteroItem(itm, /*pinned*/ false));
-
-    // For local files, create a base "file" attachment
-    const local = localFiles.map((f) => createAttachmentFromFile(f));
-
-    // Merge them into a single array
-    return [...pinned, ...selected, ...local].sort((a, b) => a.timestamp - b.timestamp);
-});
-
-// store a mapping from attachment.id => partial fields
-export const resolvedFieldsAtom = atom<Record<string, Partial<Attachment>>>({});
+export function createAttachmentFromFile(file: File): FileAttachment {
+    return {
+        id: uuidv4(),
+        type: "file",
+        shortName: file.name,
+        fullName: file.name,
+        pinned: true,
+        filePath: file.name,
+        timestamp: Date.now()
+    };
+}
 
 
-// Re-runs every time baseAttachmentsAtom changes
-export const resolveAttachmentsEffectAtom = atom(
-    // READ function: read "baseAttachmentsAtom" so changes re-trigger the effect
-    (get) => {
-        const baseList = get(baseAttachmentsAtom);
-        return baseList.map((a) => a.id).join(",");
-    },
+/**
+ * Atom to store the attachments with setters to add, remove, and toggle pinned attachments
+ */
+export const attachmentsAtom = atom<Attachment[]>([]);
 
-    // WRITE function: do async fetch for each attachment
-    async (get, set) => {
-        const baseList = get(baseAttachmentsAtom);
-        const resolvedMap = get(resolvedFieldsAtom);
+export const updateAttachmentsFromSelectedItemsAtom = atom(
+    null,
+    (get, set, selectedItems: Zotero.Item[]) => {
+        const currentAttachments = get(attachmentsAtom);
+        const threadAttachmentKeys = get(threadAttachmentKeysAtom);
 
-        for (const base of baseList) {
-            // If we already have resolved data for this attachment, skip
-            if (resolvedMap[base.id]?.valid !== undefined) {
-                continue;
-            }
+        // Map of existing Zotero attachments by item.key
+        const existingMap = new Map(
+            currentAttachments
+                .filter((att) => att.type === 'zotero_item')
+                .map((att) => [att.item.key, att])
+        );
 
-            if (base.type === "zotero_item") {
-                // We want to re-fetch the "full" version
-                // from the existing createAttachmentFromZoteroItem
-                try {
-                    // This is your original async function
-                    const resolvedData = await resolveZoteroItemAttachmentAsync(base.item);
+        // Pinned attachments
+        const pinnedAttachments = currentAttachments
+            .filter((att) => att.type === 'zotero_item' && att.pinned) as ZoteroAttachment[];
+        
+        // Excluded keys
+        const excludedKeys = new Set([
+            ...removedItemKeysCache,
+            ...threadAttachmentKeys,
+            ...pinnedAttachments.map((att) => att.item.key)
+        ]);
 
-                    // Update the record in resolvedFieldsAtom
-                    set(resolvedFieldsAtom, (prev) => ({
-                        ...prev,
-                        [base.id]: resolvedData
-                    }));
-                } catch (err) {
-                    console.error("Failed to resolve Zotero item:", err);
-                }
-            } else if (base.type === "file") {
-                // Any async checks for file attachments
-            } else if (base.type === "remote_file") {
-                // Any async checks for remote file attachments
-            }
+        // Updated list of attachments
+        const newAttachments = [
+            ...pinnedAttachments,
+            ...selectedItems
+                .filter((item) => !excludedKeys.has(item.key))
+                .map((item) => {
+                    if (existingMap.has(item.key)) {
+                        return existingMap.get(item.key)!;
+                    }
+                    return createAttachmentFromZoteroItem(item, false);
+                })
+        ];
+
+        // Combine with non-Zotero attachments (e.g. file attachments) that already exist.
+        const nonZoteroAttachments = currentAttachments.filter((att) => att.type !== 'zotero_item');
+
+        // Update state: merge and sort by timestamp.
+        set(
+            attachmentsAtom,
+            [...newAttachments, ...nonZoteroAttachments].sort((a, b) => a.timestamp - b.timestamp)
+        );
+    }
+);
+
+// Setter to add a file attachment
+export const addFileAttachmentAtom = atom(
+    null,
+    (get, set, file: File) => {
+        const currentAttachments = get(attachmentsAtom);
+        // Use file.name as a unique identifier for files
+        const exists = currentAttachments.find(
+            (att) => att.type === 'file' && att.filePath === file.name
+        );
+        if (!exists) {
+            set(attachmentsAtom, [...currentAttachments, createAttachmentFromFile(file)]);
         }
     }
 );
 
-// Derived atom that combines base attachments with resolved fields
-export const currentAttachmentsAtom = atom((get) => {
-    get(resolveAttachmentsEffectAtom);
-    // get(resolveAttachmentsEffectAtom);
+// Setter to remove an attachment by id
+export const removedItemKeysCache: Set<string> = new Set();
+export const removeAttachmentAtom = atom(
+    null,
+    (get, set, attachment: Attachment) => {
+        const currentAttachments = get(attachmentsAtom);
+        if (attachment.type === 'zotero_item') {
+            removedItemKeysCache.add(attachment.item.key);
+        }
+        set(
+            attachmentsAtom,
+            currentAttachments.filter((att) => att.id !== attachment.id)
+        );
+    }
+);
 
-    const baseList = get(baseAttachmentsAtom);
-    const resolvedMap = get(resolvedFieldsAtom);
+// Setter to toggle the pinned state of an attachment by id
+export const togglePinAttachmentAtom = atom(
+    null,
+    (get, set, attachmentId: string) => {
+        const currentAttachments = get(attachmentsAtom);
+        const updated = currentAttachments.map((att) =>
+            att.id === attachmentId ? { ...att, pinned: !att.pinned } : att
+        );
+        set(attachmentsAtom, updated);
+    }
+);
 
-    // Merge them
-    return baseList.map((base) => {
-        const resolved = resolvedMap[base.id] || {};
-        return { ...base, ...resolved };
-    });
-});
+
+/**
+ * Validate attachments
+ */
+
+// TODO: Add more mime types ('text/html')
+const VALID_MIME_TYPES = ['application/pdf', 'image/png'] as const;
+type ValidMimeType = typeof VALID_MIME_TYPES[number];
+
+function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
+    return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
+}
+
+export const isValidAttachment = async (attachment: Attachment): Promise<boolean> => {
+    if (attachment.type === 'zotero_item') {
+        const item = attachment.item;
+        if (item.isNote()) return true;
+        const attachmentItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
+        const attachmentExists = attachmentItem ? await attachmentItem.fileExists() : false;
+        // @ts-ignore getAttachmentMIMEType exists
+        const mimeType = attachmentItem ? attachmentItem.getAttachmentMIMEType() : '';
+        return attachmentExists && isValidMimeType(mimeType);
+    }
+    return true;
+}

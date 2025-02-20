@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon, AttachmentIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
@@ -9,7 +9,7 @@ import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
-import { baseAttachmentsAtom, currentAttachmentsAtom, resolveAttachmentsEffectAtom } from '../atoms/attachments';
+import { attachmentsAtom } from '../atoms/attachments';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
@@ -24,21 +24,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const currentAttachments = useAtomValue(currentAttachmentsAtom);
+    const attachments = useAtomValue(attachmentsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const streamToMessage = useSetAtom(streamToMessageAtom);
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
-    const [, resolveAttachments] = useAtom(resolveAttachmentsEffectAtom);
-    const baseAttachments = useAtomValue(baseAttachmentsAtom);
-
-    // Subscribe to baseAttachments changes to trigger the async resolution
-    useEffect(() => {
-        resolveAttachments();
-    }, [baseAttachments, resolveAttachments]);
-
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -48,7 +40,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: currentAttachments.filter((attachment) => attachment.valid === true) as Attachment[],
+                attachments: attachments.filter((attachment) => attachment.valid === true) as Attachment[],
             })
         ];
 
@@ -135,7 +127,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             {threadAttachmentCount}
                     </button>
                 )}
-                {(currentAttachments).map((attachment, index) => (
+                {attachments.map((attachment, index) => (
                     <AttachmentButton
                         key={index}
                         attachment={attachment as Attachment}

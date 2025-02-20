@@ -1,8 +1,8 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Attachment } from '../types/attachments'
 import { useSetAtom } from 'jotai'
-import { removedItemKeysAtom, selectedItemsAtom, localFilesAtom, pinnedItemsAtom } from '../atoms/attachments'
+import { removeAttachmentAtom, togglePinAttachmentAtom, isValidAttachment } from '../atoms/attachments'
 
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -31,31 +31,48 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
             disabled = false,
             ...rest
         } = props
-        const setRemovedItemKeys = useSetAtom(removedItemKeysAtom);
-        const setLocalFiles = useSetAtom(localFilesAtom);
-        const setPinnedItems = useSetAtom(pinnedItemsAtom);
+        const [isValid, setIsValid] = useState(true);
+        const [isHovered, setIsHovered] = useState(false);
+        const removeAttachment = useSetAtom(removeAttachmentAtom);
+        const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
 
         const handleRemove = () => {
-            if (attachment.type === 'zotero_item') {
-                setRemovedItemKeys((prev) => [...prev, attachment.item.key])
-                setPinnedItems((prev) => prev.filter((item) => item.key !== attachment.item.key))
-                // setSelectedItems((prev) => prev.filter((item) => item.key !== attachment.item.key))
-            }
-            if (attachment.type === 'file') {
-                setLocalFiles((prev) => prev.filter((file) => file.name !== attachment.filePath))
-            }
+            removeAttachment(attachment)
         }
+
+        const handlePin = () => {
+            togglePinAttachment(attachment.id);
+        }
+
+        useEffect(() => {
+            const checkAttachmentValidity = async () => {
+                console.log('Checking attachment validity:', attachment.id);
+                setIsValid(await isValidAttachment(attachment));
+            }
+            checkAttachmentValidity();
+        }, [attachment])
 
         return (
             <button
                 ref={ref}
-                title={attachment.fullName}
+                // title={attachment.fullName}
+                title={attachment.id}
                 className={`attachment-button ${className || ''}`}
                 disabled={disabled}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                onClick={(e) => {
+                    e.stopPropagation()
+                    handlePin()
+                }}
                 {...rest}
             >
+                {/* {isHovered && isValid === true && attachment.type === 'zotero_item' && !pinnedItems.includes(attachment.item)
+                    ? <span className="attachment-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
+                    : getIconElement(attachment)
+                } */}
                 {getIconElement(attachment)}
-                <span className={attachment.valid === false ? 'color-red' : undefined}>
+                <span className={!isValid ? 'color-red' : undefined}>
                     {attachment.shortName}
                 </span>
 
