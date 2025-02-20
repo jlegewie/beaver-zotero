@@ -1,0 +1,34 @@
+import React from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm'
+// import rehypeKatex from 'rehype-katex';
+// import 'katex/dist/katex.min.css';
+
+type MarkdownRendererProps = {
+    className: string;
+    content: string;
+};
+
+const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className }) => {
+    return (
+        <ReactMarkdown
+            // "markdown-body"
+            className={className}
+            remarkPlugins={[remarkMath,remarkGfm]}
+            // rehypePlugins={[rehypeKatex]}
+        >
+            {content
+                .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
+                .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`)
+                .replace(/^## Introduction\n\n/, '')
+                // Inline math
+                .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
+                // Display math
+                .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
+            }
+        </ReactMarkdown>
+    );
+};
+
+export default MarkdownRenderer;
