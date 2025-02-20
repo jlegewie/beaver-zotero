@@ -9,7 +9,7 @@ import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
-import { attachmentsAtom } from '../atoms/attachments';
+import { attachmentsAtom, isValidAttachment, resetAttachmentsAtom } from '../atoms/attachments';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
@@ -31,22 +31,33 @@ const InputArea: React.FC<InputAreaProps> = ({
     const streamToMessage = useSetAtom(streamToMessageAtom);
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
+    const resetAttachments = useSetAtom(resetAttachmentsAtom);
 
-    const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
+
+        // Validate attachments
+        const validAttachments = [];
+        for (const attachment of attachments) {
+            if (await isValidAttachment(attachment)) {
+                validAttachments.push(attachment);
+            }
+        }
 
         // Add user message to messages atom
         const newMessages = [
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: attachments.filter((attachment) => attachment.valid === true) as Attachment[],
+                attachments: validAttachments,
             })
         ];
 
         // Add assistant message to messages atom
         const assistantMsg = createAssistantMessage();
         setMessages([...newMessages, assistantMsg]);
+        resetAttachments();
+
 
         // Chat completion
         chatCompletion(

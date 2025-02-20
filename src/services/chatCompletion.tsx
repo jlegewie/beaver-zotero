@@ -1,5 +1,6 @@
 import { ChatMessage } from "react/types/messages";
 import { fileToContentPart, urlToContentPart, APIMessage, ContentPart } from "./OpenAIProvider";
+import { ZoteroAttachment } from "react/types/attachments";
 
 const SYSTEM_PROMPT = `You are a helpful assistant that helps researchers answer questions related to research papers, reports, and other research-related documents.
 
@@ -16,22 +17,80 @@ Follow these rules when refering to documents:
     - For multiple documents: "[ID1, ID2, ID3]"
 `
 
+async function getNoteAsMarkdown(item: Zotero.Item) {
+    const translation = new Zotero.Translate.Export();
+    translation.setItems([item]);
+    translation.setTranslator(Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN);
+    let markdown = '';
+    translation.setHandler("done", (obj: any, worked: boolean) => {
+        if (worked) {
+            markdown = obj.string.replace(/\r\n/g, '\n');
+        }
+    });
+    await translation.translate();
+    return markdown;
+}
+
+
+const getContentPartFromZoteroNote = async (item: Zotero.Item): Promise<ContentPart[]> => {
+    // const content = await getNoteAsMarkdown(item);
+    // @ts-ignore unescapeHTML exists
+    const content = Zotero.Utilities.unescapeHTML(item.getNote());
+    const title = item.getNoteTitle();
+    
+    return [
+        {
+            type: 'text',
+            text: `id: ${item.key}\ntype: Note\nname: ${title}\n\n${content}`
+        }
+    ];
+}
+
+
+const getContentPartFromZoteroAttachment = async (attachment: ZoteroAttachment): Promise<ContentPart[]> => {
+    const item = attachment.item;
+    const effectiveItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
+    if(!effectiveItem || effectiveItem.isRegularItem()) return [];
+
+    if(effectiveItem.isNote()) {
+        return await getContentPartFromZoteroNote(effectiveItem);
+    }
+    if(effectiveItem.isAttachment()) {
+        const filePath = effectiveItem ? await effectiveItem.getFilePath() : undefined;
+        if(filePath) {
+            return [
+                // {
+                //     type: 'text',
+                //     text: attachment.fullName
+                // },
+                await fileToContentPart(filePath)
+            ];
+        }
+    }
+
+    return [];
+}
+
+
 const chatMessageToRequestMessage = async (message: ChatMessage): Promise<APIMessage> => {
     if (message.role === 'user') {
         
         // Convert attachments to content parts
         const attachmentsContent: ContentPart[] = [];
         for (const attachment of message.attachments || []) {
-            if (!attachment.valid) continue;
             switch (attachment.type) {
-                case 'zotero_item':
+                case 'zotero_item': {
+                    const contentParts = await getContentPartFromZoteroAttachment(attachment);
+                    attachmentsContent.push(...contentParts);
+                    break;
+                }
                 case 'file':
-                    if (attachment.filePath) {
-                        const contentPart = await fileToContentPart(attachment.filePath);
-                        if (contentPart) {
-                            attachmentsContent.push(contentPart);
-                        }
-                    }
+                    // if (attachment.filePath) {
+                    //     const contentPart = await fileToContentPart(attachment.filePath);
+                    //     if (contentPart) {
+                    //         attachmentsContent.push(contentPart);
+                    //     }
+                    // }
                     break;
                 case 'remote_file':
                     attachmentsContent.push(urlToContentPart(attachment.url));
