@@ -14,8 +14,7 @@ export function useZoteroSelection() {
         // Handler called whenever the Zotero selection changes
         const handleSelectionChange = () => {
             // Retrieve newly selected items from Zotero
-            const newSelectedItems: Zotero.Item[] =
-            Zotero.getActiveZoteroPane().getSelectedItems() || [];
+            const newSelectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
 
             // Remove newly selected items from the removed item keys cache
             // Logic: When the user re-selects an item that was previously removed,
