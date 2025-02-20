@@ -13,6 +13,7 @@ import { baseAttachmentsAtom, currentAttachmentsAtom, resolveAttachmentsEffectAt
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
+import { Attachment } from '../types/attachments';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -45,7 +46,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: currentAttachments.filter((attachment) => attachment.valid),
+                attachments: currentAttachments.filter((attachment) => attachment.valid === true) as Attachment[],
             })
         ];
 
@@ -89,10 +90,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         console.log('Adding context item');
     };
 
-    const handleRemoveAttachment = (index: number) => {
-        // setUserAttachments(userAttachments.filter((_, i) => i !== index));
-    };
-
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Meta') {
             setIsCommandPressed(true);
@@ -129,8 +126,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 {(currentAttachments).map((attachment, index) => (
                     <AttachmentButton
                         key={index}
-                        attachment={attachment}
-                        onRemove={() => handleRemoveAttachment(index)}
+                        attachment={attachment as Attachment}
                     />
                 ))}
             </div>
