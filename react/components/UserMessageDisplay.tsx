@@ -23,6 +23,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                         <AttachmentButton
                             key={index}
                             attachment={attachment}
+                            disabled={true}
                         />
                     ))}
                 </div>
