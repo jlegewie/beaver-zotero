@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { Attachment, createAttachmentFromFile, createAttachmentFromZoteroItem, resolveZoteroItemAttachmentAsync } from "../types/attachments";
+import { threadAttachmentKeysAtom } from "./messages";
 
 // Selected items
 export const selectedItemsAtom = atom<Zotero.Item[]>([]);
@@ -18,6 +19,8 @@ export const baseAttachmentsAtom = atom<Attachment[]>((get) => {
     const pinnedItems = get(pinnedItemsAtom);
     const removedItemKeys = get(removedItemKeysAtom);
     const localFiles = get(localFilesAtom);
+    // Attachments from previous messages
+    const threadAttachmentKeys = get(threadAttachmentKeysAtom);
 
     // Filter out any items that appear in `removedItemKeys`
     const removedIDs = new Set(removedItemKeys);
@@ -25,10 +28,12 @@ export const baseAttachmentsAtom = atom<Attachment[]>((get) => {
     // For pinned or selected Zotero items, create a minimal "base" attachment
     const pinned = pinnedItems
         .filter((itm) => !removedIDs.has(itm.key))
+        .filter((itm) => !threadAttachmentKeys.includes(itm.key))
         .map((itm) => createAttachmentFromZoteroItem(itm, /*pinned*/ true));
 
     const selected = selectedItems
         .filter((itm) => !removedIDs.has(itm.key))
+        .filter((itm) => !threadAttachmentKeys.includes(itm.key))
         .map((itm) => createAttachmentFromZoteroItem(itm, /*pinned*/ false));
 
     // For local files, create a base "file" attachment

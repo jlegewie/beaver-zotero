@@ -20,6 +20,28 @@ export const systemMessageAtom = atom((get) => {
     return messages.find((message) => message.role === 'system')?.content;
 });
 
+// Derived atom for user messages only
+export const userMessagesFromThreadAtom = atom((get) => {
+    const messages = get(messagesAtom);
+    return messages.filter(message => message.role === 'user');
+});
+
+// Derive attachment keys from messages in conversation
+export const threadAttachmentKeysAtom = atom((get) => {
+    const userMessages = get(userMessagesFromThreadAtom);
+    const attachments = userMessages.flatMap((message) => message.attachments || []);
+    const keys = attachments
+        .filter((attachment) => attachment.type == 'zotero_item')
+        .map((attachment) => attachment.item.key);
+    return keys;
+});
+
+export const threadAttachmentCountAtom = atom((get) => {
+    const userMessages = get(userMessagesFromThreadAtom);
+    const attachments = userMessages.flatMap((message) => message.attachments || []);
+    return attachments.length;
+});
+
 // Setter atoms
 export const setMessageContentAtom = atom(
     null,

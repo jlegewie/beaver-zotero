@@ -6,3 +6,4 @@ export { default as Clock02Icon } from './icons/Clock02Icon';
 export { default as PlusSignIcon } from './icons/PlusSignIcon';
 export { default as Settings02Icon } from './icons/Settings02Icon';
 export { default as Settings02SolidIcon } from './icons/Settings02SolidIcon';
+export { default as AttachmentIcon } from './icons/AttachmentIcon';

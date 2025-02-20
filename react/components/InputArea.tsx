@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
-import { Icon, PlusSignIcon } from './icons';
+import { Icon, PlusSignIcon, AttachmentIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
     isStreamingAtom,
@@ -14,6 +14,7 @@ import { baseAttachmentsAtom, currentAttachmentsAtom, resolveAttachmentsEffectAt
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { Attachment } from '../types/attachments';
+import { threadAttachmentCountAtom } from '../atoms/messages';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -28,6 +29,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const streamToMessage = useSetAtom(streamToMessageAtom);
+    const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const [, resolveAttachments] = useAtom(resolveAttachmentsEffectAtom);
     const baseAttachments = useAtomValue(baseAttachmentsAtom);
@@ -123,6 +125,16 @@ const InputArea: React.FC<InputAreaProps> = ({
                 >
                         <Icon icon={PlusSignIcon} />
                 </button>
+                {threadAttachmentCount > 0 && (
+                    <button
+                        className="attachments-info"
+                        disabled={true}
+                        // title={attachment.fullName}
+                    >
+                            <Icon icon={AttachmentIcon} />
+                            {threadAttachmentCount}
+                    </button>
+                )}
                 {(currentAttachments).map((attachment, index) => (
                     <AttachmentButton
                         key={index}
