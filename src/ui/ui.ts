@@ -43,7 +43,8 @@ export class BeaverUIFactory {
         // 1) Initialize UI and add chat panel to item pane
         const chatPanel = win.document.createXULElement("vbox");
         chatPanel.setAttribute("id", "zotero-beaver-chat");
-        chatPanel.setAttribute("class", "flex flex-1 h-full");
+        chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
+        chatPanel.setAttribute("style", "min-width: 0px;");
         chatPanel.setAttribute("hidden", "true");
 
         itemPane?.appendChild(chatPanel);
@@ -51,7 +52,7 @@ export class BeaverUIFactory {
         // Create a normal div inside that vbox as mount point for the React component
         const reactContainer = win.document.createElement("div");
         reactContainer.setAttribute("id", "beaver-react-root");
-        reactContainer.setAttribute("class", "flex flex-1 flex-col h-full");
+        reactContainer.setAttribute("class", "flex flex-1 flex-col h-full min-w-0");
         chatPanel.appendChild(reactContainer);
 
         /**

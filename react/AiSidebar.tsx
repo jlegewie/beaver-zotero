@@ -27,14 +27,14 @@ const AiSidebar = () => {
     }, []); // Run once on mount
     
     return (
-        <div className="h-full flex flex-col gap-3">
+        <div className="h-full flex flex-col gap-3 min-w-0">
             {/* Header */}
-            <div id="beaver-header" className="flex flex-row items-center px-3 pt-2">
+            <div id="beaver-header" className="flex flex-row items-center px-3 pt-2 mb-2">
                 <Header />
             </div>
 
             {/* Messages area (scrollable) */}
-            <div id="beaver-messages" className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar">
+            <div id="beaver-messages" className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0">
                 {messages.map((message, index) => (
                     <div key={index} className="px-3">
                         {message.role === 'user' && (

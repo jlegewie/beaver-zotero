@@ -30,7 +30,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             )}
 
             {/* Message content */}
-            <div className="mb-2 -ml-1">
+            <div className="-ml-1">
                 {message.content}
             </div>
 

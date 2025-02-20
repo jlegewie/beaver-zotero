@@ -33,6 +33,8 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // 4) Dispatch event to toggle chat
         const event = new win.CustomEvent("toggleChat", { detail: { visible: true } });
         win.__beaverEventBus.dispatchEvent(event);
+        // @ts-ignore zotero item-pane is not typed
+        chat.hidden = false;
 
         // 5) Mark that chat is active
         // @ts-ignore zotero item-pane is not typed
@@ -50,6 +52,8 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // Dispatch event to toggle chat
         const event = new win.CustomEvent("toggleChat", { detail: { visible: false } });
         win.__beaverEventBus.dispatchEvent(event);
+        // @ts-ignore zotero item-pane is not typed
+        chat.hidden = true;
 
         // @ts-ignore zotero item-pane is not typed
         itemPane.dataset.beaverChatActive = "false";
