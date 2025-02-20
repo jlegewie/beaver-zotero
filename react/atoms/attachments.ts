@@ -44,6 +44,14 @@ export function createAttachmentFromFile(file: File): FileAttachment {
  */
 export const attachmentsAtom = atom<Attachment[]>([]);
 
+export const resetAttachmentsAtom = atom(
+    null,
+    (_, set) => {
+        removedItemKeysCache.clear();
+        set(attachmentsAtom, []);
+    }
+);
+
 export const updateAttachmentsFromSelectedItemsAtom = atom(
     null,
     (get, set, selectedItems: Zotero.Item[]) => {
