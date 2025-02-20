@@ -40,7 +40,7 @@ export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentBu
                 {...rest}
             >
                 {getIconElement(attachment)}
-                <span className={attachment.valid ? undefined : 'color-red'}>
+                <span className={attachment.valid === false ? 'color-red' : undefined}>
                     {attachment.shortName}
                 </span>
 

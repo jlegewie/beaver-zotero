@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
@@ -9,10 +9,9 @@ import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
-import { userAttachmentsAtom } from '../atoms/attachments';
+import { baseAttachmentsAtom, currentAttachmentsAtom, resolveAttachmentsEffectAtom } from '../atoms/attachments';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
-import { createAttachmentFromZoteroItem } from '../types/attachments';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 
 interface InputAreaProps {
@@ -23,12 +22,20 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const [userAttachments, setUserAttachments] = useAtom(userAttachmentsAtom);
+    const currentAttachments = useAtomValue(currentAttachmentsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const streamToMessage = useSetAtom(streamToMessageAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
+    const [, resolveAttachments] = useAtom(resolveAttachmentsEffectAtom);
+    const baseAttachments = useAtomValue(baseAttachmentsAtom);
+
+    // Subscribe to baseAttachments changes to trigger the async resolution
+    useEffect(() => {
+        resolveAttachments();
+    }, [baseAttachments, resolveAttachments]);
+
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
@@ -38,7 +45,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: userAttachments.filter((attachment) => attachment.valid),
+                attachments: currentAttachments.filter((attachment) => attachment.valid),
             })
         ];
 
@@ -64,7 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         // Clear input
         setUserMessage('');
-        setUserAttachments([]);
+        // setUserAttachments([]);
 
         // If command is pressed, handle library search
         if (isCommandPressed) {
@@ -80,14 +87,10 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleAddAttachments = async () => {
         console.log('Adding context item');
-        // Get selected items from Zotero
-        const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        // Add attachments to current user message
-        setUserAttachments(await Promise.all(items.map((item) => createAttachmentFromZoteroItem(item))));
     };
 
     const handleRemoveAttachment = (index: number) => {
-        setUserAttachments(userAttachments.filter((_, i) => i !== index));
+        // setUserAttachments(userAttachments.filter((_, i) => i !== index));
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -123,7 +126,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 >
                         <Icon icon={PlusSignIcon} />
                 </button>
-                {(userAttachments).map((attachment, index) => (
+                {(currentAttachments).map((attachment, index) => (
                     <AttachmentButton
                         key={index}
                         attachment={attachment}

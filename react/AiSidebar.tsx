@@ -4,14 +4,13 @@ import InputArea from "./components/InputArea"
 import AssistantMessageDisplay from "./components/AssistantMessageDisplay"
 import Header from "./components/Header"
 import { messagesAtom } from './atoms/messages';
-import { userAttachmentsAtom } from './atoms/attachments';
+import { selectedItemsAtom } from './atoms/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { createAttachmentFromZoteroItem } from './types/attachments';
 import { useZoteroSelection } from './hooks/useZoteroSelection';
 
 const AiSidebar = () => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
-    const setUserAttachments = useSetAtom(userAttachmentsAtom);
+    const setSelectedItemsAtom = useSetAtom(selectedItemsAtom);
     const messages = useAtomValue(messagesAtom);
     useZoteroSelection();
     
@@ -22,7 +21,7 @@ const AiSidebar = () => {
         // Set user attachments from selected Zotero items
         const loadSelectedItems = async () => {
             const items = Zotero.getActiveZoteroPane().getSelectedItems();
-            setUserAttachments(await Promise.all(items.map((item) => createAttachmentFromZoteroItem(item))));
+            setSelectedItemsAtom(items);
         };
         loadSelectedItems();
     }, []); // Run once on mount
