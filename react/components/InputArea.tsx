@@ -35,6 +35,10 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
+        
+        if (isStreaming) {
+            return;
+        }
 
         // Validate attachments
         const validAttachments = [];
