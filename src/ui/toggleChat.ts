@@ -1,3 +1,4 @@
+import { eventManager } from '../../react/events/eventManager';
 
 /**
 * Toggle the chat panel on and off.
@@ -6,8 +7,7 @@
 * @param turnOn - Whether to turn the chat on or off.
 */
 export function triggerToggleChat(win: Window) {
-    const event = new win.CustomEvent("toggleChat", { 
-        detail: { location: "library" } 
+    eventManager.dispatch('toggleChat', { 
+        location: 'library'
     });
-    win.__beaverEventBus.dispatchEvent(event);
 }
