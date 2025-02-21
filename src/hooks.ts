@@ -176,9 +176,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	// Remove Beaver menu items
 	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
 	Zotero.ItemPaneManager.unregisterInfoRow('beaver-item-pane-status');
-	// Remove chat panel from item pane
-	const chatPanel = win.document.querySelector("#zotero-beaver-chat");
-	chatPanel?.remove();	
 }
 
 function loadStylesheet() {

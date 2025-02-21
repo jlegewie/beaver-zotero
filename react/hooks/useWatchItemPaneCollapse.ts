@@ -11,7 +11,7 @@ export function useWatchItemPaneCollapse() {
     useEffect(() => {
         const win = Zotero.getMainWindow();
         const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
-        const chat = itemPane?.querySelector("#zotero-beaver-chat");
+        const chat = itemPane?.querySelector("#beaver-pane-library");
         if (!itemPane || !chat) return;
         
         const observer = new win.MutationObserver((mutations: MutationRecord[]) => {

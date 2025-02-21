@@ -18,7 +18,7 @@ export function useVisibility(location: 'library' | 'reader') {
         
         // Determine elements based on the location
         const win = Zotero.getMainWindow();
-        const chatSelector = `#zotero-beaver-chat${location === 'reader' ? '-context' : ''}`;
+        const chatSelector = `#beaver-pane-${location}`;
         const pane = location === 'library'
             ? win.document.querySelector("#zotero-item-pane")
             : win.document.querySelector("#zotero-context-pane");

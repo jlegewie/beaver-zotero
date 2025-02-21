@@ -7,7 +7,9 @@ import { eventManager } from '../../react/events/eventManager';
 * @param turnOn - Whether to turn the chat on or off.
 */
 export function triggerToggleChat(win: Window) {
+    const selectedType = win.Zotero_Tabs.selectedType;
+    const location = selectedType === 'library' ? 'library' : 'reader';
     eventManager.dispatch('toggleChat', { 
-        location: 'library'
+        location: location
     });
 }

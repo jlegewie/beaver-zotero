@@ -63,7 +63,7 @@ export class BeaverUIFactory {
             return;
         }
         const { chatPanel: itemChatPanel, reactContainer: itemReactContainer } = 
-            createMountingElement("zotero-beaver-chat", "library");
+            createMountingElement("beaver-pane-library", "library");
         itemPane?.appendChild(itemChatPanel);
 
         // Create and append mounting elements to context pane (reader)
@@ -73,7 +73,7 @@ export class BeaverUIFactory {
             return;
         }
         const { chatPanel: contextChatPanel, reactContainer: contextReactContainer } = 
-            createMountingElement("zotero-beaver-chat-context", "reader");
+            createMountingElement("beaver-pane-reader", "reader");
         contextPane?.appendChild(contextChatPanel);
 
         /**
@@ -122,7 +122,7 @@ export class BeaverUIFactory {
     }
 
     static removeChatPanel(win: Window) {
-        const elementIds = ["zotero-beaver-chat", "zotero-beaver-chat-context", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"]
+        const elementIds = ["beaver-pane-library", "beaver-pane-reader", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"]
         for (const id of elementIds) {
             const element = win.document.getElementById(id);
             if (element) {
