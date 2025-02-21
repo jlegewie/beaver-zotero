@@ -59,10 +59,10 @@ const getContentPartFromZoteroAttachment = async (attachment: ZoteroAttachment):
         const filePath = effectiveItem ? await effectiveItem.getFilePath() : undefined;
         if(filePath) {
             return [
-                // {
-                //     type: 'text',
-                //     text: attachment.fullName
-                // },
+                {
+                    type: 'text',
+                    text: `id: ${item.key}\ntype: Document\nReference: ${attachment.fullName}`
+                },
                 await fileToContentPart(filePath)
             ];
         }
