@@ -141,6 +141,8 @@ export const chatCompletion = async (
         },
         ...(await Promise.all(messages.map(chatMessageToRequestMessage))),
     ];
+
+    console.log('requestMessages', requestMessages);
     
     const request = {
         model: model,
