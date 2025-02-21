@@ -31,7 +31,7 @@ export function toggleChat(win: Window, turnOn: boolean) {
         sidenav.hidden = true;
 
         // 4) Dispatch event to toggle chat
-        const event = new win.CustomEvent("toggleChat", { detail: { visible: true } });
+        const event = new win.CustomEvent("toggleChat", { detail: { visible: true, location: "library" } });
         win.__beaverEventBus.dispatchEvent(event);
         // @ts-ignore zotero item-pane is not typed
         chat.hidden = false;
@@ -50,7 +50,7 @@ export function toggleChat(win: Window, turnOn: boolean) {
         // Turn chat off
         
         // Dispatch event to toggle chat
-        const event = new win.CustomEvent("toggleChat", { detail: { visible: false } });
+        const event = new win.CustomEvent("toggleChat", { detail: { visible: false, location: "library" } });
         win.__beaverEventBus.dispatchEvent(event);
         // @ts-ignore zotero item-pane is not typed
         chat.hidden = true;
@@ -97,7 +97,7 @@ export function watchPane(win: Window) {
     const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
         for (const m of mutations) {
             if (m.type === "attributes" && m.attributeName === "hidden") {
-                ztoolkit.log("Sidenav hidden");
+                // ztoolkit.log("Sidenav hidden");
                 // @ts-ignore zotero item-pane is not typed
                 const chatActive = (itemPane.dataset.beaverChatActive === "true");
                 // If chat is active but Zotero just unhid the sidenav, force it hidden

@@ -8,7 +8,7 @@ import { updateAttachmentsFromSelectedItemsAtom } from './atoms/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from './hooks/useZoteroSelection';
 
-const AiSidebar = () => {
+const AiSidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
     const messages = useAtomValue(messagesAtom);

@@ -1,10 +1,14 @@
 import React, { useEffect } from 'react';
 import { useAtom } from "jotai";
 import AiSidebar from "./AiSidebar";
-import { isAiSidebarVisibleAtom } from "./atoms/ui";
+import { isReaderSidebarVisibleAtom, isLibrarySidebarVisibleAtom } from "./atoms/ui";
 
-const App = () => {
-    const [isVisible, setIsVisible] = useAtom(isAiSidebarVisibleAtom);
+const App = ({ location }: { location: 'library' | 'reader' }) => {
+    const [isVisible, setIsVisible] = useAtom(
+        location === 'library' 
+            ? isLibrarySidebarVisibleAtom 
+            : isReaderSidebarVisibleAtom
+    );
 
     // Subscribe to events from Zotero
     useEffect(() => {
@@ -13,8 +17,10 @@ const App = () => {
         if (!eventBus) return;
 
         const handleToggle = async (e: CustomEvent) => {
-            const { visible } = e.detail;
-            setIsVisible(visible);
+            const { visible, location: eventLocation } = e.detail;
+            if (eventLocation === location || !eventLocation) {
+                setIsVisible(visible);
+            }
         };
 
         eventBus.addEventListener('toggleChat', handleToggle);
@@ -27,7 +33,7 @@ const App = () => {
 
     return (
         <>
-            {isVisible && <AiSidebar />}
+            {isVisible && <AiSidebar location={location} />}
         </>
     );
 }

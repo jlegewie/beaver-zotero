@@ -1,3 +1,4 @@
 import { atom } from 'jotai';
 
-export const isAiSidebarVisibleAtom = atom(false);
+export const isReaderSidebarVisibleAtom = atom(false);
+export const isLibrarySidebarVisibleAtom = atom(false);

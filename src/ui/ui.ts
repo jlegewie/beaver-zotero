@@ -40,7 +40,7 @@ export class BeaverUIFactory {
          * @param location - The location of the chat panel
          * @returns The chat panel and the React container
          */
-        function createMountingElement(id: string, location: 'item-pane' | 'context-pane') {
+        function createMountingElement(id: string, location: 'library' | 'reader') {
             const chatPanel = win.document.createXULElement("vbox");
             chatPanel.setAttribute("id", id);
             chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
@@ -64,7 +64,7 @@ export class BeaverUIFactory {
             return;
         }
         const { chatPanel: itemChatPanel, reactContainer: itemReactContainer } = 
-            createMountingElement("zotero-beaver-chat", "item-pane");
+            createMountingElement("zotero-beaver-chat", "library");
         itemPane?.appendChild(itemChatPanel);
 
         // Create and append mounting elements to context pane (reader)
@@ -74,7 +74,7 @@ export class BeaverUIFactory {
             return;
         }
         const { chatPanel: contextChatPanel, reactContainer: contextReactContainer } = 
-            createMountingElement("zotero-beaver-chat-context", "context-pane");
+            createMountingElement("zotero-beaver-chat-context", "reader");
         contextPane?.appendChild(contextChatPanel);
 
         /**
@@ -87,8 +87,8 @@ export class BeaverUIFactory {
         win.document.documentElement.appendChild(script);
 
         script.onload = () => {
-            win.renderAiSidebar(itemReactContainer, "item-pane");
-            win.renderAiSidebar(contextReactContainer, "context-pane");
+            win.renderAiSidebar(itemReactContainer, "library");
+            win.renderAiSidebar(contextReactContainer, "reader");
         };
 
         /**
