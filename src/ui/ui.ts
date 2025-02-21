@@ -33,27 +33,49 @@ export class BeaverUIFactory {
         // Remove existing panel if present
         this.removeChatPanel(win);
 
-        const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
+        /**
+         * Create XUL element (vbox) with a div inside as mounting point for react chat panel for a given location
+         * 
+         * @param id - The ID of the chat panel
+         * @param location - The location of the chat panel
+         * @returns The chat panel and the React container
+         */
+        function createMountingElement(id: string, location: 'item-pane' | 'context-pane') {
+            const chatPanel = win.document.createXULElement("vbox");
+            chatPanel.setAttribute("id", id);
+            chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
+            chatPanel.setAttribute("style", "min-width: 0px;");
+            chatPanel.setAttribute("hidden", "true");
+            
+            // Create a div inside the vbox as mount point for the React component
+            const reactContainer = win.document.createElement("div");
+            reactContainer.setAttribute("id", `beaver-react-root-${location}`);
+            reactContainer.setAttribute("data-location", location);
+            reactContainer.setAttribute("class", "flex flex-1 flex-col h-full min-w-0");
+            chatPanel.appendChild(reactContainer);
+            
+            return { chatPanel, reactContainer };
+        }
+
+        // Create and append mounting elements to item pane (library
+        const itemPane = win.document.getElementById("zotero-item-pane");
         if (!itemPane) {
             ztoolkit.log("Item pane not found");
             return;
         }
-        ztoolkit.log("onMainWindowLoad: item pane found");
+        const { chatPanel: itemChatPanel, reactContainer: itemReactContainer } = 
+            createMountingElement("zotero-beaver-chat", "item-pane");
+        itemPane?.appendChild(itemChatPanel);
 
-        // 1) Initialize UI and add chat panel to item pane
-        const chatPanel = win.document.createXULElement("vbox");
-        chatPanel.setAttribute("id", "zotero-beaver-chat");
-        chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
-        chatPanel.setAttribute("style", "min-width: 0px;");
-        chatPanel.setAttribute("hidden", "true");
-
-        itemPane?.appendChild(chatPanel);
-
-        // Create a normal div inside that vbox as mount point for the React component
-        const reactContainer = win.document.createElement("div");
-        reactContainer.setAttribute("id", "beaver-react-root");
-        reactContainer.setAttribute("class", "flex flex-1 flex-col h-full min-w-0");
-        chatPanel.appendChild(reactContainer);
+        // Create and append mounting elements to context pane (reader)
+        const contextPane = win.document.getElementById("zotero-context-pane");
+        if (!contextPane) {
+            ztoolkit.log("Context pane not found");
+            return;
+        }
+        const { chatPanel: contextChatPanel, reactContainer: contextReactContainer } = 
+            createMountingElement("zotero-beaver-chat-context", "context-pane");
+        contextPane?.appendChild(contextChatPanel);
 
         /**
         * Load the React bundle into the XUL window by injecting a <script> tag
@@ -63,11 +85,15 @@ export class BeaverUIFactory {
         script.type = "text/javascript";
         script.src = "chrome://beaver/content/reactBundle.js";
         win.document.documentElement.appendChild(script);
+
         script.onload = () => {
-            win.renderAiSidebar(reactContainer);
+            win.renderAiSidebar(itemReactContainer, "item-pane");
+            win.renderAiSidebar(contextReactContainer, "context-pane");
         };
 
-        // 2) Add a toggle button in the top toolbar (or from your extension logic)
+        /**
+         * Toggle button in the top toolbar
+         */
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) {
             ztoolkit.log("Toolbar not found");
@@ -100,12 +126,13 @@ export class BeaverUIFactory {
     }
 
     static removeChatPanel(win: Window) {
-        const chatPanel = win.document.querySelector("#zotero-beaver-chat");
-        chatPanel?.remove();
-        const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
-        chatToggleBtn?.remove();
-        const separator = win.document.querySelector("#beaver-tb-separator");
-        separator?.remove();
+        const elementIds = ["zotero-beaver-chat", "zotero-beaver-chat-context", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"]
+        for (const id of elementIds) {
+            const element = win.document.getElementById(id);
+            if (element) {
+                element.remove();
+            }
+        }
     }
 
     static registerMenuItems() {
