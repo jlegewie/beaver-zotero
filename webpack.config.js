@@ -6,7 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default {
     mode: 'development',    // 'development' for easier debugging, or 'production' for minified output
     target: 'web',
-    entry: './react/index.jsx',
+    entry: './react/index.tsx',
     devtool: 'inline-source-map',
     output: {
         path: path.resolve(__dirname, 'addon', 'content'),
