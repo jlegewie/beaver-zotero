@@ -7,11 +7,12 @@ import { triggerToggleChat } from '../../src/ui/toggleChat';
 * 
 * @param win - The window to watch.
 */
-export function useWatchItemPaneCollapse() {
+export function useWatchItemPaneCollapse(location: 'library' | 'reader') {
     useEffect(() => {
         const win = Zotero.getMainWindow();
-        const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
-        const chat = itemPane?.querySelector("#beaver-pane-library");
+        const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
+        const itemPane = win.document.getElementById(paneId);
+        const chat = itemPane?.querySelector(`#beaver-pane-${location}`);
         if (!itemPane || !chat) return;
         
         const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
