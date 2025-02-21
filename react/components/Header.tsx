@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon, Settings02Icon } from './icons';
-import { toggleChat } from '../../src/ui/chat';
+import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { messagesAtom } from '../atoms/messages';
 import { resetAttachmentsAtom, updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
 import { useSetAtom } from 'jotai';
@@ -26,7 +26,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
             <div className="flex-1">
                 <button
                     className="icon-button scale-13"
-                    onClick={() => toggleChat(Zotero.getMainWindow(), false)}
+                    onClick={() => triggerToggleChat(Zotero.getMainWindow())}
                 >
                     <Icon icon={Cancel01Icon} />
                 </button>

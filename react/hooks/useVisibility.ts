@@ -1,28 +1,85 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtom } from 'jotai';
 import { isLibrarySidebarVisibleAtom, isReaderSidebarVisibleAtom } from '../atoms/ui';
 
 export function useVisibility(location: 'library' | 'reader') {
-    const setLibraryVisible = useSetAtom(isLibrarySidebarVisibleAtom);
-    const setReaderVisible = useSetAtom(isReaderSidebarVisibleAtom);
-
+    const [isLibraryVisible, setLibraryVisible] = useAtom(isLibrarySidebarVisibleAtom);
+    const [isReaderVisible, setReaderVisible] = useAtom(isReaderSidebarVisibleAtom);
+    
     useEffect(() => {
-        const eventBus = Zotero.getMainWindow().__beaverEventBus;
+        const win = Zotero.getMainWindow();
+        const eventBus = win.__beaverEventBus;
         if (!eventBus) return;
+        
+        const handleToggle = (e: CustomEvent) => {
+            const { location: eventLocation } = e.detail;
+            if (location !== eventLocation) return;
+            
+            // Use the latest state values from the dependency array
+            const isCurrentlyVisible = location === 'library' ? isLibraryVisible : isReaderVisible;
+            const setVisible = location === 'library' ? setLibraryVisible : setReaderVisible;
+            console.log("useVisibility", { isCurrentlyVisible, location });
+            
+            // Determine elements based on the location
+            const chatSelector = `#zotero-beaver-chat${location === 'reader' ? '-context' : ''}`;
+            const pane = location === 'library'
+                ? win.document.querySelector("#zotero-item-pane")
+                : win.document.querySelector("#zotero-context-pane");
+            const content = pane?.querySelectorAll(`:scope > *:not(${chatSelector})`);
+            const chat = pane?.querySelector(chatSelector);
+            
+            if (!pane || !content || !chat) return;
+            
+            // Toggle the visibility state
+            const newVisibility = !isCurrentlyVisible;
+            
+            if (newVisibility) {
+                // Save the current collapsed state
+                const wasCollapsed = pane.getAttribute("collapsed") === "true";
+                // @ts-ignore: dataset is not typed
+                pane.dataset.beaverWasCollapsed = wasCollapsed ? "true" : "false";
+                
+                // Expand the pane if needed
+                if (wasCollapsed) {
+                    pane.removeAttribute("collapsed");
+                }
+                
+                // Hide the content and show the chat area
+                // @ts-ignore style is not typed
+                content.forEach(el => el.style.display = 'none');
+                // @ts-ignore style is not typed
+                chat.style.removeProperty('display');
 
-        const handleToggle = async (e: CustomEvent) => {
-            const { visible, location: eventLocation } = e.detail;
-            if (location === eventLocation && location === 'library') {
-                setLibraryVisible(visible);
-            } else if (location === eventLocation && location === 'reader') {
-                setReaderVisible(visible);
+                // Update the toolbar button to reflect the change
+                const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
+                chatToggleBtn?.setAttribute("selected", "true");
+            } else {
+                // Hide the chat area and show the content
+                // @ts-ignore style is not typed
+                content.forEach(el => el.style.removeProperty('display'));
+                // @ts-ignore style is not typed
+                chat.style.display = 'none';
+                
+                // Restore the collapsed state if it was previously set
+                // @ts-ignore: dataset is not typed
+                const wasCollapsed = pane.dataset.beaverWasCollapsed === "true";
+                if (wasCollapsed) {
+                    pane.setAttribute("collapsed", "true");
+                }
+                
+                // Update the toolbar button to reflect the change
+                const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
+                chatToggleBtn?.removeAttribute("selected");
             }
+            
+            // Update the appropriate atom state
+            setVisible(newVisibility);
         };
-
+        
         eventBus.addEventListener('toggleChat', handleToggle);
         return () => {
             eventBus.removeEventListener('toggleChat', handleToggle);
         };
-    }, [location, setLibraryVisible, setReaderVisible]);
-} 
+    }, [location, isLibraryVisible, isReaderVisible]);
+}

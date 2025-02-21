@@ -13,7 +13,6 @@ import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
-import { watchPane, watchItemPaneCollapse } from "./ui/chat";
 import eventBus from "../react/eventBus";
 import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
 
@@ -116,10 +115,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 	ztoolkit.log("UI ready");
 
-	// 3) Create watchers
-	watchPane(win);
-	watchItemPaneCollapse(win);
-
 	// Initialize QuickChat for this window
 	BeaverUIFactory.registerQuickChat(win);
 	
@@ -183,11 +178,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	Zotero.ItemPaneManager.unregisterInfoRow('beaver-item-pane-status');
 	// Remove chat panel from item pane
 	const chatPanel = win.document.querySelector("#zotero-beaver-chat");
-	chatPanel?.remove();
-	// Remove watchers
-	// unwatchPane(win);
-	// unwatchItemPaneCollapse(win);
-	
+	chatPanel?.remove();	
 }
 
 function loadStylesheet() {

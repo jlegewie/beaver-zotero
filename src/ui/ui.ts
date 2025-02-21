@@ -1,6 +1,6 @@
 import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
-import { toggleChat } from "./chat";
+import { triggerToggleChat } from "./toggleChat";
 import { QuickChat } from "./quickChat";
 
 const windowQuickChats = new WeakMap<Window, QuickChat>();
@@ -44,8 +44,7 @@ export class BeaverUIFactory {
             const chatPanel = win.document.createXULElement("vbox");
             chatPanel.setAttribute("id", id);
             chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
-            chatPanel.setAttribute("style", "min-width: 0px;");
-            chatPanel.setAttribute("hidden", "true");
+            chatPanel.setAttribute("style", "min-width: 0px; display: none;");
             
             // Create a div inside the vbox as mount point for the React component
             const reactContainer = win.document.createElement("div");
@@ -104,10 +103,7 @@ export class BeaverUIFactory {
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
         chatToggleBtn.addEventListener("command", () => {
-            const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
-            // @ts-ignore zotero item-pane is not typed
-            const chatActive = itemPane?.dataset.beaverChatActive === "true";
-            toggleChat(win, !chatActive);
+            triggerToggleChat(win);
         });
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
@@ -252,10 +248,7 @@ export class BeaverUIFactory {
             (ev, keyOptions) => {
                 if (keyOptions.keyboard?.equals("accel,l")) {
                     const win = Zotero.getMainWindow();
-                    const itemPane = win.document.querySelector("item-pane#zotero-item-pane");
-                    // @ts-ignore zotero item-pane is not typed
-                    const chatActive = itemPane?.dataset.beaverChatActive === "true";
-                    toggleChat(win, !chatActive);
+                    triggerToggleChat(win);
                     // Prevent default behavior
                     ev.preventDefault();
                 }
