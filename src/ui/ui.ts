@@ -2,6 +2,7 @@ import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
 import { triggerToggleChat } from "./toggleChat";
 import { QuickChat } from "./quickChat";
+import { initializeReactUI } from "../../react/ui/initialization";
 
 const windowQuickChats = new WeakMap<Window, QuickChat>();
 
@@ -34,79 +35,71 @@ export class BeaverUIFactory {
         this.removeChatPanel(win);
 
         /**
-         * Create XUL element (vbox) with a div inside as mounting point for react chat panel for a given location
-         * 
-         * @param id - The ID of the chat panel
-         * @param location - The location of the chat panel
-         * @returns The chat panel and the React container
+         * Create mounting points for React components
          */
         function createMountingElement(id: string, location: 'library' | 'reader') {
-            const chatPanel = win.document.createXULElement("vbox");
-            chatPanel.setAttribute("id", id);
-            chatPanel.setAttribute("class", "flex flex-1 h-full min-w-0");
-            chatPanel.setAttribute("style", "min-width: 0px; display: none;");
+            const mountPoint = win.document.createXULElement("vbox");
+            mountPoint.setAttribute("id", id);
+            mountPoint.setAttribute("class", "flex flex-1 h-full min-w-0");
+            mountPoint.setAttribute("style", "min-width: 0px; display: none;");
             
             // Create a div inside the vbox as mount point for the React component
             const reactContainer = win.document.createElement("div");
             reactContainer.setAttribute("id", `beaver-react-root-${location}`);
             reactContainer.setAttribute("data-location", location);
             reactContainer.setAttribute("class", "flex flex-1 flex-col h-full min-w-0");
-            chatPanel.appendChild(reactContainer);
+            mountPoint.appendChild(reactContainer);
             
-            return { chatPanel, reactContainer };
+            return { mountPoint, reactContainer };
         }
 
-        // Create and append mounting elements to item pane (library
+        // Create and append mounting points
         const itemPane = win.document.getElementById("zotero-item-pane");
-        if (!itemPane) {
-            ztoolkit.log("Item pane not found");
-            return;
-        }
-        const { chatPanel: itemChatPanel, reactContainer: itemReactContainer } = 
-            createMountingElement("beaver-pane-library", "library");
-        itemPane?.appendChild(itemChatPanel);
-
-        // Create and append mounting elements to context pane (reader)
         const contextPane = win.document.getElementById("zotero-context-pane");
-        if (!contextPane) {
-            ztoolkit.log("Context pane not found");
-            return;
-        }
-        const { chatPanel: contextChatPanel, reactContainer: contextReactContainer } = 
-            createMountingElement("beaver-pane-reader", "reader");
-        contextPane?.appendChild(contextChatPanel);
 
-        /**
-        * Load the React bundle into the XUL window by injecting a <script> tag
-        * This ensures that React runs in the context of the real XUL window
-        */
+        if (itemPane) {
+            const { mountPoint: libraryMount } = createMountingElement("beaver-pane-library", "library");
+            itemPane.appendChild(libraryMount);
+        }
+
+        if (contextPane) {
+            const { mountPoint: readerMount } = createMountingElement("beaver-pane-reader", "reader");
+            contextPane.appendChild(readerMount);
+        }
+
+        // Add toggle button to toolbar
+        this.addToolbarButton(win);
+
+        // Load React bundle
         const script = win.document.createElement("script");
         script.type = "text/javascript";
         script.src = "chrome://beaver/content/reactBundle.js";
         win.document.documentElement.appendChild(script);
 
         script.onload = () => {
-            win.renderAiSidebar(itemReactContainer, "library");
-            win.renderAiSidebar(contextReactContainer, "reader");
+            // Initialize React UI
+            initializeReactUI(win);
+            
+            // Render React components
+            const libraryRoot = win.document.getElementById("beaver-react-root-library");
+            const readerRoot = win.document.getElementById("beaver-react-root-reader");
+            
+            if (libraryRoot) win.renderAiSidebar(libraryRoot, "library");
+            if (readerRoot) win.renderAiSidebar(readerRoot, "reader");
         };
+    }
 
-        /**
-         * Toggle button in the top toolbar
-         */
+    private static addToolbarButton(win: Window) {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
-        if (!toolbar) {
-            ztoolkit.log("Toolbar not found");
-            return;
-        }
-        const separator = toolbar.querySelector("div.zotero-tb-separator");
+        if (!toolbar) return;
 
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
-        chatToggleBtn.addEventListener("command", () => {
-            triggerToggleChat(win);
-        });
+        chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
+        const separator = toolbar.querySelector("div.zotero-tb-separator");
+
         if (syncButton) {
             toolbar.insertBefore(chatToggleBtn, syncButton);
             if (separator) {
@@ -116,19 +109,12 @@ export class BeaverUIFactory {
             }
         } else {
             toolbar.appendChild(chatToggleBtn);
-            ztoolkit.log("Sync button not found, appending chat toggle button to the end of the toolbar.");
         }
-
     }
 
     static removeChatPanel(win: Window) {
-        const elementIds = ["beaver-pane-library", "beaver-pane-reader", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"]
-        for (const id of elementIds) {
-            const element = win.document.getElementById(id);
-            if (element) {
-                element.remove();
-            }
-        }
+        const elementIds = ["beaver-pane-library", "beaver-pane-reader", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"];
+        elementIds.forEach(id => win.document.getElementById(id)?.remove());
     }
 
     static registerMenuItems() {

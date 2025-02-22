@@ -24,7 +24,6 @@ const LibrarySidebar = () => {
     // Control visibility of the sidebar across app
     useToggleSidebar();
     useZoteroTabSelection();
-    useSidebarDOMEffects();
 
     // Return the sidebar if it is visible and the currently selected tab is a library tab
     return isVisible && isLibraryTab ? <LibrarySidebarContent /> : null;

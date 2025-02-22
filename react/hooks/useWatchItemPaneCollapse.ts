@@ -1,13 +1,18 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect } from 'react';
-import { triggerToggleChat } from '../../src/ui/toggleChat';
+import { useSetAtom } from 'jotai';
+import { isSidebarVisibleAtom } from '../atoms/ui';
+import { uiManager } from '../ui/UIManager';
+import { SidebarLocation } from '../ui/types';
 
 /**
 * Watch the item pane for changes to the collapsed attribute and close the chat if the item pane is collapsed.
 * 
 * @param win - The window to watch.
 */
-export function useWatchItemPaneCollapse(location: 'library' | 'reader') {
+export function useWatchItemPaneCollapse(location: SidebarLocation) {
+    const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
+
     useEffect(() => {
         const win = Zotero.getMainWindow();
         const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
@@ -20,15 +25,14 @@ export function useWatchItemPaneCollapse(location: 'library' | 'reader') {
                 if (m.type === "attributes" && m.attributeName === "collapsed") {
                     const isCollapsed = itemPane.getAttribute("collapsed") === "true";
                     if (isCollapsed) {
-                        // Close sidebar when item pane is collapsed
-                        triggerToggleChat(win);
+                        setSidebarVisible(false);
+                        uiManager.handleCollapse(location);
                     }
                 }
             }
         });
         
         observer.observe(itemPane, { attributes: true });
-        
         return () => observer.disconnect();
-    }, []);
+    }, [location]);
 } 

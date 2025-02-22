@@ -2,7 +2,8 @@
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { updateAttachmentsFromSelectedItemsAtom } from "../atoms/attachments";
-import { isLibraryTabAtom } from "../atoms/ui";
+import { isLibraryTabAtom, isSidebarVisibleAtom } from "../atoms/ui";
+import { uiManager } from '../ui/UIManager';
 
 /**
  * Listens to changes in Zotero tab selection
@@ -15,26 +16,38 @@ export function useZoteroTabSelection() {
     const window = Zotero.getMainWindow();
 
     useEffect(() => {
-        // Set initial state on mount based on current tab
-        setIsLibraryTab(window.Zotero_Tabs.selectedType === 'library');
+        // Set initial state
+        const initialIsLibrary = window.Zotero_Tabs.selectedType === 'library';
+        setIsLibraryTab(initialIsLibrary);
 
         // Handler for tab selection changes
         const tabObserver = {
             notify: function(event: string, type: string, ids: string[], extraData: any) {
                 if (type === 'tab' && event === 'select') {
                     const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
-                    
                     if (!selectedTab) return;
 
-                    if (selectedTab.type === 'library') {
-                        setIsLibraryTab(true);
-                        // For library tabs, get selected items from the active pane
+                    const isLibrary = selectedTab.type === 'library';
+                    setIsLibraryTab(isLibrary);
+
+                    // Update UI through UIManager if sidebar is visible
+                    const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
+                    if (isVisible) {
+                        uiManager.updateUI({
+                            isVisible: true,
+                            isLibraryTab: isLibrary,
+                            collapseState: {
+                                library: null,
+                                reader: null
+                            }
+                        });
+                    }
+
+                    // Update attachments
+                    if (isLibrary) {
                         const newSelectedItems = Zotero.getActiveZoteroPane().getSelectedItems() || [];
                         updateAttachmentsFromSelectedItems(newSelectedItems);
-                    } 
-                    else if (selectedTab.type === 'reader') {
-                        setIsLibraryTab(false);
-                        // For reader tabs, get the attachment from the reader
+                    } else if (selectedTab.type === 'reader') {
                         const reader = Zotero.Reader.getByTabID(selectedTab.id);
                         if (reader) {
                             // @ts-ignore itemID is not typed
@@ -51,11 +64,7 @@ export function useZoteroTabSelection() {
         // Register the observer
         // @ts-ignore registerObserver is not typed
         Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'tabSelectionObserver');
-
-        // Cleanup: unregister the observer when component unmounts
-        return () => {
-            // @ts-ignore unregisterObserver is not typed
-            Zotero.Notifier.unregisterObserver(tabObserver);
-        };
+        // @ts-ignore unregisterObserver is not typed
+        return () => Zotero.Notifier.unregisterObserver(tabObserver);
     }, [updateAttachmentsFromSelectedItems, setIsLibraryTab]);
 } 
