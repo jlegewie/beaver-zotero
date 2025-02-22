@@ -1,3 +1,4 @@
+// @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { updateAttachmentsFromSelectedItemsAtom, removedItemKeysCache } from "../atoms/attachments";
