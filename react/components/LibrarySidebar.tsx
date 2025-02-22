@@ -12,7 +12,7 @@ import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
     useZoteroSelection();
-    // useWatchItemPaneCollapse("library");
+    useWatchItemPaneCollapse("library");
     return <AiSidebar location="library" />;
 }
 

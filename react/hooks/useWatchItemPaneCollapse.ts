@@ -17,16 +17,22 @@ export function useWatchItemPaneCollapse(location: SidebarLocation) {
         const win = Zotero.getMainWindow();
         const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
         const itemPane = win.document.getElementById(paneId);
-        const sidebar = itemPane?.querySelector(`#beaver-pane-${location}`);
+        const sidebar = itemPane?.querySelector(`#beaver-pane-${location}`) as HTMLElement;
+        
         if (!itemPane || !sidebar) return;
         
         const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
             for (const m of mutations) {
                 if (m.type === "attributes" && m.attributeName === "collapsed") {
+                    const selectedType = win.Zotero_Tabs.selectedType;
+                    const currentLocation = selectedType === 'library' ? 'library' : 'reader';
+                    if(currentLocation !== location) return;
                     const isCollapsed = itemPane.getAttribute("collapsed") === "true";
-                    if (isCollapsed) {
+                    if (isCollapsed && sidebar.style.display !== 'none') {
+                        // Let UIManager handle the DOM changes
+                        uiManager.handleCollapseCleanup(location);
+                        uiManager.updateToolbarButton(false);
                         setSidebarVisible(false);
-                        uiManager.handleCollapse(location);
                     }
                 }
             }
@@ -34,5 +40,5 @@ export function useWatchItemPaneCollapse(location: SidebarLocation) {
         
         observer.observe(itemPane, { attributes: true });
         return () => observer.disconnect();
-    }, [location]);
+    }, [location, setSidebarVisible]);
 } 

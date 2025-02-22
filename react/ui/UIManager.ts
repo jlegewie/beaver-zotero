@@ -27,11 +27,26 @@ class UIManager {
         };
     }
 
-    private updateToolbarButton(isVisible: boolean): void {
+    public updateToolbarButton(isVisible: boolean): void {
         if (isVisible) {
             this.elements.chatToggleButton?.setAttribute("selected", "true");
         } else {
             this.elements.chatToggleButton?.removeAttribute("selected");
+        }
+    }
+
+    public handleCollapseCleanup(location: SidebarLocation): void {
+        // Handle DOM cleanup after collapse
+        if (location === 'library') {
+            this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
+            if (this.elements.librarySidebar) {
+                (this.elements.librarySidebar as HTMLElement).style.display = 'none';
+            }
+        } else {
+            this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
+            if (this.elements.readerSidebar) {
+                (this.elements.readerSidebar as HTMLElement).style.display = 'none';
+            }
         }
     }
 
@@ -43,7 +58,7 @@ class UIManager {
             this.collapseState.library = itemPane?.collapsed || null;
             
             // Uncollapse if needed
-            if (this.collapseState.library && itemPane) {
+            if (this.collapseState.library) {
                 itemPane.collapsed = false;
             }
             
@@ -53,15 +68,17 @@ class UIManager {
                 (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
             }
         } else {
+            // Restore collapse state
+            if (this.collapseState.library && itemPane) {
+                // collapse triggers a mutation observer that updates the UI
+                itemPane.collapsed = true;
+                return;
+            }
+
             // Restore visibility
             this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
             if (this.elements.librarySidebar) {
                 (this.elements.librarySidebar as HTMLElement).style.display = 'none';
-            }
-            
-            // Restore collapse state
-            if (this.collapseState.library && itemPane) {
-                itemPane.collapsed = true;
             }
         }
     }
@@ -85,16 +102,18 @@ class UIManager {
                 (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
             }
         } else {
+            // Restore collapse state
+            // @ts-ignore: collapsed is not typed
+            if (this.collapseState.reader && !readerPane.collapsed) {
+                // collapse triggers a mutation observer that updates the UI
+                readerPane.togglePane();
+                return;
+            }
+
             // Restore visibility
             this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
             if (this.elements.readerSidebar) {
                 (this.elements.readerSidebar as HTMLElement).style.display = 'none';
-            }
-            
-            // Restore collapse state
-            // @ts-ignore: collapsed is not typed
-            if (this.collapseState.reader && !readerPane.collapsed) {
-                readerPane.togglePane();
             }
         }
     }

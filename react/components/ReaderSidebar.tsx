@@ -7,7 +7,7 @@ import { useWatchItemPaneCollapse } from '../hooks/useWatchItemPaneCollapse';
 
 // ReaderSidebarContent handles library-specific features
 const ReaderSidebarContent = () => {
-    // useWatchItemPaneCollapse("reader");
+    useWatchItemPaneCollapse("reader");
     return <AiSidebar location="reader" />;
 }
 
