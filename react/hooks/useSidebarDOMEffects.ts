@@ -25,19 +25,17 @@ export function useSidebarDOMEffects() {
         const readerContent = readerPane?.querySelectorAll(":scope > *:not(#beaver-pane-reader)");
         const readerSidebar = readerPane?.querySelector("#beaver-pane-reader");
 
-        // Store collapse states in refs to persist between renders
-        const libraryWasCollapsed = useRef<boolean | null>(null);
-        const readerWasCollapsed = useRef<boolean | null>(null);
-
         // Handle library pane
         if (libraryPane && libraryContent && librarySidebar) {
-            
             const itemPane = win.ZoteroPane.itemPane;
             if (isSidebarVisible && isLibraryTab) {
                 // Manage collapsed state
                 const isCollapsed = itemPane && itemPane.collapsed;
                 libraryWasCollapsed.current = isCollapsed;
-                if (isCollapsed && itemPane) itemPane.collapsed = false;
+                if (isCollapsed && itemPane) {
+                    // @ts-ignore: collapsed is not typed
+                    itemPane.collapsed = false;
+                }
                 
                 // @ts-ignore style is not typed
                 libraryContent.forEach(el => el.style.display = 'none');
@@ -50,20 +48,25 @@ export function useSidebarDOMEffects() {
                 librarySidebar.style.display = 'none';
                 
                 // @ts-ignore: collapsed is not typed
-                if (libraryWasCollapsed.current && itemPane) itemPane.collapsed = true;
+                if (libraryWasCollapsed.current && itemPane) {
+                    // @ts-ignore: collapsed is not typed
+                    itemPane.collapsed = true;
+                }
             }
         }
 
         // Handle reader pane
         if (readerPane && readerContent && readerSidebar) {
-            console.log("hook unmounting");
             const contextPane = win.ZoteroContextPane;
             if (isSidebarVisible && !isLibraryTab) {
                 // Manage collapsed state
                 // @ts-ignore: collapsed is not typed
                 const isCollapsed = contextPane.collapsed;
                 readerWasCollapsed.current = isCollapsed;
-                if (isCollapsed) contextPane.togglePane();
+                if (isCollapsed) {
+                    // @ts-ignore: collapsed is not typed
+                    contextPane.togglePane();
+                }
                 
                 // @ts-ignore style is not typed
                 readerContent.forEach(el => el.style.display = 'none');
@@ -99,9 +102,9 @@ export function useSidebarDOMEffects() {
                 // @ts-ignore style is not typed
                 librarySidebar.style.display = 'none';
                 
-                if (libraryWasCollapsed.current && win.ZoteroPane.itemPane) {
-                    win.ZoteroPane.itemPane.collapsed = true
-                }
+                // if (libraryWasCollapsed.current && win.ZoteroPane.itemPane) {
+                //     win.ZoteroPane.itemPane.collapsed = true;
+                // }
             }
 
             // Restore reader pane
@@ -111,15 +114,14 @@ export function useSidebarDOMEffects() {
                 // @ts-ignore style is not typed
                 readerSidebar.style.display = 'none';
                 
-                // @ts-ignore: collapsed is not typed
-                const isCollapsed = win.ZoteroContextPane.collapsed;
-                if (readerWasCollapsed.current && !isCollapsed) {
-                    win.ZoteroContextPane.togglePane();
-                }
+                // const isCollapsed = win.ZoteroContextPane.collapsed;
+                // if (readerWasCollapsed.current && !isCollapsed) {
+                //     win.ZoteroContextPane.togglePane();
+                // }
             }
 
             // Reset toolbar button
             chatToggleBtn?.removeAttribute("selected");
         };
     }, [isSidebarVisible, isLibraryTab]);
-} 
+}
