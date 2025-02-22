@@ -12,15 +12,15 @@ export function useWatchItemPaneCollapse(location: 'library' | 'reader') {
         const win = Zotero.getMainWindow();
         const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
         const itemPane = win.document.getElementById(paneId);
-        const chat = itemPane?.querySelector(`#beaver-pane-${location}`);
-        if (!itemPane || !chat) return;
+        const sidebar = itemPane?.querySelector(`#beaver-pane-${location}`);
+        if (!itemPane || !sidebar) return;
         
         const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
             for (const m of mutations) {
                 if (m.type === "attributes" && m.attributeName === "collapsed") {
                     const isCollapsed = itemPane.getAttribute("collapsed") === "true";
                     if (isCollapsed) {
-                        // Close chat sidebar when item pane is collapsed
+                        // Close sidebar when item pane is collapsed
                         triggerToggleChat(win);
                     }
                 }
