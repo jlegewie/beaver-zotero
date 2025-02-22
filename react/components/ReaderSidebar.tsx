@@ -3,11 +3,11 @@ import { useAtomValue } from "jotai";
 import AiSidebar from "../AiSidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { isLibraryTabAtom } from "../atoms/ui";
-import { useWatchItemPaneCollapse } from '../hooks/useWatchItemPaneCollapse';
+import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 
 // ReaderSidebarContent handles library-specific features
 const ReaderSidebarContent = () => {
-    useWatchItemPaneCollapse("reader");
+    useObservePaneCollapse("reader");
     return <AiSidebar location="reader" />;
 }
 

@@ -10,7 +10,7 @@ import { SidebarLocation } from '../ui/types';
 * 
 * @param win - The window to watch.
 */
-export function useWatchItemPaneCollapse(location: SidebarLocation) {
+export function useObservePaneCollapse(location: SidebarLocation) {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
 
     useEffect(() => {

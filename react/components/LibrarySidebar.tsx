@@ -4,7 +4,7 @@ import AiSidebar from "../AiSidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { useToggleSidebar } from '../hooks/useToggleSidebar';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
-import { useWatchItemPaneCollapse } from '../hooks/useWatchItemPaneCollapse';
+import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useZoteroTabSelection } from '../hooks/useZoteroTabSelection';
 import { isLibraryTabAtom } from "../atoms/ui";
 import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
@@ -12,7 +12,7 @@ import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
     useZoteroSelection();
-    useWatchItemPaneCollapse("library");
+    useObservePaneCollapse("library");
     return <AiSidebar location="library" />;
 }
 
