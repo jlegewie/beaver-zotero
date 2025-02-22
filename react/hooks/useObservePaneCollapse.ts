@@ -29,9 +29,10 @@ export function useObservePaneCollapse(location: SidebarLocation) {
                     if(currentLocation !== location) return;
                     const isCollapsed = itemPane.getAttribute("collapsed") === "true";
                     if (isCollapsed && sidebar.style.display !== 'none') {
-                        // Let UIManager handle the DOM changes
-                        uiManager.handleCollapseCleanup(location);
+                        // Cleanup the pane and update the toolbar button
+                        uiManager.handleCleanup(location);
                         uiManager.updateToolbarButton(false);
+                        // Close the sidebar
                         setSidebarVisible(false);
                     }
                 }

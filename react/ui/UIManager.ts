@@ -35,18 +35,26 @@ class UIManager {
         }
     }
 
-    public handleCollapseCleanup(location: SidebarLocation): void {
+    public handleCleanup(location: SidebarLocation): void {
         // Handle DOM cleanup after collapse
         if (location === 'library') {
-            this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-            if (this.elements.librarySidebar) {
-                (this.elements.librarySidebar as HTMLElement).style.display = 'none';
-            }
+            this.handleLibraryCleanup();
         } else {
-            this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-            if (this.elements.readerSidebar) {
-                (this.elements.readerSidebar as HTMLElement).style.display = 'none';
-            }
+            this.handleReaderCleanup();
+        }
+    }
+
+    private handleLibraryCleanup(): void {
+        this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
+        if (this.elements.librarySidebar) {
+            (this.elements.librarySidebar as HTMLElement).style.display = 'none';
+        }
+    }
+
+    private handleReaderCleanup(): void {
+        this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
+        if (this.elements.readerSidebar) {
+            (this.elements.readerSidebar as HTMLElement).style.display = 'none';
         }
     }
 
@@ -75,11 +83,8 @@ class UIManager {
                 return;
             }
 
-            // Restore visibility
-            this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-            if (this.elements.librarySidebar) {
-                (this.elements.librarySidebar as HTMLElement).style.display = 'none';
-            }
+            // Cleanup the library pane
+            this.handleLibraryCleanup();
         }
     }
 
@@ -110,11 +115,8 @@ class UIManager {
                 return;
             }
 
-            // Restore visibility
-            this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-            if (this.elements.readerSidebar) {
-                (this.elements.readerSidebar as HTMLElement).style.display = 'none';
-            }
+            // Cleanup the reader pane
+            this.handleReaderCleanup();
         }
     }
 
