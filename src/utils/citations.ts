@@ -45,7 +45,13 @@ export function getInTextCitations(
             properties: { inText: true }
         };
         return cslEngine.previewCitationCluster(citation, [], [], "text")
-            .replace(/^\(|\)$/g, '');
+            .replace(/^\(|\)$/g, '')
+            .replace(/n\.d\.$/, '')
+            .trim()
+            .replace(/,$/, '')
+            .replace(/”/g, '"')
+            .replace(/“/g, '"')
+            .replace(/,"$/, '"');
     });
     
     cslEngine.free();
@@ -78,6 +84,7 @@ export function getFormattedReferences(
         return [];
     }
     const inTextCitations = getInTextCitations(items, style);
+    console.log(inTextCitations);
     const bibliographies = getBibliographies(items, style);
     
     return items.map((_, index) => ({
