@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from "jotai";
-import AiSidebar from "../AiSidebar";
+import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { useToggleSidebar } from '../hooks/useToggleSidebar';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
@@ -13,7 +13,7 @@ import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
 const LibrarySidebarContent = () => {
     useZoteroSelection();
     useObservePaneCollapse("library");
-    return <AiSidebar location="library" />;
+    return <Sidebar location="library" />;
 }
 
 // LibrarySidebar handles visibility

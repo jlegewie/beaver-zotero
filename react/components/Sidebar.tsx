@@ -1,14 +1,15 @@
+// @ts-ignore no idea
 import React, { useRef, useEffect } from 'react';
-import UserMessageDisplay from "./components/UserMessageDisplay"
-import InputArea from "./components/InputArea"
-import AssistantMessageDisplay from "./components/AssistantMessageDisplay"
-import Header from "./components/Header"
-import { messagesAtom } from './atoms/messages';
-import { updateAttachmentsFromSelectedItemsAtom } from './atoms/attachments';
+import UserMessageDisplay from "./UserMessageDisplay"
+import InputArea from "./InputArea"
+import AssistantMessageDisplay from "./AssistantMessageDisplay"
+import Header from "./Header"
+import { messagesAtom } from '../atoms/messages';
+import { updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { useZoteroSelection } from './hooks/useZoteroSelection';
+import { useZoteroSelection } from '../hooks/useZoteroSelection';
 
-const AiSidebar = ({ location }: { location: 'library' | 'reader' }) => {
+const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
     const messages = useAtomValue(messagesAtom);
@@ -60,4 +61,4 @@ const AiSidebar = ({ location }: { location: 'library' | 'reader' }) => {
     );
 };
 
-export default AiSidebar;
+export default Sidebar;

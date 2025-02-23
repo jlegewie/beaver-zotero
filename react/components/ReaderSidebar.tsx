@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from "jotai";
-import AiSidebar from "../AiSidebar";
+import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
@@ -8,7 +8,7 @@ import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 // ReaderSidebarContent handles library-specific features
 const ReaderSidebarContent = () => {
     useObservePaneCollapse("reader");
-    return <AiSidebar location="reader" />;
+    return <Sidebar location="reader" />;
 }
 
 const ReaderSidebar = () => {
