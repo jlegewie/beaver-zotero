@@ -1,7 +1,7 @@
 // @ts-ignore no idea
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
-import { Icon, PlusSignIcon, AttachmentIcon } from './icons';
+import { Icon, PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
     isStreamingAtom,
@@ -16,6 +16,7 @@ import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { Attachment } from '../types/attachments';
 import { threadAttachmentCountAtom } from '../atoms/messages';
+import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -143,8 +144,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                         disabled={true}
                         title={`This thread has ${threadAttachmentCount} attachments.`}
                     >
-                            <Icon icon={AttachmentIcon} />
-                            {threadAttachmentCount}
+                        <ZoteroIcon 
+                            icon={ZOTERO_ICONS.ATTACHMENTS} 
+                            size={14} 
+                            color="--accent-green"
+                            className="mr-1"
+                        />
+                        {threadAttachmentCount}
                     </button>
                 )}
                 {attachments.map((attachment, index) => (
