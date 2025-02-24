@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+// @ts-ignore no idea
+import React, { useEffect, useState, forwardRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Attachment } from '../types/attachments'
 import { useSetAtom } from 'jotai'
@@ -24,8 +25,8 @@ const getIconElement = (attachment: Attachment) => {
     return null
 }
 
-export const AttachmentButton = React.forwardRef<HTMLButtonElement, AttachmentButtonProps>(
-    function AttachmentButton(props, ref) {
+export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonProps>(
+    function AttachmentButton(props: AttachmentButtonProps, ref: React.RefObject<HTMLButtonElement>) {
         const {
             attachment,
             className,
