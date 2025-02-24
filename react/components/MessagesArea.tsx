@@ -7,10 +7,11 @@ import { ChatMessage } from "../types/messages";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
+    userScrolled: boolean;
+    setUserScrolled: (userScrolled: boolean) => void;
 };
 
-export const MessagesArea = ({ messages }: MessagesAreaProps) => {
-    const [userScrolled, setUserScrolled] = useState(false);
+export const MessagesArea = ({ messages, userScrolled, setUserScrolled }: MessagesAreaProps) => {
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const lastScrollTopRef = useRef(0);
 

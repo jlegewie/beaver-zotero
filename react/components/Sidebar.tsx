@@ -1,5 +1,5 @@
 // @ts-ignore no idea
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import UserMessageDisplay from "./UserMessageDisplay"
 import InputArea from "./InputArea"
 import AssistantMessageDisplay from "./AssistantMessageDisplay"
@@ -14,6 +14,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
     const messages = useAtomValue(messagesAtom);
+    const [userScrolled, setUserScrolled] = useState(false);
+    
     useZoteroSelection();
     
     useEffect(() => {
@@ -36,7 +38,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             </div>
 
             {/* Messages area (scrollable) */}
-            <MessagesArea messages={messages} />
+            <MessagesArea messages={messages} userScrolled={userScrolled} setUserScrolled={setUserScrolled} />
 
             {/* Prompt area (footer) */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3">
