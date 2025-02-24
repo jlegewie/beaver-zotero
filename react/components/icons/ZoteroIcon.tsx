@@ -44,7 +44,10 @@ export const ZOTERO_ICONS = {
     TRASH: '16/universal/trash.svg',
     ATTACHMENTS: 'itempane/16/attachments.svg',
     NOTES: 'itempane/16/notes.svg',
-    PLUS: '16/universal/plus.svg',
     OPEN: '16/universal/open-link.svg',
     VIEW: '16/universal/view.svg',
+    TICK: '16/universal/tick.svg',
+    CROSS: '16/universal/cross.svg',
+    PLUS: '16/universal/plus.svg',
+    MINUS: '16/universal/minus.svg',
 } as const; 
