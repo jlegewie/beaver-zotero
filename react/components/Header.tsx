@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, Cancel01Icon, ClockIcon, PlusSignIcon, Settings02Icon } from './icons';
+import { Icon, CancelIcon, ClockIcon, PlusSignIcon, Settings02Icon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { messagesAtom } from '../atoms/messages';
 import { resetAttachmentsAtom, updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
@@ -28,7 +28,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     className="icon-button scale-13"
                     onClick={() => triggerToggleChat(Zotero.getMainWindow())}
                 >
-                    <Icon icon={Cancel01Icon} />
+                    <Icon icon={CancelIcon} />
                 </button>
             </div>
             <div className="flex gap-4">
