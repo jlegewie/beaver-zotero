@@ -40,6 +40,7 @@ export const ZoteroIcon: React.FC<ZoteroIconProps> = ({
 // Common icon paths as constants for reuse
 export const ZOTERO_ICONS = {
     PIN: '16/universal/pin.svg',
+    PIN_REMOVE: '16/universal/pin-remove.svg',
     TRASH: '16/universal/trash.svg',
     ATTACHMENTS: 'itempane/16/attachments.svg',
     NOTES: 'itempane/16/notes.svg',

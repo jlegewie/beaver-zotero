@@ -74,7 +74,7 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                     : getIconElement(attachment)
                 } */}
                 {getIconElement(attachment)}
-                <span className={!isValid ? 'color-red' : undefined}>
+                <span className={!isValid ? 'font-color-red' : undefined}>
                     {attachment.shortName}
                 </span>
                 {!disabled && attachment.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
