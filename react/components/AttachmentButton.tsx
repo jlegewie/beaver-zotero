@@ -35,10 +35,9 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
             ...rest
         } = props
         const [isValid, setIsValid] = useState(true);
-        const [isHovered, setIsHovered] = useState(false);
         const removeAttachment = useSetAtom(removeAttachmentAtom);
         const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
-        const setpreviewedContextItem = useSetAtom(previewedAttachmentAtom);
+        const setPreviewedAttachment = useSetAtom(previewedAttachmentAtom);
 
         const handleRemove = () => {
             removeAttachment(attachment)
@@ -62,12 +61,10 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                 title={attachment.id}
                 className={`attachment-button ${className || ''}`}
                 disabled={disabled}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
                 onClick={(e) => {
                     e.stopPropagation()
                     if (isValid) {
-                        setpreviewedContextItem(attachment);
+                        setPreviewedAttachment(attachment);
                     }
                 }}
                 {...rest}
