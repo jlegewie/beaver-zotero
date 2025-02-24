@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, Cancel01Icon, Clock02Icon, PlusSignIcon, Settings02Icon } from './icons';
+import { Icon, Cancel01Icon, ClockIcon, PlusSignIcon, Settings02Icon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { messagesAtom } from '../atoms/messages';
 import { resetAttachmentsAtom, updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
@@ -36,7 +36,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     <Icon icon={Settings02Icon} />
                 </button> */}
                 <button className="icon-button scale-13">
-                    <Icon icon={Clock02Icon} />
+                    <Icon icon={ClockIcon} />
                 </button>
                 <button
                     onClick={handleNewThread}
