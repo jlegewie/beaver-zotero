@@ -153,9 +153,10 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                                 className="mr-2" 
                                                 defaultChecked={att.id === bestAttachmentId}
                                             />
+                                            
                                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
                                             {att.getDisplayTitle()}
-                                            {/* {att.id === bestAttachmentId && <span className="ml-2 text-sm font-color-green">Best</span>} */}
+                                            {/* {att.id === bestAttachmentId && <ZoteroIcon icon={ZOTERO_ICONS.TICK} size={12} />} */}
                                         </div>
                                     ))}
                                     
