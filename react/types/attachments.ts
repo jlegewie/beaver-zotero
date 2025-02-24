@@ -6,12 +6,13 @@ interface BaseAttachment {
     shortName: string;        // Short name shown in the UI
     fullName: string;         // Detailed name shown in tooltip
     pinned: boolean;          // If true, the attachment persists across selections
-    timestamp: number;       // Timestamp of the attachment
+    timestamp: number;        // Timestamp of the attachment
 }
 
 export interface ZoteroAttachment extends BaseAttachment {
     type: 'zotero_item';
-    item: Zotero.Item;              // The parent item
+    item: Zotero.Item;        // The parent item
+    childItemIds?: string[];  // Zotero child item IDs that are part of this attachment
 }
 
 export interface FileAttachment extends BaseAttachment {
