@@ -4,6 +4,7 @@ import UserMessageDisplay from "./UserMessageDisplay"
 import InputArea from "./InputArea"
 import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import Header from "./Header"
+import { MessagesArea } from "./MessagesArea"
 import { messagesAtom } from '../atoms/messages';
 import { updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -35,22 +36,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             </div>
 
             {/* Messages area (scrollable) */}
-            <div id="beaver-messages" className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0">
-                {messages.map((message, index) => (
-                    <div key={index} className="px-3">
-                        {message.role === 'user' && (
-                            <UserMessageDisplay
-                                message={message}
-                            />
-                        )}
-                        {message.role === 'assistant' && (
-                            <AssistantMessageDisplay
-                                message={message}
-                            />
-                        )}
-                    </div>
-                ))}
-            </div>
+            <MessagesArea messages={messages} />
 
             {/* Prompt area (footer) */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3">
