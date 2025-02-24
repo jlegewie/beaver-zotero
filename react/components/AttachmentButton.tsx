@@ -4,7 +4,7 @@ import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Attachment } from '../types/attachments'
 import { useSetAtom } from 'jotai'
 import { removeAttachmentAtom, togglePinAttachmentAtom, isValidAttachment } from '../atoms/attachments'
-import { PinIcon, Icon } from './icons'
+import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -76,8 +76,7 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                 <span className={!isValid ? 'color-red' : undefined}>
                     {attachment.shortName}
                 </span>
-                {!disabled && attachment.pinned && <Icon icon={PinIcon} className="icon-16 -mr-1" />}
-
+                {!disabled && attachment.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
                 {!disabled && (
                     <span 
                         role="button"
