@@ -8,3 +8,7 @@ export { default as Settings02Icon } from './icons/Settings02Icon';
 export { default as Settings02SolidIcon } from './icons/Settings02SolidIcon';
 export { default as PinIcon } from './icons/PinIcon';
 export { default as AttachmentIcon } from './icons/AttachmentIcon';
+export { default as ArrowUp } from './icons/ArrowUp';
+export { default as ArrowDown } from './icons/ArrowDown';
+export { default as ArrowLeft } from './icons/ArrowLeft';
+export { default as ArrowRight } from './icons/ArrowRight';
