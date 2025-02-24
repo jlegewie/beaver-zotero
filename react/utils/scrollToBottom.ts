@@ -6,7 +6,10 @@
 //   }
 // };
 
-export const scrollToBottom = (containerRef: React.RefObject<HTMLElement>, userScrolled: boolean) => {
+export const scrollToBottom = (
+    containerRef: React.RefObject<HTMLElement>,
+    userScrolled: boolean
+) => {
     if (!(containerRef.current && !userScrolled))
         return;
     const container = containerRef.current;
