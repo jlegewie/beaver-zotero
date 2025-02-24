@@ -11,6 +11,8 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
+import { previewedAttachmentAtom } from '../atoms/ui';
+import AttachmentPreview from './AttachmentPreview';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -18,6 +20,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useState(false);
+    const previewedAttachment = useAtomValue(previewedAttachmentAtom);
     
     useZoteroSelection();
     
@@ -39,9 +42,9 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             scrollToBottom(messagesContainerRef, false);
         }
     };
-    
+
     return (
-        <div className="h-full flex flex-col gap-3 min-w-0">
+        <div className="sidebar-container h-full flex flex-col gap-3 min-w-0">
             
             {/* Header */}
             <div id="beaver-header" className="flex flex-row items-center px-3 pt-2 mb-2">
@@ -56,9 +59,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 ref={messagesContainerRef}
             />
 
-            {/* Prompt area (footer) with floating button */}
+            {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 {userScrolled && <ScrollDownButton onClick={handleScrollToBottom} />}
+                {previewedAttachment && <AttachmentPreview attachment={previewedAttachment} />}
                 <InputArea inputRef={inputRef} />
             </div>
         </div>

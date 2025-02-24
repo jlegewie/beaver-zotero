@@ -22,6 +22,10 @@
     opacity: .5;
 }
 
+[id^="beaver-pane-"] .sidebar-container {
+    background-color: var(--material-sidepane);
+}
+
 /* Component: Beaver Button (Ghost) */
 [id^="beaver-pane-"] .icon-button {
     cursor: pointer;
@@ -165,10 +169,12 @@
     display: inline-flex;
     align-items: center;
     cursor: default;
-    border: 1px solid var(--accent-blue10);
-    background-color: var(--accent-blue10);
+    /* border: 1px solid var(--accent-blue10);
+    background-color: var(--accent-blue10); */
+    border: 1px solid var(--fill-quinary);
+    background-color: var(--fill-quinary);
     border-radius: 4px;
-    color: var(--accent-blue);
+    color: var(--fill-secondary);
     user-select: none;
     line-height: 1.2;
     font-size: 0.85rem;
@@ -211,7 +217,7 @@
 }
 
 [id^="beaver-pane-"] .user-message-display {
-    margin: 0 auto;    
+    margin: 0 auto;
     padding-left: 0.65rem;
     padding-right: 0.65rem;
     padding-top: 0.65rem;
@@ -220,6 +226,55 @@
     border-radius: 6px;
     background-color: var(--fill-quinary);
     user-select: text;
+}
+
+/* Attachment Preview Container */
+[id^="beaver-pane-"] .attachment-preview {
+    padding:0.3rem;
+    /* padding-top: 0.75rem;
+    padding-bottom: 0.25rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem; */
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    /* border: 3px solid var(--fill-quinary); */
+    border-radius: 8px;
+    user-select: text;
+    margin-bottom: 0.5rem;
+}
+
+[id^="beaver-pane-"] .attachment-content {
+    background-color: var(--material-sidepane);
+    border-radius: 8px;
+}
+
+/* [id^="beaver-pane-"] .attachment-button-section {
+} */
+
+
+/* Ghost buttons for the actions */
+[id^="beaver-pane-"] .attachment-ghost-button {
+    cursor: pointer;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease-in-out;
+}
+
+[id^="beaver-pane-"] .attachment-ghost-button:hover {
+    /* background-color: var(--fill-quinary); */
+    color: var(--fill-primary);
+}
+
+/* Optional: style for content area if needed */
+[id^="beaver-pane-"] .attachment-content {
+    min-height: 1.5rem;
 }
 
 [id^="beaver-pane-"] .chat-input {
@@ -321,12 +376,24 @@
 [id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
 [id^="beaver-pane-"] .-mr-2 { margin-right: -0.5rem; }
 [id^="beaver-pane-"] .-mr-3 { margin-right: -0.75rem; }
-
+[id^="beaver-pane-"] .inset-x-0 { left: 0; right: 0; }
+[id^="beaver-pane-"] .translate-y-full { transform: translateY(100%); }
+[id^="beaver-pane-"] .-translate-y-full { transform: translateY(-100%); }
+[id^="beaver-pane-"] .top-4 { top: 1rem; }
 
 /* Typography */
 [id^="beaver-pane-"] .text-sm { font-size: 0.875rem; }
 [id^="beaver-pane-"] .text-base { font-size: 1rem; }
+[id^="beaver-pane-"] .text-lg { font-size: 1.125rem; }
 [id^="beaver-pane-"] .font-medium { font-weight: 500; }
+[id^="beaver-pane-"] .font-semibold { font-weight: 600; }
+[id^="beaver-pane-"] .font-color-primary { color: var(--fill-primary); }
+[id^="beaver-pane-"] .font-color-secondary { color: var(--fill-secondary); }
+[id^="beaver-pane-"] .font-color-tertiary { color: var(--fill-tertiary); }
+[id^="beaver-pane-"] .font-color-quaternary { color: var(--fill-quaternary); }
+[id^="beaver-pane-"] .font-color-quinary { color: var(--fill-quinary); }
+[id^="beaver-pane-"] .font-color-senary { color: var(--fill-senary); }
+
 
 /* Transitions */
 [id^="beaver-pane-"] .transition { transition: all 0.2s ease-in-out; }

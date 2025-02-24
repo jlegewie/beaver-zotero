@@ -5,6 +5,7 @@ import { Attachment } from '../types/attachments'
 import { useSetAtom } from 'jotai'
 import { removeAttachmentAtom, togglePinAttachmentAtom, isValidAttachment } from '../atoms/attachments'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { previewedAttachmentAtom } from '../atoms/ui'
 
 
 interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,7 +13,7 @@ interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEle
     disabled?: boolean
 }
 
-const getIconElement = (attachment: Attachment) => {
+export const getIconElement = (attachment: Attachment) => {
     if (attachment.type === 'zotero_item') {
         const icon = attachment.item.getItemTypeIconName()
         const iconElement = icon ? (
@@ -37,6 +38,7 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
         const [isHovered, setIsHovered] = useState(false);
         const removeAttachment = useSetAtom(removeAttachmentAtom);
         const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
+        const setpreviewedContextItem = useSetAtom(previewedAttachmentAtom);
 
         const handleRemove = () => {
             removeAttachment(attachment)
@@ -58,13 +60,15 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                 ref={ref}
                 // title={attachment.fullName}
                 title={attachment.id}
-                className={`attachment-button ${className || ''} ${attachment.pinned ? 'pinned' : ''}`}
+                className={`attachment-button ${className || ''}`}
                 disabled={disabled}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={(e) => {
                     e.stopPropagation()
-                    if (isValid) handlePin()
+                    if (isValid) {
+                        setpreviewedContextItem(attachment);
+                    }
                 }}
                 {...rest}
             >
