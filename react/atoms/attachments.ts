@@ -115,6 +115,25 @@ export const addFileAttachmentAtom = atom(
     }
 );
 
+// Setter to update childItemIds of a ZoteroAttachment
+export const updateChildItemIdsAtom = atom(
+    null,
+    (get, set, params: { attachmentId: string, childItemIds: string[] }) => {
+        const { attachmentId, childItemIds } = params;
+        const currentAttachments = get(attachmentsAtom);
+        
+        const updated = currentAttachments.map((att) => {
+            if (att.id === attachmentId && att.type === 'zotero_item') {
+                return { ...att, childItemIds };
+            }
+            return att;
+        });
+        console.log("updated", updated);
+        
+        set(attachmentsAtom, updated);
+    }
+);
+
 // Setter to remove an attachment by id
 export const removedItemKeysCache: Set<string> = new Set();
 export const removeAttachmentAtom = atom(
@@ -156,15 +175,18 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
     return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
 }
 
+export const isValidZoteroItem = async (item: Zotero.Item): Promise<boolean> => {
+    if (item.isNote()) return true;
+    const attachmentItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
+    const attachmentExists = attachmentItem ? await attachmentItem.fileExists() : false;
+    // @ts-ignore getAttachmentMIMEType exists
+        const mimeType = attachmentItem ? attachmentItem.getAttachmentMIMEType() : '';
+    return attachmentExists && isValidMimeType(mimeType);
+}
+
 export const isValidAttachment = async (attachment: Attachment): Promise<boolean> => {
     if (attachment.type === 'zotero_item') {
-        const item = attachment.item;
-        if (item.isNote()) return true;
-        const attachmentItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
-        const attachmentExists = attachmentItem ? await attachmentItem.fileExists() : false;
-        // @ts-ignore getAttachmentMIMEType exists
-        const mimeType = attachmentItem ? attachmentItem.getAttachmentMIMEType() : '';
-        return attachmentExists && isValidMimeType(mimeType);
+        return isValidZoteroItem(attachment.item);
     }
     return true;
 }

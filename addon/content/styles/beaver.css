@@ -417,7 +417,7 @@
 /* States */
 [id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
-
+[id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
 
 [id^="beaver-pane-"] .scale-70 { transform: scale(0.70); }

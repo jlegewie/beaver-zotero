@@ -1,10 +1,10 @@
 // @ts-nocheck no idea
 import React, { useRef, useEffect } from 'react';
 import { Icon, PinIcon, CancelIcon, CSSItemTypeIcon } from './icons';
-import { Attachment } from '../types/attachments';
-import { useSetAtom } from 'jotai';
+import { Attachment, ZoteroAttachment } from '../types/attachments';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { previewedAttachmentAtom } from '../atoms/ui';
-import { togglePinAttachmentAtom, removeAttachmentAtom, isValidAttachment } from '../atoms/attachments';
+import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom, isValidZoteroItem, updateChildItemIdsAtom } from '../atoms/attachments';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 interface AttachmentPreviewProps {
@@ -16,51 +16,69 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     const setPreviewedAttachment = useSetAtom(previewedAttachmentAtom);
     const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
     const removeAttachment = useSetAtom(removeAttachmentAtom);
+    const updateChildItemIds = useSetAtom(updateChildItemIdsAtom);
     const [attachments, setAttachments] = React.useState<any[]>([]);
     const [notes, setNotes] = React.useState<any[]>([]);
     const [validAttachments, setValidAttachments] = React.useState<{[id: number]: boolean}>({});
-    const [bestAttachmentId, setBestAttachmentId] = React.useState<number | null>(null);
+
+    // Read the most up-to-date version of the attachment from the attachments atom
+    const attachmentsAtomValue = useAtomValue(attachmentsAtom);
+    const currentAttachment = attachmentsAtomValue.find(att => att.id === attachment.id) || attachment;
 
     // Fetch attachments and notes when the component mounts
     useEffect(() => {
+        let isMounted = true;
+        
         const fetchAttachmentsAndNotes = async () => {
-            if (attachment.type === 'zotero_item' && attachment.item) {
+            if (currentAttachment.type === 'zotero_item' && currentAttachment.item) {
                 // Get attachments
-                const attIds = attachment.item.getAttachments();
+                const attIds = currentAttachment.item.getAttachments();
                 const atts = attIds.map(id => Zotero.Items.get(id));
-                setAttachments(atts);
+                if (isMounted) setAttachments(atts);
 
                 // Check which attachments are valid
                 const validityMap: {[id: number]: boolean} = {};
                 for (const att of atts) {
                     try {
-                        const isValid = await isValidAttachment(att);
+                        const isValid = await isValidZoteroItem(att);
                         validityMap[att.id] = isValid;
                     } catch (e) {
                         validityMap[att.id] = false;
                     }
                 }
-                setValidAttachments(validityMap);
-
-                // Get best attachment
-                try {
-                    const bestAtt = await attachment.item.getBestAttachment();
-                    if (bestAtt) {
-                        setBestAttachmentId(bestAtt.id);
-                    }
-                } catch (e) {
-                    console.error("Error getting best attachment:", e);
-                }
+                if (isMounted) setValidAttachments(validityMap);
 
                 // Get notes
-                const noteIds = attachment.item.getNotes();
+                const noteIds = currentAttachment.item.getNotes();
                 const noteItems = noteIds.map(id => Zotero.Items.get(id));
-                setNotes(noteItems);
+                if (isMounted) setNotes(noteItems);
+
+                // Set best attachment as default if childItemIds is not set
+                if (!currentAttachment.childItemIds && isMounted) {
+                    try {
+                        const bestAtt = await currentAttachment.item.getBestAttachment();
+                        if (bestAtt && isMounted) {
+                            updateChildItemIds({
+                                attachmentId: currentAttachment.id,
+                                childItemIds: [bestAtt.id.toString()]
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Error getting best attachment:", e);
+                    }
+                }
             }
         };
 
         fetchAttachmentsAndNotes();
-    }, [attachment]);
+        
+        return () => {
+            isMounted = false;
+        };
+        
+    }, [currentAttachment]);
+    // Only run when attachment ID or type changes, not when childItemIds changes
+    // }, [attachment.id, attachment.item?.id]);
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -85,21 +103,43 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     }, [setPreviewedAttachment]);
 
     const handlePin = () => {
-        togglePinAttachment(attachment.id);
+        togglePinAttachment(currentAttachment.id);
         setPreviewedAttachment(null);
     };
 
     const handleRemove = () => {
-        removeAttachment(attachment);
+        removeAttachment(currentAttachment);
         setPreviewedAttachment(null);
     };
 
     const handleOpen = () => {
-        if (attachment.type === 'zotero_item') {
+        if (currentAttachment.type === 'zotero_item') {
             // Open in Zotero
-            attachment.item.select();
+            currentAttachment.item.select();
         }
         setPreviewedAttachment(null);
+    };
+
+    const handleToggleItem = (itemId: string) => {
+        if (currentAttachment.type === 'zotero_item') {
+            const currentChildItemIds = currentAttachment.childItemIds || [];
+            const newChildItemIds = currentChildItemIds.includes(itemId)
+                ? currentChildItemIds.filter(id => id !== itemId)
+                : [...currentChildItemIds, itemId];
+            
+            console.log("newChildItemIds", newChildItemIds);
+            updateChildItemIds({
+                attachmentId: currentAttachment.id,
+                childItemIds: newChildItemIds
+            });
+        }
+    };
+
+    const isItemSelected = (itemId: string) => {
+        if (currentAttachment.type === 'zotero_item' && currentAttachment.childItemIds) {
+            return currentAttachment.childItemIds.includes(itemId);
+        }
+        return false;
     };
 
     return (
@@ -111,13 +151,13 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
             >
                 {/* Content Area */}
                 <div className="attachment-content p-3">
-                    {attachment.type === 'zotero_item' && (
+                    {currentAttachment.type === 'zotero_item' && (
                         <>
                             <span className="flex items-center font-color-primary">
-                                {<CSSItemTypeIcon itemType={attachment.item.getItemTypeIconName()} />}
-                                <span className="ml-2">{attachment.shortName}</span>
+                                {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
+                                <span className="ml-2">{currentAttachment.shortName}</span>
                             </span>
-                            <p className="text-base my-2">{attachment.item.getDisplayTitle()}</p>
+                            <p className="text-base my-2">{currentAttachment.item.getDisplayTitle()}</p>
                             
                             {/* Combined Attachments and Notes Section */}
                             <div className="mt-3">
@@ -146,17 +186,23 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                     {attachments.map(att => (
                                         <div 
                                             key={`att-${att.id}`}
-                                            className={`flex p-2 items-center attachment-item ${validAttachments[att.id] ? 'font-color-secondary' : 'font-color-red'}`}
+                                            className={validAttachments[att.id]
+                                                ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary`
+                                                : `flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
+                                            }
+                                            onClick={() => validAttachments[att.id] ? handleToggleItem(att.id.toString()) : null}
                                         >
                                             <input 
                                                 type="checkbox" 
                                                 className="mr-2" 
-                                                defaultChecked={att.id === bestAttachmentId}
+                                                checked={isItemSelected(att.id.toString())}
+                                                onChange={() => {}} // React requires this for controlled components
+                                                disabled={!validAttachments[att.id]}
                                             />
                                             
                                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
                                             {att.getDisplayTitle()}
-                                            {/* {att.id === bestAttachmentId && <ZoteroIcon icon={ZOTERO_ICONS.TICK} size={12} />} */}
+                                            {/* <span className='font-color-red'>{att.getDisplayTitle()}</span> */}
                                         </div>
                                     ))}
                                     
@@ -164,9 +210,15 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                     {notes.map(note => (
                                         <div 
                                             key={`note-${note.id}`} 
-                                            className="flex p-2 items-center attachment-item font-color-secondary"
+                                            className="flex p-2 items-center attachment-item font-color-secondary cursor-pointer"
+                                            onClick={() => handleToggleItem(note.id.toString())}
                                         >
-                                            <input type="checkbox" className="mr-2" />
+                                            <input 
+                                                type="checkbox" 
+                                                className="mr-2" 
+                                                checked={isItemSelected(note.id.toString())}
+                                                onChange={() => {}} // React requires this for controlled components
+                                            />
                                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={note.getItemTypeIconName()} /></span>
                                             {note.getNoteTitle()}
                                         </div>
@@ -180,8 +232,8 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                             </div>
                         </>
                     )}
-                    {attachment.type !== 'zotero_item' && (
-                        <h3>{attachment.fullName}</h3>
+                    {currentAttachment.type !== 'zotero_item' && (
+                        <h3>{currentAttachment.fullName}</h3>
                     )}
                 </div>
 
@@ -194,10 +246,10 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                         >
                             {/* <Icon icon={PinIcon} /> */}
                             <ZoteroIcon 
-                                icon={attachment.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
+                                icon={currentAttachment.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
                                 size={12}
                             />
-                            <span>{attachment.pinned ? 'Unpin' : 'Pin'}</span>
+                            <span>{currentAttachment.pinned ? 'Unpin' : 'Pin'}</span>
                         </button>
                         <button
                             className="attachment-ghost-button"

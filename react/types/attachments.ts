@@ -1,4 +1,3 @@
-
 // Attachment interface and types
 interface BaseAttachment {
     id: string;               // Unique identifier for tracking
