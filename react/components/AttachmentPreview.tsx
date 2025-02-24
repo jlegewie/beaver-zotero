@@ -5,7 +5,6 @@ import { Attachment } from '../types/attachments';
 import { useSetAtom } from 'jotai';
 import { previewedAttachmentAtom } from '../atoms/ui';
 import { togglePinAttachmentAtom, removeAttachmentAtom, isValidAttachment } from '../atoms/attachments';
-import { AttachmentButton, getIconElement } from './AttachmentButton';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 interface AttachmentPreviewProps {
@@ -115,10 +114,10 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                     {attachment.type === 'zotero_item' && (
                         <>
                             <span className="flex items-center font-color-primary">
-                                {getIconElement(attachment)}
-                                {attachment.shortName}
+                                {<CSSItemTypeIcon itemType={attachment.item.getItemTypeIconName()} />}
+                                <span className="ml-2">{attachment.shortName}</span>
                             </span>
-                            <p className="text-base m-2">{attachment.item.getDisplayTitle()}</p>
+                            <p className="text-base my-2">{attachment.item.getDisplayTitle()}</p>
                             
                             {/* Combined Attachments and Notes Section */}
                             <div className="mt-3">
