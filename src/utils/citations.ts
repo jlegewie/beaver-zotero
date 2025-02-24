@@ -47,6 +47,7 @@ export function getInTextCitations(
         return cslEngine.previewCitationCluster(citation, [], [], "text")
             .replace(/^\(|\)$/g, '')
             .replace(/n\.d\.$/, '')
+            // .replace(/ et al\./g, '+')
             .trim()
             .replace(/,$/, '')
             .replace(/”/g, '"')
@@ -84,7 +85,6 @@ export function getFormattedReferences(
         return [];
     }
     const inTextCitations = getInTextCitations(items, style);
-    console.log(inTextCitations);
     const bibliographies = getBibliographies(items, style);
     
     return items.map((_, index) => ({
