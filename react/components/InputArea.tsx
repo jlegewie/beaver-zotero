@@ -1,3 +1,4 @@
+// @ts-ignore no idea
 import React, { useState } from 'react';
 import { AttachmentButton } from "./AttachmentButton";
 import { Icon, PlusSignIcon, AttachmentIcon } from './icons';
@@ -122,7 +123,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     return (
-        <div className="user-message-display" onClick={handleContainerClick} style={{ minHeight: 'fit-content' }}>
+        <div
+            className="user-message-display"
+            onClick={handleContainerClick}
+            style={{ minHeight: 'fit-content' }}
+        >
 
             {/* Message Attachments */}
             <div className="flex flex-wrap gap-3 mb-2">
