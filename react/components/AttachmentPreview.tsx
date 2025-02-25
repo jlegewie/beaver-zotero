@@ -6,6 +6,7 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { previewedAttachmentAtom } from '../atoms/ui';
 import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom, isValidZoteroItem, updateChildItemIdsAtom } from '../atoms/attachments';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { truncateText } from '../utils/truncateText';
 
 interface AttachmentPreviewProps {
     attachment: Attachment;
@@ -201,7 +202,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                             />
                                             
                                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
-                                            {att.getDisplayTitle()}
+                                            {truncateText(att.getDisplayTitle(), 32)}
                                             {/* <span className='font-color-red'>{att.getDisplayTitle()}</span> */}
                                         </div>
                                     ))}
@@ -220,7 +221,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                                 onChange={() => {}} // React requires this for controlled components
                                             />
                                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={note.getItemTypeIconName()} /></span>
-                                            {note.getNoteTitle()}
+                                            {truncateText(note.getNoteTitle(), 32)}
                                         </div>
                                     ))}
                                     
