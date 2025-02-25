@@ -237,11 +237,16 @@
     border-radius: 8px;
     user-select: text;
     margin-bottom: 0.5rem;
+    max-height: 380px;
+    display: flex;
+    flex-direction: column;
 }
 
 [id^="beaver-pane-"] .attachment-content {
     background-color: var(--material-sidepane);
     border-radius: 8px;
+    overflow-y: auto;
+    min-height: 1.5rem;
 }
 
 /* Attachment and Note Item Hover Effect */

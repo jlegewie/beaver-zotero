@@ -1,5 +1,5 @@
 // @ts-nocheck no idea
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Icon, PinIcon, CancelIcon, CSSItemTypeIcon } from './icons';
 import { Attachment, ZoteroAttachment } from '../types/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -21,10 +21,53 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     const [attachments, setAttachments] = React.useState<any[]>([]);
     const [notes, setNotes] = React.useState<any[]>([]);
     const [validAttachments, setValidAttachments] = React.useState<{[id: number]: boolean}>({});
+    const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
 
     // Read the most up-to-date version of the attachment from the attachments atom
     const attachmentsAtomValue = useAtomValue(attachmentsAtom);
     const currentAttachment = attachmentsAtomValue.find(att => att.id === attachment.id) || attachment;
+
+    // Calculate available space for the preview
+    useEffect(() => {
+        const calculateAvailableSpace = () => {
+            try {
+                const doc = Zotero.getMainWindow().document;
+                const header = doc.getElementById('beaver-header');
+                const prompt = doc.getElementById('beaver-prompt');
+                
+                if (header && prompt) {
+                    // Get the header's bottom position and prompt's top position
+                    const headerRect = header.getBoundingClientRect();
+                    const promptRect = prompt.getBoundingClientRect();
+                    
+                    // Calculate available space (distance between header bottom and prompt top)
+                    const availableSpace = promptRect.top - headerRect.bottom;
+                    
+                    // Set max height (minus some padding for gap)
+                    const maxHeight = Math.min(availableSpace - 30, 380);
+                    
+                    // Set content height (accounting for padding and button area)
+                    const contentHeight = maxHeight - 46; // 46px for padding and button area
+                    
+                    // Ensure minimum height
+                    setMaxContentHeight(Math.max(contentHeight, 100));
+                }
+            } catch (e) {
+                console.error("Error calculating preview height:", e);
+                setMaxContentHeight(320); // Fallback to a safe value
+            }
+        };
+
+        calculateAvailableSpace();
+        
+        // Optional: recalculate on window resize
+        const win = Zotero.getMainWindow();
+        win.addEventListener('resize', calculateAvailableSpace);
+        
+        return () => {
+            win.removeEventListener('resize', calculateAvailableSpace);
+        };
+    }, []);
 
     // Fetch attachments and notes when the component mounts
     useEffect(() => {
@@ -148,10 +191,12 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
             <div
                 ref={previewRef}
                 className="attachment-preview mx-0"
-                // style={{ backgroundColor: 'rgba(255, 0, 0, 0.2)' }}
             >
                 {/* Content Area */}
-                <div className="attachment-content p-3">
+                <div 
+                    className="attachment-content p-3"
+                    style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
+                >
                     {currentAttachment.type === 'zotero_item' && (
                         <>
                             <span className="flex items-center font-color-primary">
