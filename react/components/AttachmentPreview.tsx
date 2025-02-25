@@ -300,6 +300,10 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                         <button
                             className="attachment-ghost-button"
                             onClick={handleOpen}
+                            disabled={
+                                !attachment.item.isPDFAttachment() &&
+                                !attachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment())
+                            }
                         >
                             <ZoteroIcon 
                                 icon={ZOTERO_ICONS.OPEN} 

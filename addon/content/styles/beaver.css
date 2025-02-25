@@ -280,10 +280,17 @@
     color: var(--fill-primary);
 }
 
+[id^="beaver-pane-"] .attachment-ghost-button:disabled {
+    cursor: not-allowed;
+    color: var(--fill-tertiary);
+}
+
 /* Optional: style for content area if needed */
 [id^="beaver-pane-"] .attachment-content {
     min-height: 1.5rem;
 }
+
+
 
 [id^="beaver-pane-"] .chat-input {
     width: 100%;
