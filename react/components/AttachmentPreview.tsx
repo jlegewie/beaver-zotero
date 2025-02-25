@@ -28,6 +28,10 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     const attachmentsAtomValue = useAtomValue(attachmentsAtom);
     const currentAttachment = attachmentsAtomValue.find(att => att.id === attachment.id) || attachment;
 
+    // Type of attachment
+    const isZoteroItem = currentAttachment.type === 'zotero_item' && currentAttachment.item;
+    const isRegularZoteroItem = isZoteroItem && currentAttachment.item.isRegularItem();
+
     // Calculate available space for the preview
     useEffect(() => {
         const calculateAvailableSpace = () => {
@@ -75,7 +79,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         let isMounted = true;
         
         const fetchAttachmentsAndNotes = async () => {
-            if (currentAttachment.type === 'zotero_item' && currentAttachment.item) {
+            if (isRegularZoteroItem) {
                 // Get attachments
                 const attIds = currentAttachment.item.getAttachments();
                 const atts = attIds.map(id => Zotero.Items.get(id));
@@ -197,7 +201,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                     className="attachment-content p-3"
                     style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
                 >
-                    {currentAttachment.type === 'zotero_item' && (
+                    {isRegularZoteroItem&& (
                         <>
                             <span className="flex items-center font-color-primary">
                                 {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
@@ -278,6 +282,22 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                             </div>
                         </>
                     )}
+                    {currentAttachment.type === 'zotero_item' && !isRegularZoteroItem && (
+                        <>
+                            <span className="flex items-center font-color-primary">
+                                {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
+                                <span className="ml-2">{currentAttachment.shortName}</span>
+                            </span>
+                            <p className="text-base my-2">
+                                {currentAttachment.item.isNote()
+                                    ? Zotero.Utilities.unescapeHTML(currentAttachment.item.getNote()).slice(0, 30) + '...'
+                                    : currentAttachment.item.isAttachment()
+                                        ? currentAttachment.item.getFilename()
+                                        : currentAttachment.item.getDisplayTitle()}
+                            </p>
+                        </>
+                    )}
+
                     {currentAttachment.type !== 'zotero_item' && (
                         <h3>{currentAttachment.fullName}</h3>
                     )}
@@ -301,8 +321,11 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                             className="attachment-ghost-button"
                             onClick={handleOpen}
                             disabled={
-                                !attachment.item.isPDFAttachment() &&
-                                !attachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment())
+                                !isZoteroItem ||
+                                !(
+                                    currentAttachment.item.isPDFAttachment() ||
+                                    (currentAttachment.item.isRegularItem() && currentAttachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
+                                )
                             }
                         >
                             <ZoteroIcon 
