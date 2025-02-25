@@ -118,6 +118,7 @@
 
 /* Component: Beaver Context Item */
 [id^="beaver-pane-"] .attachment-button {
+    padding-right: 0.5rem;
     display: inline-flex;
     align-items: center;
     cursor: pointer;
@@ -183,7 +184,8 @@
 }
 
 [id^="beaver-pane-"] .attachment-remove {
-    margin-left: 0.25rem;
+    /* margin-left: 0.25rem; */
+    margin-right: 0.15rem;
     padding: 0;
     background: none;
     border: none;

@@ -13,18 +13,6 @@ interface AttachmentButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEle
     disabled?: boolean
 }
 
-export const getIconElement = (attachment: Attachment) => {
-    if (attachment.type === 'zotero_item') {
-        const icon = attachment.item.getItemTypeIconName()
-        const iconElement = icon ? (
-            <span className="attachment-button-icon">
-                <CSSItemTypeIcon itemType={icon} />
-            </span>
-        ) : null
-        return iconElement
-    }
-    return null
-}
 
 export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonProps>(
     function AttachmentButton(props: AttachmentButtonProps, ref: React.RefObject<HTMLButtonElement>) {
@@ -35,9 +23,36 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
             ...rest
         } = props
         const [isValid, setIsValid] = useState(true);
+        const [isHovered, setIsHovered] = useState(false);
+
         const removeAttachment = useSetAtom(removeAttachmentAtom);
         const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
         const setPreviewedAttachment = useSetAtom(previewedAttachmentAtom);
+
+        const getIconElement = (attachment: Attachment, isHovered: boolean) => {
+            if (isHovered) {
+                return (<span 
+                    role="button"
+                    className="attachment-remove"
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemove()
+                    }}
+                >
+                    <CSSIcon name="x-8" className="icon-16" />
+                </span>)
+            }
+            if (attachment.type === 'zotero_item') {
+                const icon = attachment.item.getItemTypeIconName()
+                const iconElement = icon ? (
+                    <span className="attachment-button-icon">
+                        <CSSItemTypeIcon itemType={icon} />
+                    </span>
+                ) : null
+                return iconElement
+            }
+            return null
+        }
 
         const handleRemove = () => {
             removeAttachment(attachment)
@@ -57,6 +72,8 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
         return (
             <button
                 ref={ref}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
                 // title={attachment.fullName}
                 title={attachment.fullName}
                 className={`attachment-button ${className || ''}`}
@@ -73,12 +90,12 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                     ? <span className="attachment-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
                     : getIconElement(attachment)
                 } */}
-                {getIconElement(attachment)}
+                {getIconElement(attachment, isHovered)}
                 <span className={!isValid ? 'font-color-red' : undefined}>
                     {attachment.shortName}
                 </span>
                 {!disabled && attachment.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
-                {!disabled && (
+                {/* {!disabled && (
                     <span 
                         role="button"
                         className="attachment-remove"
@@ -89,7 +106,7 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
                     >
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
-                )}
+                )} */}
             </button>
         )
     }
