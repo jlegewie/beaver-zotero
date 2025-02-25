@@ -168,6 +168,18 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         setPreviewedAttachment(null);
     };
 
+    const formatContent = (item: Zotero.Item) => {
+        if (item.isNote()) {
+            const title = item.getNoteTitle();
+            const content = Zotero.Utilities.unescapeHTML(item.getNote());
+            return content.replace(title, '').trim().slice(0, 30) + '...';
+        }
+        if (item.isAttachment()) {
+            return item.getFilename();
+        }
+        return item.getDisplayTitle();
+    };
+
     const handleToggleItem = (itemId: string) => {
         if (currentAttachment.type === 'zotero_item') {
             const currentChildItemIds = currentAttachment.childItemIds || [];
@@ -288,13 +300,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                                 {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
                                 <span className="ml-2">{currentAttachment.shortName}</span>
                             </span>
-                            <p className="text-base my-2">
-                                {currentAttachment.item.isNote()
-                                    ? Zotero.Utilities.unescapeHTML(currentAttachment.item.getNote()).slice(0, 30) + '...'
-                                    : currentAttachment.item.isAttachment()
-                                        ? currentAttachment.item.getFilename()
-                                        : currentAttachment.item.getDisplayTitle()}
-                            </p>
+                            <p className="text-base my-2">{formatContent(currentAttachment.item)}</p>
                         </>
                     )}
 
