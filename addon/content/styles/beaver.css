@@ -220,7 +220,7 @@
     padding-bottom: 0.65rem;
     border: 1px solid var(--fill-quinary);
     border-radius: 6px;
-    background-color: var(--fill-quinary);
+    background-color: var(--material-mix-quarternary);
     user-select: text;
 }
 
@@ -231,7 +231,7 @@
     padding-bottom: 0.25rem;
     padding-left: 0.75rem;
     padding-right: 0.75rem; */
-    background-color: var(--fill-quinary);
+    background-color: var(--material-mix-quarternary);
     color: var(--fill-secondary);
     /* border: 3px solid var(--fill-quinary); */
     border-radius: 8px;
