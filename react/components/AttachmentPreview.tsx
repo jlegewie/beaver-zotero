@@ -1,13 +1,15 @@
 // @ts-nocheck no idea
 import React, { useRef, useEffect, useState } from 'react';
-import { Icon, PinIcon, CancelIcon, CSSItemTypeIcon } from './icons';
-import { Attachment, ZoteroAttachment } from '../types/attachments';
+import { Icon, CancelIcon } from './icons';
+import { Attachment } from '../types/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { previewedAttachmentAtom } from '../atoms/ui';
-import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom, isValidZoteroItem, updateChildItemIdsAtom } from '../atoms/attachments';
+import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom } from '../atoms/attachments';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { truncateText } from '../utils/truncateText';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
+import PreviewZoteroItem from './previews/PreviewZoteroItem';
+import PreviewZoteroAttachment from './previews/PreviewZoteroAttachment';
+import PreviewFileAttachment from './previews/PreviewFileAttachment';
 
 interface AttachmentPreviewProps {
     attachment: Attachment;
@@ -18,10 +20,6 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     const setPreviewedAttachment = useSetAtom(previewedAttachmentAtom);
     const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
     const removeAttachment = useSetAtom(removeAttachmentAtom);
-    const updateChildItemIds = useSetAtom(updateChildItemIdsAtom);
-    const [attachments, setAttachments] = React.useState<any[]>([]);
-    const [notes, setNotes] = React.useState<any[]>([]);
-    const [validAttachments, setValidAttachments] = React.useState<{[id: number]: boolean}>({});
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
 
     // Read the most up-to-date version of the attachment from the attachments atom
@@ -41,20 +39,13 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                 const prompt = doc.getElementById('beaver-prompt');
                 
                 if (header && prompt) {
-                    // Get the header's bottom position and prompt's top position
                     const headerRect = header.getBoundingClientRect();
                     const promptRect = prompt.getBoundingClientRect();
                     
-                    // Calculate available space (distance between header bottom and prompt top)
                     const availableSpace = promptRect.top - headerRect.bottom;
-                    
-                    // Set max height (minus some padding for gap)
                     const maxHeight = Math.min(availableSpace - 30, 380);
-                    
-                    // Set content height (accounting for padding and button area)
                     const contentHeight = maxHeight - 46; // 46px for padding and button area
                     
-                    // Ensure minimum height
                     setMaxContentHeight(Math.max(contentHeight, 100));
                 }
             } catch (e) {
@@ -65,7 +56,6 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
 
         calculateAvailableSpace();
         
-        // Optional: recalculate on window resize
         const win = Zotero.getMainWindow();
         win.addEventListener('resize', calculateAvailableSpace);
         
@@ -74,61 +64,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         };
     }, []);
 
-    // Fetch attachments and notes when the component mounts
-    useEffect(() => {
-        let isMounted = true;
-        
-        const fetchAttachmentsAndNotes = async () => {
-            if (isRegularZoteroItem) {
-                // Get attachments
-                const attIds = currentAttachment.item.getAttachments();
-                const atts = attIds.map(id => Zotero.Items.get(id));
-                if (isMounted) setAttachments(atts);
-
-                // Check which attachments are valid
-                const validityMap: {[id: number]: boolean} = {};
-                for (const att of atts) {
-                    try {
-                        const isValid = await isValidZoteroItem(att);
-                        validityMap[att.id] = isValid;
-                    } catch (e) {
-                        validityMap[att.id] = false;
-                    }
-                }
-                if (isMounted) setValidAttachments(validityMap);
-
-                // Get notes
-                const noteIds = currentAttachment.item.getNotes();
-                const noteItems = noteIds.map(id => Zotero.Items.get(id));
-                if (isMounted) setNotes(noteItems);
-
-                // Set best attachment as default if childItemIds is not set
-                if (!currentAttachment.childItemIds && isMounted) {
-                    try {
-                        const bestAtt = await currentAttachment.item.getBestAttachment();
-                        if (bestAtt && isMounted) {
-                            updateChildItemIds({
-                                attachmentId: currentAttachment.id,
-                                childItemIds: [bestAtt.id.toString()]
-                            });
-                        }
-                    } catch (e) {
-                        console.error("Error getting best attachment:", e);
-                    }
-                }
-            }
-        };
-
-        fetchAttachmentsAndNotes();
-        
-        return () => {
-            isMounted = false;
-        };
-        
-    }, [currentAttachment]);
-    // Only run when attachment ID or type changes, not when childItemIds changes
-    // }, [attachment.id, attachment.item?.id]);
-
+    // Keyboard shortcuts
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -168,38 +104,26 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         setPreviewedAttachment(null);
     };
 
-    const formatContent = (item: Zotero.Item) => {
-        if (item.isNote()) {
-            const title = item.getNoteTitle();
-            const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            return content.replace(title, '').trim().slice(0, 30) + '...';
-        }
-        if (item.isAttachment()) {
-            return item.getFilename();
-        }
-        return item.getDisplayTitle();
-    };
+    // Determine if the PDF can be opened
+    const canOpenPDF = isZoteroItem && (
+        currentAttachment.item.isPDFAttachment() ||
+        (currentAttachment.item.isRegularItem() && 
+         currentAttachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
+    );
 
-    const handleToggleItem = (itemId: string) => {
+    // Render appropriate content based on attachment type
+    const renderContent = () => {
+        if (!currentAttachment) return null;
+        
         if (currentAttachment.type === 'zotero_item') {
-            const currentChildItemIds = currentAttachment.childItemIds || [];
-            const newChildItemIds = currentChildItemIds.includes(itemId)
-                ? currentChildItemIds.filter(id => id !== itemId)
-                : [...currentChildItemIds, itemId];
-            
-            console.log("newChildItemIds", newChildItemIds);
-            updateChildItemIds({
-                attachmentId: currentAttachment.id,
-                childItemIds: newChildItemIds
-            });
+            if (isRegularZoteroItem) {
+                return <PreviewZoteroItem attachment={currentAttachment} />;
+            } else {
+                return <PreviewZoteroAttachment attachment={currentAttachment} />;
+            }
+        } else {
+            return <PreviewFileAttachment attachment={currentAttachment} />;
         }
-    };
-
-    const isItemSelected = (itemId: string) => {
-        if (currentAttachment.type === 'zotero_item' && currentAttachment.childItemIds) {
-            return currentAttachment.childItemIds.includes(itemId);
-        }
-        return false;
     };
 
     return (
@@ -213,100 +137,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                     className="attachment-content p-3"
                     style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
                 >
-                    {isRegularZoteroItem&& (
-                        <>
-                            <span className="flex items-center font-color-primary">
-                                {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
-                                <span className="ml-2">{currentAttachment.shortName}</span>
-                            </span>
-                            <p className="text-base my-2">{currentAttachment.item.getDisplayTitle()}</p>
-                            
-                            {/* Combined Attachments and Notes Section */}
-                            <div className="mt-3">
-                                <div className="flex items-center font-color-secondary mb-2">
-                                    <ZoteroIcon 
-                                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                                        size={15} 
-                                        color="--accent-green"
-                                        className="mr-2"
-                                    />
-                                    <span>{attachments.length} Attachment{attachments.length !== 1 ? 's' : ''}</span>
-                                    
-                                    <span className="mx-1"></span>
-                                    
-                                    <ZoteroIcon 
-                                        icon={ZOTERO_ICONS.NOTES}
-                                        size={15}
-                                        color="--accent-yellow"
-                                        className="mr-2"
-                                    />
-                                    <span>{notes.length} Note{notes.length !== 1 ? 's' : ''}</span>
-                                </div>
-                                
-                                <div className="ml-6 space-y-1">
-                                    {/* Attachments List */}
-                                    {attachments.map(att => (
-                                        <div 
-                                            key={`att-${att.id}`}
-                                            className={validAttachments[att.id]
-                                                ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary`
-                                                : `flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
-                                            }
-                                            onClick={() => validAttachments[att.id] ? handleToggleItem(att.id.toString()) : null}
-                                        >
-                                            <input 
-                                                type="checkbox" 
-                                                className="mr-2" 
-                                                checked={isItemSelected(att.id.toString())}
-                                                onChange={() => {}} // React requires this for controlled components
-                                                disabled={!validAttachments[att.id]}
-                                            />
-                                            
-                                            <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
-                                            {truncateText(att.getDisplayTitle(), 32)}
-                                            {/* <span className='font-color-red'>{att.getDisplayTitle()}</span> */}
-                                        </div>
-                                    ))}
-                                    
-                                    {/* Notes List */}
-                                    {notes.map(note => (
-                                        <div 
-                                            key={`note-${note.id}`} 
-                                            className="flex p-2 items-center attachment-item font-color-secondary cursor-pointer"
-                                            onClick={() => handleToggleItem(note.id.toString())}
-                                        >
-                                            <input 
-                                                type="checkbox" 
-                                                className="mr-2" 
-                                                checked={isItemSelected(note.id.toString())}
-                                                onChange={() => {}} // React requires this for controlled components
-                                            />
-                                            <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={note.getItemTypeIconName()} /></span>
-                                            {truncateText(note.getNoteTitle(), 32)}
-                                        </div>
-                                    ))}
-                                    
-                                    {/* Show message if no attachments or notes */}
-                                    {attachments.length === 0 && notes.length === 0 && (
-                                        <div className="text-gray-400 italic">No attachments or notes</div>
-                                    )}
-                                </div>
-                            </div>
-                        </>
-                    )}
-                    {currentAttachment.type === 'zotero_item' && !isRegularZoteroItem && (
-                        <>
-                            <span className="flex items-center font-color-primary">
-                                {<CSSItemTypeIcon itemType={currentAttachment.item.getItemTypeIconName()} />}
-                                <span className="ml-2">{currentAttachment.shortName}</span>
-                            </span>
-                            <p className="text-base my-2">{formatContent(currentAttachment.item)}</p>
-                        </>
-                    )}
-
-                    {currentAttachment.type !== 'zotero_item' && (
-                        <h3>{currentAttachment.fullName}</h3>
-                    )}
+                    {renderContent()}
                 </div>
 
                 {/* buttons */}
@@ -316,7 +147,6 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                             className="attachment-ghost-button"
                             onClick={handlePin}
                         >
-                            {/* <Icon icon={PinIcon} /> */}
                             <ZoteroIcon 
                                 icon={currentAttachment.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
                                 size={12}
@@ -326,13 +156,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                         <button
                             className="attachment-ghost-button"
                             onClick={handleOpen}
-                            disabled={
-                                !isZoteroItem ||
-                                !(
-                                    currentAttachment.item.isPDFAttachment() ||
-                                    (currentAttachment.item.isRegularItem() && currentAttachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
-                                )
-                            }
+                            disabled={!canOpenPDF}
                         >
                             <ZoteroIcon 
                                 icon={ZOTERO_ICONS.OPEN} 
@@ -360,7 +184,6 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                         </button>
                     </div>
                 </div>
-
             </div>
         </div>
     );
