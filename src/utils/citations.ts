@@ -1,3 +1,5 @@
+import { truncateText } from "../../react/utils/truncateText";
+
 interface ZoteroStyle {
     getCiteProc(locale: string, format: 'text' | 'html'): CSLEngine;
 }
@@ -44,7 +46,7 @@ export function getInTextCitations(
             citationItems: [{ id: item.id }],
             properties: { inText: true }
         };
-        return cslEngine.previewCitationCluster(citation, [], [], "text")
+        const citation_formatted = cslEngine.previewCitationCluster(citation, [], [], "text")
             .replace(/^\(|\)$/g, '')
             .replace(/n\.d\.$/, '')
             // .replace(/ et al\./g, '+')
@@ -53,6 +55,8 @@ export function getInTextCitations(
             .replace(/”/g, '"')
             .replace(/“/g, '"')
             .replace(/,"$/, '"');
+
+        return truncateText(citation_formatted, 25);
     });
     
     cslEngine.free();
