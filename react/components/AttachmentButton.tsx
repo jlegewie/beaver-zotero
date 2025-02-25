@@ -58,7 +58,7 @@ export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonPr
             <button
                 ref={ref}
                 // title={attachment.fullName}
-                title={attachment.id}
+                title={attachment.fullName}
                 className={`attachment-button ${className || ''}`}
                 disabled={disabled}
                 onClick={(e) => {
