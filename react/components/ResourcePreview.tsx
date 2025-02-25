@@ -1,34 +1,38 @@
-// @ts-nocheck no idea
-import React, { useRef, useEffect, useState } from 'react';
+
+import React from 'react';
+// @ts-ignore no idea why this is needed
+import { useRef, useEffect, useState } from 'react';
 import { Icon, CancelIcon } from './icons';
-import { Attachment } from '../types/attachments';
+import { Resource } from '../types/resources';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { previewedAttachmentAtom } from '../atoms/ui';
-import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom } from '../atoms/attachments';
+import { previewedResourceAtom } from '../atoms/ui';
+import { resourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../atoms/resources';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
 import PreviewZoteroAttachment from './previews/PreviewZoteroAttachment';
 import PreviewFileAttachment from './previews/PreviewFileAttachment';
+import { getZoteroItem } from '../utils/resourceUtils';
 
-interface AttachmentPreviewProps {
-    attachment: Attachment;
+interface ResourcePreviewProps {
+    resource: Resource;
 }
 
-const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => {
+const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
     const previewRef = useRef<HTMLDivElement>(null);
-    const setPreviewedAttachment = useSetAtom(previewedAttachmentAtom);
-    const togglePinAttachment = useSetAtom(togglePinAttachmentAtom);
-    const removeAttachment = useSetAtom(removeAttachmentAtom);
+    const setPreviewedResource = useSetAtom(previewedResourceAtom);
+    const togglePinResource = useSetAtom(togglePinResourceAtom);
+    const removeResource = useSetAtom(removeResourceAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
 
-    // Read the most up-to-date version of the attachment from the attachments atom
-    const attachmentsAtomValue = useAtomValue(attachmentsAtom);
-    const currentAttachment = attachmentsAtomValue.find(att => att.id === attachment.id) || attachment;
+    // Get resource from resources atom
+    const resources = useAtomValue(resourcesAtom);
+    const currentResource = resources.find(att => att.id === resource.id) || resource;
 
-    // Type of attachment
-    const isZoteroItem = currentAttachment.type === 'zotero_item' && currentAttachment.item;
-    const isRegularZoteroItem = isZoteroItem && currentAttachment.item.isRegularItem();
+    // Type of resource
+    const item = currentResource.type === 'zotero_item' ? getZoteroItem(currentResource) : null;
+    const isZoteroItem = currentResource.type === 'zotero_item' && item;
+    const isRegularZoteroItem = isZoteroItem && item.isRegularItem();
 
     // Calculate available space for the preview
     useEffect(() => {
@@ -68,13 +72,13 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
-                setPreviewedAttachment(null);
+                setPreviewedResource(null);
             }
         };
 
         const handleClickOutside = (e: MouseEvent) => {
             if (previewRef.current && !previewRef.current.contains(e.target as Node)) {
-                setPreviewedAttachment(null);
+                setPreviewedResource(null);
             }
         };
 
@@ -85,44 +89,46 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
             Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
             Zotero.getMainWindow().document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [setPreviewedAttachment]);
+    }, [setPreviewedResource]);
 
     const handlePin = () => {
-        togglePinAttachment(currentAttachment.id);
-        setPreviewedAttachment(null);
+        togglePinResource(currentResource.id);
+        setPreviewedResource(null);
     };
 
     const handleRemove = () => {
-        removeAttachment(currentAttachment);
-        setPreviewedAttachment(null);
+        removeResource(currentResource);
+        setPreviewedResource(null);
     };
 
     const handleOpen = async () => {
-        if (currentAttachment.type === 'zotero_item') {
-            await openPDFInNewWindow(currentAttachment.item);
+        if (currentResource.type === 'zotero_item' && item) {
+            await openPDFInNewWindow(item);
         }
-        setPreviewedAttachment(null);
+        setPreviewedResource(null);
     };
 
     // Determine if the PDF can be opened
     const canOpenPDF = isZoteroItem && (
-        currentAttachment.item.isPDFAttachment() ||
-        (currentAttachment.item.isRegularItem() && 
-         currentAttachment.item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
+        item.isPDFAttachment() ||
+        (item.isRegularItem() && 
+         item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
     );
 
     // Render appropriate content based on attachment type
     const renderContent = () => {
-        if (!currentAttachment) return null;
+        if (!currentResource) return null;
         
-        if (currentAttachment.type === 'zotero_item') {
+        if (currentResource.type === 'zotero_item') {
             if (isRegularZoteroItem) {
-                return <PreviewZoteroItem attachment={currentAttachment} />;
+                return <PreviewZoteroItem resource={currentResource} item={item} />;
+            } else if (item) {
+                return <PreviewZoteroAttachment resource={currentResource} item={item} />;
             } else {
-                return <PreviewZoteroAttachment attachment={currentAttachment} />;
+                return null;
             }
         } else {
-            return <PreviewFileAttachment attachment={currentAttachment} />;
+            return <PreviewFileAttachment resource={currentResource} />;
         }
     };
 
@@ -130,11 +136,11 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         <div className="absolute -top-4 inset-x-0 -translate-y-full px-3">
             <div
                 ref={previewRef}
-                className="attachment-preview mx-0"
+                className="resource-preview mx-0"
             >
                 {/* Content Area */}
                 <div 
-                    className="attachment-content p-3"
+                    className="resource-content p-3"
                     style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
                 >
                     {renderContent()}
@@ -144,17 +150,17 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                 <div className="p-1 flex flex-row items-center">
                     <div className="flex-1 gap-4">
                         <button
-                            className="attachment-ghost-button"
+                            className="resource-ghost-button"
                             onClick={handlePin}
                         >
                             <ZoteroIcon 
-                                icon={currentAttachment.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
+                                icon={currentResource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
                                 size={12}
                             />
-                            <span>{currentAttachment.pinned ? 'Unpin' : 'Pin'}</span>
+                            <span>{currentResource.pinned ? 'Unpin' : 'Pin'}</span>
                         </button>
                         <button
-                            className="attachment-ghost-button"
+                            className="resource-ghost-button"
                             onClick={handleOpen}
                             disabled={!canOpenPDF}
                         >
@@ -165,7 +171,7 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                             Open
                         </button>
                         <button 
-                            className="attachment-ghost-button"
+                            className="resource-ghost-button"
                             onClick={handleRemove}
                         >
                             <ZoteroIcon 
@@ -177,8 +183,8 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
                     </div>
                     <div className="flex">
                         <button
-                            className="attachment-ghost-button"
-                            onClick={() => setPreviewedAttachment(null)}
+                            className="resource-ghost-button"
+                            onClick={() => setPreviewedResource(null)}
                         >
                             <Icon icon={CancelIcon} />
                         </button>
@@ -189,4 +195,4 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
     );
 };
 
-export default AttachmentPreview;
+export default ResourcePreview;

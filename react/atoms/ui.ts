@@ -1,24 +1,24 @@
 import { atom } from 'jotai';
-import { Attachment } from '../types/attachments';
-import { attachmentsAtom } from './attachments';
+import { resourcesAtom } from './resources';
+import { Resource } from 'react/types/resources';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
-export const previewedAttachmentAtom = atom(
-  (get) => {
-    const previewAttachmentId = get(previewedAttachmentIdAtom);
-    const attachments = get(attachmentsAtom);
-    
-    if (!previewAttachmentId) return null;
-    
-    // Find the attachment with the latest data from attachmentsAtom
-    return attachments.find(att => att.id === previewAttachmentId) || null;
-  },
-  (get, set, attachment: Attachment | null) => {
-    // When setting a new attachment to preview, just store its ID
-    set(previewedAttachmentIdAtom, attachment?.id || null);
-  }
-);
 
-// Simple atom to just store the ID of the attachment being previewed
-export const previewedAttachmentIdAtom = atom<string | null>(null);
+// Resource preview
+export const previewedResourceIdAtom = atom<string | null>(null);
+export const previewedResourceAtom = atom(
+    (get) => {
+        const previewResourceId = get(previewedResourceIdAtom);
+        const resources = get(resourcesAtom);
+        
+        if (!previewResourceId) return null;
+        
+        // Find the attachment with the latest data from attachmentsAtom
+        return resources.find(resource => resource.id === previewResourceId) || null;
+    },
+    (get, set, resource: Resource | null) => {
+        // When setting a new attachment to preview, just store its ID
+        set(previewedResourceIdAtom, resource?.id || null);
+    }
+);

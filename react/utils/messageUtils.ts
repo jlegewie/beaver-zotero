@@ -1,6 +1,6 @@
-import { ChatMessage } from "react/types/messages";
-import { APIMessage, ContentPart } from "./OpenAIProvider";
-import { resourceToContentParts } from "../../react/utils/contentPartUtils";
+import { ChatMessage } from '../types/messages';
+import { resourceToContentParts } from './contentPartUtils';
+import { APIMessage, ContentPart } from '../../src/services/OpenAIProvider';
 
 const SYSTEM_PROMPT = `You are a helpful assistant that helps researchers answer questions related to research papers, reports, and other research-related documents.
 
@@ -15,11 +15,13 @@ Follow these rules when refering to documents:
 - Support your statements with source citations that include document id(s) at the end of sentences or paragraphs following best citations practices for an academic researcher. Format citations using the following format:
     - For a single document: "[ID]"
     - For multiple documents: "[ID1, ID2, ID3]"
-`
+`;
 
-async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMessage> {
+/**
+* Convert a chat message to an API message format
+*/
+export async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMessage> {
     if (message.role === 'user') {
-        
         // Convert resources to content parts
         const resourcesContent: ContentPart[] = [];
         for (const resource of message.resources || []) {
@@ -41,7 +43,7 @@ async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMes
             content: content
         };
     }
-
+    
     // For non-user messages, return as is
     return {
         role: message.role,
@@ -49,13 +51,11 @@ async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMes
     };
 }
 
-export const chatCompletion = async (
-    messages: ChatMessage[],
-    onChunk: (chunk: string) => void,
-    onFinish: () => void,
-    onError: (error: Error) => void
-) => {
-    // Request messages 
+/**
+* Create a chat completion request
+*/
+export async function createChatCompletionRequest(messages: ChatMessage[]) {
+    // Request messages
     const requestMessages = [
         {
             role: 'system',
@@ -63,27 +63,36 @@ export const chatCompletion = async (
         },
         ...(await Promise.all(messages.map(chatMessageToRequestMessage))),
     ];
-
-    // LLM provider
+    
+    // Determine model based on provider
     // @ts-ignore Zotero.Beaver defined in hooks.ts
     const provider = Zotero.Beaver.aiProvider;
     const model = (provider.providerName === 'openai') ? 'gpt-4o' : 'gemini-2.0-flash';
     
-    const request = {
+    return {
         model: model,
         messages: requestMessages,
-    }
+    };
+}
 
-    console.log('requestMessages', requestMessages);
-    
-    // Call chat completion
+/**
+* Execute chat completion
+*/
+export async function chatCompletion(
+    messages: ChatMessage[],
+    onChunk: (chunk: string) => void,
+    onFinish: () => void,
+    onError: (error: Error) => void
+) {
     try {
+        // @ts-ignore Zotero.Beaver defined in hooks.ts
+        const provider = Zotero.Beaver.aiProvider;
+        const request = await createChatCompletionRequest(messages);
+        
         await provider.createChatCompletionStreaming(request, onChunk);
+        onFinish();
     } catch (error) {
         console.error(error);
         onError(error as Error);
     }
-
-    // Call finish callback
-    onFinish();
 }

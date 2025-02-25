@@ -1,21 +1,24 @@
-// @ts-nocheck no idea
-import React, { useEffect, useState } from 'react';
-import { ZoteroAttachment } from '../../types/attachments';
+import React from 'react';
+// @ts-ignore no idea why this is needed
+import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { updateChildItemIdsAtom, isValidZoteroItem } from '../../atoms/attachments';
+import { updateChildItemKeysAtom } from '../../atoms/resources';
+import { isValidZoteroItem } from '../../utils/resourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/truncateText';
+import { ZoteroResource } from 'react/types/resources';
 
 interface PreviewZoteroItemProps {
-    attachment: ZoteroAttachment;
+    resource: ZoteroResource;
+    item: Zotero.Item;
 }
 
-const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => {
-    const updateChildItemIds = useSetAtom(updateChildItemIdsAtom);
-    const [attachments, setAttachments] = useState<any[]>([]);
-    const [notes, setNotes] = useState<any[]>([]);
-    const [validAttachments, setValidAttachments] = useState<{[id: number]: boolean}>({});
+const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ resource, item }) => {
+    const updateChildItemKeys = useSetAtom(updateChildItemKeysAtom);
+    const [attachments, setAttachments] = useState<Zotero.Item[]>([]);
+    const [notes, setNotes] = useState<Zotero.Item[]>([]);
+    const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
 
     // Fetch attachments and notes
     useEffect(() => {
@@ -23,7 +26,7 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
         
         const fetchAttachmentsAndNotes = async () => {
             // Get attachments
-            const attIds = attachment.item.getAttachments();
+            const attIds = item.getAttachments();
             const atts = attIds.map(id => Zotero.Items.get(id));
             if (isMounted) setAttachments(atts);
 
@@ -37,27 +40,12 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
                     validityMap[att.id] = false;
                 }
             }
-            if (isMounted) setValidAttachments(validityMap);
+            if (isMounted) setValidItemIds(validityMap);
 
             // Get notes
-            const noteIds = attachment.item.getNotes();
+            const noteIds = item.getNotes();
             const noteItems = noteIds.map(id => Zotero.Items.get(id));
             if (isMounted) setNotes(noteItems);
-
-            // Set best attachment as default if childItemIds is not set
-            if (!attachment.childItemIds && isMounted) {
-                try {
-                    const bestAtt = await attachment.item.getBestAttachment();
-                    if (bestAtt && isMounted) {
-                        updateChildItemIds({
-                            attachmentId: attachment.id,
-                            childItemIds: [bestAtt.id.toString()]
-                        });
-                    }
-                } catch (e) {
-                    console.error("Error getting best attachment:", e);
-                }
-            }
         };
 
         fetchAttachmentsAndNotes();
@@ -65,24 +53,22 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
         return () => {
             isMounted = false;
         };
-    }, [attachment]);
+    }, [resource]);
 
-    const handleToggleItem = (itemId: string) => {
-        const currentChildItemIds = attachment.childItemIds || [];
-        const newChildItemIds = currentChildItemIds.includes(itemId)
-            ? currentChildItemIds.filter(id => id !== itemId)
-            : [...currentChildItemIds, itemId];
-        
-        console.log("newChildItemIds", newChildItemIds);
-        updateChildItemIds({
-            attachmentId: attachment.id,
-            childItemIds: newChildItemIds
+    const handleToggleItem = (itemKey: string) => {
+        const currentChildItemKeys = resource.childItemKeys || [];
+        const newChildItemKeys = currentChildItemKeys.includes(itemKey)
+            ? currentChildItemKeys.filter(key => key !== itemKey)
+            : [...currentChildItemKeys, itemKey];
+        updateChildItemKeys({
+            resourceId: resource.id,
+            childItemKeys: newChildItemKeys
         });
     };
 
-    const isItemSelected = (itemId: string) => {
-        if (attachment.childItemIds) {
-            return attachment.childItemIds.includes(itemId);
+    const isItemSelected = (itemKey: string) => {
+        if (resource.childItemKeys) {
+            return resource.childItemKeys.includes(itemKey);
         }
         return false;
     };
@@ -90,10 +76,10 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
     return (
         <>
             <span className="flex items-center font-color-primary">
-                {<CSSItemTypeIcon itemType={attachment.item.getItemTypeIconName()} />}
-                <span className="ml-2">{attachment.shortName}</span>
+                {<CSSItemTypeIcon itemType={resource.icon} />}
+                <span className="ml-2">{resource.name}</span>
             </span>
-            <p className="text-base my-2">{attachment.item.getDisplayTitle()}</p>
+            <p className="text-base my-2">{item.getDisplayTitle()}</p>
             
             {/* Combined Attachments and Notes Section */}
             <div className="mt-3">
@@ -119,21 +105,21 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
                 
                 <div className="ml-6 space-y-1">
                     {/* Attachments List */}
-                    {attachments.map(att => (
+                    {attachments.map((att: Zotero.Item) => (
                         <div 
                             key={`att-${att.id}`}
-                            className={validAttachments[att.id]
+                            className={validItemIds[att.id]
                                 ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary`
                                 : `flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
                             }
-                            onClick={() => validAttachments[att.id] ? handleToggleItem(att.id.toString()) : null}
+                            onClick={() => validItemIds[att.id] ? handleToggleItem(att.key) : null}
                         >
                             <input 
                                 type="checkbox" 
-                                className="mr-2" 
-                                checked={isItemSelected(att.id.toString())}
+                                className="mr-2"
+                                checked={isItemSelected(att.key)}
                                 onChange={() => {}} // React requires this for controlled components
-                                disabled={!validAttachments[att.id]}
+                                disabled={!validItemIds[att.id]}
                             />
                             
                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
@@ -142,16 +128,16 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ attachment }) => 
                     ))}
                     
                     {/* Notes List */}
-                    {notes.map(note => (
+                    {notes.map((note: Zotero.Item) => (
                         <div 
                             key={`note-${note.id}`} 
                             className="flex p-2 items-center attachment-item font-color-secondary cursor-pointer"
-                            onClick={() => handleToggleItem(note.id.toString())}
+                            onClick={() => handleToggleItem(note.key)}
                         >
                             <input 
                                 type="checkbox" 
                                 className="mr-2" 
-                                checked={isItemSelected(note.id.toString())}
+                                checked={isItemSelected(note.key)}
                                 onChange={() => {}} // React requires this for controlled components
                             />
                             <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={note.getItemTypeIconName()} /></span>

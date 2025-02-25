@@ -1,17 +1,17 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
-import { updateAttachmentsFromSelectedItemsAtom } from "../atoms/attachments";
-import { isLibraryTabAtom, isSidebarVisibleAtom } from "../atoms/ui";
+import { updateResourcesFromZoteroItemsAtom } from "../atoms/resources";
+import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 
 /**
  * Listens to changes in Zotero tab selection
  * 
- * Sets isLibraryTabAtom and updates attachments based on the selected tab type.
+ * Sets isLibraryTabAtom and updates resources based on the selected tab type.
  */
 export function useZoteroTabSelection() {
-    const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
+    const updateResourcesFromZoteroItems = useSetAtom(updateResourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     const window = Zotero.getMainWindow();
 
@@ -22,7 +22,7 @@ export function useZoteroTabSelection() {
 
         // Handler for tab selection changes
         const tabObserver = {
-            notify: function(event: string, type: string, ids: string[], extraData: any) {
+            notify: async function(event: string, type: string, ids: string[], extraData: any) {
                 if (type === 'tab' && event === 'select') {
                     const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
@@ -43,17 +43,17 @@ export function useZoteroTabSelection() {
                         });
                     }
 
-                    // Update attachments
+                    // Update resources
                     if (isLibrary) {
                         const newSelectedItems = Zotero.getActiveZoteroPane().getSelectedItems() || [];
-                        updateAttachmentsFromSelectedItems(newSelectedItems);
+                        await updateResourcesFromZoteroItems(newSelectedItems);
                     } else if (selectedTab.type === 'reader') {
                         const reader = Zotero.Reader.getByTabID(selectedTab.id);
                         if (reader) {
                             // @ts-ignore itemID is not typed
-                            const attachment = Zotero.Items.get(reader.itemID);
-                            if (attachment) {
-                                updateAttachmentsFromSelectedItems([attachment]);
+                            const item = Zotero.Items.get(reader.itemID);
+                            if (item) {
+                                updateResourcesFromZoteroItems([item]);
                             }
                         }
                     }
@@ -66,5 +66,5 @@ export function useZoteroTabSelection() {
         Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'tabSelectionObserver');
         // @ts-ignore unregisterObserver is not typed
         return () => Zotero.Notifier.unregisterObserver(tabObserver);
-    }, [updateAttachmentsFromSelectedItems, setIsLibraryTab]);
+    }, [updateResourcesFromZoteroItems, setIsLibraryTab]);
 } 

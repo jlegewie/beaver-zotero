@@ -10,12 +10,13 @@ import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
-import { attachmentsAtom, isValidAttachment, resetAttachmentsAtom } from '../atoms/attachments';
+import { resourcesAtom, resetResourcesAtom } from '../atoms/resources';
+import { isResourceValid } from '../utils/resourceUtils';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { Attachment } from '../types/attachments';
-import { threadAttachmentCountAtom } from '../atoms/messages';
+import { Resource } from '../types/resources';
+import { threadResourceCountAtom } from '../atoms/messages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 interface InputAreaProps {
@@ -26,43 +27,46 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const attachments = useAtomValue(attachmentsAtom);
+    const resources = useAtomValue(resourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const streamToMessage = useSetAtom(streamToMessageAtom);
-    const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
+    const threadResourceCount = useAtomValue(threadResourceCountAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
-    const resetAttachments = useSetAtom(resetAttachmentsAtom);
+    const resetResources = useSetAtom(resetResourcesAtom);
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+    const handleSubmit = async (
+        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
+    ) => {
         e.preventDefault();
         
         if (isStreaming) {
             return;
         }
 
-        // Validate attachments
-        const validAttachments = [];
-        for (const attachment of attachments) {
-            if (await isValidAttachment(attachment)) {
-                validAttachments.push(attachment);
+        // Validate resources
+        const validResources = [];
+        for (const resource of resources) {
+            if (await isResourceValid(resource, true)) {
+                validResources.push(resource);
             }
         }
+        console.log('validResources', validResources);
 
         // Add user message to messages atom
         const newMessages = [
             ...messages,
             createUserMessage({
                 content: userMessage,
-                attachments: validAttachments,
+                resources: validResources,
             })
         ];
 
         // Add assistant message to messages atom
         const assistantMsg = createAssistantMessage();
         setMessages([...newMessages, assistantMsg]);
-        resetAttachments();
+        resetResources();
 
 
         // Chat completion
@@ -83,7 +87,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         // Clear input
         setUserMessage('');
-        // setUserAttachments([]);
 
         // If command is pressed, handle library search
         if (isCommandPressed) {
@@ -97,7 +100,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         console.log('Chat completion with library search:', userMessage);
     };
 
-    const handleAddAttachments = async () => {
+    const handleAddResources = async () => {
         console.log('Adding context item');
     };
 
@@ -130,19 +133,19 @@ const InputArea: React.FC<InputAreaProps> = ({
             style={{ minHeight: 'fit-content' }}
         >
 
-            {/* Message Attachments */}
+            {/* Message resources */}
             <div className="flex flex-wrap gap-3 mb-2">
                 <button
                     className="icon-button scale-11"
-                    onClick={handleAddAttachments}
+                    onClick={handleAddResources}
                 >
                         <Icon icon={PlusSignIcon} />
                 </button>
-                {threadAttachmentCount > 0 && (
+                {threadResourceCount > 0 && (
                     <button
-                        className="attachments-info"
+                        className="resources-info"
                         disabled={true}
-                        title={`This thread has ${threadAttachmentCount} attachments.`}
+                        title={`This thread has ${threadResourceCount} resources.`}
                     >
                         <ZoteroIcon 
                             icon={ZOTERO_ICONS.ATTACHMENTS} 
@@ -150,13 +153,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                             color="--accent-green"
                             className="mr-1"
                         />
-                        {threadAttachmentCount}
+                        {threadResourceCount}
                     </button>
                 )}
-                {attachments.map((attachment, index) => (
+                {resources.map((resource, index) => (
                     <AttachmentButton
                         key={index}
-                        attachment={attachment as Attachment}
+                        resource={resource}
                     />
                 ))}
             </div>

@@ -1,26 +1,24 @@
 // @ts-ignore no idea
 import React, { useRef, useEffect, useState } from 'react';
-import UserMessageDisplay from "./UserMessageDisplay"
 import InputArea from "./InputArea"
-import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
 import { messagesAtom } from '../atoms/messages';
-import { updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { previewedAttachmentAtom } from '../atoms/ui';
-import AttachmentPreview from './AttachmentPreview';
+import { previewedResourceAtom } from '../atoms/ui';
+import ResourcePreview from './ResourcePreview';
+import { updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const messages = useAtomValue(messagesAtom);
-    const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
+    const updateResourcesFromZoteroSelection = useSetAtom(updateResourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useState(false);
-    const previewedAttachment = useAtomValue(previewedAttachmentAtom);
+    const previewedResource = useAtomValue(previewedResourceAtom);
     
     useZoteroSelection();
     
@@ -28,13 +26,9 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         // Focus the input
         inputRef.current?.focus();
 
-        // Set user attachments from selected Zotero items
-        const loadSelectedItems = async () => {
-            const items = Zotero.getActiveZoteroPane().getSelectedItems();
-            updateAttachmentsFromSelectedItems(items);
-        };
-        loadSelectedItems();
-    }, []); // Run once on mount
+        // Update resources based on Zotero selection
+        updateResourcesFromZoteroSelection();
+    }, []);
     
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
@@ -62,7 +56,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 {userScrolled && <ScrollDownButton onClick={handleScrollToBottom} />}
-                {previewedAttachment && <AttachmentPreview attachment={previewedAttachment} />}
+                {previewedResource && <ResourcePreview resource={previewedResource} />}
                 <InputArea inputRef={inputRef} />
             </div>
         </div>

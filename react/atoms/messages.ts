@@ -1,9 +1,8 @@
 import { atom } from "jotai";
-import { Attachment } from "../types/attachments";
 import { ChatMessage } from "../types/messages";
+import { ZoteroResource } from "../types/resources";
 
-
-// Current user message and content parts
+// Current user message and content
 export const userMessageAtom = atom<string>('');
 
 // Messages atom
@@ -26,20 +25,20 @@ export const userMessagesFromThreadAtom = atom((get) => {
     return messages.filter(message => message.role === 'user');
 });
 
-// Derive attachment keys from messages in conversation
-export const threadAttachmentKeysAtom = atom((get) => {
+// Derive resource keys from messages in conversation
+export const threadResourceKeysAtom = atom((get) => {
     const userMessages = get(userMessagesFromThreadAtom);
-    const attachments = userMessages.flatMap((message) => message.attachments || []);
-    const keys = attachments
-        .filter((attachment) => attachment.type == 'zotero_item')
-        .map((attachment) => attachment.item.key);
+    const resources = userMessages.flatMap((message) => message.resources || []);
+    const keys = resources
+    .filter((resource): resource is ZoteroResource => resource.type === 'zotero_item')
+    .map((resource) => resource.itemKey);
     return keys;
 });
 
-export const threadAttachmentCountAtom = atom((get) => {
+export const threadResourceCountAtom = atom((get) => {
     const userMessages = get(userMessagesFromThreadAtom);
-    const attachments = userMessages.flatMap((message) => message.attachments || []);
-    return attachments.length;
+    const resources = userMessages.flatMap((message) => message.resources || []);
+    return resources.length;
 });
 
 // Setter atoms

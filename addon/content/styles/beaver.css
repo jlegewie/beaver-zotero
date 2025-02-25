@@ -117,7 +117,7 @@
 }
 
 /* Component: Beaver Context Item */
-[id^="beaver-pane-"] .attachment-button {
+[id^="beaver-pane-"] .resource-button {
     padding-right: 0.5rem;
     display: inline-flex;
     align-items: center;
@@ -133,40 +133,40 @@
     font-size: 0.85rem;
 }
 
-[id^="beaver-pane-"] .attachment-button.pinned {
+[id^="beaver-pane-"] .resource-button.pinned {
     border: 1px solid var(--fill-tertiary);
 }
 
-[id^="beaver-pane-"] .attachment-button:hover {
+[id^="beaver-pane-"] .resource-button:hover {
     border-color: var(--fill-quarternary);
     background-color: var(--fill-quarternary);
     /* color: var(--fill-primary); */
 }
 
-[id^="beaver-pane-"] .attachment-button:disabled {
+[id^="beaver-pane-"] .resource-button:disabled {
     cursor: default;
 }
 
-[id^="beaver-pane-"] .attachment-button:hover:disabled {
+[id^="beaver-pane-"] .resource-button:hover:disabled {
     border-color: var(--fill-quarternary);
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .attachment-button .icon:hover {
+[id^="beaver-pane-"] .resource-button .icon:hover {
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .attachment-button-icon {
+[id^="beaver-pane-"] .resource-button-icon {
     margin-right: 0.15rem;
     display: inline-flex;
     align-items: center;
 }
 
-[id^="beaver-pane-"] .attachment-button-icon span {
+[id^="beaver-pane-"] .resource-button-icon span {
     transform: scale(0.75);
 }
 
-[id^="beaver-pane-"] .attachments-info {
+[id^="beaver-pane-"] .resources-info {
     display: inline-flex;
     align-items: center;
     cursor: default;
@@ -183,7 +183,7 @@
     padding-right: 0.2rem;
 }
 
-[id^="beaver-pane-"] .attachment-remove {
+[id^="beaver-pane-"] .resource-remove {
     /* margin-left: 0.25rem; */
     margin-right: 0.15rem;
     padding: 0;
@@ -198,7 +198,7 @@
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .attachment-remove:hover {
+[id^="beaver-pane-"] .resource-remove:hover {
     opacity: 1;
     color: var(--fill-secondary);
 }
@@ -226,8 +226,8 @@
     user-select: text;
 }
 
-/* Attachment Preview Container */
-[id^="beaver-pane-"] .attachment-preview {
+/* Resource Preview Container */
+[id^="beaver-pane-"] .resource-preview {
     padding:0.35rem;
     /* padding-top: 0.75rem;
     padding-bottom: 0.25rem;
@@ -244,7 +244,7 @@
     flex-direction: column;
 }
 
-[id^="beaver-pane-"] .attachment-content {
+[id^="beaver-pane-"] .resource-content {
     background-color: var(--material-sidepane);
     border-radius: 8px;
     overflow-y: auto;
@@ -263,7 +263,7 @@
 }
 
 /* Ghost buttons for the actions */
-[id^="beaver-pane-"] .attachment-ghost-button {
+[id^="beaver-pane-"] .resource-ghost-button {
     cursor: pointer;
     background-color: transparent;
     color: var(--fill-secondary);
@@ -277,18 +277,18 @@
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .attachment-ghost-button:hover {
+[id^="beaver-pane-"] .resource-ghost-button:hover {
     /* background-color: var(--fill-quinary); */
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .attachment-ghost-button:disabled {
+[id^="beaver-pane-"] .resource-ghost-button:disabled {
     cursor: not-allowed;
     color: var(--fill-tertiary);
 }
 
 /* Optional: style for content area if needed */
-[id^="beaver-pane-"] .attachment-content {
+[id^="beaver-pane-"] .resource-content {
     min-height: 1.5rem;
 }
 

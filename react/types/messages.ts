@@ -1,22 +1,23 @@
-import { Attachment } from "./attachments";
 import { v4 as uuidv4 } from 'uuid';
+import { Resource } from './resources';
 
 // Message types
-export type ChatMessage = {
+export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
-    attachments?: Attachment[];
+    resources?: Resource[];
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
 }
 
+// Factory functions for creating messages
 export const createUserMessage = (message: Partial<ChatMessage>): ChatMessage => {
     return {
         id: uuidv4(),
         role: 'user',
         content: '',
         status: 'completed',
-        attachments: [],
+        resources: [],
         ...message,
     };
 };
@@ -27,7 +28,7 @@ export const createAssistantMessage = (message?: Partial<ChatMessage>): ChatMess
         role: 'assistant',
         content: '',
         status: 'in_progress',
-        attachments: [],
+        resources: [],
         ...message,
     };
 };

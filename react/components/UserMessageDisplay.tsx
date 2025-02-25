@@ -16,13 +16,13 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     return (
         <div className="user-message-display">
             
-            {/* Message attachments */}
-            {message.attachments && (
+            {/* Message resources */}
+            {message.resources && (
                 <div className="flex flex-wrap gap-3 mb-2">
-                    {(message.attachments).map((attachment, index) => (
+                    {(message.resources).map((resource, index) => (
                         <AttachmentButton
                             key={index}
-                            attachment={attachment}
+                            resource={resource}
                             disabled={true}
                         />
                     ))}

@@ -1,13 +1,13 @@
 import React from 'react';
-import { FileAttachment, RemoteFileAttachment } from '../../types/attachments';
+import { FileResource, RemoteFileResource } from '../../types/resources';
 
 interface PreviewFileAttachmentProps {
-    attachment: FileAttachment | RemoteFileAttachment;
+    resource: FileResource | RemoteFileResource;
 }
 
-const PreviewFileAttachment: React.FC<PreviewFileAttachmentProps> = ({ attachment }) => {
+const PreviewFileAttachment: React.FC<PreviewFileAttachmentProps> = ({ resource }) => {
     return (
-        <h3>{attachment.fullName}</h3>
+        <h3>{resource.name}</h3>
     );
 };
 

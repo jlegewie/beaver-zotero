@@ -2,7 +2,8 @@ import React from 'react';
 import { Icon, CancelIcon, ClockIcon, PlusSignIcon, Settings02Icon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { messagesAtom } from '../atoms/messages';
-import { resetAttachmentsAtom, updateAttachmentsFromSelectedItemsAtom } from '../atoms/attachments';
+import { resetResourcesAtom, updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
+
 import { useSetAtom } from 'jotai';
 
 interface HeaderProps {
@@ -11,14 +12,13 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const setMessages = useSetAtom(messagesAtom);
-    const resetAttachments = useSetAtom(resetAttachmentsAtom);
-    const updateAttachmentsFromSelectedItems = useSetAtom(updateAttachmentsFromSelectedItemsAtom);
+    const resetResources = useSetAtom(resetResourcesAtom);
+    const updateResourcesFromZoteroSelection = useSetAtom(updateResourcesFromZoteroSelectionAtom);
     
-    const handleNewThread = () => {
+    const handleNewThread = async () => {
         setMessages([]);
-        resetAttachments();
-        const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        updateAttachmentsFromSelectedItems(items);
+        resetResources();
+        await updateResourcesFromZoteroSelection();
     }
 
     return (
