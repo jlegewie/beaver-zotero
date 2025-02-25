@@ -10,8 +10,8 @@ import { resourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../ato
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
-import PreviewZoteroAttachment from './previews/PreviewZoteroAttachment';
-import PreviewFileAttachment from './previews/PreviewFileAttachment';
+import PreviewZoteroResource from './previews/PreviewZoteroResource';
+import PreviewFileResource from './previews/PreviewFileResource';
 import { getZoteroItem } from '../utils/resourceUtils';
 
 interface ResourcePreviewProps {
@@ -123,12 +123,12 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
             if (isRegularZoteroItem) {
                 return <PreviewZoteroItem resource={currentResource} item={item} />;
             } else if (item) {
-                return <PreviewZoteroAttachment resource={currentResource} item={item} />;
+                return <PreviewZoteroResource resource={currentResource} item={item} />;
             } else {
                 return null;
             }
         } else {
-            return <PreviewFileAttachment resource={currentResource} />;
+            return <PreviewFileResource resource={currentResource} />;
         }
     };
 

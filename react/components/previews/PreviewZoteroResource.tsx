@@ -2,12 +2,12 @@ import React from 'react';
 import { ZoteroResource } from '../../types/resources';
 import { CSSItemTypeIcon } from '../icons';
 
-interface PreviewZoteroAttachmentProps {
+interface PreviewZoteroResourceProps {
     resource: ZoteroResource;
     item: Zotero.Item;
 }
 
-const PreviewZoteroAttachment: React.FC<PreviewZoteroAttachmentProps> = ({ resource, item }) => {
+const PreviewZoteroResource: React.FC<PreviewZoteroResourceProps> = ({ resource, item }) => {
     const formatContent = (item: Zotero.Item) => {
         if (item.isNote()) {
             const title = item.getNoteTitle();
@@ -33,4 +33,4 @@ const PreviewZoteroAttachment: React.FC<PreviewZoteroAttachmentProps> = ({ resou
     );
 };
 
-export default PreviewZoteroAttachment; 
+export default PreviewZoteroResource; 
