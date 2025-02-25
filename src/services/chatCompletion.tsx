@@ -46,29 +46,40 @@ const getContentPartFromZoteroNote = async (item: Zotero.Item): Promise<ContentP
     ];
 }
 
-
-const getContentPartFromZoteroAttachment = async (attachment: ZoteroAttachment): Promise<ContentPart[]> => {
-    const item = attachment.item;
-    const effectiveItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
-    if(!effectiveItem || effectiveItem.isRegularItem()) return [];
-
-    if(effectiveItem.isNote()) {
-        return await getContentPartFromZoteroNote(effectiveItem);
+const getContentPartFromZoteroItem = async (item: Zotero.Item, name: string): Promise<ContentPart[]> => {
+    if(item.isNote()) {
+        return await getContentPartFromZoteroNote(item);
     }
-    if(effectiveItem.isAttachment()) {
-        const filePath = effectiveItem ? await effectiveItem.getFilePath() : undefined;
+    if(item.isAttachment()) {
+        const filePath = item ? await item.getFilePath() : undefined;
         if(filePath) {
             return [
                 {
                     type: 'text',
-                    text: `id: ${item.key}\ntype: Document\nReference: ${attachment.fullName}`
+                    text: `id: ${item.key}\ntype: Document\nReference: ${name}`
                 },
                 await fileToContentPart(filePath)
             ];
         }
     }
-
     return [];
+}
+
+const getContentPartFromZoteroAttachment = async (attachment: ZoteroAttachment): Promise<ContentPart[]> => {
+    const item = attachment.item;
+
+    // If the attachment has defined child items, get the content of the child items
+    if(attachment.childItemIds) {
+        const childItems = attachment.childItemIds.map(id => Zotero.Items.get(id));
+        const childItemsContent = await Promise.all(childItems.map(item => getContentPartFromZoteroItem(item, attachment.fullName)));
+        return childItemsContent.flat();
+    }
+
+    // Get the effective item to use for content extraction
+    const effectiveItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
+    if(!effectiveItem || effectiveItem.isRegularItem()) return [];
+
+    return await getContentPartFromZoteroItem(effectiveItem, attachment.fullName);
 }
 
 
