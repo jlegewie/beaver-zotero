@@ -1,6 +1,6 @@
 // @ts-ignore no idea
 import React, { useState } from 'react';
-import { AttachmentButton } from "./AttachmentButton";
+import { ResourceButton } from "./ResourceButton";
 import { Icon, PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
@@ -157,7 +157,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     </button>
                 )}
                 {resources.map((resource, index) => (
-                    <AttachmentButton
+                    <ResourceButton
                         key={index}
                         resource={resource}
                     />

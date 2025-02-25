@@ -8,13 +8,13 @@ import { isResourceValid } from '../utils/resourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedResourceAtom } from '../atoms/ui'
 
-interface AttachmentButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'resource'> {
+interface ResourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'resource'> {
     resource: Resource
     disabled?: boolean
 }
 
-export const AttachmentButton = forwardRef<HTMLButtonElement, AttachmentButtonProps>(
-    function AttachmentButton(props: AttachmentButtonProps, ref: React.RefObject<HTMLButtonElement>) {
+export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>(
+    function ResourceButton(props: ResourceButtonProps, ref: React.RefObject<HTMLButtonElement>) {
         const {
             resource,
             className,

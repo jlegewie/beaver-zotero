@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { AttachmentButton } from "./AttachmentButton";
+import { ResourceButton } from "./ResourceButton";
 import { ChatMessage } from '../types/messages';
 import { isStreamingAtom } from '../atoms/messages';
 
@@ -20,7 +20,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             {message.resources && (
                 <div className="flex flex-wrap gap-3 mb-2">
                     {(message.resources).map((resource, index) => (
-                        <AttachmentButton
+                        <ResourceButton
                             key={index}
                             resource={resource}
                             disabled={true}
