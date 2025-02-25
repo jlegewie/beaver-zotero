@@ -7,6 +7,7 @@ import { previewedAttachmentAtom } from '../atoms/ui';
 import { attachmentsAtom, togglePinAttachmentAtom, removeAttachmentAtom, isValidZoteroItem, updateChildItemIdsAtom } from '../atoms/attachments';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { truncateText } from '../utils/truncateText';
+import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 
 interface AttachmentPreviewProps {
     attachment: Attachment;
@@ -156,10 +157,9 @@ const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({ attachment }) => 
         setPreviewedAttachment(null);
     };
 
-    const handleOpen = () => {
+    const handleOpen = async () => {
         if (currentAttachment.type === 'zotero_item') {
-            // Open in Zotero
-            currentAttachment.item.select();
+            await openPDFInNewWindow(currentAttachment.item);
         }
         setPreviewedAttachment(null);
     };
