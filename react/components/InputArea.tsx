@@ -1,21 +1,12 @@
 // @ts-ignore no idea
 import React, { useState } from 'react';
 import { ResourceButton } from "./ResourceButton";
-import { Icon, PlusSignIcon } from './icons';
+import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import {
-    isStreamingAtom,
-    userMessageAtom,
-    messagesAtom,
-    streamToMessageAtom,
-    setMessageStatusAtom
-} from '../atoms/messages';
-import { resourcesAtom, resetResourcesAtom, addFileResourceAtom } from '../atoms/resources';
-import { isResourceValid } from '../utils/resourceUtils';
+import { isStreamingAtom, userMessageAtom } from '../atoms/messages';
+import { resourcesAtom, addFileResourceAtom } from '../atoms/resources';
 import DragDropWrapper from './DragDropWrapper';
-
-import { chatCompletion } from '../../src/services/chatCompletion';
-import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
+import { generateResponseAtom } from '../atoms/generateMessages';
 import { threadResourceCountAtom } from '../atoms/messages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
@@ -28,15 +19,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const [resources, setResources] = useAtom(resourcesAtom);
+    const resources = useAtomValue(resourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
-    const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
-    const streamToMessage = useSetAtom(streamToMessageAtom);
     const threadResourceCount = useAtomValue(threadResourceCountAtom);
-    const setMessageStatus = useSetAtom(setMessageStatusAtom);
-    const resetResources = useSetAtom(resetResourcesAtom);
     const addFileResource = useSetAtom(addFileResourceAtom);
+    const generateResponse = useSetAtom(generateResponseAtom);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -47,52 +35,10 @@ const InputArea: React.FC<InputAreaProps> = ({
             return;
         }
 
-        // Validate resources
-        const validResources = [];
-        for (const resource of resources) {
-            if (await isResourceValid(resource, true)) {
-                validResources.push(resource);
-            }
-        }
-        console.log('validResources', validResources);
-
-        // Add user message to messages atom
-        const newMessages = [
-            ...messages,
-            createUserMessage({
-                content: userMessage,
-                resources: validResources,
-            })
-        ];
-
-        // Add assistant message to messages atom
-        const assistantMsg = createAssistantMessage();
-        setMessages([...newMessages, assistantMsg]);
-        resetResources();
-
-
-        // Chat completion
-        chatCompletion(
-            newMessages as ChatMessage[],
-            (chunk: string) => {
-                streamToMessage({ id: assistantMsg.id, chunk: chunk });
-            },
-            () => {
-                setMessageStatus({ id: assistantMsg.id, status: 'completed' })
-            },
-            (error: Error) => {
-                // @ts-ignore - Custom error properties
-                const errorType = error.errorType || 'unknown';
-                setMessageStatus({ 
-                    id: assistantMsg.id,
-                    status: 'error',
-                    errorType: errorType
-                });
-            }
-        );
-
-        // Clear input
-        setUserMessage('');
+        generateResponse({
+            content: userMessage,
+            resources: resources,
+        });
 
         // If command is pressed, handle library search
         if (isCommandPressed) {

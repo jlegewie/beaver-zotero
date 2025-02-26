@@ -16,6 +16,7 @@ import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
 import MenuButton from './MenuButton';
+import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -30,6 +31,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const streamToMessage = useSetAtom(streamToMessageAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     
     // Manage copy feedback state manually
@@ -55,28 +57,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     ];
 
     const handleRepeat = () => {
-        const newMessages = rollbackChatToMessageId(message.id);
-        if (!newMessages) return;
-        const assistantMsgId = newMessages[newMessages.length - 1].id;
-
-        chatCompletion(
-            newMessages as ChatMessage[],
-            (chunk: string) => {
-                streamToMessage({ id: assistantMsgId, chunk: chunk });
-            },
-            () => {
-                setMessageStatus({ id: assistantMsgId, status: 'completed' })
-            },
-            (error: Error) => {
-                // @ts-ignore - Custom error properties
-                const errorType = error.errorType || 'unknown';
-                setMessageStatus({ 
-                    id: assistantMsgId, 
-                    status: 'error',
-                    errorType: errorType
-                });
-            }
-        );
+        regenerateFromMessage(message.id);
     }
 
     const handleCopy = async () => {
