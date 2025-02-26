@@ -80,9 +80,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                 setMessageStatus({ id: assistantMsg.id, status: 'completed' })
             },
             (error: Error) => {
-                // console.error(error);
-                setMessageStatus({ id: assistantMsg.id, status: 'error' })
-                // setMessageError({ id: assistantMsg.id, error: error })
+                // @ts-ignore - Custom error properties
+                const errorType = error.errorType || 'unknown';
+                setMessageStatus({ 
+                    id: assistantMsg.id,
+                    status: 'error',
+                    errorType: errorType
+                });
             }
         );
 

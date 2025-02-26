@@ -83,9 +83,39 @@ export const chatCompletion = async (
         await provider.createChatCompletionStreaming(request, onChunk);
         // Call finish callback
         onFinish();
-    } catch (error) {
-        // console.error(error);
-        // Call error callback
-        onError(error as Error);
+    } catch (error: any) {        
+        // Error classification based on status code
+        let errorType = 'unknown';
+        let status = -1;
+        
+        // Try to get status code from the error object
+        if ('status' in error) {
+            // @ts-ignore - Access status property
+            status = error.status || -1;
+        }
+        
+        // Map status codes to error types
+        if (status === -1) {
+            errorType = 'network';
+        } else if (status === 401 || status === 403) {
+            errorType = 'auth';
+        } else if (status === 400) {
+            errorType = 'invalid_request'; // Invalid API key often results in 400
+        } else if (status === 429) {
+            errorType = 'rate_limit';
+        } else if (status === 503 || status === 502 || status === 500) {
+            errorType = 'service_unavailable';
+        } else if (status >= 400 && status < 500) {
+            errorType = 'bad_request';
+        } else if (status >= 500) {
+            errorType = 'server_error';
+        }
+
+        // Create standardized error object
+        const enhancedError = error instanceof Error ? error : new Error('API request failed');
+        // @ts-ignore - Add errorType
+        enhancedError.errorType = errorType;
+        
+        onError(enhancedError);
     }
 }

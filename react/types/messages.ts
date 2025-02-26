@@ -8,6 +8,7 @@ export interface ChatMessage {
     content: string;
     resources?: Resource[];
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
+    errorType?: string;
 }
 
 // Factory functions for creating messages

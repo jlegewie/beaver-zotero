@@ -41,8 +41,13 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 setMessageStatus({ id: assistantMsgId, status: 'completed' })
             },
             (error: Error) => {
-                setMessageStatus({ id: assistantMsgId, status: 'error' })
-                // setMessageError({ id: assistantMsg.id, error: error })
+                // @ts-ignore - Custom error properties
+                const errorType = error.errorType || 'unknown';
+                setMessageStatus({ 
+                    id: assistantMsgId, 
+                    status: 'error',
+                    errorType: errorType
+                });
             }
         );
     }
@@ -55,6 +60,30 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }, 400);
     }
 
+    // Get appropriate error message based on the error type
+    const getErrorMessage = () => {
+        const errorType = message.errorType || 'unknown';
+        
+        switch (errorType) {
+            case 'service_unavailable':
+                return "The AI service is currently unavailable. Please try again later.";
+            case 'rate_limit':
+                return "Rate limit exceeded. Please try again later.";
+            case 'auth':
+                return "Authentication error. Please check your API key.";
+            case 'invalid_request':
+                return "Invalid API request. The API key may be incorrect.";
+            case 'network':
+                return "Network connection error. Please check your internet connection.";
+            case 'bad_request':
+                return "The request to the AI service was invalid.";
+            case 'server_error':
+                return "The AI service encountered an error. Please try again later.";
+            default:
+                return "Error completing the response. Please try again.";
+        }
+    };
+
     return (
         <div className="hover-trigger">
             <div className="px-2 user-select-text">
@@ -65,7 +94,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 {message.status === 'error' &&
                     <div className="font-color-red py-3 flex flex-row gap-2">
                         <Icon icon={AlertIcon} className="mt-1"/>
-                        <span>Error completing a response. Please try again in a few moments.</span>
+                        <span>{getErrorMessage()}</span>
                     </div>
                 }
             </div>

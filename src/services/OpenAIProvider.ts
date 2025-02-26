@@ -132,7 +132,7 @@ export abstract class AIProvider {
             
             const rawResponse = xhr.responseText;
             if (!rawResponse) {
-                throw new Error('No response from OpenAI Chat Completion API.');
+                throw new Error('No response from Chat Completion API.');
             }
             
             // Parse JSON (text at json.choices[0].message.content)
@@ -146,12 +146,32 @@ export abstract class AIProvider {
                 responseText = json.choices[0].message.content;
             } else {
                 // Fallback, log if format unexpected.
-                this.logError(`Unexpected response format from OpenAI: ${rawResponse}`);
+                this.logError(`Unexpected response format: ${rawResponse}`);
                 responseText = '';
             }
         } catch (e) {
             this.logError(e);
-            throw e;
+            
+            // Create a standardized error with status code
+            let errorMessage = `${this.providerName} request failed`;
+            
+            if (e instanceof Error) {
+                errorMessage = e.message;
+            }
+            
+            const apiError = new Error(errorMessage);
+            
+            // Try to get status from XMLHttpRequest if available
+            // @ts-ignore - Check if e has a status property
+            if (e && e.status) {
+                // @ts-ignore - Access status property
+                apiError.status = e.status;
+            } else {
+                // @ts-ignore - Default to network error if status unknown
+                apiError.status = -1;
+            }
+            
+            throw apiError;
         }
         
         return responseText;
@@ -247,9 +267,24 @@ export abstract class AIProvider {
                             // Check status
                             const status = xhr.status;
                             if (status < 200 || status >= 300) {
-                                const errMsg = `OpenAI streaming request failed with status ${status}`;
-                                this.logError(errMsg);
-                                reject(new Error(errMsg));
+                                let errorMessage = `${this.providerName} request failed with status ${status}`;
+                                
+                                // Try to get error details from response
+                                try {
+                                    const errorBody = JSON.parse(xhr.responseText);
+                                    if (errorBody.error && errorBody.error.message) {
+                                        errorMessage += `: ${errorBody.error.message}`;
+                                    }
+                                } catch (parseErr) {
+                                    // If can't parse JSON, use raw response or default message
+                                }
+                                
+                                const apiError = new Error(errorMessage);
+                                // @ts-ignore - Add status to error
+                                apiError.status = status;
+                                
+                                this.logError(apiError);
+                                reject(apiError);
                                 return;
                             }
                             
@@ -269,13 +304,25 @@ export abstract class AIProvider {
                     requestObserver,
                     timeout: 0,
                 }).catch((err: unknown) => {
-                    // If the request fails to even start
+                    // If the request fails to even start - likely network issue
                     this.logError(err);
-                    reject(err);
+                    
+                    // Create a network error with status -1
+                    const networkError = new Error("Network connection error");
+                    // @ts-ignore - Add status to error
+                    networkError.status = -1; // Special code for network errors
+                    
+                    reject(networkError);
                 });
             } catch (outerErr) {
                 this.logError(outerErr);
-                reject(outerErr);
+                
+                // General error during request setup
+                const setupError = new Error("Error preparing request");
+                // @ts-ignore - Add status to error
+                setupError.status = -2; // Special code for request setup errors
+                
+                reject(setupError);
             }
         });
     }

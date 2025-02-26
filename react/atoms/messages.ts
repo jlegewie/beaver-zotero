@@ -62,9 +62,9 @@ export const streamToMessageAtom = atom(
 
 export const setMessageStatusAtom = atom(
     null,
-    (get, set, { id, status }: { id: string; status: ChatMessage['status'] }) => {
+    (get, set, { id, status, errorType }: { id: string; status: ChatMessage['status']; errorType?: string }) => {
         set(messagesAtom, get(messagesAtom).map(message =>
-            message.id === id ? { ...message, status } : message
+            message.id === id ? { ...message, status, ...(errorType && { errorType }) } : message
         ));
     }
 );
