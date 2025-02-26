@@ -81,11 +81,11 @@ export const chatCompletion = async (
     // Call chat completion
     try {
         await provider.createChatCompletionStreaming(request, onChunk);
+        // Call finish callback
+        onFinish();
     } catch (error) {
         // console.error(error);
+        // Call error callback
         onError(error as Error);
     }
-
-    // Call finish callback
-    onFinish();
 }

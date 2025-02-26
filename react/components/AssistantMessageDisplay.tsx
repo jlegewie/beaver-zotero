@@ -3,7 +3,7 @@ import React from 'react';
 import { useState } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon } from './icons';
+import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
 import { isStreamingAtom, rollbackChatToMessageIdAtom } from '../atoms/messages';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { chatCompletion } from '../../src/services/chatCompletion';
@@ -41,7 +41,6 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 setMessageStatus({ id: assistantMsgId, status: 'completed' })
             },
             (error: Error) => {
-                console.error("ERROR");
                 setMessageStatus({ id: assistantMsgId, status: 'error' })
                 // setMessageError({ id: assistantMsg.id, error: error })
             }
@@ -63,16 +62,21 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }
+                {message.status === 'error' &&
+                    <div className="font-color-red py-3 flex flex-row gap-2">
+                        <Icon icon={AlertIcon} className="mt-1"/>
+                        <span>Error completing a response. Please try again in a few moments.</span>
+                    </div>
+                }
             </div>
 
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
-                // className={`flex flex-row items-center mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming ? 'hidden' : ''}`}
                 className={`flex flex-row items-center pt-1 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1" />
                 <div className="flex gap-5">
-                    {isLastMessage &&
+                    {isLastMessage && message.status !== 'error' &&
                         <button
                             className="icon-button scale-13"
                             // onClick={handleShare}
@@ -86,12 +90,14 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                     >
                         <Icon icon={RepeatIcon} />
                     </button>
-                    <button
-                        className="icon-button scale-13"
-                        onClick={handleCopy}
-                    >
-                        <Icon icon={justCopied ? TickIcon : CopyIcon} />
-                    </button>
+                    {message.status !== 'error' &&
+                        <button
+                            className="icon-button scale-13"
+                            onClick={handleCopy}
+                        >
+                            <Icon icon={justCopied ? TickIcon : CopyIcon} />
+                        </button>
+                    }
                 </div>
             </div>
         </div>
