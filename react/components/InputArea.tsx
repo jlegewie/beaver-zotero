@@ -18,6 +18,7 @@ import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadResourceCountAtom } from '../atoms/messages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import IconButton from './IconButton';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -140,12 +141,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Message resources */}
             <div className="flex flex-wrap gap-3 mb-2">
-                <button
-                    className="icon-button scale-11"
+                <IconButton
+                    icon={PlusSignIcon}
                     onClick={handleAddResources}
-                >
-                        <Icon icon={PlusSignIcon} />
-                </button>
+                    className="scale-11"
+                    ariaLabel="Add context item"
+                />
                 {threadResourceCount > 0 && (
                     <button
                         className="resources-info"
