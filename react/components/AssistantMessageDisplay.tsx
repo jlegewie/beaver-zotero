@@ -101,7 +101,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
-                className={`flex flex-row items-center pt-1 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
+                className={`flex flex-row items-center py-2 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1" />
                 <div className="flex gap-5">
