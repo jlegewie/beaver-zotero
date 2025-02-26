@@ -1,6 +1,6 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
@@ -31,6 +31,11 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const [isShareMenuOpen, setIsShareMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+    
+    // Text selection right-click menu
+    const [isSelectionMenuOpen, setIsSelectionMenuOpen] = useState<boolean>(false);
+    const [selectionMenuPosition, setSelectionMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const contentRef = useRef<HTMLDivElement | null>(null);
 
     const shareMenuItems: MenuItem[] = [
         {
@@ -48,6 +53,49 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             onClick: () => console.log('Add Note from Conversation clicked'),
         }
     ];
+
+    // Selection menu items - just copy for now
+    const selectionMenuItems: MenuItem[] = [
+        {
+            label: 'Copy',
+            onClick: () => {
+                const selectedText = Zotero.getMainWindow().getSelection()?.toString() || '';
+                if (selectedText) {
+                    navigator.clipboard.writeText(selectedText);
+                }
+            }
+        }
+    ];
+
+    const handleContextMenu = (e: React.MouseEvent) => {
+        // Check if there's selected text
+        const selection = Zotero.getMainWindow().getSelection();
+        const selectedText = selection?.toString() || '';
+        
+        // Only show menu if text is selected
+        if (selectedText.trim().length > 0) {
+            e.preventDefault();
+            setSelectionMenuPosition({ x: e.clientX, y: e.clientY });
+            setIsSelectionMenuOpen(true);
+        }
+    };
+
+    // Close the selection menu when the selection changes or is removed
+    useEffect(() => {
+        const handleSelectionChange = () => {
+            const selection = Zotero.getMainWindow().getSelection();
+            const selectedText = selection?.toString() || '';
+            
+            if (selectedText.trim().length === 0 && isSelectionMenuOpen) {
+                setIsSelectionMenuOpen(false);
+            }
+        };
+        
+        Zotero.getMainWindow().document.addEventListener('selectionchange', handleSelectionChange);
+        return () => {
+            Zotero.getMainWindow().document.removeEventListener('selectionchange', handleSelectionChange);
+        };
+    }, [isSelectionMenuOpen]);
 
     const handleShareClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -122,7 +170,11 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
-            <div className="px-2 user-select-text">
+            <div 
+                className="px-2 user-select-text" 
+                ref={contentRef}
+                onContextMenu={handleContextMenu}
+            >
                 <MarkdownRenderer className="markdown" content={message.content} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
@@ -176,6 +228,15 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                     }
                 </div>
             </div>
+
+            {/* Text selection context menu */}
+            <ContextMenu
+                menuItems={selectionMenuItems}
+                isOpen={isSelectionMenuOpen}
+                onClose={() => setIsSelectionMenuOpen(false)}
+                position={selectionMenuPosition}
+                useFixedPosition={true}
+            />
         </div>
     );
 };
