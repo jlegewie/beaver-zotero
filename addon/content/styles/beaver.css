@@ -577,7 +577,8 @@
 }
 
 [id^="beaver-pane-"] .markdown h3 {
-    font-size: 1.1em;
+    padding-top: 0.1em;
+    font-size: 1.15em;
 }
 
 [id^="beaver-pane-"] .markdown h4 {
