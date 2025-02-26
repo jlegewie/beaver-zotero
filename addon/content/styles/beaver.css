@@ -242,6 +242,13 @@
     max-height: 380px;
     display: flex;
     flex-direction: column;
+    opacity: 0;
+    animation: fadeIn 0.3s ease-in-out forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 [id^="beaver-pane-"] .resource-content {
@@ -281,10 +288,10 @@
     border-radius: 4px;
     padding: 0.5rem 1rem;
     font-size: 0.9rem;
-    animation: fadeIn 0.3s ease-in-out;
+    animation: fadeInShift 0.3s ease-in-out;
 }
 
-@keyframes fadeIn {
+@keyframes fadeInShift {
     from { opacity: 0; transform: translateY(-10px); }
     to { opacity: 1; transform: translateY(0); }
 }

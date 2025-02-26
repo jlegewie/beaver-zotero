@@ -1,12 +1,16 @@
 // @ts-ignore no idea
-import React, { useEffect, useState, forwardRef } from 'react'
+import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Resource } from '../types/resources'
-import { useSetAtom } from 'jotai'
-import { removeResourceAtom } from '../atoms/resources'
+import { useSetAtom, useAtom } from 'jotai'
+import { removeResourceAtom, togglePinResourceAtom } from '../atoms/resources'
 import { isResourceValid } from '../utils/resourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedResourceAtom } from '../atoms/ui'
+
+// Create a shared close timeout atom to coordinate between ResourceButton and ResourcePreview
+import { atom } from 'jotai'
+export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface ResourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'resource'> {
     resource: Resource
@@ -26,6 +30,11 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
         const [isHovered, setIsHovered] = useState(false);
         const removeResource = useSetAtom(removeResourceAtom);
         const setPreviewedResource = useSetAtom(previewedResourceAtom);
+        const togglePinResource = useSetAtom(togglePinResourceAtom);
+        const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
+        
+        // Hover timer ref for handling delayed hover behavior
+        const hoverTimerRef = useRef<number | null>(null);
 
         const getIconElement = (resource: Resource, isHovered: boolean) => {
             if (isHovered) {
@@ -55,6 +64,71 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
             removeResource(resource)
         }
 
+        // Start a timeout to close the preview after delay
+        const startCloseTimer = () => {
+            // Clear any existing timeout
+            if (previewCloseTimeout) {
+                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+            }
+            
+            // Start a new timeout
+            const newTimeout = Zotero.getMainWindow().setTimeout(() => {
+                setPreviewedResource(null);
+                setPreviewCloseTimeout(null);
+            }, 350); // 300ms delay before closing
+            
+            setPreviewCloseTimeout(newTimeout);
+        };
+
+        const cancelCloseTimer = () => {
+            if (previewCloseTimeout) {
+                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+                setPreviewCloseTimeout(null);
+            }
+        };
+
+        const handleMouseEnter = () => {
+            setIsHovered(true);
+            cancelCloseTimer();
+            
+            // Show preview with a small delay to prevent flashing during quick mouse movements
+            if (hoverTimerRef.current) {
+                Zotero.getMainWindow().clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+            }
+            
+            // Only show preview if the resource is valid
+            if (isValid) {
+                hoverTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
+                    setPreviewedResource(resource);
+                }, 100); // Shorter delay of 100ms before showing preview
+            }
+        };
+
+        const handleMouseLeave = () => {
+            setIsHovered(false);
+            
+            // Clear any pending show timers
+            if (hoverTimerRef.current) {
+                Zotero.getMainWindow().clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+            }
+            
+            // Start the close timer when mouse leaves button
+            // This will be canceled if mouse enters preview quickly enough
+            startCloseTimer();
+        };
+
+        // Cleanup timers on unmount
+        useEffect(() => {
+            return () => {
+                if (hoverTimerRef.current) {
+                    Zotero.getMainWindow().clearTimeout(hoverTimerRef.current);
+                }
+                cancelCloseTimer();
+            };
+        }, []);
+
         useEffect(() => {
             const checkAttachmentValidity = async () => {
                 setIsValid(await isResourceValid(resource));
@@ -65,14 +139,14 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
         return (
             <button
                 ref={ref}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 className={`resource-button ${className || ''}`}
                 disabled={disabled}
                 onClick={(e) => {
-                    e.stopPropagation()
+                    e.stopPropagation();
                     if (isValid) {
-                        setPreviewedResource(resource);
+                        togglePinResource(resource.id);
                     }
                 }}
                 {...rest}

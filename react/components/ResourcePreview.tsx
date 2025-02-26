@@ -1,10 +1,9 @@
-
 import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useRef, useEffect, useState } from 'react';
 import { Icon, CancelIcon } from './icons';
 import { Resource } from '../types/resources';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedResourceAtom } from '../atoms/ui';
 import { resourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../atoms/resources';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
@@ -13,6 +12,7 @@ import PreviewZoteroItem from './previews/PreviewZoteroItem';
 import PreviewZoteroResource from './previews/PreviewZoteroResource';
 import PreviewFileResource from './previews/PreviewFileResource';
 import { getZoteroItem } from '../utils/resourceUtils';
+import { previewCloseTimeoutAtom } from './ResourceButton';
 
 interface ResourcePreviewProps {
     resource: Resource;
@@ -24,6 +24,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
     const togglePinResource = useSetAtom(togglePinResourceAtom);
     const removeResource = useSetAtom(removeResourceAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
+    const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
     // Get resource from resources atom
     const resources = useAtomValue(resourcesAtom);
@@ -68,6 +69,43 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
         };
     }, []);
 
+    // Cancel or start close timer
+    const cancelCloseTimer = () => {
+        if (previewCloseTimeout) {
+            Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+            setPreviewCloseTimeout(null);
+        }
+    };
+
+    const startCloseTimer = () => {
+        // Clear any existing timeout
+        cancelCloseTimer();
+        
+        // Start a new timeout
+        const newTimeout = Zotero.getMainWindow().setTimeout(() => {
+            setPreviewedResource(null);
+            setPreviewCloseTimeout(null);
+        }, 350); // 350ms delay before closing
+        
+        setPreviewCloseTimeout(newTimeout);
+    };
+
+    // Handle mouse enter/leave for preview
+    const handleMouseEnter = () => {
+        cancelCloseTimer();
+    };
+
+    const handleMouseLeave = () => {
+        startCloseTimer();
+    };
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            cancelCloseTimer();
+        };
+    }, []);
+
     // Keyboard shortcuts
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -76,18 +114,10 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
             }
         };
 
-        const handleClickOutside = (e: MouseEvent) => {
-            if (previewRef.current && !previewRef.current.contains(e.target as Node)) {
-                setPreviewedResource(null);
-            }
-        };
-
         Zotero.getMainWindow().document.addEventListener('keydown', handleEscape);
-        Zotero.getMainWindow().document.addEventListener('mousedown', handleClickOutside);
 
         return () => {
             Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
-            Zotero.getMainWindow().document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [setPreviewedResource]);
 
@@ -127,8 +157,10 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
             } else {
                 return null;
             }
+        } else if (currentResource.type === 'file') {
+            return <PreviewFileResource resource={currentResource as any} />;
         } else {
-            return <PreviewFileResource resource={currentResource} />;
+            return null;
         }
     };
 
@@ -137,6 +169,8 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
             <div
                 ref={previewRef}
                 className="resource-preview mx-0"
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
             >
                 {/* Content Area */}
                 <div 
