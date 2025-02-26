@@ -41,9 +41,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         <div className="sidebar-container h-full flex flex-col gap-3 min-w-0">
             
             {/* Header */}
-            <div id="beaver-header" className="flex flex-row items-center px-3 pt-2 mb-2">
-                <Header />
-            </div>
+            <Header />
 
             {/* Messages area (scrollable) */}
             <MessagesArea 
