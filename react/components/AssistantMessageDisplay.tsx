@@ -6,12 +6,16 @@ import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
 import { isStreamingAtom, rollbackChatToMessageIdAtom } from '../atoms/messages';
 import { useAtomValue, useSetAtom } from 'jotai';
-import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
+import ContextMenu from './ContextMenu';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
+import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
+import { copyToClipboard } from '../utils/clipboard';
+import IconButton from './IconButton';
+import MenuButton from './MenuButton';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -26,76 +30,34 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const streamToMessage = useSetAtom(streamToMessageAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const contentRef = useRef<HTMLDivElement | null>(null);
+    
+    // Manage copy feedback state manually
     const [justCopied, setJustCopied] = useState(false);
-    // Share menu
+    
+    const { 
+        isMenuOpen: isSelectionMenuOpen, 
+        menuPosition: selectionMenuPosition,
+        closeMenu: closeSelectionMenu,
+        handleContextMenu,
+        menuItems: selectionMenuItems
+    } = useSelectionContextMenu(contentRef);
+    
+    // Share menu state and items
     const [isShareMenuOpen, setIsShareMenuOpen] = useState<boolean>(false);
-    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [menuPosition, setMenuPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
     const shareButtonRef = useRef<HTMLButtonElement | null>(null);
     
-    // Text selection right-click menu
-    const [isSelectionMenuOpen, setIsSelectionMenuOpen] = useState<boolean>(false);
-    const [selectionMenuPosition, setSelectionMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
-    const contentRef = useRef<HTMLDivElement | null>(null);
-
-    const shareMenuItems: MenuItem[] = [
+    const shareMenuItems = [
         {
             label: 'Copy',
-            onClick: () => console.log('Copy clicked'),
-            // icon: (
-            //     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            //         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-            //         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            //     </svg>
-            // )
+            onClick: () => handleCopy()
         },
         {
-            label: 'Add Note from Conversation',
-            onClick: () => console.log('Add Note from Conversation clicked'),
+            label: 'Save as Note',
+            onClick: () => console.log('Save as Note clicked')
         }
     ];
-
-    // Selection menu items - just copy for now
-    const selectionMenuItems: MenuItem[] = [
-        {
-            label: 'Copy',
-            onClick: () => {
-                const selectedText = Zotero.getMainWindow().getSelection()?.toString() || '';
-                if (selectedText) {
-                    navigator.clipboard.writeText(selectedText);
-                }
-            }
-        }
-    ];
-
-    const handleContextMenu = (e: React.MouseEvent) => {
-        // Check if there's selected text
-        const selection = Zotero.getMainWindow().getSelection();
-        const selectedText = selection?.toString() || '';
-        
-        // Only show menu if text is selected
-        if (selectedText.trim().length > 0) {
-            e.preventDefault();
-            setSelectionMenuPosition({ x: e.clientX, y: e.clientY });
-            setIsSelectionMenuOpen(true);
-        }
-    };
-
-    // Close the selection menu when the selection changes or is removed
-    useEffect(() => {
-        const handleSelectionChange = () => {
-            const selection = Zotero.getMainWindow().getSelection();
-            const selectedText = selection?.toString() || '';
-            
-            if (selectedText.trim().length === 0 && isSelectionMenuOpen) {
-                setIsSelectionMenuOpen(false);
-            }
-        };
-        
-        Zotero.getMainWindow().document.addEventListener('selectionchange', handleSelectionChange);
-        return () => {
-            Zotero.getMainWindow().document.removeEventListener('selectionchange', handleSelectionChange);
-        };
-    }, [isSelectionMenuOpen]);
 
     const handleShareClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -136,13 +98,14 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         );
     }
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText(message.content);
-        setJustCopied(true);
-        setTimeout(() => {
-            setJustCopied(false);
-        }, 400);
-    }
+    const handleCopy = async () => {
+        await copyToClipboard(message.content, {
+            onSuccess: () => {
+                setJustCopied(true);
+                setTimeout(() => setJustCopied(false), 400);
+            }
+        });
+    };
 
     // Get appropriate error message based on the error type
     const getErrorMessage = () => {
@@ -194,37 +157,27 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 <div className="flex-1" />
                 <div className="flex gap-5">
                     {isLastMessage && message.status !== 'error' &&
-                        <>
-                            <button
-                                className="icon-button scale-12"
-                                ref={shareButtonRef}
-                                onClick={handleShareClick}
-                            >
-                                <Icon icon={ShareIcon} />
-                            </button>
-                            <ContextMenu
-                                menuItems={shareMenuItems}
-                                isOpen={isShareMenuOpen}
-                                onClose={() => setIsShareMenuOpen(false)}
-                                position={menuPosition}
-                                // usePortal={true}
-                                useFixedPosition={true}
-                            />
-                        </>
+                        <MenuButton
+                            icon={ShareIcon}
+                            menuItems={shareMenuItems}
+                            className="scale-12"
+                            ariaLabel="Share"
+                            positionAdjustment={{ x: 0, y: 0 }}
+                        />
                     }
-                    <button
-                        className="icon-button scale-12"
+                    <IconButton
+                        icon={RepeatIcon}
                         onClick={handleRepeat}
-                    >
-                        <Icon icon={RepeatIcon} />
-                    </button>
+                        className="scale-12"
+                        ariaLabel="Regenerate response"
+                    />
                     {message.status !== 'error' &&
-                        <button
-                            className="icon-button scale-12"
+                        <IconButton
+                            icon={justCopied ? TickIcon : CopyIcon}
                             onClick={handleCopy}
-                        >
-                            <Icon icon={justCopied ? TickIcon : CopyIcon} />
-                        </button>
+                            className="scale-12"
+                            ariaLabel="Copy to clipboard"
+                        />
                     }
                 </div>
             </div>
@@ -233,7 +186,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             <ContextMenu
                 menuItems={selectionMenuItems}
                 isOpen={isSelectionMenuOpen}
-                onClose={() => setIsSelectionMenuOpen(false)}
+                onClose={closeSelectionMenu}
                 position={selectionMenuPosition}
                 useFixedPosition={true}
             />
