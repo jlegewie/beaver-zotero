@@ -85,7 +85,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     };
 
     return (
-        <div className="hover-trigger">
+        <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
             <div className="px-2 user-select-text">
                 <MarkdownRenderer className="markdown" content={message.content} />
                 {message.status === 'in_progress' && message.content == '' && 
@@ -101,27 +101,27 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
-                className={`flex flex-row items-center py-2 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
+                className={`flex flex-row items-center pt-2 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1" />
                 <div className="flex gap-5">
                     {isLastMessage && message.status !== 'error' &&
                         <button
-                            className="icon-button scale-13"
+                            className="icon-button scale-12"
                             // onClick={handleShare}
                         >
                             <Icon icon={ShareIcon} />
                         </button>
                     }
                     <button
-                        className="icon-button scale-13"
+                        className="icon-button scale-12"
                         onClick={handleRepeat}
                     >
                         <Icon icon={RepeatIcon} />
                     </button>
                     {message.status !== 'error' &&
                         <button
-                            className="icon-button scale-13"
+                            className="icon-button scale-12"
                             onClick={handleCopy}
                         >
                             <Icon icon={justCopied ? TickIcon : CopyIcon} />
