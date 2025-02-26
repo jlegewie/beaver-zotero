@@ -649,7 +649,10 @@
 
 [id^="beaver-pane-"] .markdown :not(pre)>code {
     font-size: 85%;
-    padding: 0.3em;
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
+    padding-left: 0.2em;
+    padding-right: 0.2em;
     border-radius: 4px;
     background-color: var(--fill-quarternary) !important;
     border: 1px solid var(--fill-quarternary) !important;
