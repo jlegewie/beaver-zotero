@@ -42,12 +42,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         handleContextMenu,
         menuItems: selectionMenuItems
     } = useSelectionContextMenu(contentRef);
-    
-    // Share menu state and items
-    const [isShareMenuOpen, setIsShareMenuOpen] = useState<boolean>(false);
-    const [menuPosition, setMenuPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
-    const shareButtonRef = useRef<HTMLButtonElement | null>(null);
-    
+        
     const shareMenuItems = [
         {
             label: 'Copy',
@@ -58,20 +53,6 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             onClick: () => console.log('Save as Note clicked')
         }
     ];
-
-    const handleShareClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        
-        // Get button position
-        if (shareButtonRef.current) {
-            const rect = shareButtonRef.current.getBoundingClientRect();
-            setMenuPosition({ 
-                x: rect.left,
-                y: rect.bottom + 5
-            });
-            setIsShareMenuOpen(true);
-        }
-    };
 
     const handleRepeat = () => {
         const newMessages = rollbackChatToMessageId(message.id);
