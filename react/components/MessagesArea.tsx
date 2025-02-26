@@ -62,6 +62,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                         {message.role === 'assistant' && (
                             <AssistantMessageDisplay
                                 message={message}
+                                isLastMessage={index === messages.length - 1}
                             />
                         )}
                     </div>
