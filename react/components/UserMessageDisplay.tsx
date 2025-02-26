@@ -17,7 +17,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         <div className="user-message-display">
             
             {/* Message resources */}
-            {message.resources && (
+            {message.resources && message.resources.length > 0 && (
                 <div className="flex flex-wrap gap-3 mb-2">
                     {(message.resources).map((resource, index) => (
                         <ResourceButton
