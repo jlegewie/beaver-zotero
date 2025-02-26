@@ -2,8 +2,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { ZoteroResource, FileResource, RemoteFileResource, Resource } from '../types/resources';
 import { getInTextCitations } from '../../src/utils/citations';
 
+// Limits
+export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+export const MAX_ATTACHMENTS = 10;
+export const MAX_PAGES = 100;
+
 // TODO: Add more mime types as needed
-const VALID_MIME_TYPES = ['application/pdf', 'image/png'] as const;
+export const VALID_MIME_TYPES = ['application/pdf', 'image/png'] as const;
 type ValidMimeType = typeof VALID_MIME_TYPES[number];
 
 function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
@@ -39,10 +44,11 @@ export function createFileResource(file: File): FileResource {
         id: uuidv4(),
         type: 'file',
         fileName: file.name,
-        filePath: file.name,
+        filePath: file.mozFullPath,
+        fileType: file.type,
         name: file.name,
-        icon: 'file',
-        pinned: true,
+        icon: file.type === 'application/pdf' ? 'attachmentPDF' : 'attachmentImage',
+        pinned: false,
         timestamp: Date.now()
     };
 }

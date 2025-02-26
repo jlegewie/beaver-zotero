@@ -10,12 +10,12 @@ import {
     streamToMessageAtom,
     setMessageStatusAtom
 } from '../atoms/messages';
-import { resourcesAtom, resetResourcesAtom } from '../atoms/resources';
+import { resourcesAtom, resetResourcesAtom, addFileResourceAtom } from '../atoms/resources';
 import { isResourceValid } from '../utils/resourceUtils';
+import DragDropWrapper from './DragDropWrapper';
 
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { Resource } from '../types/resources';
 import { threadResourceCountAtom } from '../atoms/messages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
@@ -27,7 +27,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const resources = useAtomValue(resourcesAtom);
+    const [resources, setResources] = useAtom(resourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const [messages, setMessages] = useAtom(messagesAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
@@ -35,6 +35,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const threadResourceCount = useAtomValue(threadResourceCountAtom);
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const resetResources = useSetAtom(resetResourcesAtom);
+    const addFileResource = useSetAtom(addFileResourceAtom);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -127,12 +128,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     return (
+        <DragDropWrapper addFileResource={addFileResource}>
         <div
             className="user-message-display"
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
-
             {/* Message resources */}
             <div className="flex flex-wrap gap-3 mb-2">
                 <button
@@ -215,6 +216,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             </form>
         </div>
+        </DragDropWrapper>
     );
 };
 

@@ -40,7 +40,7 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
             }
-            if (resource.type === 'zotero_item') {
+            if (resource.icon) {
                 const iconElement = resource.icon ? (
                     <span className="resource-button-icon">
                         <CSSItemTypeIcon itemType={resource.icon} />

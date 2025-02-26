@@ -22,6 +22,7 @@ export interface FileResource extends BaseResource {
     type: 'file';
     filePath: string;
     fileName: string;
+    fileType: string;
 }
 
 // Remote file resource from URL

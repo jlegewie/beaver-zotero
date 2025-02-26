@@ -251,6 +251,44 @@
     min-height: 1.5rem;
 }
 
+/* Drag and Drop Styles */
+[id^="beaver-pane-"] .user-message-display {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .bg-quarternary {
+    background-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .bg-tertiary {
+    background-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .opacity-90 {
+    opacity: 0.9;
+}
+
+[id^="beaver-pane-"] .inset-0 {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+}
+
+[id^="beaver-pane-"] .resource-error-message {
+    background-color: var(--fill-senary);
+    border: 1px solid var(--tag-red);
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* Attachment and Note Item Hover Effect */
 [id^="beaver-pane-"] .attachment-item {
     border-radius: 4px;
