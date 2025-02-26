@@ -1,11 +1,12 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
 import { isStreamingAtom, rollbackChatToMessageIdAtom } from '../atoms/messages';
 import { useAtomValue, useSetAtom } from 'jotai';
+import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import {
     streamToMessageAtom,
@@ -26,6 +27,41 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const [justCopied, setJustCopied] = useState(false);
+    // Share menu
+    const [isShareMenuOpen, setIsShareMenuOpen] = useState<boolean>(false);
+    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const shareButtonRef = useRef<HTMLButtonElement | null>(null);
+
+    const shareMenuItems: MenuItem[] = [
+        {
+            label: 'Copy',
+            onClick: () => console.log('Copy clicked'),
+            // icon: (
+            //     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            //         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            //         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            //     </svg>
+            // )
+        },
+        {
+            label: 'Add Note from Conversation',
+            onClick: () => console.log('Add Note from Conversation clicked'),
+        }
+    ];
+
+    const handleShareClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        // Get button position
+        if (shareButtonRef.current) {
+            const rect = shareButtonRef.current.getBoundingClientRect();
+            setMenuPosition({ 
+                x: rect.left,
+                y: rect.bottom + 5
+            });
+            setIsShareMenuOpen(true);
+        }
+    };
 
     const handleRepeat = () => {
         const newMessages = rollbackChatToMessageId(message.id);
@@ -106,12 +142,23 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 <div className="flex-1" />
                 <div className="flex gap-5">
                     {isLastMessage && message.status !== 'error' &&
-                        <button
-                            className="icon-button scale-12"
-                            // onClick={handleShare}
-                        >
-                            <Icon icon={ShareIcon} />
-                        </button>
+                        <>
+                            <button
+                                className="icon-button scale-12"
+                                ref={shareButtonRef}
+                                onClick={handleShareClick}
+                            >
+                                <Icon icon={ShareIcon} />
+                            </button>
+                            <ContextMenu
+                                menuItems={shareMenuItems}
+                                isOpen={isShareMenuOpen}
+                                onClose={() => setIsShareMenuOpen(false)}
+                                position={menuPosition}
+                                // usePortal={true}
+                                useFixedPosition={true}
+                            />
+                        </>
                     }
                     <button
                         className="icon-button scale-12"
