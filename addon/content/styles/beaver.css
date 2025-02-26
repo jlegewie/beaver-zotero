@@ -502,6 +502,12 @@
 [id^="beaver-pane-"] .bg-quinary { background-color: var(--fill-quinary); }
 [id^="beaver-pane-"] .bg-senary { background-color: var(--fill-senary); }
 
+/* Rounded corners */
+[id^="beaver-pane-"] .rounded-sm { border-radius: 0.125rem; }
+[id^="beaver-pane-"] .rounded-md { border-radius: 0.375rem; }
+[id^="beaver-pane-"] .rounded-lg { border-radius: 0.5rem; }
+[id^="beaver-pane-"] .rounded-xl { border-radius: 0.75rem; }
+
 /* Scrollbar */
 [id^="beaver-pane-"] .scrollbar {
     scrollbar-color: var(--color-scrollbar) var(--color-scrollbar-background);
