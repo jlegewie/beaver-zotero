@@ -55,7 +55,9 @@ export const chatCompletion = async (
     onFinish: () => void,
     onError: (error: Error) => void
 ) => {
-    // Request messages 
+    // Filter empty assistant messages
+    messages = messages.filter(message => !(message.role == 'assistant' && message.content == ''));
+    // Request messages
     const requestMessages = [
         {
             role: 'system',
@@ -80,7 +82,7 @@ export const chatCompletion = async (
     try {
         await provider.createChatCompletionStreaming(request, onChunk);
     } catch (error) {
-        console.error(error);
+        // console.error(error);
         onError(error as Error);
     }
 

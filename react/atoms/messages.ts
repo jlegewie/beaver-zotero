@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ChatMessage } from "../types/messages";
+import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { ZoteroResource } from "../types/resources";
 
 // Current user message and content
@@ -66,5 +66,25 @@ export const setMessageStatusAtom = atom(
         set(messagesAtom, get(messagesAtom).map(message =>
             message.id === id ? { ...message, status } : message
         ));
+    }
+);
+
+export const rollbackChatToMessageIdAtom = atom(
+    null,
+    (get, set, id: string) => {
+        const messages = get(messagesAtom);
+        const messageIndex = messages.findIndex(message => message.id === id);
+
+        if (messageIndex > 0) {
+            // Create a new assistant message
+            const assistantMsg = createAssistantMessage();
+            // Keep only the message before the specified ID
+            const truncatedMessages = messages.slice(0, messageIndex);
+            // Add the assistant message to the new messages
+            const newMessages = [...truncatedMessages, assistantMsg];
+            set(messagesAtom, newMessages);
+            return newMessages;
+        }
+        // If message not found or is already the first message, do nothing
     }
 );

@@ -12,3 +12,7 @@ export { default as ArrowUp } from './icons/ArrowUp';
 export { default as ArrowDown } from './icons/ArrowDown';
 export { default as ArrowLeft } from './icons/ArrowLeft';
 export { default as ArrowRight } from './icons/ArrowRight';
+export { default as RepeatIcon } from './icons/RepeatIcon';
+export { default as CopyIcon } from './icons/CopyIcon';
+export { default as TickIcon } from './icons/TickIcon';
+export { default as ShareIcon } from './icons/ShareIcon';
