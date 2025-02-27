@@ -63,6 +63,19 @@ export function getInTextCitations(
     return citations;
 }
 
+export function getBibliography(
+    item: Zotero.Item,
+    style: string = 'http://www.zotero.org/styles/chicago-author-date'
+): string {
+    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
+    const cslEngine = csl_style.getCiteProc('en-US', 'text');
+    
+    const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [item], "text").trim();
+    
+    cslEngine.free();
+    return bibliography;
+}
+
 export function getBibliographies(
     items: Zotero.Item[],
     style: string = 'http://www.zotero.org/styles/chicago-author-date'
