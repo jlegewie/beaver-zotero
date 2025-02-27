@@ -558,6 +558,25 @@
     text-decoration: underline;
 }
 
+[id^="beaver-pane-"] .markdown a[href^="zotero"] {
+    cursor: pointer;
+    font-size: 0.75em;
+    margin-left: -0.1em;
+    text-decoration: none;
+    background: var(--fill-quarternary);
+    padding-right: 0.35em;
+    padding-left: 0.35em;
+    border-radius: 0.5em;
+    border: 1px solid var(--fill-quarternary);
+    color: var(--fill-secondary);
+    transition: all 0.2s ease-in-out;
+}
+
+[id^="beaver-pane-"] .markdown a[href^="zotero"]:hover {
+    color: var(--fill-primary);
+    border: 1px solid var(--fill-tertiary);
+}
+
 [id^="beaver-pane-"] .markdown h1,
 [id^="beaver-pane-"] .markdown h2,
 [id^="beaver-pane-"] .markdown h3,
