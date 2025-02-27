@@ -7,6 +7,7 @@ export interface BaseResource {
     icon: string;           // Icon for the resource
     pinned: boolean;        // If true, the resource persists across selections
     timestamp: number;      // Creation timestamp
+    citeKey?: string;       // Cite key for the resource
 }
 
 // Zotero item resource
