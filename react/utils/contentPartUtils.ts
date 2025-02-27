@@ -1,7 +1,7 @@
 import { Resource } from '../types/resources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
-import { getFormattedReferences } from '../../src/utils/citations';
-import { getChildItems, getZoteroItem } from './resourceUtils';
+import { getBibliography } from '../../src/utils/citations';
+import { getZoteroItem } from './resourceUtils';
 
 
 // Utility function to get note content as markdown
@@ -19,82 +19,93 @@ async function getNoteAsMarkdown(item: Zotero.Item) {
     return markdown;
 }
 
-// Get content part from a Zotero note
-async function getContentPartFromZoteroNote(item: Zotero.Item): Promise<ContentPart[]> {
-    // @ts-ignore unescapeHTML exists
-    const content = Zotero.Utilities.unescapeHTML(item.getNote());
-    const title = item.getNoteTitle();
-    
-    return [{
-        type: 'text',
-        text: `id: ${item.key}\ntype: Note\nname: ${title}\n\n${content}`
-    }];
-}
-
-// Get content part from a Zotero item, with name for citation
-async function getContentPartFromZoteroItem(item: Zotero.Item, name: string): Promise<ContentPart[]> {
-    if (item.isNote()) {
-        return await getContentPartFromZoteroNote(item);
-    }
-    
-    if (item.isAttachment()) {
-        const filePath = item ? await item.getFilePath() : undefined;
-        if (filePath) {
-            return [
-                {
-                    type: 'text',
-                    text: `id: ${item.key}\ntype: Document\nReference: ${name}`
-                },
-                await fileToContentPart(filePath)
-            ];
-        }
-    }
-    
-    return [];
-}
-
-// Convert a ZoteroResource to content parts
+/**
+ * Convert a Resource to content parts
+ * 
+ * @param resource - The resource to convert
+ * @returns Promise<ContentPart[]> - The content parts
+ */
 export async function resourceToContentParts(resource: Resource): Promise<ContentPart[]> {
-    switch (resource.type) {
-        case 'zotero_item': {
-            // Get the Zotero item
-            const item = getZoteroItem(resource);
-            if (!item) return [];
+    if (resource.type === 'zotero_item') {
+        // Get the Zotero item
+        const item = getZoteroItem(resource);
+
+        // Skip if the item is not a regular item (regular items should already be flattened)
+        if (!item || item.isRegularItem()) return [];
+
+        // Define id and parent item
+        const id = `${resource.libraryID}-${resource.itemKey}`;
+        const parentItem = item.parentItem;
+
+        // Attachment with parent item
+        if (parentItem && item.isAttachment()) {
+            /*const title = parentItem.getDisplayTitle();
+            const authors = parentItem?.getCreators();
+            const year = parentItem.getField('date', true).slice(0, 4);*/
+            const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
+            const reference = getBibliography(parentItem);
+            const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
+            const metadata = `# Document (id: ${id})\nType: ${type}\nReference: ${reference}`;
+
+            // Get the file path
+            const filePath = await item.getFilePath();
+            if (!filePath) return [];
+
+            // return content parts
+            return [
+                { type: 'text', text: metadata },
+                await fileToContentPart(filePath)
+            ]
+
+        // Note with parent item
+        } else if (parentItem && item.isNote()) {
+            const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
+            const reference = getBibliography(parentItem);
+            // @ts-ignore unescapeHTML exists
+            const content = Zotero.Utilities.unescapeHTML(item.getNote());
+            const noteData = `# Note (id: ${id})\nType of parent: ${type}\nReference of parent: ${reference}\nNote Content: ${content}`;
+            return [{ type: 'text', text: noteData }]
+        // Top-level attachment
+        } else if (!parentItem && item.isAttachment()) {
+            // @ts-ignore getFilename exists
+            const fileName = item.getFileName();
+            const metadata = `# Document (id: ${id})\nFile Name: ${fileName}`;
+
+            // Get the file path
+            const filePath = await item.getFilePath();
+            if (!filePath) return [];
+
+            // return content parts
+            return [
+                { type: 'text', text: metadata },
+                await fileToContentPart(filePath)
+            ]
             
-            // Get name for reference
-            const metadata = getFormattedReferences([item])[0];
-            
-            // If the resource has defined child items, get the content of the child items
-            // if (resource.childItemKeys && resource.childItemKeys.length > 0) {
-            if (item.isRegularItem()) {
-                const childItems = getChildItems(resource);
-                
-                const childItemsContent = await Promise.all(
-                    childItems.filter(Boolean).map(item => 
-                        getContentPartFromZoteroItem(item, metadata.bibliography)
-                    )
-                );
-                
-                return childItemsContent.flat();
-            }
-            
-            return await getContentPartFromZoteroItem(item, metadata.bibliography);
+        // Top-level note
+        } else if (!parentItem && item.isNote()) {
+            // const content = await getNoteAsMarkdown(item);
+            // @ts-ignore unescapeHTML exists
+            const content = Zotero.Utilities.unescapeHTML(item.getNote());
+            const noteData = `# Note (id: ${id})\nNote Content: ${content}`;
+            return [{ type: 'text', text: noteData }]
         }
-        
-        case 'file': {
-            if (resource.filePath) {
-                return [await fileToContentPart(resource.filePath)];
-            }
-            return [];
-        }
-        
-        case 'remote_file': {
-            return [urlToContentPart(resource.url)];
-        }
-        
-        default:
-        return [];
     }
+    if (resource.type === 'file') {
+        const metadata = `# Document (id: ${resource.id})\nFile Name: ${resource.fileName}`;
+        // Get the file path
+        const filePath = resource.filePath;
+        if (!filePath) return [];
+
+        // return content parts
+        return [
+            { type: 'text', text: metadata },
+            await fileToContentPart(filePath)
+        ];
+    }
+    if (resource.type === 'remote_file') {
+        return [urlToContentPart(resource.url)];
+    }
+    return [];
 }
 
 
@@ -170,5 +181,85 @@ export function urlToContentPart(url: string): ContentPart {
  *         ]
  *     },
  *     {"role": "user", "content": "test"},
+ * ]
+ */
+
+
+/**
+ * Example of formatted messages produced by resourceToContentParts
+ * messages = [
+ *     {"role": "system", "content": SYSTEM_PROMPT},
+ *     // Example of a Zotero attachment with parent item (e.g., PDF)
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# Document (id: 1-ABC123)\nType: journalArticle\nReference: Smith, J. (2023). Advances in AI. Journal of AI Research, 45(2), 123-145."
+ *             },
+ *             {
+ *                 "type": "image_url",
+ *                 "image_url": {"url": "data:application/pdf;base64,JVBERi0xLjcKJeLjz9..."}
+ *             }
+ *         ]
+ *     },
+ *     // Example of a Zotero note with parent item
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# Note (id: 1-DEF456)\nType of parent: journalArticle\nReference of parent: Smith, J. (2023). Advances in AI. Journal of AI Research, 45(2), 123-145.\nNote Content: This paper discusses key advancements in generative AI models."
+ *             },
+ *         ]
+ *     },
+ *     // Example of a top-level attachment
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# Document (id: 1-GHI789)\nFile Name: report.pdf"
+ *             },
+ *             {
+ *                 "type": "image_url",
+ *                 "image_url": {"url": "data:application/pdf;base64,JVBERi0xLjcKJeLjz9..."}
+ *             },
+ *         ]
+ *     },
+ *     // Example of a top-level note
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# Note (id: 1-JKL012)\nNote Content: <p>These are my research notes for the AI project.</p>"
+ *             },
+ *         ]
+ *     },
+ *     // Example of a local file resource
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# Document (id: file-123)\nFile Name: analysis.png"
+ *             },
+ *             {
+ *                 "type": "image_url",
+ *                 "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."}
+ *             },
+*         ]
+ *     },
+ *     // The user's query
+ *     {
+ *         "role": "user", 
+ *         "content": [
+ *             {
+ *                 "type": "text",
+ *                 "text": "# User Query\nCan you summarize the key findings from Smith's paper on AI advancements?"
+ *             }
+ *         ]
+ *     }
  * ]
  */
