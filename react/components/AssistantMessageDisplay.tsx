@@ -1,17 +1,12 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
-import { isStreamingAtom, rollbackChatToMessageIdAtom } from '../atoms/messages';
+import { isStreamingAtom } from '../atoms/messages';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
-import { chatCompletion } from '../../src/services/chatCompletion';
-import {
-    streamToMessageAtom,
-    setMessageStatusAtom
-} from '../atoms/messages';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
@@ -27,9 +22,6 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     message,
     isLastMessage
 }) => {
-    const rollbackChatToMessageId = useSetAtom(rollbackChatToMessageIdAtom);
-    const streamToMessage = useSetAtom(streamToMessageAtom);
-    const setMessageStatus = useSetAtom(setMessageStatusAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
