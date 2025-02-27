@@ -5,7 +5,7 @@ import { ZoteroResource, Resource } from "../types/resources";
 // Current user message and content
 export const userMessageAtom = atom<string>('');
 
-// Messages atom
+// Thread messages atom
 export const messagesAtom = atom<ChatMessage[]>([]);
 
 // Derived atoms
