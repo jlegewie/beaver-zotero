@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { ZoteroResource } from "../types/resources";
+import { ZoteroResource, Resource } from "../types/resources";
 
 // Current user message and content
 export const userMessageAtom = atom<string>('');
@@ -17,6 +17,17 @@ export const isStreamingAtom = atom((get) => {
 export const systemMessageAtom = atom((get) => {
     const messages = get(messagesAtom);
     return messages.find((message) => message.role === 'system')?.content;
+});
+
+export const sourcesAtom = atom<Resource[]>((get) => {
+    const messages = get(messagesAtom);
+    return messages
+        .flatMap((message) => message.resources || [])
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .map((resource, index) => ({
+            ...resource,
+            citeKey: String(index + 1),
+        }));
 });
 
 // Derived atom for user messages only
