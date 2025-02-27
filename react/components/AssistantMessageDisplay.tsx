@@ -12,6 +12,8 @@ import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
+import { parseCitations } from '../utils/parseCitations';
+import { sourcesAtom } from '../atoms/messages';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -25,7 +27,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    
+    const sources = useAtomValue(sourcesAtom);
+
     // Manage copy feedback state manually
     const [justCopied, setJustCopied] = useState(false);
     
@@ -88,11 +91,11 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
             <div 
-                className="px-2 user-select-text" 
+                className="px-2 user-select-text"
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={message.content} />
+                <MarkdownRenderer className="markdown" content={parseCitations(message.content, sources).textWithLinks} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }
