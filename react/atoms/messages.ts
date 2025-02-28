@@ -17,11 +17,6 @@ export const isStreamingAtom = atom((get) => {
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
-export const systemMessageAtom = atom((get) => {
-    const messages = get(messagesAtom);
-    return messages.find((message) => message.role === 'system')?.content;
-});
-
 export const sourcesAtom = atom<Source[]>((get) => {
     const messages = get(messagesAtom);
     // Citation preferences
