@@ -1,5 +1,6 @@
 import { createOpenPDFURL } from "./createOpenPDFURL";
 import { ZoteroResource, Resource } from "../types/resources";
+import { getPref } from "../../src/utils/prefs";
 
 interface ZoteroStyle {
     getCiteProc(locale: string, format: 'text' | 'html'): CSLEngine;
@@ -56,7 +57,11 @@ function parseCitations(
     sources: Resource[] = []
 ): ParserOutput {
     const citations: Citation[] = [];
+    let lastSourceId: string = '';
     
+    // Citation format
+    const authorYearFormat = getPref("citationFormat") !== "numeric";
+
     // Regular expression to match the citation format
     const citationRegex = /\{\{cite:([^}]+)\}\}/g;
     
@@ -139,9 +144,21 @@ function parseCitations(
             const page = pages.length > 0 ? pages[0] : null;
             const url = createOpenPDFURL(item, page);
             
-            // Create markdown link using citeKey from source
-            const label = page ? `${source.citeKey}•` : source.citeKey;
+            // Label for the citation link
+            let label = '';
+            if (authorYearFormat) {
+                label = lastSourceId === source.id
+                    ? (page ? `p.${page}` : 'Ibid')
+                    : (page ? `${source.citation!}, p.${page}` : source.citation!);
+            } else {
+                label = source.numericCitation!;
+            }
+
+            // Create markdown link
             citationLinks.push(`[${label}](${url})`);
+
+            // Update last source ID
+            lastSourceId = source.id;
         }
         
         // Join multiple citations with commas
