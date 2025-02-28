@@ -12,6 +12,9 @@ declare namespace _ZoteroTypes {
       "voyageApiKey": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
+      "citationFormat": string;
+      "citationStyle": string;
+      "citationLocale": string;
     };
   }
 }
