@@ -26,8 +26,7 @@ export interface TooltipProps {
 }
 
 /**
-* A reusable tooltip component that displays additional information when
-* hovering over an element.
+* A reusable tooltip component
 */
 const Tooltip: React.FC<TooltipProps> = ({
     children,
@@ -66,7 +65,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         const spaceAbove = anchorRect.top;
         
         let placement: 'top' | 'bottom' = 'bottom';
-        let posY = anchorRect.bottom + 12; // Increased gap to 12px to prevent arrow from entering anchor
+        let posY = anchorRect.bottom + 10;
         
         // If not enough space below, place it above
         if (spaceBelow < tooltipRect.height + 12 && spaceAbove > tooltipRect.height + 12) {
@@ -107,7 +106,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         // the tooltip has been rendered and can be measured
         const initialPositionTimer = setTimeout(() => {
             calculatePosition();
-        }, 0);
+        }, 10);
         
         const mainWindow = Zotero.getMainWindow();
         
@@ -138,18 +137,18 @@ const Tooltip: React.FC<TooltipProps> = ({
     };
     
     const handleMouseLeave = () => {
-        setIsOpen(false);
+        // setIsOpen(false);
     };
     
     // Wrap children to add mouse event handlers
     const wrappedChildren = (
         <div 
-        ref={anchorRef}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        style={{ display: 'inline-block' }}
+            ref={anchorRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            style={{ display: 'inline-block' }}
         >
-        {children}
+            {children}
         </div>
     );
     
@@ -157,40 +156,44 @@ const Tooltip: React.FC<TooltipProps> = ({
     const tooltipElement = isOpen && (
         <div
             ref={tooltipRef}
-            className={`bg-quaternary rounded-md p-1 shadow-md ${
-                position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'
-            } ${classNames}`}
+            className={`
+                bg-quaternary rounded-md p-0 shadow-md fixed z-1000 border-quinary
+                ${position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'}
+                ${classNames}
+            `}
             style={{
-                position: 'fixed',
                 top: position.y,
                 left: position.x,
-                transform: 'translateX(-50%)',
-                border: '1px solid var(--fill-quinary)',
-                zIndex: 1000,
+                transform: 'translateX(-50%)'
             }}
             role="tooltip"
             aria-hidden={!isOpen}
         >
-        <div 
-            className={`px-2 py-1 ${singleLine ? 'flex items-center' : ''} ${singleLine ? 'single-line' : ''}`}
-        >
-            <div className={`text-sm font-color-secondary ${singleLine ? 'single-line' : ''}`}>{content}</div>
-            {secondaryContent && (
-                <div className={`text-sm font-color-tertiary
-                    ${singleLine ? 'ml-3' : 'mt-1'}
-                    ${singleLine ? 'single-line' : ''}
-                `}>
-                    {secondaryContent}
+            <div className={`
+                px-2 py-1
+                ${singleLine ? 'flex items-center' : ''}
+                ${singleLine ? 'single-line' : ''}
+            `}>
+                <div className={`text-base font-color-secondary ${singleLine ? 'single-line' : ''}`}>
+                    {content}
                 </div>
+                {secondaryContent && (
+                    <div className={`
+                        text-sm font-color-tertiary
+                        ${singleLine ? 'ml-3' : 'mt-1'}
+                        ${singleLine ? 'single-line' : ''}
+                    `}>
+                        {secondaryContent}
+                    </div>
+                )}
+            </div>
+            
+            {showArrow && (
+                <div 
+                    className={`tooltip-arrow tooltip-arrow-${position.placement}`}
+                    style={{ left: arrowPosition }}
+                />
             )}
-        </div>
-        
-        {showArrow && (
-            <div 
-                className={`tooltip-arrow tooltip-arrow-${position.placement}`}
-                style={{ left: arrowPosition }}
-            />
-        )}
         </div>
     );
     
