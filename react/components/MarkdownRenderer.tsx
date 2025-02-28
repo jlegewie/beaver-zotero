@@ -2,6 +2,7 @@ import React from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm'
+import Tooltip from './Tooltip';
 // import rehypeKatex from 'rehype-katex';
 // import 'katex/dist/katex.min.css';
 
@@ -24,6 +25,20 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
                 }
                 // Use default sanitization for all other links
                 return defaultUrlTransform(uri);
+            }}
+            components={{
+                // Add a tooltip to zotero links
+                a: ({ node, children, ...props }: any) => {
+                    if (props.href.startsWith('zotero://')) {
+                        const tooltip = props.title || '';
+                        return (
+                            <Tooltip content={tooltip} width="250px">
+                                <a href={props.href}>{children}</a>
+                            </Tooltip>
+                        );
+                    }
+                    return <a {...props}>{children}</a>;
+                },
             }}
         >
             {content

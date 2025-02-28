@@ -130,7 +130,7 @@ function parseCitations(
             }
 
             // Create markdown link
-            citationLinks.push(`[${label}](${url})`);
+            citationLinks.push(`[${label}](${url} "${source.reference}")`);
 
             // Update last source ID
             lastSourceId = source.id;
