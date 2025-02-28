@@ -1,13 +1,15 @@
 
 // Base resource interface
 export interface BaseResource {
-    id: string;             // Unique identifier for tracking
-    type: string;           // Type discriminator
-    name: string;           // Name for the resource
-    icon: string;           // Icon for the resource
-    pinned: boolean;        // If true, the resource persists across selections
-    timestamp: number;      // Creation timestamp
-    citeKey?: string;       // Cite key for the resource
+    id: string;               // Unique identifier for tracking
+    type: string;             // Type discriminator
+    name: string;             // Name for the resource
+    icon: string;             // Icon for the resource
+    pinned: boolean;          // If true, the resource persists across selections
+    timestamp: number;        // Creation timestamp
+    reference?: string;       // Reference for the resource
+    citation?: string;        // Citation for the resource
+    numericCitation?: string; // Numeric citation for the resource
 }
 
 // Zotero item resource
