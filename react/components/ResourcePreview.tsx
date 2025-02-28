@@ -5,7 +5,7 @@ import { Icon, CancelIcon } from './icons';
 import { Resource } from '../types/resources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedResourceAtom } from '../atoms/ui';
-import { resourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../atoms/resources';
+import { currentResourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../atoms/resources';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
@@ -27,8 +27,8 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
     // Get resource from resources atom
-    const resources = useAtomValue(resourcesAtom);
-    const currentResource = resources.find(att => att.id === resource.id) || resource;
+    const currentResources = useAtomValue(currentResourcesAtom);
+    const currentResource = currentResources.find(att => att.id === resource.id) || resource;
 
     // Type of resource
     const item = currentResource.type === 'zotero_item' ? getZoteroItem(currentResource) : null;

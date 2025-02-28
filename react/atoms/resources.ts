@@ -4,14 +4,15 @@ import { createZoteroResource, createFileResource } from "../utils/resourceUtils
 import { threadResourceKeysAtom } from "./messages";
 
 /**
+* Atom to store the resources
+*/
+export const currentResourcesAtom = atom<Resource[]>([]);
+
+
+/**
 * Cache to track removed item keys to prevent them from reappearing
 */
 export const removedItemKeysCache: Set<string> = new Set();
-
-/**
-* Atom to store the resources
-*/
-export const resourcesAtom = atom<Resource[]>([]);
 
 /**
 * Atom to reset all resources
@@ -20,7 +21,7 @@ export const resetResourcesAtom = atom(
     null,
     (_, set) => {
         removedItemKeysCache.clear();
-        set(resourcesAtom, []);
+        set(currentResourcesAtom, []);
     }
 );
 
@@ -30,7 +31,7 @@ export const resetResourcesAtom = atom(
 export const updateResourcesFromZoteroItemsAtom = atom(
     null,
     async (get, set, selectedItems: Zotero.Item[]) => {
-        const currentResources = get(resourcesAtom);
+        const currentResources = get(currentResourcesAtom);
         const threadResourceKeys = get(threadResourceKeysAtom);
         
         // Map of existing Zotero resources by item key
@@ -75,7 +76,7 @@ export const updateResourcesFromZoteroItemsAtom = atom(
     
         // Update state: merge and sort by timestamp
         set(
-            resourcesAtom,
+            currentResourcesAtom,
             [...newResources, ...nonZoteroResources].sort((a, b) => a.timestamp - b.timestamp)
         );
     }
@@ -98,13 +99,13 @@ export const updateResourcesFromZoteroSelectionAtom = atom(
 export const addFileResourceAtom = atom(
     null,
     (get, set, file: File) => {
-        const currentResources = get(resourcesAtom);
+        const currentResources = get(currentResourcesAtom);
         // Use file.name as a unique identifier for files
         const exists = currentResources.find(
             (res) => res.type === 'file' && (res as any).filePath === file.name
         );
         if (!exists) {
-            set(resourcesAtom, [...currentResources, createFileResource(file)]);
+            set(currentResourcesAtom, [...currentResources, createFileResource(file)]);
         }
     }
 );
@@ -116,7 +117,7 @@ export const updateChildItemKeysAtom = atom(
     null,
     (get, set, params: { resourceId: string, childItemKeys: string[] }) => {
         const { resourceId, childItemKeys } = params;
-        const currentResources = get(resourcesAtom);
+        const currentResources = get(currentResourcesAtom);
         
         const updated = currentResources.map((res) => {
             if (res.id === resourceId && res.type === 'zotero_item') {
@@ -125,7 +126,7 @@ export const updateChildItemKeysAtom = atom(
             return res;
         });
         
-        set(resourcesAtom, updated);
+        set(currentResourcesAtom, updated);
     }
 );
 
@@ -135,12 +136,12 @@ export const updateChildItemKeysAtom = atom(
 export const removeResourceAtom = atom(
     null,
     (get, set, resource: Resource) => {
-        const currentResources = get(resourcesAtom);
+        const currentResources = get(currentResourcesAtom);
         if (resource.type === 'zotero_item') {
             removedItemKeysCache.add((resource as ZoteroResource).itemKey);
         }
         set(
-            resourcesAtom,
+            currentResourcesAtom,
             currentResources.filter((res) => res.id !== resource.id)
         );
     }
@@ -152,11 +153,11 @@ export const removeResourceAtom = atom(
 export const togglePinResourceAtom = atom(
     null,
     (get, set, resourceId: string) => {
-        const currentResources = get(resourcesAtom);
+        const currentResources = get(currentResourcesAtom);
         const updated = currentResources.map((res) =>
             res.id === resourceId ? { ...res, pinned: !res.pinned } : res
     );
-    set(resourcesAtom, updated);
+    set(currentResourcesAtom, updated);
 }
 );
 

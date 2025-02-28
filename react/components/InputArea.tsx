@@ -4,7 +4,7 @@ import { ResourceButton } from "./ResourceButton";
 import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, userMessageAtom } from '../atoms/messages';
-import { resourcesAtom, addFileResourceAtom } from '../atoms/resources';
+import { currentResourcesAtom, addFileResourceAtom } from '../atoms/resources';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { threadResourceCountAtom } from '../atoms/messages';
@@ -19,7 +19,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(userMessageAtom);
-    const resources = useAtomValue(resourcesAtom);
+    const currentResources = useAtomValue(currentResourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
     const threadResourceCount = useAtomValue(threadResourceCountAtom);
@@ -37,7 +37,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         generateResponse({
             content: userMessage,
-            resources: resources,
+            resources: currentResources,
         });
 
         // If command is pressed, handle library search
@@ -108,7 +108,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         {threadResourceCount}
                     </button>
                 )}
-                {resources.map((resource, index) => (
+                {currentResources.map((resource, index) => (
                     <ResourceButton
                         key={index}
                         resource={resource}
