@@ -1,5 +1,5 @@
 import { createOpenPDFURL } from "./createOpenPDFURL";
-import { ZoteroResource, Resource } from "../types/resources";
+import { ZoteroResource, Source } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 
 
@@ -29,7 +29,7 @@ interface ParserOutput {
 */
 function parseCitations(
     text: string,
-    sources: Resource[] = []
+    sources: Source[] = []
 ): ParserOutput {
     const citations: Citation[] = [];
     let lastSourceId: string = '';
@@ -124,9 +124,9 @@ function parseCitations(
             if (authorYearFormat) {
                 label = lastSourceId === source.id
                     ? (page ? `p.${page}` : 'Ibid')
-                    : (page ? `${source.citation!}, p.${page}` : source.citation!);
+                    : (page ? `${source.citation}, p.${page}` : source.citation);
             } else {
-                label = source.numericCitation!;
+                label = source.numericCitation;
             }
 
             // Create markdown link

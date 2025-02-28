@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { ZoteroResource, Resource } from "../types/resources";
+import { ZoteroResource, Resource, Source } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/resourceUtils";
@@ -22,7 +22,7 @@ export const systemMessageAtom = atom((get) => {
     return messages.find((message) => message.role === 'system')?.content;
 });
 
-export const sourcesAtom = atom<Resource[]>((get) => {
+export const sourcesAtom = atom<Source[]>((get) => {
     const messages = get(messagesAtom);
     // Citation preferences
     const citationFormat = getPref("citationFormat") || "author-year";
@@ -51,7 +51,7 @@ export const sourcesAtom = atom<Resource[]>((get) => {
                     citation: citation,
                     numericCitation: String(index + 1),
                     reference: reference,
-                };
+                } as Source;
             }
             if (resource.type === 'file') {
                 // Return formatted source
@@ -60,11 +60,11 @@ export const sourcesAtom = atom<Resource[]>((get) => {
                     citation: 'File',
                     numericCitation: String(index + 1),
                     reference: resource.filePath,
-                };
+                } as Source;
             }
             return null;
         })
-        .filter(Boolean) as Resource[];
+        .filter(Boolean) as Source[];
     cslEngine.free();
     return sources;
 });
