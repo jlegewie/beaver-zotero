@@ -793,3 +793,87 @@
     opacity: 1;
     visibility: visible;
 }
+
+/* Component: Tooltip */
+[id^="beaver-pane-"] .tooltip-container {
+    position: absolute;
+    z-index: 1000;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background-color: var(--material-mix-quarternary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    max-width: 250px;
+    word-wrap: break-word;
+    pointer-events: none;
+    color: var(--fill-secondary);
+    border: 1px solid var(--fill-quarternary);
+    transform: translateX(-50%);
+    white-space: normal;
+}
+
+[id^="beaver-pane-"] .tooltip-container.whitespace-nowrap {
+    white-space: nowrap;
+    max-width: none;
+}
+
+/* Arrow styles with border */
+[id^="beaver-pane-"] .tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    transform: translateX(-50%);
+}
+
+[id^="beaver-pane-"] .tooltip-arrow-bottom {
+    top: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 6px solid var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .tooltip-arrow-bottom::after {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 5px solid var(--material-mix-quarternary);
+}
+
+[id^="beaver-pane-"] .tooltip-arrow-top {
+    bottom: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .tooltip-arrow-top::after {
+    content: '';
+    position: absolute;
+    left: -5px;
+    bottom: 1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid var(--material-mix-quarternary);
+}
+
+@keyframes tooltipFadeIn {
+    from { opacity: 0; transform: translateY(5px) translateX(-50%); }
+    to { opacity: 1; transform: translateY(0) translateX(-50%); }
+}
+
+@keyframes tooltipFadeInTop {
+    from { opacity: 0; transform: translateY(-5px) translateX(-50%); }
+    to { opacity: 1; transform: translateY(0) translateX(-50%); }
+}
+
+[id^="beaver-pane-"] .tooltip-fade-in-bottom {
+    animation: tooltipFadeIn 0.2s ease-in-out forwards;
+}
+
+[id^="beaver-pane-"] .tooltip-fade-in-top {
+    animation: tooltipFadeInTop 0.2s ease-in-out forwards;
+}
