@@ -1,188 +1,219 @@
 import React from 'react';
-// @ts-ignore no idea why
-import { useState, useRef, useEffect } from 'react';
+// @ts-ignore no idea why this is needed
+import { useEffect, useRef, useState, ReactNode } from 'react';
+import ReactDOM from 'react-dom';
 
-// Gap between tooltip and window edge (in pixels)
-const WINDOW_EDGE_GAP = 12;
-
-interface TooltipProps {
-    children: React.ReactNode;
-    content: React.ReactNode;
-    secondaryContent?: React.ReactNode; // Faded text that appears after the main content
+/**
+* Props for the Tooltip component
+*/
+export interface TooltipProps {
+    /** The element that triggers the tooltip */
+    children: ReactNode;
+    /** Main text content of the tooltip */
+    content: ReactNode;
+    /** Secondary content displayed on the right side */
+    secondaryContent?: ReactNode;
+    /** Whether to show the arrow pointing to the anchor element */
     showArrow?: boolean;
-    className?: string;
+    /** Whether to display all content on a single line */
+    singleLine?: boolean;
+    /** Additional CSS class names */
+    classNames?: string;
+    /** Whether the tooltip is disabled */
     disabled?: boolean;
-    singleLine?: boolean; // Force tooltip text to be on one line
+    /** Whether to use a portal for rendering (prevents containment issues) */
+    usePortal?: boolean;
 }
 
 /**
-* A tooltip component that displays content on hover
+* A reusable tooltip component that displays additional information when
+* hovering over an element.
 */
 const Tooltip: React.FC<TooltipProps> = ({
     children,
     content,
     secondaryContent,
-    showArrow = false,
-    className = '',
+    showArrow = true,
+    singleLine = false,
+    classNames = '',
     disabled = false,
-    singleLine = false
+    usePortal = false,
 }) => {
-    const [isVisible, setIsVisible] = useState<boolean>(false);
-    const [position, setPosition] = useState({
-        placement: 'bottom' as 'top' | 'bottom',
-        tooltipStyle: {},
-        arrowStyle: {}
+    const [isOpen, setIsOpen] = useState<boolean>(false);
+    const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
+        x: 0, 
+        y: 0, 
+        placement: 'bottom' 
     });
-    const [isPositioned, setIsPositioned] = useState<boolean>(false);
-    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [arrowPosition, setArrowPosition] = useState<string>('50%');
+    
+    const anchorRef = useRef<HTMLDivElement | null>(null);
     const tooltipRef = useRef<HTMLDivElement | null>(null);
     
-    // Calculate position of tooltip
-    const updatePosition = () => {
-        if (!containerRef.current || !tooltipRef.current) return;
+    // Calculate tooltip position
+    const calculatePosition = () => {
+        if (!anchorRef.current || !tooltipRef.current) return;
         
-        const win = Zotero.getMainWindow();
-        const containerRect = containerRef.current.getBoundingClientRect();
+        const mainWindow = Zotero.getMainWindow();
+        const anchorRect = anchorRef.current.getBoundingClientRect();
         const tooltipRect = tooltipRef.current.getBoundingClientRect();
-        const windowHeight = win.innerHeight;
-        const windowWidth = win.innerWidth;
         
-        // Check if tooltip would be off-screen at the bottom
-        const wouldOverflowBottom = containerRect.bottom + tooltipRect.height + 10 > windowHeight - WINDOW_EDGE_GAP;
-        const placement = wouldOverflowBottom ? 'top' : 'bottom';
+        // Calculate center position (default)
+        const centerX = anchorRect.left + (anchorRect.width / 2);
         
-        // Calculate the center point of the container
-        const containerCenter = containerRect.left + (containerRect.width / 2);
+        // Check if tooltip should be displayed below or above the anchor
+        const spaceBelow = mainWindow.innerHeight - anchorRect.bottom;
+        const spaceAbove = anchorRect.top;
         
-        // Calculate ideal tooltip position (centered on container)
-        let tooltipLeft = containerCenter - (tooltipRect.width / 2);
+        let placement: 'top' | 'bottom' = 'bottom';
+        let posY = anchorRect.bottom + 12; // Increased gap to 12px to prevent arrow from entering anchor
         
-        // Calculate how far the tooltip would extend beyond the right edge
-        const rightOverflow = tooltipLeft + tooltipRect.width - (windowWidth - WINDOW_EDGE_GAP);
-        // Calculate how far the tooltip would extend beyond the left edge
-        const leftOverflow = WINDOW_EDGE_GAP - tooltipLeft;
-        
-        // Adjust tooltip position if it overflows
-        if (rightOverflow > 0) {
-            // Shift left to avoid right overflow
-            tooltipLeft -= rightOverflow;
-        } else if (leftOverflow > 0) {
-            // Shift right to avoid left overflow
-            tooltipLeft += leftOverflow;
+        // If not enough space below, place it above
+        if (spaceBelow < tooltipRect.height + 12 && spaceAbove > tooltipRect.height + 12) {
+            placement = 'top';
+            posY = anchorRect.top - tooltipRect.height - 12;
         }
         
-        // Calculate arrow position (should point to container center)
-        // Arrow position is relative to the tooltip
-        const arrowLeft = containerCenter - tooltipLeft;
-
-        // Prepare styles
-        const tooltipStyle: any = {
-            position: 'absolute',
-            left: 0,
-            transform: `translateX(${tooltipLeft}px)`,
-            [placement === 'bottom' ? 'top' : 'bottom']: '100%',
-            marginTop: placement === 'bottom' ? '10px' : undefined,
-            marginBottom: placement === 'top' ? '10px' : undefined,
-            opacity: 1,
-            zIndex: 9999
-        };
+        // Base position is at the anchor's center
+        let posX = centerX;
         
-        const arrowStyle = {
-            left: `${arrowLeft}px`,
-        };
+        // Adjust if tooltip would overflow right or left edge
+        const rightEdge = posX + (tooltipRect.width / 2);
+        if (rightEdge > mainWindow.innerWidth - 8) {
+            // Shift left to avoid right overflow
+            const adjustment = rightEdge - (mainWindow.innerWidth - 8);
+            posX -= adjustment;
+        }
         
-        // Set the position state
-        setPosition({
-            placement,
-            tooltipStyle,
-            arrowStyle
-        });
+        const leftEdge = posX - (tooltipRect.width / 2);
+        if (leftEdge < 8) {
+            // Shift right to avoid left overflow
+            const adjustment = 8 - leftEdge;
+            posX += adjustment;
+        }
         
-        // Mark as positioned
-        setIsPositioned(true);
+        // Calculate arrow position (relative to tooltip left edge)
+        const arrowPos = `calc(50% + ${centerX - posX}px)`;
+        
+        setPosition({ x: posX, y: posY, placement });
+        setArrowPosition(arrowPos);
     };
     
-    // Handle mouse events
+    // Update position when tooltip is shown
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        // Initial position calculation with a slight delay to ensure
+        // the tooltip has been rendered and can be measured
+        const initialPositionTimer = setTimeout(() => {
+            calculatePosition();
+        }, 0);
+        
+        const mainWindow = Zotero.getMainWindow();
+        
+        // Handle window resize
+        const handleResize = () => calculatePosition();
+        mainWindow.addEventListener('resize', handleResize);
+        
+        // Handle scroll events to close the tooltip
+        const handleScroll = () => setIsOpen(false);
+        mainWindow.addEventListener('scroll', handleScroll, true);
+        
+        // Handle click events to close the tooltip
+        const handleClick = () => setIsOpen(false);
+        mainWindow.addEventListener('click', handleClick);
+        
+        return () => {
+            clearTimeout(initialPositionTimer);
+            mainWindow.removeEventListener('resize', handleResize);
+            mainWindow.removeEventListener('scroll', handleScroll, true);
+            mainWindow.removeEventListener('click', handleClick);
+        };
+    }, [isOpen]);
+    
+    // Handle mouse enter/leave for the anchor element
     const handleMouseEnter = () => {
         if (disabled) return;
-        setIsVisible(true);
-        setIsPositioned(false); // Reset positioning when showing
+        setIsOpen(true);
     };
     
     const handleMouseLeave = () => {
-        setIsVisible(false);
+        setIsOpen(false);
     };
     
-    // Handle scroll and click events to hide tooltip
-    useEffect(() => {
-        const win = Zotero.getMainWindow();
-        const handleScroll = () => {
-            setIsVisible(false);
-        };
-        
-        const handleClick = () => {
-            setIsVisible(false);
-        };
-        
-        if (isVisible) {
-            win.addEventListener('scroll', handleScroll, true);
-            win.addEventListener('click', handleClick);
-        }
-        
-        return () => {
-            win.removeEventListener('scroll', handleScroll, true);
-            win.removeEventListener('click', handleClick);
-        };
-    }, [isVisible]);
-    
-    // Perform positioning after render
-    useEffect(() => {
-        if (isVisible && !isPositioned) {
-            // Using a longer timeout to ensure all content is fully rendered and measured
-            const timeoutId = setTimeout(updatePosition, 50);
-            return () => clearTimeout(timeoutId);
-        }
-    }, [isVisible, isPositioned]);
-    
-    // Force repositioning when content or options change
-    useEffect(() => {
-        if (isVisible) {
-            setIsPositioned(false);
-        }
-    }, [content, secondaryContent, singleLine]);
-    
-    return (
+    // Wrap children to add mouse event handlers
+    const wrappedChildren = (
         <div 
-            className="relative inline-flex"
-            ref={containerRef}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+        ref={anchorRef}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        style={{ display: 'inline-block' }}
         >
-            {children}
-            
-            {isVisible && (
-                <div
-                    ref={tooltipRef}
-                    className={`tooltip-container tooltip-fade-in-${position.placement} ${singleLine ? 'whitespace-nowrap' : ''} ${className}`}
-                    style={{
-                        ...position.tooltipStyle,
-                        opacity: isPositioned ? 1 : 0, // Hide until positioned
-                    }}
-                >
-                    {showArrow && (
-                        <div 
-                            className={`tooltip-arrow tooltip-arrow-${position.placement}`}
-                            style={position.arrowStyle}
-                        />
-                    )}
-                    <span>{content}</span>
-                    {secondaryContent && (
-                        <span className="font-color-tertiary ml-1">{secondaryContent}</span>
-                    )}
+        {children}
+        </div>
+    );
+    
+    // Tooltip element
+    const tooltipElement = isOpen && (
+        <div
+            ref={tooltipRef}
+            className={`bg-quaternary rounded-md p-1 shadow-md ${
+                position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'
+            } ${classNames}`}
+            style={{
+                position: 'fixed',
+                top: position.y,
+                left: position.x,
+                transform: 'translateX(-50%)',
+                border: '1px solid var(--fill-quinary)',
+                zIndex: 1000,
+            }}
+            role="tooltip"
+            aria-hidden={!isOpen}
+        >
+        <div 
+            className={`px-2 py-1 ${singleLine ? 'flex items-center' : ''} ${singleLine ? 'single-line' : ''}`}
+        >
+            <div className={`text-sm font-color-secondary ${singleLine ? 'single-line' : ''}`}>{content}</div>
+            {secondaryContent && (
+                <div className={`text-sm font-color-tertiary
+                    ${singleLine ? 'ml-3' : 'mt-1'}
+                    ${singleLine ? 'single-line' : ''}
+                `}>
+                    {secondaryContent}
                 </div>
             )}
         </div>
+        
+        {showArrow && (
+            <div 
+                className={`tooltip-arrow tooltip-arrow-${position.placement}`}
+                style={{ left: arrowPosition }}
+            />
+        )}
+        </div>
+    );
+    
+    // Use portal if requested - this helps when the tooltip needs to 
+    // break out of a container with overflow:hidden or similar
+    if (usePortal && isOpen) {
+        return (
+            <>
+            {wrappedChildren}
+            {ReactDOM.createPortal(
+                tooltipElement,
+                Zotero.getMainWindow().document.body
+            )}
+            </>
+        );
+    }
+    
+    return (
+        <>
+        {wrappedChildren}
+        {tooltipElement}
+        </>
     );
 };
 
-export default Tooltip; 
+export default Tooltip;
