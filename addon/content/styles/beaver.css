@@ -388,6 +388,7 @@
 [id^="beaver-pane-"] .z-1000 { z-index: 1000; }
 [id^="beaver-pane-"] .hidden { display: none; }
 
+[id^="beaver-pane-"] .inline-flex { display: inline-flex; }
 [id^="beaver-pane-"] .inline-block { display: inline-block; }
 [id^="beaver-pane-"] .block { display: block; }
 [id^="beaver-pane-"] .whitespace-nowrap { white-space: nowrap; }
