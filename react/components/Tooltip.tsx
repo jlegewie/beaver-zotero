@@ -23,6 +23,8 @@ export interface TooltipProps {
     disabled?: boolean;
     /** Whether to use a portal for rendering (prevents containment issues) */
     usePortal?: boolean;
+    /** Whether to show the tooltip on hover */
+    width?: string;
 }
 
 /**
@@ -37,6 +39,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     classNames = '',
     disabled = false,
     usePortal = false,
+    width,
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
     const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
@@ -164,7 +167,8 @@ const Tooltip: React.FC<TooltipProps> = ({
             style={{
                 top: position.y,
                 left: position.x,
-                transform: 'translateX(-50%)'
+                transform: 'translateX(-50%)',
+                width: width,
             }}
             role="tooltip"
             aria-hidden={!isOpen}
