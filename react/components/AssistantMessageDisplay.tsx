@@ -95,7 +95,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={parseCitations(message.content, sources).textWithLinks} />
+                <MarkdownRenderer className="markdown" content={parseCitations(message.content, sources).text} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }

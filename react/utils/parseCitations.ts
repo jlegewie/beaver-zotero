@@ -34,15 +34,14 @@ interface Citation {
     id: string;
     libraryId: string;
     itemKey: string;
-    pages: number[];
+    locators: string[];
 }
 
 /**
 * Interface for the parser output
 */
 interface ParserOutput {
-    textWithLinks: string;
-    referenceList: string;
+    text: string;
     citations: Citation[];
 }
 
@@ -50,25 +49,16 @@ interface ParserOutput {
 * Parses citation format and transforms them into properly formatted citations
 * @param text Text containing citations in the format {{cite:DOC-ID|page_info}}
 * @param sources Array of resources to use for citation formatting
-* @param style Citation style to use (default: Chicago Author-Date)
-* @param locale Locale for citation formatting (default: en-US)
 * @returns Object containing transformed text, reference list, and parsed citations
 */
 function parseCitations(
     text: string,
-    sources: Resource[] = [],
-    style: string = 'http://www.zotero.org/styles/chicago-author-date',
-    locale: string = 'en-US'
+    sources: Resource[] = []
 ): ParserOutput {
     const citations: Citation[] = [];
-    const citedItems = new Set<string>();
     
     // Regular expression to match the citation format
     const citationRegex = /\{\{cite:([^}]+)\}\}/g;
-    
-    // Get the Zotero style and CSL engine
-    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
-    const cslEngine = csl_style.getCiteProc(locale, 'text');
     
     // Process text and replace citations with markdown links
     const processedText = text.replace(citationRegex, (match, citationContent) => {
@@ -128,11 +118,10 @@ function parseCitations(
                 id: docId,
                 libraryId,
                 itemKey,
-                pages
+                locators: pages.map(page => page.toString())
             };
             
             citations.push(citation);
-            citedItems.add(docId);
             
             // Get the item from Zotero for citation formatting
             const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
@@ -151,23 +140,17 @@ function parseCitations(
             const url = createOpenPDFURL(item, page);
             
             // Create markdown link using citeKey from source
-            citationLinks.push(`[${source.citeKey}](${url})`);
+            const label = page ? `${source.citeKey}•` : source.citeKey;
+            citationLinks.push(`[${label}](${url})`);
         }
         
         // Join multiple citations with commas
         if (citationLinks.length === 0) return match; // Return original if no valid citations
         return citationLinks.join(' ');
     });
-    
-    // Generate reference list
-    let referenceList = '';
-    if (citedItems.size > 0) {
-        referenceList = 'Reference list';
-    }
-    
+        
     return {
-        textWithLinks: processedText,
-        referenceList,
+        text: processedText,
         citations
     };
 }
