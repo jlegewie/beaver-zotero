@@ -137,7 +137,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     };
     
     const handleMouseLeave = () => {
-        // setIsOpen(false);
+        setIsOpen(false);
     };
     
     // Wrap children to add mouse event handlers
