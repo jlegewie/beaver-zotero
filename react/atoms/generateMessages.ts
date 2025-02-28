@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { messagesAtom, setMessageStatusAtom, streamToMessageAtom, userMessageAtom } from './messages';
+import { messagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
 import { Resource } from '../types/resources';
 import { isResourceValid } from '../utils/resourceUtils';
 import { resetResourcesAtom } from './resources';
@@ -41,7 +41,7 @@ export const generateResponseAtom = atom(
         
         // Reset user message andresources after adding to message
         set(resetResourcesAtom);
-        set(userMessageAtom, '');
+        set(currentUserMessageAtom, '');
         
         // Execute chat completion
         _processChatCompletion(newMessages, assistantMsg.id, set);

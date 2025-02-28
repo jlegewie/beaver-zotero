@@ -6,7 +6,7 @@ import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/resourceUtils";
 
 // Current user message and content
-export const userMessageAtom = atom<string>('');
+export const currentUserMessageAtom = atom<string>('');
 
 // Thread messages atom
 export const messagesAtom = atom<ChatMessage[]>([]);

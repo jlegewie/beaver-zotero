@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { ResourceButton } from "./ResourceButton";
 import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, userMessageAtom } from '../atoms/messages';
+import { isStreamingAtom, currentUserMessageAtom } from '../atoms/messages';
 import { currentResourcesAtom, addFileResourceAtom } from '../atoms/resources';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
@@ -18,7 +18,7 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
-    const [userMessage, setUserMessage] = useAtom(userMessageAtom);
+    const [userMessage, setUserMessage] = useAtom(currentUserMessageAtom);
     const currentResources = useAtomValue(currentResourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
