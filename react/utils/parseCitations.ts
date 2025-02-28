@@ -2,31 +2,6 @@ import { createOpenPDFURL } from "./createOpenPDFURL";
 import { ZoteroResource, Resource } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 
-interface ZoteroStyle {
-    getCiteProc(locale: string, format: 'text' | 'html'): CSLEngine;
-}
-
-interface CSLEngine {
-    updateItems(ids: number[]): void;
-    previewCitationCluster(
-        citation: CSLCitation,
-        citationsPre: any[],
-        citationsPost: any[],
-        format: 'text' | 'html'
-    ): string;
-    free(): void;
-}
-
-interface CSLCitation {
-    citationItems: Array<{
-        id: number;
-        [key: string]: any;
-    }>;
-    properties: {
-        inText?: boolean;
-        [key: string]: any;
-    };
-}
 
 /**
 * Interface representing a parsed citation
