@@ -1,6 +1,6 @@
 import { truncateText } from "../../react/utils/truncateText";
 
-interface ZoteroStyle {
+export interface ZoteroStyle {
     getCiteProc(locale: string, format: 'text' | 'html'): CSLEngine;
 }
 
@@ -61,6 +61,37 @@ export function getInTextCitations(
     
     cslEngine.free();
     return citations;
+}
+
+export function getAuthorYearCitationFromStyle(
+    item: Zotero.Item,
+    style: string = 'http://www.zotero.org/styles/chicago-author-date',
+    locale: string = 'en-US'
+): string {
+    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
+    const cslEngine = csl_style.getCiteProc(locale, 'text');
+    const citation = getAuthorYearCitation(item, cslEngine);
+    cslEngine.free();
+    return citation;
+}
+
+export function getAuthorYearCitation(
+    item: Zotero.Item,
+    cslEngine: CSLEngine
+): string {    
+    const citation: CSLCitation = {
+        citationItems: [{ id: item.id }],
+        properties: { inText: true }
+    };
+    const citation_formatted = cslEngine.previewCitationCluster(citation, [], [], "text")
+        .replace(/^\(|\)$/g, '')
+        .trim()
+        .replace(/,$/, '')
+        .replace(/”/g, '"')
+        .replace(/“/g, '"')
+        .replace(/,"$/, '"');
+
+    return citation_formatted;
 }
 
 export function getBibliography(
