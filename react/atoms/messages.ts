@@ -1,6 +1,9 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { ZoteroResource, Resource } from "../types/resources";
+import { getPref } from "../../src/utils/prefs";
+import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
+import { getZoteroItem } from "../utils/resourceUtils";
 
 // Current user message and content
 export const userMessageAtom = atom<string>('');
@@ -21,13 +24,49 @@ export const systemMessageAtom = atom((get) => {
 
 export const sourcesAtom = atom<Resource[]>((get) => {
     const messages = get(messagesAtom);
-    return messages
+    // Citation preferences
+    const citationFormat = getPref("citationFormat") || "author-year";
+    const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
+    const locale = getPref("citationLocale") || 'en-US';
+    // CSL engine for in-text citations
+    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
+    const cslEngine = csl_style.getCiteProc(locale, 'text');
+    // Define list of sources
+    const sources = messages
         .flatMap((message) => message.resources || [])
         .sort((a, b) => a.timestamp - b.timestamp)
-        .map((resource, index) => ({
-            ...resource,
-            citeKey: String(index + 1),
-        }));
+        .map((resource, index) => {
+            if (resource.type === 'zotero_item') {
+                // Get item and parent item
+                const item = getZoteroItem(resource);
+                if(!item) return null;
+                const parent = item.parentItem;
+                // Format in-text citations
+                const citation = getAuthorYearCitation(parent || item, cslEngine);
+                // Format reference
+                const reference = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [parent || item], "text").trim();
+                // Return formatted source
+                return {
+                    ...resource,
+                    citation: citation,
+                    numericCitation: String(index + 1),
+                    reference: reference,
+                };
+            }
+            if (resource.type === 'file') {
+                // Return formatted source
+                return {
+                    ...resource,
+                    citation: 'File',
+                    numericCitation: String(index + 1),
+                    reference: resource.filePath,
+                };
+            }
+            return null;
+        })
+        .filter(Boolean) as Resource[];
+    cslEngine.free();
+    return sources;
 });
 
 // Derived atom for user messages only
