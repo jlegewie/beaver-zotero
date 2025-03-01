@@ -163,37 +163,37 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         const handleKeyNav = (e: KeyboardEvent) => {
             switch (e.key) {
                 case 'ArrowDown':
-                e.preventDefault();
-                setFocusedIndex((prev: number) => {
-                    let next = (prev + 1) % menuItems.length;
-                    // Skip disabled items
-                    while (menuItems[next].disabled && next !== prev) {
-                        next = (next + 1) % menuItems.length;
-                    }
-                    return next;
-                });
-                break;
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        let next = (prev + 1) % menuItems.length;
+                        // Skip disabled items
+                        while (menuItems[next].disabled && next !== prev) {
+                            next = (next + 1) % menuItems.length;
+                        }
+                        return next;
+                    });
+                    break;
                 case 'ArrowUp':
-                e.preventDefault();
-                setFocusedIndex((prev: number) => {
-                    let next = (prev - 1 + menuItems.length) % menuItems.length;
-                    // Skip disabled items
-                    while (menuItems[next].disabled && next !== prev) {
-                        next = (next - 1 + menuItems.length) % menuItems.length;
-                    }
-                    return next;
-                });
-                break;
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        let next = (prev - 1 + menuItems.length) % menuItems.length;
+                        // Skip disabled items
+                        while (menuItems[next].disabled && next !== prev) {
+                            next = (next - 1 + menuItems.length) % menuItems.length;
+                        }
+                        return next;
+                    });
+                    break;
                 case 'Enter':
                 case ' ':
-                e.preventDefault();
-                if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled) {
-                    menuItems[focusedIndex].onClick();
-                    onClose();
-                }
-                break;
-                default:
-                break;
+                    e.preventDefault();
+                    if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled) {
+                        menuItems[focusedIndex].onClick();
+                        onClose();
+                    }
+                    break;
+                    default:
+                    break;
             }
         };
         
