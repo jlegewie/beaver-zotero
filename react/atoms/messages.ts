@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { Source } from "../types/resources";
+import { SourceWithCitations } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/resourceUtils";
@@ -18,7 +18,7 @@ export const isStreamingAtom = atom((get) => {
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
-export const threadSourcesWithCitationsAtom = atom<Source[]>((get) => {
+export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
     const resources = get(threadResourcesAtom)
         .sort((a, b) => a.timestamp - b.timestamp);
     // Citation preferences
@@ -45,7 +45,7 @@ export const threadSourcesWithCitationsAtom = atom<Source[]>((get) => {
                     citation: citation,
                     numericCitation: String(index + 1),
                     reference: reference,
-                } as Source;
+                } as SourceWithCitations;
             }
             if (resource.type === 'file') {
                 // Return formatted source
@@ -54,11 +54,11 @@ export const threadSourcesWithCitationsAtom = atom<Source[]>((get) => {
                     citation: 'File',
                     numericCitation: String(index + 1),
                     reference: resource.filePath,
-                } as Source;
+                } as SourceWithCitations;
             }
             return null;
         })
-        .filter(Boolean) as Source[];
+        .filter(Boolean) as SourceWithCitations[];
     cslEngine.free();
     return sources;
 });

@@ -1,5 +1,5 @@
 import { createOpenPDFURL } from "./createOpenPDFURL";
-import { ZoteroResource, Source } from "../types/resources";
+import { ZoteroResource, SourceWithCitations } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 
 
@@ -29,7 +29,7 @@ interface ParserOutput {
 */
 function parseCitations(
     text: string,
-    sources: Source[] = []
+    sources: SourceWithCitations[] = []
 ): ParserOutput {
     const citations: Citation[] = [];
     let lastSourceId: string = '';
