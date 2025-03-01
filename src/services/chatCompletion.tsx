@@ -6,45 +6,34 @@ import { Source } from "react/types/sources";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
-async function chatMessageToRequestMessage(message: ChatMessage, sources: Source[]): Promise<APIMessage> {
-    if (message.role === 'user') {
-        // Get sources for the message
-        const messageSources = sources.filter(r => r.messageId === message.id);
-        
-        // Flatten sources
-        const flattenedSources = messageSources?.flatMap(
-            source => source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
-                ? source.childItemKeys.map(key => ({...source, itemKey: key}))
-                : source
-        );
+async function sourcesToRequestMessages(sources: Source[]): Promise<APIMessage> {
+    // Flatten sources
+    const flattenedSources = sources.flatMap(
+        source => source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
+            ? source.childItemKeys.map(key => ({...source, itemKey: key}))
+            : source
+    );
 
-        // Convert sources to content parts
-        const sourcesContent: ContentPart[] = [];
-        for (const source of flattenedSources || []) {
-            const contentParts = await sourceToContentParts(source);
-            sourcesContent.push(...contentParts);
-        }
-        
-        // Add the user's message
-        const content: ContentPart[] = [
-            ...sourcesContent,
-            {
-                type: 'text',
-                text: `# User Query\n${message.content}`
-            }
-        ];
-        
-        return {
-            role: message.role,
-            content: content
-        };
+    // Convert sources to content parts
+    const sourcesContent: ContentPart[] = [];
+    for (const source of flattenedSources) {
+        const contentParts = await sourceToContentParts(source);
+        sourcesContent.push(...contentParts);
     }
+    
+    // Return the sources as a user message
+    return {
+        role: 'user',
+        content: [...sourcesContent]
+    } as APIMessage;
+}
 
+function chatMessageToRequestMessage(message: ChatMessage): APIMessage {
     // For non-user messages, return as is
     return {
         role: message.role,
         content: message.content
-    };
+    } as APIMessage;
 }
 
 export const chatCompletion = async (
@@ -57,16 +46,20 @@ export const chatCompletion = async (
     // System prompt
     const systemPrompt = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
 
+    // Sources
+    const sourcesFormatted = await sourcesToRequestMessages(sources);
+
     // Thread messages
-    messages = messages.filter(message => !(message.role == 'assistant' && message.content == ''));
-    const messagesFormatted = await Promise.all(messages.map(message => chatMessageToRequestMessage(message, sources)));
-    console.log('messagesFormatted', messagesFormatted);
+    messages = messages.filter(m => m.content !== '' && m.status !== 'error');
+    const messagesFormatted = messages.map(message => chatMessageToRequestMessage(message));
 
     // Request messages
     const requestMessages = [
         { role: 'system', content: systemPrompt },
+        sourcesFormatted,
         ...messagesFormatted,
     ];
+    console.log('requestMessages', requestMessages);
 
     // LLM provider
     // @ts-ignore Zotero.Beaver defined in hooks.ts
@@ -77,8 +70,6 @@ export const chatCompletion = async (
         model: model,
         messages: requestMessages,
     }
-
-    console.log('requestMessages', requestMessages);
     
     // Call chat completion
     try {
