@@ -149,19 +149,20 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <div className="flex gap-2">
                         <Button
                             type={isCommandPressed ? "button" : undefined}
-                            variant={isCommandPressed ? 'surface' : 'outline'}
-                            className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
+                            variant={isCommandPressed ? 'solid' : 'outline'}
+                            // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
+                            className="mr-1"
                             onClick={handleLibrarySearch}
-                            disabled={isStreaming}
+                            disabled={isStreaming || userMessage.length === 0}
                         >
                             Library Search ⌘ ⏎
                         </Button>
                         <Button
                             type={isCommandPressed ? undefined : "button"}
-                            variant={isCommandPressed ? 'outline' : 'surface' }
-                            className={`mr-1 ${isCommandPressed ? 'opacity-50' : ''}`}
+                            variant={isCommandPressed ? 'outline' : 'solid' }
+                            className="mr-1"
                             onClick={handleSubmit}
-                            disabled={isStreaming}
+                            disabled={isStreaming || userMessage.length === 0}
                         >
                             Send ⏎
                         </Button>
