@@ -4,7 +4,7 @@ import { SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/sourceUtils";
-import { threadSourcesAtom } from "./resources";
+import { threadSourcesAtom } from "./sources";
 
 // Current user message and content
 export const currentUserMessageAtom = atom<string>('');

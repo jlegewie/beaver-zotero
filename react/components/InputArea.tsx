@@ -4,7 +4,7 @@ import { SourceButton } from "./SourceButton";
 import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, currentUserMessageAtom } from '../atoms/messages';
-import { currentSourcesAtom, addFileSourceAtom, threadSourceCountAtom } from '../atoms/resources';
+import { currentSourcesAtom, addFileSourceAtom, threadSourceCountAtom } from '../atoms/sources';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';

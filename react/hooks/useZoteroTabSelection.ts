@@ -1,7 +1,7 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
-import { updateSourcesFromZoteroItemsAtom } from "../atoms/resources";
+import { updateSourcesFromZoteroItemsAtom } from "../atoms/sources";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 

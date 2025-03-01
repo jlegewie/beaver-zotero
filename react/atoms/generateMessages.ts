@@ -3,7 +3,7 @@ import { ChatMessage, createAssistantMessage, createUserMessage } from '../types
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
 import { Source } from '../types/sources';
 import { isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, threadSourcesAtom } from './resources';
+import { resetCurrentSourcesAtom, threadSourcesAtom } from './sources';
 import { chatCompletion } from '../../src/services/chatCompletion';
 
 export const generateResponseAtom = atom(

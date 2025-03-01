@@ -10,7 +10,7 @@ import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { previewedSourceAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
-import { updateSourcesFromZoteroSelectionAtom } from '../atoms/resources';
+import { updateSourcesFromZoteroSelectionAtom } from '../atoms/sources';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);

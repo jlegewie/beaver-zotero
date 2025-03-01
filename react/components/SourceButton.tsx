@@ -3,7 +3,7 @@ import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { Source } from '../types/sources'
 import { useSetAtom, useAtom } from 'jotai'
-import { removeSourceAtom, togglePinSourceAtom } from '../atoms/resources'
+import { removeSourceAtom, togglePinSourceAtom } from '../atoms/sources'
 import { isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedSourceAtom } from '../atoms/ui'

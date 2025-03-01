@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/messages';
 import { isStreamingAtom } from '../atoms/messages';
-import { threadSourcesAtom } from '../atoms/resources';
+import { threadSourcesAtom } from '../atoms/sources';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
