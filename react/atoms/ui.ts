@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { currentSourcesAtom } from './resources';
-import { Source } from 'react/types/resources';
+import { Source } from 'react/types/sources';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);

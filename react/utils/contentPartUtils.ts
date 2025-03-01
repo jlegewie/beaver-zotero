@@ -1,4 +1,4 @@
-import { Source } from '../types/resources';
+import { Source } from '../types/sources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
 import { getBibliography } from '../../src/utils/citations';
 import { getZoteroItem } from './resourceUtils';

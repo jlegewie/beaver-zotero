@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { Source, ZoteroSource } from "../types/resources";
+import { Source, ZoteroSource } from "../types/sources";
 import { createZoteroSource, createFileSource } from "../utils/resourceUtils";
 
 /**

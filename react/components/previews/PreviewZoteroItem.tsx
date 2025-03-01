@@ -7,7 +7,7 @@ import { isValidZoteroItem } from '../../utils/resourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/truncateText';
-import { ZoteroSource } from '../../types/resources';
+import { ZoteroSource } from '../../types/sources';
 
 interface PreviewZoteroItemProps {
     source: ZoteroSource;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { CSSItemTypeIcon } from '../icons';
-import { FileSource } from '../../types/resources';
+import { FileSource } from '../../types/sources';
 
 interface PreviewFileSourceProps {
     source: FileSource;

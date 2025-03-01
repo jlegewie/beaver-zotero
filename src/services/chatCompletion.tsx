@@ -2,7 +2,7 @@ import { ChatMessage } from "react/types/messages";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/resourceUtils";
-import { Source } from "react/types/resources";
+import { Source } from "react/types/sources";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 

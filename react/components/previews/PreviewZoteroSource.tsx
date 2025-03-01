@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoteroSource } from '../../types/resources';
+import { ZoteroSource } from '../../types/sources';
 import { CSSItemTypeIcon } from '../icons';
 
 interface PreviewZoteroSourceProps {

@@ -1,7 +1,7 @@
 // @ts-ignore no idea
 import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { Source } from '../types/resources'
+import { Source } from '../types/sources'
 import { useSetAtom, useAtom } from 'jotai'
 import { removeSourceAtom, togglePinSourceAtom } from '../atoms/resources'
 import { isSourceValid } from '../utils/resourceUtils'

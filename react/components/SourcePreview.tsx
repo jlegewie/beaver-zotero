@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useRef, useEffect, useState } from 'react';
 import { Icon, CancelIcon } from './icons';
-import { Source } from '../types/resources';
+import { Source } from '../types/sources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedSourceAtom } from '../atoms/ui';
 import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/resources';

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/resources';
+import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
 import { getInTextCitations } from '../../src/utils/citations';
 
 // Limits
