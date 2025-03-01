@@ -163,3 +163,44 @@ export function sourceFromDb(data: any): Source | null {
             return null;
     }
 }
+
+export function revealSource(source: Source) {
+    if (source.type === 'zotero_item') {
+        const itemID = Zotero.Items.getIDFromLibraryAndKey(source.libraryID, source.itemKey);
+        if (itemID && Zotero.getActiveZoteroPane()) {
+            // @ts-ignore selectItem exists
+            Zotero.getActiveZoteroPane().itemsView.selectItem(itemID);
+        }
+    } else if (source.type === 'file') {
+        Zotero.File.reveal(source.filePath);
+    }
+}
+
+export async function openSource(source: Source) {
+    if (source.type === 'zotero_item') {
+        const item = getZoteroItem(source);
+        if (!item) return;
+        
+        // Regular items
+        if (item.isRegularItem()) {
+            const bestAttachment = await item.getBestAttachment();
+            if (bestAttachment) {
+                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+            }
+        }
+
+        // Attachments
+        if (item.isAttachment()) {
+            Zotero.getActiveZoteroPane().viewAttachment(item.id);
+        }
+
+        // Notes
+        if (item.isNote()) {
+            // @ts-ignore selectItem exists
+            Zotero.getActiveZoteroPane().itemsView.selectItem(item.id)
+        }
+
+    } else if (source.type === 'file') {
+        Zotero.launchFile(source.filePath);
+    }
+}
