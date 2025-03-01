@@ -19,6 +19,7 @@ interface Citation {
 interface ParserOutput {
     text: string;
     citations: Citation[];
+    sources: SourceWithCitations[];
 }
 
 /**
@@ -32,6 +33,7 @@ function parseCitations(
     sources: SourceWithCitations[] = []
 ): ParserOutput {
     const citations: Citation[] = [];
+    const citedSources: SourceWithCitations[] = [];
     let lastSourceId: string = '';
     
     // Citation format
@@ -102,7 +104,8 @@ function parseCitations(
             };
             
             citations.push(citation);
-            
+            citedSources.push(source);
+
             // Get the item from Zotero for citation formatting
             const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
             if (!item) continue;
@@ -143,7 +146,8 @@ function parseCitations(
         
     return {
         text: processedText,
-        citations
+        citations,
+        sources: [...new Set(citedSources)].sort((a, b) => parseInt(a.numericCitation) - parseInt(b.numericCitation)) as SourceWithCitations[]
     };
 }
 

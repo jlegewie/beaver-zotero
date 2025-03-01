@@ -98,6 +98,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
     };
 
+    const { text: parsedText, citations, sources: citedSources } = parseCitations(message.content, threadSourcesWithCitations);
+
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
             <div 
@@ -105,7 +107,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={parseCitations(message.content, threadSourcesWithCitations).text} />
+                <MarkdownRenderer className="markdown" content={parsedText} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }
@@ -125,7 +127,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                     ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1">
-                    {threadSourcesWithCitations.length > 0 && (
+                    {citedSources.length > 0 && (
                         <Button
                             variant="outline"
                             onClick={toggleSources}
@@ -165,8 +167,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             </div>
 
             {/* Sources section */}
-            {sourcesVisible && threadSourcesWithCitations.length > 0 && (
-                <SourcesDisplay sources={threadSourcesWithCitations} />
+            {sourcesVisible && citedSources.length > 0 && (
+                <SourcesDisplay sources={citedSources} />
             )}
 
             {/* Text selection context menu */}
