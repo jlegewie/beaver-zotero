@@ -5,8 +5,8 @@ import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
 
 interface MenuButtonProps {
-    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     menuItems: MenuItem[];
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     className?: string;
     iconClassName?: string;
     buttonLabel?: string;
@@ -21,8 +21,8 @@ interface MenuButtonProps {
 * A button that displays a menu when clicked
 */
 const MenuButton: React.FC<MenuButtonProps> = ({
-    icon,
     menuItems,
+    icon,
     className = '',
     iconClassName = '',
     buttonLabel,
@@ -57,7 +57,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
             >
-                <Icon icon={icon} className={iconClassName} />
+                {icon && <Icon icon={icon} className={iconClassName} />}
                 {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
             </button>
             <ContextMenu
