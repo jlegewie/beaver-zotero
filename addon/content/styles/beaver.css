@@ -770,14 +770,12 @@
 }
 
 [id^="beaver-pane-"] .variant-solid:hover {
-    filter: brightness(1.1);
+    filter: brightness(1.15);
 }
 
 [id^="beaver-pane-"] .variant-solid:disabled {
     cursor: not-allowed;
-    background-color: var(--fill-quarternary);
-    color: var(--fill-tertiary);
-    border-color: var(--fill-quarternary);
+    opacity: 0.5;
     filter: none;
 }
 
