@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, ArrowDown } from './icons';
+import { Icon, ArrowDownIcon } from './icons';
 
 interface ScrollDownButtonProps extends React.HTMLProps<HTMLButtonElement> {
     onClick: () => void;
@@ -18,7 +18,7 @@ export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
                 className={`scroll-down-button ${className || ''}`}
                 style={style}
             >
-                <Icon icon={ArrowDown} />
+                <Icon icon={ArrowDownIcon} />
             </button>
         </div>
     );
