@@ -1,8 +1,8 @@
 import React from 'react';
 import { CancelIcon, ClockIcon, PlusSignIcon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { threadMessagesAtom, currentUserMessageAtom } from '../atoms/messages';
-import { resetCurrentSourcesAtom, threadSourcesAtom, updateSourcesFromZoteroSelectionAtom } from '../atoms/sources';
+import { threadMessagesAtom, threadSourcesAtom } from '../atoms/threads';
+import { resetCurrentSourcesAtom, currentUserMessageAtom, updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { useAtom, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';

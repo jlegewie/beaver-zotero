@@ -1,27 +1,13 @@
 import { atom } from "jotai";
 import { Source, ZoteroSource } from "../types/sources";
 import { createZoteroSource, createFileSource } from "../utils/sourceUtils";
+import { threadSourceKeysAtom } from "./threads";
 
 /**
-* Atom to store the sources (current sources and thread sources)
+* Current user message and sources
 */
+export const currentUserMessageAtom = atom<string>('');
 export const currentSourcesAtom = atom<Source[]>([]);
-export const threadSourcesAtom = atom<Source[]>([]);
-
-// Derived atom for thread source keys
-export const threadSourceKeysAtom = atom((get) => {
-    const sources = get(threadSourcesAtom);
-    const keys = sources
-        .filter((source): source is ZoteroSource => source.type === 'zotero_item')
-        .map((source) => source.itemKey);
-    return keys;
-});
-
-// Derived atom for thread source count
-export const threadSourceCountAtom = atom((get) => {
-    const sources = get(threadSourcesAtom);
-    return sources.length;
-});
 
 
 /**

@@ -3,14 +3,14 @@ import React, { useRef, useEffect, useState } from 'react';
 import InputArea from "./InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
-import { threadMessagesAtom } from '../atoms/messages';
+import { threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { previewedSourceAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
-import { updateSourcesFromZoteroSelectionAtom } from '../atoms/sources';
+import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);

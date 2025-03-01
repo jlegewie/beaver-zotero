@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
-import { isStreamingAtom } from '../atoms/messages';
+import { isStreamingAtom, threadSourcesWithCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
@@ -13,7 +13,6 @@ import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import { parseCitations } from '../utils/parseCitations';
-import { threadSourcesWithCitationsAtom } from '../atoms/messages';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;

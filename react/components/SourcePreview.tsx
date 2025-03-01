@@ -5,7 +5,7 @@ import { Icon, CancelIcon } from './icons';
 import { Source } from '../types/sources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedSourceAtom } from '../atoms/ui';
-import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/sources';
+import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';

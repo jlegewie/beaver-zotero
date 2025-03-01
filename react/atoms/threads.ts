@@ -1,23 +1,37 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { SourceWithCitations } from "../types/sources";
+import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/sourceUtils";
-import { threadSourcesAtom } from "./sources";
 
-// Current user message and content
-export const currentUserMessageAtom = atom<string>('');
 
-// Thread messages atom
+// Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
+export const threadSourcesAtom = atom<Source[]>([]);
 
-// Derived atoms
+// Derived atom for thread source keys
+export const threadSourceKeysAtom = atom((get) => {
+    const sources = get(threadSourcesAtom);
+    const keys = sources
+        .filter((source): source is ZoteroSource => source.type === 'zotero_item')
+        .map((source) => source.itemKey);
+    return keys;
+});
+
+// Derived atom for thread source count
+export const threadSourceCountAtom = atom((get) => {
+    const sources = get(threadSourcesAtom);
+    return sources.length;
+});
+
+// Derived atoms for thread status
 export const isStreamingAtom = atom((get) => {
     const messages = get(threadMessagesAtom);
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
+// Derived atom for thread sources with citations
 export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
     const threadSources = get(threadSourcesAtom)
         .sort((a, b) => a.timestamp - b.timestamp);
@@ -62,6 +76,7 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
     cslEngine.free();
     return sources;
 });
+
 
 // Setter atoms
 export const setMessageContentAtom = atom(

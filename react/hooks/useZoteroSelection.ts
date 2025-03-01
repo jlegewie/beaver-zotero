@@ -1,7 +1,7 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/sources";
+import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/input";
 
 /**
 * Listens to changes in the Zotero item selection and updates

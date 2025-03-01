@@ -1,9 +1,9 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
+import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom } from './threads';
 import { Source } from '../types/sources';
 import { isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, threadSourcesAtom } from './sources';
+import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 
 export const generateResponseAtom = atom(

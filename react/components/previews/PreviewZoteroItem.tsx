@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { updateSourceChildItemKeysAtom } from '../../atoms/sources';
+import { updateSourceChildItemKeysAtom } from '../../atoms/input';
 import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';

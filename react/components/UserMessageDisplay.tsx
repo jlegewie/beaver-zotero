@@ -2,8 +2,7 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/messages';
-import { isStreamingAtom } from '../atoms/messages';
-import { threadSourcesAtom } from '../atoms/sources';
+import { isStreamingAtom, threadSourcesAtom } from '../atoms/threads';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;

@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { currentSourcesAtom } from './sources';
+import { currentSourcesAtom } from './input';
 import { Source } from 'react/types/sources';
 
 export const isSidebarVisibleAtom = atom(false);
