@@ -10,6 +10,8 @@ interface ButtonProps {
     children?: React.ReactNode;
     /** Icon to display (optional) */
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    /** Icon to display on the right (optional) */
+    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Click handler */
     onClick?: (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => void;
     /** Additional class names */
@@ -37,6 +39,7 @@ const Button: React.FC<ButtonProps> = ({
     variant,
     children,
     icon,
+    rightIcon,
     onClick,
     className = '',
     iconClassName = '',
@@ -71,6 +74,7 @@ const Button: React.FC<ButtonProps> = ({
         >
             {icon && <Icon icon={icon} className={iconClassName} />}
             {children}
+            {rightIcon && <Icon icon={rightIcon} className={iconClassName} />}
             {loading && <span className="spinner">●</span>}
             {loading && loadingText && <span>{loadingText}</span>}
         </button>
