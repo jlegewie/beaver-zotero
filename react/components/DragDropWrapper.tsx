@@ -1,7 +1,7 @@
 // @ts-ignore no idea
 import React, { useState, useRef } from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../utils/resourceUtils';
+import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../utils/sourceUtils';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;

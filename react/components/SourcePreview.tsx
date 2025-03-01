@@ -11,7 +11,7 @@ import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
 import PreviewZoteroSource from './previews/PreviewZoteroSource';
 import PreviewFileSource from './previews/PreviewFileSource';
-import { getZoteroItem } from '../utils/resourceUtils';
+import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
 
 interface SourcePreviewProps {

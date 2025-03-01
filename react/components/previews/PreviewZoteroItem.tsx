@@ -3,7 +3,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { updateChildItemKeysAtom } from '../../atoms/resources';
-import { isValidZoteroItem } from '../../utils/resourceUtils';
+import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/truncateText';

@@ -1,7 +1,7 @@
 import { Source } from '../types/sources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
 import { getBibliography } from '../../src/utils/citations';
-import { getZoteroItem } from './resourceUtils';
+import { getZoteroItem } from './sourceUtils';
 
 
 // Utility function to get note content as markdown

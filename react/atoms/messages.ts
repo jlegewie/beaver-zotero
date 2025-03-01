@@ -3,7 +3,7 @@ import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
-import { getZoteroItem } from "../utils/resourceUtils";
+import { getZoteroItem } from "../utils/sourceUtils";
 import { threadSourcesAtom } from "./resources";
 
 // Current user message and content

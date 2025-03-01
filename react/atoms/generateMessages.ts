@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
 import { Source } from '../types/sources';
-import { isSourceValid } from '../utils/resourceUtils';
+import { isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, threadSourcesAtom } from './resources';
 import { chatCompletion } from '../../src/services/chatCompletion';
 

@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { Source, ZoteroSource } from "../types/sources";
-import { createZoteroSource, createFileSource } from "../utils/resourceUtils";
+import { createZoteroSource, createFileSource } from "../utils/sourceUtils";
 
 /**
 * Atom to store the sources (current sources and thread sources)
