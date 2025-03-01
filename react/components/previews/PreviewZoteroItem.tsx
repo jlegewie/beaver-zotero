@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { updateChildItemKeysAtom } from '../../atoms/resources';
+import { updateSourceChildItemKeysAtom } from '../../atoms/resources';
 import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
@@ -15,7 +15,7 @@ interface PreviewZoteroItemProps {
 }
 
 const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) => {
-    const updateChildItemKeys = useSetAtom(updateChildItemKeysAtom);
+    const updateSourceChildItemKeys = useSetAtom(updateSourceChildItemKeysAtom);
     const [attachments, setAttachments] = useState<Zotero.Item[]>([]);
     const [notes, setNotes] = useState<Zotero.Item[]>([]);
     const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
@@ -60,7 +60,7 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
         const newChildItemKeys = currentChildItemKeys.includes(itemKey)
             ? currentChildItemKeys.filter(key => key !== itemKey)
             : [...currentChildItemKeys, itemKey];
-        updateChildItemKeys({
+        updateSourceChildItemKeys({
             sourceId: source.id,
             childItemKeys: newChildItemKeys
         });

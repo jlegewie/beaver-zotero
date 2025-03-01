@@ -128,7 +128,7 @@ export const addFileSourceAtom = atom(
 /**
 * Update child item keys of a ZoteroSource
 */
-export const updateChildItemKeysAtom = atom(
+export const updateSourceChildItemKeysAtom = atom(
     null,
     (get, set, params: { sourceId: string, childItemKeys: string[] }) => {
         const { sourceId, childItemKeys } = params;
