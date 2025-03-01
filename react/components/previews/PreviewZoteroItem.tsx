@@ -7,14 +7,14 @@ import { isValidZoteroItem } from '../../utils/resourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/truncateText';
-import { ZoteroResource } from 'react/types/resources';
+import { ZoteroSource } from '../../types/resources';
 
 interface PreviewZoteroItemProps {
-    resource: ZoteroResource;
+    source: ZoteroSource;
     item: Zotero.Item;
 }
 
-const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ resource, item }) => {
+const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) => {
     const updateChildItemKeys = useSetAtom(updateChildItemKeysAtom);
     const [attachments, setAttachments] = useState<Zotero.Item[]>([]);
     const [notes, setNotes] = useState<Zotero.Item[]>([]);
@@ -53,22 +53,22 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ resource, item })
         return () => {
             isMounted = false;
         };
-    }, [resource]);
+    }, [source]);
 
     const handleToggleItem = (itemKey: string) => {
-        const currentChildItemKeys = resource.childItemKeys || [];
+        const currentChildItemKeys = source.childItemKeys || [];
         const newChildItemKeys = currentChildItemKeys.includes(itemKey)
             ? currentChildItemKeys.filter(key => key !== itemKey)
             : [...currentChildItemKeys, itemKey];
         updateChildItemKeys({
-            resourceId: resource.id,
+            sourceId: source.id,
             childItemKeys: newChildItemKeys
         });
     };
 
     const isItemSelected = (itemKey: string) => {
-        if (resource.childItemKeys) {
-            return resource.childItemKeys.includes(itemKey);
+        if (source.childItemKeys) {
+            return source.childItemKeys.includes(itemKey);
         }
         return false;
     };
@@ -76,8 +76,8 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ resource, item })
     return (
         <>
             <span className="flex items-center font-color-primary">
-                {<CSSItemTypeIcon itemType={resource.icon} />}
-                <span className="ml-2">{resource.name}</span>
+                {<CSSItemTypeIcon itemType={source.icon} />}
+                <span className="ml-2">{source.name}</span>
             </span>
             <p className="text-base my-2">{item.getDisplayTitle()}</p>
             

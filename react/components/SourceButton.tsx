@@ -1,26 +1,26 @@
 // @ts-ignore no idea
 import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { Resource } from '../types/resources'
+import { Source } from '../types/resources'
 import { useSetAtom, useAtom } from 'jotai'
-import { removeResourceAtom, togglePinResourceAtom } from '../atoms/resources'
-import { isResourceValid } from '../utils/resourceUtils'
+import { removeSourceAtom, togglePinSourceAtom } from '../atoms/resources'
+import { isSourceValid } from '../utils/resourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { previewedResourceAtom } from '../atoms/ui'
+import { previewedSourceAtom } from '../atoms/ui'
 
-// Create a shared close timeout atom to coordinate between ResourceButton and ResourcePreview
+// Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 import { atom } from 'jotai'
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
-interface ResourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'resource'> {
-    resource: Resource
+interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
+    source: Source
     disabled?: boolean
 }
 
-export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>(
-    function ResourceButton(props: ResourceButtonProps, ref: React.RefObject<HTMLButtonElement>) {
+export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
+    function SourceButton(props: SourceButtonProps, ref: React.RefObject<HTMLButtonElement>) {
         const {
-            resource,
+            source,
             className,
             disabled = false,
             ...rest
@@ -28,19 +28,19 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
         // States
         const [isValid, setIsValid] = useState(true);
         const [isHovered, setIsHovered] = useState(false);
-        const removeResource = useSetAtom(removeResourceAtom);
-        const setPreviewedResource = useSetAtom(previewedResourceAtom);
-        const togglePinResource = useSetAtom(togglePinResourceAtom);
+        const removeSource = useSetAtom(removeSourceAtom);
+        const setPreviewedSource = useSetAtom(previewedSourceAtom);
+        const togglePinSource = useSetAtom(togglePinSourceAtom);
         const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
         
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
 
-        const getIconElement = (resource: Resource, isHovered: boolean) => {
+        const getIconElement = (source: Source, isHovered: boolean) => {
             if (isHovered) {
                 return (<span 
                     role="button"
-                    className="resource-remove"
+                    className="source-remove"
                     onClick={(e) => {
                         e.stopPropagation()
                         handleRemove()
@@ -49,10 +49,10 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
             }
-            if (resource.icon) {
-                const iconElement = resource.icon ? (
-                    <span className="resource-button-icon">
-                        <CSSItemTypeIcon itemType={resource.icon} />
+            if (source.icon) {
+                const iconElement = source.icon ? (
+                    <span className="source-button-icon">
+                        <CSSItemTypeIcon itemType={source.icon} />
                     </span>
                 ) : null
                 return iconElement
@@ -61,7 +61,7 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
         }
 
         const handleRemove = () => {
-            removeResource(resource)
+            removeSource(source)
         }
 
         // Start a timeout to close the preview after delay
@@ -73,7 +73,7 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
             
             // Start a new timeout
             const newTimeout = Zotero.getMainWindow().setTimeout(() => {
-                setPreviewedResource(null);
+                setPreviewedSource(null);
                 setPreviewCloseTimeout(null);
             }, 350); // 300ms delay before closing
             
@@ -97,10 +97,10 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
                 hoverTimerRef.current = null;
             }
             
-            // Only show preview if the resource is valid
+            // Only show preview if the source is valid
             if (isValid) {
                 hoverTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
-                    setPreviewedResource(resource);
+                    setPreviewedSource(source);
                 }, 100); // Shorter delay of 100ms before showing preview
             }
         };
@@ -131,39 +131,39 @@ export const ResourceButton = forwardRef<HTMLButtonElement, ResourceButtonProps>
 
         useEffect(() => {
             const checkAttachmentValidity = async () => {
-                setIsValid(await isResourceValid(resource));
+                setIsValid(await isSourceValid(source));
             }
             checkAttachmentValidity();
-        }, [resource])
+        }, [source])
 
         return (
             <button
                 ref={ref}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
-                className={`resource-button ${className || ''}`}
+                className={`source-button ${className || ''}`}
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
                     if (isValid) {
-                        togglePinResource(resource.id);
+                        togglePinSource(source.id);
                     }
                 }}
                 {...rest}
             >
                 {/* {isHovered && isValid === true && attachment.type === 'zotero_item' && !pinnedItems.includes(attachment.item)
-                    ? <span className="resource-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
+                    ? <span className="source-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
                     : getIconElement(attachment)
                 } */}
-                {getIconElement(resource, isHovered)}
+                {getIconElement(source, isHovered)}
                 <span className={!isValid ? 'font-color-red' : undefined}>
-                    {resource.name}
+                    {source.name}
                 </span>
-                {!disabled && resource.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
+                {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
                 {/* {!disabled && (
                     <span 
                         role="button"
-                        className="resource-remove"
+                        className="source-remove"
                         onClick={(e) => {
                             e.stopPropagation()
                             handleRemove()

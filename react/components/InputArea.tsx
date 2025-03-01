@@ -1,10 +1,10 @@
 // @ts-ignore no idea
 import React, { useState } from 'react';
-import { ResourceButton } from "./ResourceButton";
+import { SourceButton } from "./SourceButton";
 import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, currentUserMessageAtom } from '../atoms/messages';
-import { currentResourcesAtom, addFileResourceAtom, threadResourceCountAtom } from '../atoms/resources';
+import { currentSourcesAtom, addFileSourceAtom, threadSourceCountAtom } from '../atoms/resources';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
@@ -18,11 +18,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [userMessage, setUserMessage] = useAtom(currentUserMessageAtom);
-    const currentResources = useAtomValue(currentResourcesAtom);
+    const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
-    const threadResourceCount = useAtomValue(threadResourceCountAtom);
-    const addFileResource = useSetAtom(addFileResourceAtom);
+    const threadSourceCount = useAtomValue(threadSourceCountAtom);
+    const addFileSource = useSetAtom(addFileSourceAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
 
     const handleSubmit = async (
@@ -36,7 +36,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         generateResponse({
             content: userMessage,
-            resources: currentResources,
+            sources: currentSources,
         });
 
         // If command is pressed, handle library search
@@ -51,7 +51,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         console.log('Chat completion with library search:', userMessage);
     };
 
-    const handleAddResources = async () => {
+    const handleAddSources = async () => {
         console.log('Adding context item');
     };
 
@@ -78,25 +78,25 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     return (
-        <DragDropWrapper addFileResource={addFileResource}>
+        <DragDropWrapper addFileSource={addFileSource}>
         <div
             className="user-message-display"
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
-            {/* Message resources */}
+            {/* Message sources */}
             <div className="flex flex-wrap gap-3 mb-2">
                 <IconButton
                     icon={PlusSignIcon}
-                    onClick={handleAddResources}
+                    onClick={handleAddSources}
                     className="scale-11"
-                    ariaLabel="Add context item"
+                    ariaLabel="Add sources"
                 />
-                {threadResourceCount > 0 && (
+                {threadSourceCount > 0 && (
                     <button
-                        className="resources-info"
+                        className="sources-info"
                         disabled={true}
-                        title={`This thread has ${threadResourceCount} resources.`}
+                        title={`This thread has ${threadSourceCount} sources.`}
                     >
                         <ZoteroIcon 
                             icon={ZOTERO_ICONS.ATTACHMENTS} 
@@ -104,13 +104,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                             color="--accent-green"
                             className="mr-1"
                         />
-                        {threadResourceCount}
+                        {threadSourceCount}
                     </button>
                 )}
-                {currentResources.map((resource, index) => (
-                    <ResourceButton
+                {currentSources.map((source, index) => (
+                    <SourceButton
                         key={index}
-                        resource={resource}
+                        source={source}
                     />
                 ))}
             </div>

@@ -1,5 +1,5 @@
 import { createOpenPDFURL } from "./createOpenPDFURL";
-import { ZoteroResource, SourceWithCitations } from "../types/resources";
+import { ZoteroSource, SourceWithCitations } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 
 
@@ -24,7 +24,7 @@ interface ParserOutput {
 /**
 * Parses citation format and transforms them into properly formatted citations
 * @param text Text containing citations in the format {{cite:DOC-ID|page_info}}
-* @param sources Array of resources to use for citation formatting
+* @param sources Array of sources to use for citation formatting
 * @returns Object containing transformed text, reference list, and parsed citations
 */
 function parseCitations(
@@ -57,14 +57,14 @@ function parseCitations(
             const libraryId = idParts[0];
             const itemKey = idParts[1];
             
-            // Find the resource in sources
+            // Find the source in sources
             const source = sources.find(
                 s => s.type === 'zotero_item' && 
                     (
-                        (s as ZoteroResource).itemKey === itemKey ||
-                        (s as ZoteroResource).childItemKeys.includes(itemKey)
+                        (s as ZoteroSource).itemKey === itemKey ||
+                        (s as ZoteroSource).childItemKeys.includes(itemKey)
                     ) &&
-                    String((s as ZoteroResource).libraryID) === libraryId
+                    String((s as ZoteroSource).libraryID) === libraryId
             );
             
             // If source not found, skip this citation

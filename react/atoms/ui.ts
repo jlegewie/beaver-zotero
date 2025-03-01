@@ -1,24 +1,24 @@
 import { atom } from 'jotai';
-import { currentResourcesAtom } from './resources';
-import { Resource } from 'react/types/resources';
+import { currentSourcesAtom } from './resources';
+import { Source } from 'react/types/resources';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 
-// Resource preview
-export const previewedResourceIdAtom = atom<string | null>(null);
-export const previewedResourceAtom = atom(
+// Source preview
+export const previewedSourceIdAtom = atom<string | null>(null);
+export const previewedSourceAtom = atom(
     (get) => {
-        const previewResourceId = get(previewedResourceIdAtom);
-        const currentResources = get(currentResourcesAtom);
+        const previewSourceId = get(previewedSourceIdAtom);
+        const currentSources = get(currentSourcesAtom);
         
-        if (!previewResourceId) return null;
+        if (!previewSourceId) return null;
         
         // Find the attachment with the latest data from attachmentsAtom
-        return currentResources.find(resource => resource.id === previewResourceId) || null;
+        return currentSources.find(source => source.id === previewSourceId) || null;
     },
-    (get, set, resource: Resource | null) => {
+    (get, set, source: Source | null) => {
         // When setting a new attachment to preview, just store its ID
-        set(previewedResourceIdAtom, resource?.id || null);
+        set(previewedSourceIdAtom, source?.id || null);
     }
 );

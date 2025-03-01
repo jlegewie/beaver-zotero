@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroResource, FileResource, RemoteFileResource, Resource } from '../types/resources';
+import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/resources';
 import { getInTextCitations } from '../../src/utils/citations';
 
 // Limits
@@ -16,12 +16,12 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 }
 
 /**
-* Factory function to create a ZoteroResource from a Zotero item
+* Factory function to create a ZoteroSource from a Zotero item
 */
-export async function createZoteroResource(
+export async function createZoteroSource(
     item: Zotero.Item,
     pinned: boolean = false
-): Promise<ZoteroResource> {
+): Promise<ZoteroSource> {
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
     return {
         id: uuidv4(),
@@ -37,9 +37,9 @@ export async function createZoteroResource(
 }
 
 /**
-* Factory function to create a FileResource from a File
+* Factory function to create a FileSource from a File
 */
-export function createFileResource(file: File): FileResource {
+export function createFileSource(file: File): FileSource {
     return {
         id: uuidv4(),
         type: 'file',
@@ -54,9 +54,9 @@ export function createFileResource(file: File): FileResource {
 }
 
 /**
-* Factory function to create a RemoteFileResource
+* Factory function to create a RemoteFileSource
 */
-export function createRemoteFileResource(url: string, name: string): RemoteFileResource {
+export function createRemoteFileSource(url: string, name: string): RemoteFileSource {
     return {
         id: uuidv4(),
         type: 'remote_file',
@@ -69,11 +69,11 @@ export function createRemoteFileResource(url: string, name: string): RemoteFileR
 }
 
 /**
-* Resource method: Get the Zotero item from a ZoteroResource
+* Source method: Get the Zotero item from a ZoteroSource
 */
-export function getZoteroItem(resource: ZoteroResource): Zotero.Item | null {
+export function getZoteroItem(source: ZoteroSource): Zotero.Item | null {
     try {
-        const item = Zotero.Items.getByLibraryAndKey(resource.libraryID, resource.itemKey);
+        const item = Zotero.Items.getByLibraryAndKey(source.libraryID, source.itemKey);
         return item || null;
     } catch (error) {
         console.error("Error retrieving Zotero item:", error);
@@ -82,17 +82,17 @@ export function getZoteroItem(resource: ZoteroResource): Zotero.Item | null {
 }
 
 /**
-* Resource method: Get child items for a ZoteroResource
+* Source method: Get child items for a ZoteroSource
 */
-export function getChildItems(resource: ZoteroResource): Zotero.Item[] {
-    if (!resource.childItemKeys || resource.childItemKeys.length === 0) {
+export function getChildItems(source: ZoteroSource): Zotero.Item[] {
+    if (!source.childItemKeys || source.childItemKeys.length === 0) {
         return [];
     }
     
     try {
         const childItems = 
-            resource.childItemKeys.map(key => 
-                Zotero.Items.getByLibraryAndKey(resource.libraryID, key)
+            source.childItemKeys.map(key => 
+                Zotero.Items.getByLibraryAndKey(source.libraryID, key)
             )
         
         return childItems.filter(Boolean) as Zotero.Item[];
@@ -103,7 +103,7 @@ export function getChildItems(resource: ZoteroResource): Zotero.Item[] {
 }
 
 /**
-* Resource method: Check if a resource is valid
+* Source method: Check if a source is valid
 */
 export const isValidZoteroItem = async (item: Zotero.Item): Promise<boolean> => {
     if (item.isNote()) return true;
@@ -114,14 +114,14 @@ export const isValidZoteroItem = async (item: Zotero.Item): Promise<boolean> => 
     return attachmentExists && isValidMimeType(mimeType);
 }
 
-export async function isResourceValid(resource: Resource, confirmChildItems: boolean = false): Promise<boolean> {
-    switch (resource.type) {
+export async function isSourceValid(source: Source, confirmChildItems: boolean = false): Promise<boolean> {
+    switch (source.type) {
         case 'zotero_item': {
-            const item = getZoteroItem(resource);
+            const item = getZoteroItem(source);
             if (!item) return false;
             const isValid = await isValidZoteroItem(item);
             if (item.isRegularItem() && confirmChildItems) {
-                const childItems = getChildItems(resource);
+                const childItems = getChildItems(source);
                 const childItemValidities = await Promise.all(childItems.map(isValidZoteroItem));
                 return isValid && childItemValidities.length > 0 && childItemValidities.some(Boolean);
             }
@@ -132,33 +132,33 @@ export async function isResourceValid(resource: Resource, confirmChildItems: boo
             return true;
         case 'remote_file':
             // TODO: Potentially check if URL is valid/reachable
-            return Boolean(resource.url);
+            return Boolean(source.url);
         default:
             return false;
     }
 }
 
 /**
-* Resource method: Convert resource to database-friendly format
+* Source method: Convert source to database-friendly format
 */
-export function resourceToDb(resource: Resource): any {
+export function sourceToDb(source: Source): any {
     // Strip any circular references or complex objects
-    return { ...resource };
+    return { ...source };
 }
 
 /**
-* Resource method: Create resource from database data
+* Source method: Create source from database data
 */
-export function resourceFromDb(data: any): Resource | null {
+export function sourceFromDb(data: any): Source | null {
     if (!data || !data.type) return null;
     
     switch (data.type) {
         case 'zotero_item':
-            return data as ZoteroResource;
+            return data as ZoteroSource;
         case 'file':
-            return data as FileResource;
+            return data as FileSource;
         case 'remote_file':
-            return data as RemoteFileResource;
+            return data as RemoteFileSource;
         default:
             return null;
     }

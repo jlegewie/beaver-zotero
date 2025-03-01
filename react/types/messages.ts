@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Resource } from './resources';
+import { Source } from './resources';
 
 // Message types
 export interface ChatMessage {

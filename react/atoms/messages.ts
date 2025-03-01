@@ -4,7 +4,7 @@ import { SourceWithCitations } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/resourceUtils";
-import { threadResourcesAtom } from "./resources";
+import { threadSourcesAtom } from "./resources";
 
 // Current user message and content
 export const currentUserMessageAtom = atom<string>('');
@@ -19,7 +19,7 @@ export const isStreamingAtom = atom((get) => {
 });
 
 export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
-    const resources = get(threadResourcesAtom)
+    const threadSources = get(threadSourcesAtom)
         .sort((a, b) => a.timestamp - b.timestamp);
     // Citation preferences
     const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
@@ -28,11 +28,11 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
     const csl_style: ZoteroStyle = Zotero.Styles.get(style);
     const cslEngine = csl_style.getCiteProc(locale, 'text');
     // Define list of sources
-    const sources = resources
-        .map((resource, index) => {
-            if (resource.type === 'zotero_item') {
+    const sources = threadSources
+        .map((source, index) => {
+            if (source.type === 'zotero_item') {
                 // Get item and parent item
-                const item = getZoteroItem(resource);
+                const item = getZoteroItem(source);
                 if(!item) return null;
                 const parent = item.parentItem;
                 // Format in-text citations
@@ -41,19 +41,19 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
                 const reference = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [parent || item], "text").trim();
                 // Return formatted source
                 return {
-                    ...resource,
+                    ...source,
                     citation: citation,
                     numericCitation: String(index + 1),
                     reference: reference,
                 } as SourceWithCitations;
             }
-            if (resource.type === 'file') {
+            if (source.type === 'file') {
                 // Return formatted source
                 return {
-                    ...resource,
+                    ...source,
                     citation: 'File',
                     numericCitation: String(index + 1),
-                    reference: resource.filePath,
+                    reference: source.filePath,
                 } as SourceWithCitations;
             }
             return null;
@@ -95,7 +95,7 @@ export const rollbackChatToMessageIdAtom = atom(
     null,
     (get, set, messageId: string) => {
         const threadMessages = get(threadMessagesAtom);
-        const threadResources = get(threadResourcesAtom);
+        const threadSources = get(threadSourcesAtom);
 
         // Find the index of the message to continue from
         const messageIndex = threadMessages.findIndex(m => m.id === messageId);
@@ -113,9 +113,9 @@ export const rollbackChatToMessageIdAtom = atom(
         // Update messages atom
         set(threadMessagesAtom, newMessages);
 
-        // Remove resources for messages after the specified message
-        const newThreadResources = threadResources.filter(r => r.messageId && messageIds.includes(r.messageId));
-        set(threadResourcesAtom, newThreadResources);
+        // Remove sources for messages after the specified message
+        const newThreadSources = threadSources.filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(threadSourcesAtom, newThreadSources);
 
         // return new messages
         return newMessages;

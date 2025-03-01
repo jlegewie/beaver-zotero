@@ -117,7 +117,7 @@
 }
 
 /* Component: Beaver Context Item */
-[id^="beaver-pane-"] .resource-button {
+[id^="beaver-pane-"] .source-button {
     padding-right: 0.5rem;
     display: inline-flex;
     align-items: center;
@@ -133,40 +133,40 @@
     font-size: 0.85rem;
 }
 
-[id^="beaver-pane-"] .resource-button.pinned {
+[id^="beaver-pane-"] .source-button.pinned {
     border: 1px solid var(--fill-tertiary);
 }
 
-[id^="beaver-pane-"] .resource-button:hover {
+[id^="beaver-pane-"] .source-button:hover {
     border-color: var(--fill-quarternary);
     background-color: var(--fill-quarternary);
     /* color: var(--fill-primary); */
 }
 
-[id^="beaver-pane-"] .resource-button:disabled {
+[id^="beaver-pane-"] .source-button:disabled {
     cursor: default;
 }
 
-[id^="beaver-pane-"] .resource-button:hover:disabled {
+[id^="beaver-pane-"] .source-button:hover:disabled {
     border-color: var(--fill-quarternary);
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .resource-button .icon:hover {
+[id^="beaver-pane-"] .source-button .icon:hover {
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .resource-button-icon {
+[id^="beaver-pane-"] .source-button-icon {
     margin-right: 0.15rem;
     display: inline-flex;
     align-items: center;
 }
 
-[id^="beaver-pane-"] .resource-button-icon span {
+[id^="beaver-pane-"] .source-button-icon span {
     transform: scale(0.75);
 }
 
-[id^="beaver-pane-"] .resources-info {
+[id^="beaver-pane-"] .sources-info {
     display: inline-flex;
     align-items: center;
     cursor: default;
@@ -183,7 +183,7 @@
     padding-right: 0.2rem;
 }
 
-[id^="beaver-pane-"] .resource-remove {
+[id^="beaver-pane-"] .source-remove {
     /* margin-left: 0.25rem; */
     margin-right: 0.15rem;
     padding: 0;
@@ -198,7 +198,7 @@
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .resource-remove:hover {
+[id^="beaver-pane-"] .source-remove:hover {
     opacity: 1;
     color: var(--fill-secondary);
 }
@@ -220,8 +220,8 @@
     user-select: text;
 }
 
-/* Resource Preview Container */
-[id^="beaver-pane-"] .resource-preview {
+/* Source Preview Container */
+[id^="beaver-pane-"] .source-preview {
     padding:0.35rem;
     /* padding-top: 0.75rem;
     padding-bottom: 0.25rem;
@@ -245,7 +245,7 @@
     to { opacity: 1; }
 }
 
-[id^="beaver-pane-"] .resource-content {
+[id^="beaver-pane-"] .source-content {
     background-color: var(--material-sidepane);
     border-radius: 8px;
     overflow-y: auto;
@@ -276,7 +276,7 @@
     left: 0;
 }
 
-[id^="beaver-pane-"] .resource-error-message {
+[id^="beaver-pane-"] .source-error-message {
     background-color: var(--fill-senary);
     border: 1px solid var(--tag-red);
     border-radius: 4px;
@@ -302,7 +302,7 @@
 }
 
 /* Ghost buttons for the actions */
-[id^="beaver-pane-"] .resource-ghost-button {
+[id^="beaver-pane-"] .source-ghost-button {
     cursor: pointer;
     background-color: transparent;
     color: var(--fill-secondary);
@@ -316,18 +316,18 @@
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .resource-ghost-button:hover {
+[id^="beaver-pane-"] .source-ghost-button:hover {
     /* background-color: var(--fill-quinary); */
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .resource-ghost-button:disabled {
+[id^="beaver-pane-"] .source-ghost-button:disabled {
     cursor: not-allowed;
     color: var(--fill-tertiary);
 }
 
 /* Optional: style for content area if needed */
-[id^="beaver-pane-"] .resource-content {
+[id^="beaver-pane-"] .source-content {
     min-height: 1.5rem;
 }
 

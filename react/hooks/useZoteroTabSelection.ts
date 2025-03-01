@@ -1,17 +1,17 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
-import { updateResourcesFromZoteroItemsAtom } from "../atoms/resources";
+import { updateSourcesFromZoteroItemsAtom } from "../atoms/resources";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 
 /**
  * Listens to changes in Zotero tab selection
  * 
- * Sets isLibraryTabAtom and updates resources based on the selected tab type.
+ * Sets isLibraryTabAtom and updates sources based on the selected tab type.
  */
 export function useZoteroTabSelection() {
-    const updateResourcesFromZoteroItems = useSetAtom(updateResourcesFromZoteroItemsAtom);
+    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     const window = Zotero.getMainWindow();
 
@@ -43,17 +43,17 @@ export function useZoteroTabSelection() {
                         });
                     }
 
-                    // Update resources
+                    // Update sources
                     if (isLibrary) {
                         const newSelectedItems = Zotero.getActiveZoteroPane().getSelectedItems() || [];
-                        await updateResourcesFromZoteroItems(newSelectedItems);
+                        await updateSourcesFromZoteroItems(newSelectedItems);
                     } else if (selectedTab.type === 'reader') {
                         const reader = Zotero.Reader.getByTabID(selectedTab.id);
                         if (reader) {
                             // @ts-ignore itemID is not typed
                             const item = Zotero.Items.get(reader.itemID);
                             if (item) {
-                                updateResourcesFromZoteroItems([item]);
+                                updateSourcesFromZoteroItems([item]);
                             }
                         }
                     }
@@ -66,5 +66,5 @@ export function useZoteroTabSelection() {
         Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'tabSelectionObserver');
         // @ts-ignore unregisterObserver is not typed
         return () => Zotero.Notifier.unregisterObserver(tabObserver);
-    }, [updateResourcesFromZoteroItems, setIsLibraryTab]);
+    }, [updateSourcesFromZoteroItems, setIsLibraryTab]);
 } 

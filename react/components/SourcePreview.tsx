@@ -2,37 +2,37 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useRef, useEffect, useState } from 'react';
 import { Icon, CancelIcon } from './icons';
-import { Resource } from '../types/resources';
+import { Source } from '../types/resources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { previewedResourceAtom } from '../atoms/ui';
-import { currentResourcesAtom, togglePinResourceAtom, removeResourceAtom } from '../atoms/resources';
+import { previewedSourceAtom } from '../atoms/ui';
+import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/resources';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
-import PreviewZoteroResource from './previews/PreviewZoteroResource';
-import PreviewFileResource from './previews/PreviewFileResource';
+import PreviewZoteroSource from './previews/PreviewZoteroSource';
+import PreviewFileSource from './previews/PreviewFileSource';
 import { getZoteroItem } from '../utils/resourceUtils';
-import { previewCloseTimeoutAtom } from './ResourceButton';
+import { previewCloseTimeoutAtom } from './SourceButton';
 
-interface ResourcePreviewProps {
-    resource: Resource;
+interface SourcePreviewProps {
+    source: Source;
 }
 
-const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
+const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
     const previewRef = useRef<HTMLDivElement>(null);
-    const setPreviewedResource = useSetAtom(previewedResourceAtom);
-    const togglePinResource = useSetAtom(togglePinResourceAtom);
-    const removeResource = useSetAtom(removeResourceAtom);
+    const setPreviewedSource = useSetAtom(previewedSourceAtom);
+    const togglePinSource = useSetAtom(togglePinSourceAtom);
+    const removeSource = useSetAtom(removeSourceAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
-    // Get resource from resources atom
-    const currentResources = useAtomValue(currentResourcesAtom);
-    const currentResource = currentResources.find(att => att.id === resource.id) || resource;
+    // Get source from sources atom
+    const currentSources = useAtomValue(currentSourcesAtom);
+    const currentSource = currentSources.find(att => att.id === source.id) || source;
 
-    // Type of resource
-    const item = currentResource.type === 'zotero_item' ? getZoteroItem(currentResource) : null;
-    const isZoteroItem = currentResource.type === 'zotero_item' && item;
+    // Type of source
+    const item = currentSource.type === 'zotero_item' ? getZoteroItem(currentSource) : null;
+    const isZoteroItem = currentSource.type === 'zotero_item' && item;
     const isRegularZoteroItem = isZoteroItem && item.isRegularItem();
 
     // Calculate available space for the preview
@@ -83,7 +83,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
         
         // Start a new timeout
         const newTimeout = Zotero.getMainWindow().setTimeout(() => {
-            setPreviewedResource(null);
+            setPreviewedSource(null);
             setPreviewCloseTimeout(null);
         }, 350); // 350ms delay before closing
         
@@ -110,7 +110,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
-                setPreviewedResource(null);
+                setPreviewedSource(null);
             }
         };
 
@@ -119,23 +119,23 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
         return () => {
             Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
         };
-    }, [setPreviewedResource]);
+    }, [setPreviewedSource]);
 
     const handlePin = () => {
-        togglePinResource(currentResource.id);
-        setPreviewedResource(null);
+        togglePinSource(currentSource.id);
+        setPreviewedSource(null);
     };
 
     const handleRemove = () => {
-        removeResource(currentResource);
-        setPreviewedResource(null);
+        removeSource(currentSource);
+        setPreviewedSource(null);
     };
 
     const handleOpen = async () => {
-        if (currentResource.type === 'zotero_item' && item) {
+        if (currentSource.type === 'zotero_item' && item) {
             await openPDFInNewWindow(item);
         }
-        setPreviewedResource(null);
+        setPreviewedSource(null);
     };
 
     // Determine if the PDF can be opened
@@ -147,18 +147,18 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
 
     // Render appropriate content based on attachment type
     const renderContent = () => {
-        if (!currentResource) return null;
+        if (!currentSource) return null;
         
-        if (currentResource.type === 'zotero_item') {
+        if (currentSource.type === 'zotero_item') {
             if (isRegularZoteroItem) {
-                return <PreviewZoteroItem resource={currentResource} item={item} />;
+                return <PreviewZoteroItem source={currentSource} item={item} />;
             } else if (item) {
-                return <PreviewZoteroResource resource={currentResource} item={item} />;
+                return <PreviewZoteroSource source={currentSource} item={item} />;
             } else {
                 return null;
             }
-        } else if (currentResource.type === 'file') {
-            return <PreviewFileResource resource={currentResource as any} />;
+        } else if (currentSource.type === 'file') {
+            return <PreviewFileSource source={currentSource as any} />;
         } else {
             return null;
         }
@@ -168,13 +168,13 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
         <div className="absolute -top-4 inset-x-0 -translate-y-full px-3">
             <div
                 ref={previewRef}
-                className="resource-preview mx-0"
+                className="source-preview mx-0"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
             >
                 {/* Content Area */}
                 <div 
-                    className="resource-content p-3"
+                    className="source-content p-3"
                     style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
                 >
                     {renderContent()}
@@ -184,17 +184,17 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
                 <div className="p-1 flex flex-row items-center">
                     <div className="flex-1 gap-4">
                         <button
-                            className="resource-ghost-button"
+                            className="source-ghost-button"
                             onClick={handlePin}
                         >
                             <ZoteroIcon 
-                                icon={currentResource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
+                                icon={currentSource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
                                 size={12}
                             />
-                            <span>{currentResource.pinned ? 'Unpin' : 'Pin'}</span>
+                            <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
                         </button>
                         <button
-                            className="resource-ghost-button"
+                            className="source-ghost-button"
                             onClick={handleOpen}
                             disabled={!canOpenPDF}
                         >
@@ -205,7 +205,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
                             Open
                         </button>
                         <button 
-                            className="resource-ghost-button"
+                            className="source-ghost-button"
                             onClick={handleRemove}
                         >
                             <ZoteroIcon 
@@ -217,8 +217,8 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
                     </div>
                     <div className="flex">
                         <button
-                            className="resource-ghost-button"
-                            onClick={() => setPreviewedResource(null)}
+                            className="source-ghost-button"
+                            onClick={() => setPreviewedSource(null)}
                         >
                             <Icon icon={CancelIcon} />
                         </button>
@@ -229,4 +229,4 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({ resource }) => {
     );
 };
 
-export default ResourcePreview;
+export default SourcePreview;

@@ -1,4 +1,4 @@
-import { Resource } from '../types/resources';
+import { Source } from '../types/resources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
 import { getBibliography } from '../../src/utils/citations';
 import { getZoteroItem } from './resourceUtils';
@@ -20,21 +20,21 @@ async function getNoteAsMarkdown(item: Zotero.Item) {
 }
 
 /**
- * Convert a Resource to content parts
+ * Convert a Source to content parts
  * 
- * @param resource - The resource to convert
+ * @param source - The source to convert
  * @returns Promise<ContentPart[]> - The content parts
  */
-export async function resourceToContentParts(resource: Resource): Promise<ContentPart[]> {
-    if (resource.type === 'zotero_item') {
+export async function sourceToContentParts(source: Source): Promise<ContentPart[]> {
+    if (source.type === 'zotero_item') {
         // Get the Zotero item
-        const item = getZoteroItem(resource);
+        const item = getZoteroItem(source);
 
         // Skip if the item is not a regular item (regular items should already be flattened)
         if (!item || item.isRegularItem()) return [];
 
         // Define id and parent item
-        const id = `${resource.libraryID}-${resource.itemKey}`;
+        const id = `${source.libraryID}-${source.itemKey}`;
         const parentItem = item.parentItem;
 
         // Attachment with parent item
@@ -90,10 +90,10 @@ export async function resourceToContentParts(resource: Resource): Promise<Conten
             return [{ type: 'text', text: noteData }]
         }
     }
-    if (resource.type === 'file') {
-        const metadata = `# Document (id: ${resource.id})\nFile Name: ${resource.fileName}`;
+    if (source.type === 'file') {
+        const metadata = `# Document (id: ${source.id})\nFile Name: ${source.fileName}`;
         // Get the file path
-        const filePath = resource.filePath;
+        const filePath = source.filePath;
         if (!filePath) return [];
 
         // return content parts
@@ -102,8 +102,8 @@ export async function resourceToContentParts(resource: Resource): Promise<Conten
             await fileToContentPart(filePath)
         ];
     }
-    if (resource.type === 'remote_file') {
-        return [urlToContentPart(resource.url)];
+    if (source.type === 'remote_file') {
+        return [urlToContentPart(source.url)];
     }
     return [];
 }
@@ -186,7 +186,7 @@ export function urlToContentPart(url: string): ContentPart {
 
 
 /**
- * Example of formatted messages produced by resourceToContentParts
+ * Example of formatted messages produced by sourceToContentParts
  * messages = [
  *     {"role": "system", "content": SYSTEM_PROMPT},
  *     // Example of a Zotero attachment with parent item (e.g., PDF)
@@ -237,7 +237,7 @@ export function urlToContentPart(url: string): ContentPart {
  *             },
  *         ]
  *     },
- *     // Example of a local file resource
+ *     // Example of a local file source
  *     {
  *         "role": "user", 
  *         "content": [

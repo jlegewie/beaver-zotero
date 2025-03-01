@@ -1,14 +1,14 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { updateResourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/resources";
+import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/resources";
 
 /**
 * Listens to changes in the Zotero item selection and updates
 * the selectedItemsAtom only when the selection differs from the previous one.
 */
 export function useZoteroSelection() {
-    const updateResourcesFromZoteroItems = useSetAtom(updateResourcesFromZoteroItemsAtom);
+    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const lastSelectionKeys = useRef<string[]>([]);
 
     useEffect(() => {
@@ -26,7 +26,7 @@ export function useZoteroSelection() {
             newlySelectedKeys.forEach((key) => removedItemKeysCache.delete(key));
 
             // Update the selected items atom
-            await updateResourcesFromZoteroItems(newSelectedItems);
+            await updateSourcesFromZoteroItems(newSelectedItems);
 
             // Update the last selection keys
             lastSelectionKeys.current = newSelectedItems.map((item) => item.key);
@@ -41,5 +41,5 @@ export function useZoteroSelection() {
             // @ts-ignore itemsView is not fully typed
             Zotero.getActiveZoteroPane().itemsView.onSelect.removeListener(handleSelectionChange);
         };
-    }, [updateResourcesFromZoteroItems]);
+    }, [updateSourcesFromZoteroItems]);
 }

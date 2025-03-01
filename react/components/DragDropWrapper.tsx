@@ -5,12 +5,12 @@ import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../utils/resourceUtils';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
-    addFileResource: (file: File) => void;
+    addFileSource: (file: File) => void;
 }
 
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
     children,
-    addFileResource
+    addFileSource
 }) => {
     // Drag and drop states
     const [isDragging, setIsDragging] = useState(false);
@@ -70,7 +70,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         e.stopPropagation();
         setIsDragging(false);
 
-        // Check for Zotero items (disabled because resources are updated on selection)
+        // Check for Zotero items (disabled because sources are updated on selection)
         /*if (e.dataTransfer.types.includes('zotero/item')) {
             const itemIDs = e.dataTransfer.getData('zotero/item');
             if (itemIDs) {
@@ -81,22 +81,22 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     // Get the Zotero items
                     const items = Zotero.Items.get(ids);
                     
-                    // Create ZoteroResources for each item
+                    // Create ZoteroSources for each item
                     for (const item of items) {
-                        // Create a resource with pinned set to true
-                        const resource = await createZoteroResource(item, true);
-                        // Add resource directly to the resources atom
-                        const currentResources = [...resources];
-                        // Check if resource already exists
-                        const exists = currentResources.some(
+                        // Create a source with pinned set to true
+                        const source = await createZoteroSource(item, true);
+                        // Add source directly to the sources atom
+                        const currentSources = [...sources];
+                        // Check if source already exists
+                        const exists = currentSources.some(
                             (res) => res.type === 'zotero_item' && 
-                                res.libraryID === resource.libraryID && 
-                                res.itemKey === resource.itemKey
+                                res.libraryID === source.libraryID && 
+                                res.itemKey === source.itemKey
                         );
                         if (!exists) {
-                            currentResources.push(resource);
-                            // Update resources atom
-                            setResources(currentResources);
+                            currentSources.push(source);
+                            // Update sources atom
+                            setSources(currentSources);
                         }
                         // if (!exists) {
                     }
@@ -124,8 +124,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     continue;
                 }
                 
-                // Add file resource
-                addFileResource(file);
+                // Add file source
+                addFileSource(file);
             }
         }
     };

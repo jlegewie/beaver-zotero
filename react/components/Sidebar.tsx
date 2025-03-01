@@ -8,17 +8,17 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { previewedResourceAtom } from '../atoms/ui';
-import ResourcePreview from './ResourcePreview';
-import { updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
+import { previewedSourceAtom } from '../atoms/ui';
+import SourcePreview from './SourcePreview';
+import { updateSourcesFromZoteroSelectionAtom } from '../atoms/resources';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const threadMessages = useAtomValue(threadMessagesAtom);
-    const updateResourcesFromZoteroSelection = useSetAtom(updateResourcesFromZoteroSelectionAtom);
+    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useState(false);
-    const previewedResource = useAtomValue(previewedResourceAtom);
+    const previewedSource = useAtomValue(previewedSourceAtom);
     
     useZoteroSelection();
     
@@ -26,8 +26,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         // Focus the input
         inputRef.current?.focus();
 
-        // Update resources based on Zotero selection
-        updateResourcesFromZoteroSelection();
+        // Update sources based on Zotero selection
+        updateSourcesFromZoteroSelection();
     }, []);
     
     const handleScrollToBottom = () => {
@@ -54,7 +54,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 {userScrolled && <ScrollDownButton onClick={handleScrollToBottom} />}
-                {previewedResource && <ResourcePreview resource={previewedResource} />}
+                {previewedSource && <SourcePreview source={previewedSource} />}
                 <InputArea inputRef={inputRef} />
             </div>
         </div>

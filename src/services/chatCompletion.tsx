@@ -1,33 +1,33 @@
 import { ChatMessage } from "react/types/messages";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
-import { resourceToContentParts } from "../../react/utils/contentPartUtils";
+import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/resourceUtils";
-import { Resource } from "react/types/resources";
+import { Source } from "react/types/resources";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
-async function chatMessageToRequestMessage(message: ChatMessage, resources: Resource[]): Promise<APIMessage> {
+async function chatMessageToRequestMessage(message: ChatMessage, sources: Source[]): Promise<APIMessage> {
     if (message.role === 'user') {
-        // Get resources for the message
-        const messageResources = resources.filter(r => r.messageId === message.id);
+        // Get sources for the message
+        const messageSources = sources.filter(r => r.messageId === message.id);
         
-        // Flatten resources
-        const flattenedResources = messageResources?.flatMap(
-            resource => resource.type === 'zotero_item' && getZoteroItem(resource)?.isRegularItem()
-                ? resource.childItemKeys.map(key => ({...resource, itemKey: key}))
-                : resource
+        // Flatten sources
+        const flattenedSources = messageSources?.flatMap(
+            source => source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
+                ? source.childItemKeys.map(key => ({...source, itemKey: key}))
+                : source
         );
 
-        // Convert resources to content parts
-        const resourcesContent: ContentPart[] = [];
-        for (const resource of flattenedResources || []) {
-            const contentParts = await resourceToContentParts(resource);
-            resourcesContent.push(...contentParts);
+        // Convert sources to content parts
+        const sourcesContent: ContentPart[] = [];
+        for (const source of flattenedSources || []) {
+            const contentParts = await sourceToContentParts(source);
+            sourcesContent.push(...contentParts);
         }
         
         // Add the user's message
         const content: ContentPart[] = [
-            ...resourcesContent,
+            ...sourcesContent,
             {
                 type: 'text',
                 text: `# User Query\n${message.content}`
@@ -49,7 +49,7 @@ async function chatMessageToRequestMessage(message: ChatMessage, resources: Reso
 
 export const chatCompletion = async (
     messages: ChatMessage[],
-    resources: Resource[],
+    sources: Source[],
     onChunk: (chunk: string) => void,
     onFinish: () => void,
     onError: (error: Error) => void
@@ -59,7 +59,7 @@ export const chatCompletion = async (
 
     // Thread messages
     messages = messages.filter(message => !(message.role == 'assistant' && message.content == ''));
-    const messagesFormatted = await Promise.all(messages.map(message => chatMessageToRequestMessage(message, resources)));
+    const messagesFormatted = await Promise.all(messages.map(message => chatMessageToRequestMessage(message, sources)));
     console.log('messagesFormatted', messagesFormatted);
 
     // Request messages

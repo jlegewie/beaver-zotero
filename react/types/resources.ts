@@ -1,45 +1,45 @@
 
-// Base resource interface
-export interface BaseResource {
+// Base source interface
+export interface BaseSource {
     id: string;               // Unique identifier for tracking
     messageId?: string;       // Message ID for tracking
     type: string;             // Type discriminator
-    name: string;             // Name for the resource
-    icon: string;             // Icon for the resource
-    pinned: boolean;          // If true, the resource persists across selections
+    name: string;             // Name for the source
+    icon: string;             // Icon for the source
+    pinned: boolean;          // If true, the source persists across selections
     timestamp: number;        // Creation timestamp
 }
 
-// Zotero item resource
-export interface ZoteroResource extends BaseResource {
+// Zotero item source
+export interface ZoteroSource extends BaseSource {
     type: 'zotero_item';
     libraryID: number;        // Zotero library ID
     itemKey: string;          // Zotero item key
-    childItemKeys: string[];  // Keys of child items that are part of this resource
+    childItemKeys: string[];  // Keys of child items that are part of this source
 }
 
-// File resource from local file system
-export interface FileResource extends BaseResource {
+// File source from local file system
+export interface FileSource extends BaseSource {
     type: 'file';
     filePath: string;
     fileName: string;
     fileType: string;
 }
 
-// Remote file resource from URL
-export interface RemoteFileResource extends BaseResource {
+// Remote file source from URL
+export interface RemoteFileSource extends BaseSource {
     type: 'remote_file';
     url: string;
     name: string;
 }
 
-// Union type for all resource types
-export type Resource = ZoteroResource | FileResource | RemoteFileResource;
+// Union type for all source types
+export type Source = ZoteroSource | FileSource | RemoteFileSource;
 
 
-// Source type
-export type Source = Resource & {
-    reference: string;       // Reference for the resource
-    citation: string;        // Citation for the resource
-    numericCitation: string; // Numeric citation for the resource
+// SourceWithCitations type
+export type SourceWithCitations = Source & {
+    reference: string;       // Reference for the source
+    citation: string;        // Citation for the source
+    numericCitation: string; // Numeric citation for the source
 }
