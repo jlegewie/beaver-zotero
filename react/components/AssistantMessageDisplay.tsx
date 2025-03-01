@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useRef } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon } from './icons';
+import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
 import { isStreamingAtom, threadSourcesWithCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
@@ -14,6 +14,7 @@ import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import { parseCitations } from '../utils/parseCitations';
 import Button from './Button';
+import SourcesDisplay from './SourcesDisplay';
 
 
 interface AssistantMessageDisplayProps {
@@ -128,10 +129,10 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                         <Button
                             variant="outline"
                             onClick={toggleSources}
-                            // icon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
+                            rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
                             className="text-sm"
                         >
-                            Sources ({threadSourcesWithCitations.length})
+                            {threadSourcesWithCitations.length} Source{threadSourcesWithCitations.length === 1 ? '' : 's'}
                         </Button>
                     )}
                 </div>
@@ -162,6 +163,11 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                     }
                 </div>
             </div>
+
+            {/* Sources section */}
+            {sourcesVisible && threadSourcesWithCitations.length > 0 && (
+                <SourcesDisplay sources={threadSourcesWithCitations} />
+            )}
 
             {/* Text selection context menu */}
             <ContextMenu
