@@ -18,7 +18,7 @@ export const isStreamingAtom = atom((get) => {
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
-export const sourcesAtom = atom<Source[]>((get) => {
+export const threadSourcesWithCitationsAtom = atom<Source[]>((get) => {
     const resources = get(threadResourcesAtom)
         .sort((a, b) => a.timestamp - b.timestamp);
     // Citation preferences

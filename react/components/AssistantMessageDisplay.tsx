@@ -13,7 +13,7 @@ import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import { parseCitations } from '../utils/parseCitations';
-import { sourcesAtom } from '../atoms/messages';
+import { threadSourcesWithCitationsAtom } from '../atoms/messages';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -27,7 +27,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const sources = useAtomValue(sourcesAtom);
+    const threadSourcesWithCitations = useAtomValue(threadSourcesWithCitationsAtom);
 
     // Manage copy feedback state manually
     const [justCopied, setJustCopied] = useState(false);
@@ -95,7 +95,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={parseCitations(message.content, sources).text} />
+                <MarkdownRenderer className="markdown" content={parseCitations(message.content, threadSourcesWithCitations).text} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }
