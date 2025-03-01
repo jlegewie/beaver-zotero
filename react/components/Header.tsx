@@ -1,8 +1,8 @@
 import React from 'react';
 import { CancelIcon, ClockIcon, PlusSignIcon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { messagesAtom } from '../atoms/messages';
-import { resetResourcesAtom, updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
+import { threadMessagesAtom, currentUserMessageAtom } from '../atoms/messages';
+import { resetCurrentResourcesAtom, threadResourcesAtom, updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
 import { useAtom, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';
@@ -12,13 +12,17 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
-    const [messages, setMessages] = useAtom(messagesAtom);
-    const resetResources = useSetAtom(resetResourcesAtom);
+    const [threadMessages, setThreadMessages] = useAtom(threadMessagesAtom);
+    const setThreadResources = useSetAtom(threadResourcesAtom);
+    const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
+    const resetCurrentResources = useSetAtom(resetCurrentResourcesAtom);
     const updateResourcesFromZoteroSelection = useSetAtom(updateResourcesFromZoteroSelectionAtom);
     
     const handleNewThread = async () => {
-        setMessages([]);
-        resetResources();
+        setThreadMessages([]);
+        setThreadResources([]);
+        setCurrentUserMessage('');
+        resetCurrentResources();
         await updateResourcesFromZoteroSelection();
     }
 
@@ -52,7 +56,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         onClick={handleNewThread}
                         className="scale-14"
                         ariaLabel="New thread"
-                        disabled={messages.length === 0}
+                        disabled={threadMessages.length === 0}
                     />
                 </Tooltip>
             </div>

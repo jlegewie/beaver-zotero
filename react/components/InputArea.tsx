@@ -4,10 +4,9 @@ import { ResourceButton } from "./ResourceButton";
 import { PlusSignIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, currentUserMessageAtom } from '../atoms/messages';
-import { currentResourcesAtom, addFileResourceAtom } from '../atoms/resources';
+import { currentResourcesAtom, addFileResourceAtom, threadResourceCountAtom } from '../atoms/resources';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
-import { threadResourceCountAtom } from '../atoms/messages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
 

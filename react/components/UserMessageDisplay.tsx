@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { ResourceButton } from "./ResourceButton";
 import { ChatMessage } from '../types/messages';
 import { isStreamingAtom } from '../atoms/messages';
+import { threadResourcesAtom } from '../atoms/resources';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -12,14 +13,16 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     message
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
+    const threadResources = useAtomValue(threadResourcesAtom);
+    const messageResources = threadResources.filter(r => r.messageId === message.id);
 
     return (
         <div className="user-message-display">
             
             {/* Message resources */}
-            {message.resources && message.resources.length > 0 && (
+            {messageResources.length > 0 && (
                 <div className="flex flex-wrap gap-3 mb-2">
-                    {(message.resources).map((resource, index) => (
+                    {messageResources.map((resource, index) => (
                         <ResourceButton
                             key={index}
                             resource={resource}

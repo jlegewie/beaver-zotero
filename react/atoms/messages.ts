@@ -1,35 +1,34 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { ZoteroResource, Resource, Source } from "../types/resources";
+import { Source } from "../types/resources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/resourceUtils";
+import { threadResourcesAtom } from "./resources";
 
 // Current user message and content
 export const currentUserMessageAtom = atom<string>('');
 
 // Thread messages atom
-export const messagesAtom = atom<ChatMessage[]>([]);
+export const threadMessagesAtom = atom<ChatMessage[]>([]);
 
 // Derived atoms
 export const isStreamingAtom = atom((get) => {
-    const messages = get(messagesAtom);
+    const messages = get(threadMessagesAtom);
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
 export const sourcesAtom = atom<Source[]>((get) => {
-    const messages = get(messagesAtom);
+    const resources = get(threadResourcesAtom)
+        .sort((a, b) => a.timestamp - b.timestamp);
     // Citation preferences
-    const citationFormat = getPref("citationFormat") || "author-year";
     const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
     const locale = getPref("citationLocale") || 'en-US';
     // CSL engine for in-text citations
     const csl_style: ZoteroStyle = Zotero.Styles.get(style);
     const cslEngine = csl_style.getCiteProc(locale, 'text');
     // Define list of sources
-    const sources = messages
-        .flatMap((message) => message.resources || [])
-        .sort((a, b) => a.timestamp - b.timestamp)
+    const sources = resources
         .map((resource, index) => {
             if (resource.type === 'zotero_item') {
                 // Get item and parent item
@@ -64,33 +63,11 @@ export const sourcesAtom = atom<Source[]>((get) => {
     return sources;
 });
 
-// Derived atom for user messages only
-export const userMessagesFromThreadAtom = atom((get) => {
-    const messages = get(messagesAtom);
-    return messages.filter(message => message.role === 'user');
-});
-
-// Derive resource keys from messages in conversation
-export const threadResourceKeysAtom = atom((get) => {
-    const userMessages = get(userMessagesFromThreadAtom);
-    const resources = userMessages.flatMap((message) => message.resources || []);
-    const keys = resources
-    .filter((resource): resource is ZoteroResource => resource.type === 'zotero_item')
-    .map((resource) => resource.itemKey);
-    return keys;
-});
-
-export const threadResourceCountAtom = atom((get) => {
-    const userMessages = get(userMessagesFromThreadAtom);
-    const resources = userMessages.flatMap((message) => message.resources || []);
-    return resources.length;
-});
-
 // Setter atoms
 export const setMessageContentAtom = atom(
     null,
     (get, set, { id, content }: { id: string; content: string }) => {
-        set(messagesAtom, get(messagesAtom).map(message => 
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message => 
             message.id === id ? { ...message, content } : message
         ));
     }
@@ -99,7 +76,7 @@ export const setMessageContentAtom = atom(
 export const streamToMessageAtom = atom(
     null,
     (get, set, { id, chunk }: { id: string; chunk: string }) => {
-        set(messagesAtom, get(messagesAtom).map(message =>
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
             message.id === id ? { ...message, content: message.content + chunk } : message
         ));
     }
@@ -108,7 +85,7 @@ export const streamToMessageAtom = atom(
 export const setMessageStatusAtom = atom(
     null,
     (get, set, { id, status, errorType }: { id: string; status: ChatMessage['status']; errorType?: string }) => {
-        set(messagesAtom, get(messagesAtom).map(message =>
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
             message.id === id ? { ...message, status, ...(errorType && { errorType }) } : message
         ));
     }
@@ -116,20 +93,31 @@ export const setMessageStatusAtom = atom(
 
 export const rollbackChatToMessageIdAtom = atom(
     null,
-    (get, set, id: string) => {
-        const messages = get(messagesAtom);
-        const messageIndex = messages.findIndex(message => message.id === id);
+    (get, set, messageId: string) => {
+        const threadMessages = get(threadMessagesAtom);
+        const threadResources = get(threadResourcesAtom);
 
-        if (messageIndex > 0) {
-            // Create a new assistant message
-            const assistantMsg = createAssistantMessage();
-            // Keep only the message before the specified ID
-            const truncatedMessages = messages.slice(0, messageIndex);
-            // Add the assistant message to the new messages
-            const newMessages = [...truncatedMessages, assistantMsg];
-            set(messagesAtom, newMessages);
-            return newMessages;
-        }
-        // If message not found or is already the first message, do nothing
+        // Find the index of the message to continue from
+        const messageIndex = threadMessages.findIndex(m => m.id === messageId);
+        if (messageIndex < 0) return null;
+        
+        // Truncate messages to the specified message
+        const truncatedMessages = threadMessages.slice(0, messageIndex);
+        const messageIds = truncatedMessages.map(m => m.id);
+
+        // Create a new assistant message
+        const assistantMsg = createAssistantMessage();
+        // Add the assistant message to the new messages
+        const newMessages = [...truncatedMessages, assistantMsg];
+
+        // Update messages atom
+        set(threadMessagesAtom, newMessages);
+
+        // Remove resources for messages after the specified message
+        const newThreadResources = threadResources.filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(threadResourcesAtom, newThreadResources);
+
+        // return new messages
+        return newMessages;
     }
 );

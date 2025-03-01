@@ -2,6 +2,7 @@
 // Base resource interface
 export interface BaseResource {
     id: string;               // Unique identifier for tracking
+    messageId?: string;       // Message ID for tracking
     type: string;             // Type discriminator
     name: string;             // Name for the resource
     icon: string;             // Icon for the resource

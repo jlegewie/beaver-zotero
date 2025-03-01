@@ -1,50 +1,47 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { messagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
+import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, currentUserMessageAtom } from './messages';
 import { Resource } from '../types/resources';
 import { isResourceValid } from '../utils/resourceUtils';
-import { resetResourcesAtom } from './resources';
+import { resetCurrentResourcesAtom, threadResourcesAtom } from './resources';
 import { chatCompletion } from '../../src/services/chatCompletion';
 
 export const generateResponseAtom = atom(
     null,
     async (get, set, payload: {
         content: string;
-        resources?: Resource[];
+        resources: Resource[];
     }) => {
         // Get current messages
-        const messages = get(messagesAtom);
-        
-        // Validate resources if provided
-        const validResources: Resource[] = [];
+        const threadMessages = get(threadMessagesAtom);
+        const threadResources = get(threadResourcesAtom);
+
+        // Create user and assistant messages
+        const userMsg = createUserMessage(payload.content);
+        const assistantMsg = createAssistantMessage();
+
+        // Update thread messages atom
+        const newMessages = [...threadMessages, userMsg, assistantMsg];
+        set(threadMessagesAtom, newMessages);
+
+        // Update thread resources atom
+        const newThreadResources: Resource[] = [...threadResources];
         if (payload.resources && payload.resources.length > 0) {
             for (const resource of payload.resources) {
                 if (await isResourceValid(resource, true)) {
-                    validResources.push(resource);
+                    newThreadResources.push({...resource, messageId: userMsg.id});
                 }
             }
         }
-        console.log('validResources', validResources);
+        console.log('validResources', newThreadResources);
+        set(threadResourcesAtom, newThreadResources);
         
-        // Create user message
-        const userMsg = createUserMessage({
-            content: payload.content,
-            resources: validResources,
-        });
-        
-        // Create assistant message
-        const assistantMsg = createAssistantMessage();
-        
-        // Update messages atom
-        const newMessages = [...messages, userMsg, assistantMsg];
-        set(messagesAtom, newMessages);
-        
-        // Reset user message andresources after adding to message
-        set(resetResourcesAtom);
+        // Reset user message and resources after adding to message
+        set(resetCurrentResourcesAtom);
         set(currentUserMessageAtom, '');
         
         // Execute chat completion
-        _processChatCompletion(newMessages, assistantMsg.id, set);
+        _processChatCompletion(newMessages, newThreadResources, assistantMsg.id, set);
         
         return assistantMsg.id;
     }
@@ -54,24 +51,31 @@ export const regenerateFromMessageAtom = atom(
     null,
     async (get, set, messageId: string) => {
         // Get current messages
-        const messages = get(messagesAtom);
-        
+        const threadMessages = get(threadMessagesAtom);
+        const threadResources = get(threadResourcesAtom);
+
         // Find the index of the message to continue from
-        const messageIndex = messages.findIndex(m => m.id === messageId);
+        const messageIndex = threadMessages.findIndex(m => m.id === messageId);
         if (messageIndex < 0) return null; // Message not found
         
         // Truncate messages to the specified message
-        const truncatedMessages = messages.slice(0, messageIndex);
+        const truncatedMessages = threadMessages.slice(0, messageIndex);
+        const messageIds = truncatedMessages.map(m => m.id);
         
         // Create a new assistant message
         const assistantMsg = createAssistantMessage();
+        // Add the assistant message to the new messages
         const newMessages = [...truncatedMessages, assistantMsg];
         
         // Update messages atom
-        set(messagesAtom, newMessages);
+        set(threadMessagesAtom, newMessages);
+
+        // Remove resources for messages after the specified message
+        const newThreadResources = threadResources.filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(threadResourcesAtom, newThreadResources);
         
         // Execute chat completion
-        _processChatCompletion(newMessages, assistantMsg.id, set);
+        _processChatCompletion(newMessages, newThreadResources, assistantMsg.id, set);
         
         return assistantMsg.id;
     }
@@ -80,6 +84,7 @@ export const regenerateFromMessageAtom = atom(
 // Helper function to process chat completion
 function _processChatCompletion(
     messages: ChatMessage[],
+    resources: Resource[],
     assistantMsgId: string,
     set: any
 ) {
@@ -90,6 +95,7 @@ function _processChatCompletion(
     
     chatCompletion(
         filteredMessages,
+        resources,
         (chunk: string) => {
             set(streamToMessageAtom, { id: assistantMsgId, chunk });
         },

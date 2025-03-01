@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import InputArea from "./InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
-import { messagesAtom } from '../atoms/messages';
+import { threadMessagesAtom } from '../atoms/messages';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
@@ -14,7 +14,7 @@ import { updateResourcesFromZoteroSelectionAtom } from '../atoms/resources';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
-    const messages = useAtomValue(messagesAtom);
+    const threadMessages = useAtomValue(threadMessagesAtom);
     const updateResourcesFromZoteroSelection = useSetAtom(updateResourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useState(false);
@@ -45,7 +45,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
             {/* Messages area (scrollable) */}
             <MessagesArea 
-                messages={messages} 
+                messages={threadMessages} 
                 userScrolled={userScrolled} 
                 setUserScrolled={setUserScrolled}
                 ref={messagesContainerRef}

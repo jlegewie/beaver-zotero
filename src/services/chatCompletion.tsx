@@ -2,14 +2,17 @@ import { ChatMessage } from "react/types/messages";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { resourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/resourceUtils";
+import { Resource } from "react/types/resources";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
-async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMessage> {
+async function chatMessageToRequestMessage(message: ChatMessage, resources: Resource[]): Promise<APIMessage> {
     if (message.role === 'user') {
+        // Get resources for the message
+        const messageResources = resources.filter(r => r.messageId === message.id);
         
         // Flatten resources
-        const flattenedResources = message.resources?.flatMap(
+        const flattenedResources = messageResources?.flatMap(
             resource => resource.type === 'zotero_item' && getZoteroItem(resource)?.isRegularItem()
                 ? resource.childItemKeys.map(key => ({...resource, itemKey: key}))
                 : resource
@@ -46,6 +49,7 @@ async function chatMessageToRequestMessage(message: ChatMessage): Promise<APIMes
 
 export const chatCompletion = async (
     messages: ChatMessage[],
+    resources: Resource[],
     onChunk: (chunk: string) => void,
     onFinish: () => void,
     onError: (error: Error) => void
@@ -55,7 +59,7 @@ export const chatCompletion = async (
 
     // Thread messages
     messages = messages.filter(message => !(message.role == 'assistant' && message.content == ''));
-    const messagesFormatted = await Promise.all(messages.map(chatMessageToRequestMessage))
+    const messagesFormatted = await Promise.all(messages.map(message => chatMessageToRequestMessage(message, resources)));
     console.log('messagesFormatted', messagesFormatted);
 
     // Request messages

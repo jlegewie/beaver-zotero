@@ -1,12 +1,27 @@
 import { atom } from "jotai";
 import { Resource, ZoteroResource } from "../types/resources";
 import { createZoteroResource, createFileResource } from "../utils/resourceUtils";
-import { threadResourceKeysAtom } from "./messages";
 
 /**
-* Atom to store the resources
+* Atom to store the resources (current resources and thread resources)
 */
 export const currentResourcesAtom = atom<Resource[]>([]);
+export const threadResourcesAtom = atom<Resource[]>([]);
+
+// Derived atom for thread resource keys
+export const threadResourceKeysAtom = atom((get) => {
+    const resources = get(threadResourcesAtom);
+    const keys = resources
+        .filter((resource): resource is ZoteroResource => resource.type === 'zotero_item')
+        .map((resource) => resource.itemKey);
+    return keys;
+});
+
+// Derived atom for thread resource count
+export const threadResourceCountAtom = atom((get) => {
+    const resources = get(threadResourcesAtom);
+    return resources.length;
+});
 
 
 /**
@@ -17,7 +32,7 @@ export const removedItemKeysCache: Set<string> = new Set();
 /**
 * Atom to reset all resources
 */
-export const resetResourcesAtom = atom(
+export const resetCurrentResourcesAtom = atom(
     null,
     (_, set) => {
         removedItemKeysCache.clear();
