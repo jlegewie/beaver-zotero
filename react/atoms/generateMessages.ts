@@ -33,7 +33,6 @@ export const generateResponseAtom = atom(
                 }
             }
         }
-        console.log('validSources', newThreadSources);
         set(threadSourcesAtom, newThreadSources);
         
         // Reset user message and source after adding to message

@@ -6,25 +6,21 @@ import { Source } from "react/types/sources";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
-async function sourcesToRequestMessages(sources: Source[]): Promise<APIMessage> {
+async function sourceToRequestMessage(source: Source): Promise<APIMessage> {
     // Flatten sources
-    const flattenedSources = sources.flatMap(
-        source => source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
+    const sources = source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
             ? source.childItemKeys.map(key => ({...source, itemKey: key}))
-            : source
-    );
+            : [source];
 
     // Convert sources to content parts
-    const sourcesContent: ContentPart[] = [];
-    for (const source of flattenedSources) {
-        const contentParts = await sourceToContentParts(source);
-        sourcesContent.push(...contentParts);
-    }
+    const sourcesContent: ContentPart[] = (await Promise.all(
+        sources.map(source => sourceToContentParts(source))
+    )).flat();
     
     // Return the sources as a user message
     return {
         role: 'user',
-        content: [...sourcesContent]
+        content: sourcesContent
     } as APIMessage;
 }
 
@@ -45,20 +41,20 @@ export const chatCompletion = async (
 ) => {
     // System prompt
     const systemPrompt = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
-
-    // Sources
-    const sourcesFormatted = await sourcesToRequestMessages(sources);
+    const requestMessages: APIMessage[] = [{ role: 'system', content: systemPrompt }];
 
     // Thread messages
-    messages = messages.filter(m => m.content !== '' && m.status !== 'error');
-    const messagesFormatted = messages.map(message => chatMessageToRequestMessage(message));
+    for (const message of messages) {
+        if (message.content === '' || message.status === 'error') continue;
+        // Add sources
+        const messageSources = await Promise.all(sources
+            .filter(source => source.messageId === message.id)
+            .map(source => sourceToRequestMessage(source)));
+        requestMessages.push(...messageSources);
+        // Add chat message
+        requestMessages.push(chatMessageToRequestMessage(message));
+    }
 
-    // Request messages
-    const requestMessages = [
-        { role: 'system', content: systemPrompt },
-        sourcesFormatted,
-        ...messagesFormatted,
-    ];
     console.log('requestMessages', requestMessages);
 
     // LLM provider
