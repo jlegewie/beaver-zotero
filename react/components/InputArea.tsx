@@ -148,7 +148,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <div className="flex gap-2">
                         <button
                             type={isCommandPressed ? "button" : undefined}
-                            className={`beaver-button ${isCommandPressed ? '' : 'faded'} mr-1`}
+                            // className={`variant-surface ${isCommandPressed ? '' : 'faded'} mr-1`}
+                            className={`${isCommandPressed ? 'variant-surface' : 'variant-outline'} mr-1`}
                             onClick={handleLibrarySearch}
                             disabled={isStreaming}
                         >
@@ -156,7 +157,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </button>
                         <button
                             type={isCommandPressed ? undefined : "button"}
-                            className={`beaver-button ${isCommandPressed ? 'faded' : ''}`}
+                            // className={`variant-surface ${isCommandPressed ? 'faded' : ''}`}
+                            className={`${isCommandPressed ? 'variant-outline' : 'variant-surface'} mr-1`}
                             onClick={handleSubmit}
                             disabled={isStreaming}
                         >
