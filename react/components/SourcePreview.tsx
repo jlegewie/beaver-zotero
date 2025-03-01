@@ -13,7 +13,8 @@ import PreviewZoteroSource from './previews/PreviewZoteroSource';
 import PreviewFileSource from './previews/PreviewFileSource';
 import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
-
+import Button from './Button';
+import IconButton from './IconButton';
 interface SourcePreviewProps {
     source: Source;
 }
@@ -181,10 +182,10 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                 </div>
 
                 {/* buttons */}
-                <div className="p-1 flex flex-row items-center">
-                    <div className="flex-1 gap-4">
-                        <button
-                            className="source-ghost-button"
+                <div className="px-1 pt-1 flex flex-row items-center">
+                    <div className="flex-1 gap-3 flex">
+                        <Button
+                            variant="ghost"
                             onClick={handlePin}
                         >
                             <ZoteroIcon 
@@ -192,9 +193,9 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                                 size={12}
                             />
                             <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
-                        </button>
-                        <button
-                            className="source-ghost-button"
+                        </Button>
+                        <Button
+                            variant="ghost"
                             onClick={handleOpen}
                             disabled={!canOpenPDF}
                         >
@@ -203,9 +204,9 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                                 size={12}
                             />
                             Open
-                        </button>
-                        <button 
-                            className="source-ghost-button"
+                        </Button>
+                        <Button 
+                            variant="ghost"
                             onClick={handleRemove}
                         >
                             <ZoteroIcon 
@@ -213,15 +214,14 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                                 size={12}
                             />
                             Remove
-                        </button>
+                        </Button>
                     </div>
                     <div className="flex">
-                        <button
-                            className="source-ghost-button"
+                        <IconButton
+                            icon={CancelIcon}
+                            variant="ghost"
                             onClick={() => setPreviewedSource(null)}
-                        >
-                            <Icon icon={CancelIcon} />
-                        </button>
+                        />
                     </div>
                 </div>
             </div>

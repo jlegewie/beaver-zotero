@@ -13,6 +13,8 @@ import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import { parseCitations } from '../utils/parseCitations';
+import Button from './Button';
+
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -27,7 +29,10 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const threadSourcesWithCitations = useAtomValue(threadSourcesWithCitationsAtom);
-
+    
+    // New state for source visibility
+    const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
+    
     // Manage copy feedback state manually
     const [justCopied, setJustCopied] = useState(false);
     
@@ -50,6 +55,11 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
     ];
 
+    // Toggle sources visibility
+    const toggleSources = () => {
+        setSourcesVisible((prev: boolean) => !prev);
+    };
+
     const handleRepeat = () => {
         regenerateFromMessage(message.id);
     }
@@ -58,7 +68,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         await copyToClipboard(message.content, {
             onSuccess: () => {
                 setJustCopied(true);
-                setTimeout(() => setJustCopied(false), 400);
+                setTimeout(() => setJustCopied(false), 600);
             }
         });
     };
@@ -108,16 +118,31 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
-                className={`flex flex-row items-center pt-2 mr-4 ${isLastMessage ? '' : 'hover-fade'} ${isStreaming && isLastMessage ? 'hidden' : ''}`}
+                className={`
+                    flex flex-row items-center pt-2 mr-4 ml-3
+                    ${isLastMessage ? '' : 'hover-fade'}
+                    ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
-                <div className="flex-1" />
-                <div className="flex gap-5">
+                <div className="flex-1">
+                    {threadSourcesWithCitations.length > 0 && (
+                        <Button
+                            variant="outline"
+                            onClick={toggleSources}
+                            // icon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
+                            className="text-sm"
+                        >
+                            Sources ({threadSourcesWithCitations.length})
+                        </Button>
+                    )}
+                </div>
+                <div className="flex gap-4">
                     {isLastMessage && message.status !== 'error' &&
                         <MenuButton
                             icon={ShareIcon}
                             menuItems={shareMenuItems}
                             className="scale-12"
                             ariaLabel="Share"
+                            variant="ghost"
                             positionAdjustment={{ x: 0, y: 0 }}
                         />
                     }

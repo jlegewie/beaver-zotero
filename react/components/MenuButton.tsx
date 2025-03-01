@@ -6,6 +6,8 @@ import { Icon } from './icons';
 
 interface MenuButtonProps {
     menuItems: MenuItem[];
+    variant?: string;
+    maxWidth?: string;
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     className?: string;
     iconClassName?: string;
@@ -22,6 +24,8 @@ interface MenuButtonProps {
 */
 const MenuButton: React.FC<MenuButtonProps> = ({
     menuItems,
+    variant = 'surface',
+    maxWidth = undefined,
     icon,
     className = '',
     iconClassName = '',
@@ -46,11 +50,17 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             setIsMenuOpen(true);
         }
     };
+
+    const variantClass = `variant-${variant}`;
     
     return (
         <>
             <button
-                className={`icon-button ${className}`}
+                className={`
+                    ${variantClass}
+                    ${icon && !buttonLabel ? 'icon-only' : ''}
+                    ${className}`
+                }
                 ref={buttonRef}
                 onClick={handleButtonClick}
                 aria-label={ariaLabel || buttonLabel}
@@ -63,6 +73,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             <ContextMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
+                maxWidth={maxWidth}
                 onClose={() => setIsMenuOpen(false)}
                 position={menuPosition}
                 useFixedPosition={true}

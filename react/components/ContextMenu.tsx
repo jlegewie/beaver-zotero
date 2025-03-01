@@ -15,6 +15,25 @@ export interface MenuItem {
     icon?: ReactNode;
     /** Whether the item is disabled */
     disabled?: boolean;
+    /** 
+     * Optional custom content to render instead of the default label and icon.
+     * 
+     * @example
+     * // Example with custom content
+     * const menuItems = [
+     *   {
+     *     label: "Custom Item", // still needed for accessibility
+     *     onClick: () => console.log("Custom item clicked"),
+     *     customContent: (
+     *       <div className="flex flex-col">
+     *         <span className="font-bold">Custom Title</span>
+     *         <span className="text-xs">Additional description text</span>
+     *       </div>
+     *     )
+     *   }
+     * ];
+     */
+    customContent?: ReactNode;
 }
 
 /**
@@ -33,6 +52,8 @@ export interface ContextMenuProps {
     menuItems: MenuItem[];
     /** Controls menu visibility */
     isOpen: boolean;
+    /** Optional max width for the menu */
+    maxWidth?: string;
     /** Callback when menu should close */
     onClose: () => void;
     /** Position coordinates for menu placement */
@@ -58,6 +79,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     isOpen, 
     onClose, 
     position,
+    maxWidth = undefined,
     className = '',
     useFixedPosition = false,
     usePortal = false,
@@ -226,7 +248,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 top: adjustedPosition.y,
                 left: adjustedPosition.x,
                 maxHeight: '80vh',
-                border: '1px solid var(--fill-quinary)'
+                border: '1px solid var(--fill-quinary)',
+                maxWidth: maxWidth || undefined
             }}
             tabIndex={-1}
             role="menu"
@@ -255,10 +278,18 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     onFocus={() => setFocusedIndex(index)}
                     aria-disabled={item.disabled}
                 >
-                    {item.icon && (
-                        <span className="flex-none flex items-center">{item.icon}</span>
+                    {item.customContent ? (
+                        // Render custom content if provided
+                        <>{item.customContent}</>
+                    ) : (
+                        // Otherwise render default icon + label layout
+                        <>
+                            {item.icon && (
+                                <span className="flex-none flex items-center">{item.icon}</span>
+                            )}
+                            <span className="flex-1 text-sm font-color-secondary">{item.label}</span>
+                        </>
                     )}
-                    <span className="flex-1 text-sm font-color-secondary">{item.label}</span>
                 </div>
             ))}
         </div>

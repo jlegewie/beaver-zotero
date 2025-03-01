@@ -1,99 +1,80 @@
-import React, { ButtonHTMLAttributes } from 'react';
-import { Spinner } from './icons';
+import React from 'react';
+import { Icon } from './icons';
 
-// Button props interface
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
+
+interface ButtonProps {
+    /** Button variant */
+    variant: ButtonVariant;
+    /** Button contents */
+    children?: React.ReactNode;
+    /** Icon to display (optional) */
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    /** Click handler */
+    onClick?: (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => void;
+    /** Additional class names */
+    className?: string;
+    /** Additional class names for the icon */
+    iconClassName?: string;
+    /** Accessible label for the button */
+    ariaLabel?: string;
+    /** Whether the button is disabled */
+    disabled?: boolean;
+    /** Loading state */
     loading?: boolean;
+    /** Text to show when loading */
     loadingText?: string;
+    /** Optional title attribute for tooltips */
+    title?: string;
+    /** Type of button */
+    type?: 'button' | 'submit' | 'reset';
 }
 
-// Base Button component
+/**
+* Button component with multiple variants
+*/
 const Button: React.FC<ButtonProps> = ({
+    variant,
     children,
-    disabled,
+    icon,
+    onClick,
+    className = '',
+    iconClassName = '',
+    ariaLabel,
+    disabled = false,
     loading = false,
     loadingText,
-    className = '',
-    ...props
+    title,
+    type = 'button'
 }) => {
-    // Determine if the button has both text and icon
-    const hasTextAndIcon = React.Children.toArray(children).length > 1;
+    const hasText = !!children;
+    const isIconOnly = !!icon && !children;
     
-    const renderContent = () => {
-        if (loading) {
-            if (loadingText) {
-                return (
-                    <>
-                    {loadingText}
-                    <Spinner className="ml-2" />
-                    </>
-                );
-            }
-            return <Spinner />;
-        }
-        
-        if (hasTextAndIcon) {
-            // Add spacing between icon and text
-            return React.Children.map(children, (child, index) => {
-                if (index !== React.Children.count(children) - 1) {
-                    return <>{child}<span className="mr-2" /></>;
-                }
-                return child;
-            });
-        }
-        
-        return children;
-    };
+    const variantClass = `variant-${variant}`;
+    const classes = [
+        variantClass,
+        isIconOnly ? 'icon-only' : '',
+        hasText ? 'has-text' : '',
+        loading ? 'loading' : '',
+        loadingText ? 'has-loading-text' : '',
+        className
+    ].filter(Boolean).join(' ');
     
     return (
         <button
-            className={`inline-flex items-center justify-center ${
-                disabled || loading ? 'cursor-not-allowed' : ''
-            } ${className}`}
-            disabled={disabled || loading}
-            aria-disabled={disabled || loading}
-            aria-busy={loading}
-            {...props}
-        >
-            {renderContent()}
-        </button>
-    );
-};
-
-// IconButton props interface
-interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-    'aria-label': string; // Make aria-label required
-    loading?: boolean;
-}
-
-// IconButton component
-const IconButton: React.FC<IconButtonProps> = ({
-    children,
-    disabled,
-    loading = false,
-    className = '',
-    'aria-label': ariaLabel,
-    ...props
-}) => {
-    return (
-        <button
-            className={`inline-flex items-center justify-center ${
-                disabled || loading ? 'cursor-not-allowed' : ''
-            } ${className}`}
-            disabled={disabled || loading}
+            className={classes}
+            onClick={onClick}
             aria-label={ariaLabel}
-            aria-disabled={disabled || loading}
-            aria-busy={loading}
-            {...props}
+            disabled={disabled || loading}
+            title={title}
+            type={type}
         >
-            {loading ? <Spinner /> : children}
+            {icon && <Icon icon={icon} className={iconClassName} />}
+            {children}
+            {loading && <span className="spinner">●</span>}
+            {loading && loadingText && <span>{loadingText}</span>}
         </button>
     );
 };
 
-export {
-    Button,
-    IconButton,
-    type ButtonProps,
-    type IconButtonProps,
-};
+export default Button;

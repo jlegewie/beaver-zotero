@@ -1,9 +1,13 @@
 import React from 'react';
 import { Icon } from './icons';
 
+type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
+
 interface IconButtonProps {
     /** Icon to display */
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    /** Button variant */
+    variant?: IconButtonVariant;
     /** Click handler */
     onClick: (e: React.MouseEvent) => void;
     /** Additional class names for the button */
@@ -14,34 +18,46 @@ interface IconButtonProps {
     ariaLabel?: string;
     /** Whether the button is disabled */
     disabled?: boolean;
+    /** Loading state */
+    loading?: boolean;
     /** Optional title attribute for tooltips */
     title?: string;
 }
 
 /**
- * A button that displays an icon
- */
+* A button that displays an icon with multiple variant options
+*/
 const IconButton: React.FC<IconButtonProps> = ({
     icon,
+    variant = 'ghost',
     onClick,
     className = '',
     iconClassName = '',
     ariaLabel,
     disabled = false,
+    loading = false,
     title
 }) => {
-  return (
-    <button
-        className={`icon-button ${className}`}
-        onClick={onClick}
-        aria-label={ariaLabel}
-        disabled={disabled}
-        title={title}
-        type="button"
-    >
-        <Icon icon={icon} className={iconClassName} />
-    </button>
-  );
+    // Use the existing icon-button class for ghost variant for compatibility
+    // Use the variant-{type} classes for the other variants
+    // const buttonClass = variant === 'ghost' 
+    //     ? `icon-button ${className}`
+    //     : `variant-${variant} icon-only ${className} ${loading ? 'loading' : ''}`;
+    const buttonClass = `variant-${variant} icon-only ${className} ${loading ? 'loading' : ''}`;
+    
+    return (
+        <button
+            className={buttonClass}
+            onClick={onClick}
+            aria-label={ariaLabel}
+            disabled={disabled || loading}
+            title={title}
+            type="button"
+        >
+            <Icon icon={icon} className={iconClassName} />
+            {loading && <span className="spinner">●</span>}
+        </button>
+    );
 };
 
-export default IconButton; 
+export default IconButton;

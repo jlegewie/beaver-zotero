@@ -9,6 +9,7 @@ import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
+import Button from './Button';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -146,24 +147,24 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <div className="flex flex-row items-center pt-2">
                     <div className="flex-1" />
                     <div className="flex gap-2">
-                        <button
+                        <Button
                             type={isCommandPressed ? "button" : undefined}
-                            // className={`variant-surface ${isCommandPressed ? '' : 'faded'} mr-1`}
-                            className={`${isCommandPressed ? 'variant-surface' : 'variant-outline'} mr-1`}
+                            variant={isCommandPressed ? 'surface' : 'outline'}
+                            className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                             onClick={handleLibrarySearch}
                             disabled={isStreaming}
                         >
                             Library Search ⌘ ⏎
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                             type={isCommandPressed ? undefined : "button"}
-                            // className={`variant-surface ${isCommandPressed ? 'faded' : ''}`}
-                            className={`${isCommandPressed ? 'variant-outline' : 'variant-surface'} mr-1`}
+                            variant={isCommandPressed ? 'outline' : 'surface' }
+                            className={`mr-1 ${isCommandPressed ? 'opacity-50' : ''}`}
                             onClick={handleSubmit}
                             disabled={isStreaming}
                         >
                             Send ⏎
-                        </button>
+                        </Button>
                     </div>
                 </div>
             </form>

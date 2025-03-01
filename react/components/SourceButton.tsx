@@ -7,9 +7,12 @@ import { removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedSourceAtom } from '../atoms/ui'
+import { CancelIcon } from './icons'
+import Button from './Button'
 
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 import { atom } from 'jotai'
+import IconButton from './IconButton'
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
@@ -36,8 +39,16 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
 
-        const getIconElement = (source: Source, isHovered: boolean) => {
+        const getIconElement = (source: Source, isHovered: boolean, disabled: boolean) => {
             if (isHovered) {
+                // return (<IconButton
+                //     icon={CancelIcon}
+                //     className="scale-80 m-0 p-0"
+                //     onClick={(e) => {
+                //         e.stopPropagation()
+                //         handleRemove()
+                //     }}
+                // />)
                 return (<span 
                     role="button"
                     className="source-remove"
@@ -51,7 +62,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
             if (source.icon) {
                 const iconElement = source.icon ? (
-                    <span className="source-button-icon">
+                    <span className={disabled ? "mr-015 scale-80 opacity-50" : "mr-015 scale-80"}>
                         <CSSItemTypeIcon itemType={source.icon} />
                     </span>
                 ) : null
@@ -141,7 +152,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 ref={ref}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
-                className={`source-button ${className || ''}`}
+                className={`variant-outline source-button ${className || ''}`}
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
@@ -155,11 +166,11 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     ? <span className="source-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
                     : getIconElement(attachment)
                 } */}
-                {getIconElement(source, isHovered)}
+                {getIconElement(source, isHovered, disabled)}
                 <span className={!isValid ? 'font-color-red' : undefined}>
                     {source.name}
                 </span>
-                {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="ml-1 -mr-1" />}
+                {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
                 {/* {!disabled && (
                     <span 
                         role="button"

@@ -26,171 +26,6 @@
     background-color: var(--material-sidepane);
 }
 
-/* Component: Beaver Button (Ghost) */
-[id^="beaver-pane-"] .icon-button {
-    cursor: pointer;
-    /* border: 1px solid var(--fill-quarternary); */
-    border: 0px solid transparent;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    transition: all 0.2s ease-in-out;
-    background-color: transparent;
-    color: var(--fill-secondary);
-    align-items: center;
-    /* transform: scale(1.2); */
-}
-
-[id^="beaver-pane-"] .icon-button svg {
-    transform: translateY(0.1em);
-}
-
-[id^="beaver-pane-"] .icon-button:hover {
-    color: var(--fill-primary);
-    background-color: var(--fill-quinary);
-}
-
-[id^="beaver-pane-"] .icon-button:disabled {
-    color: var(--fill-tertiary);
-    cursor: not-allowed;
-}
-
-[id^="beaver-pane-"] .icon-button:disabled:hover {
-    color: var(--fill-tertiary);
-    background-color: transparent;
-}
-
-/* Button: Outline variant */
-[id^="beaver-pane-"] .variant-outline {
-    cursor: pointer;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 4px;
-    /* line-height: 1.25; */
-    transition: all 0.2s ease-in-out;
-    font-size: 0.9rem;
-    background-color: transparent;
-    color: var(--fill-secondary);
-    padding: 2px 6px;
-    display: inline-flex;
-    align-items: center;
-}
-
-[id^="beaver-pane-"] .variant-outline:hover {
-    /* color: var(--fill-primary); */
-    background-color: var(--fill-quinary);
-}
-
-[id^="beaver-pane-"] .variant-outline:disabled {
-    cursor: not-allowed;
-    color: var(--fill-tertiary);
-}
-
-/* Button: Surface variant */
-[id^="beaver-pane-"] .variant-surface {
-    cursor: pointer;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 4px;
-    /* line-height: 1.25; */
-    transition: all 0.2s ease-in-out;
-    font-size: 0.9rem;
-    background-color: var(--fill-quarternary);
-    color: var(--fill-secondary);
-    padding: 2px 6px;
-    display: inline-flex;
-    align-items: center;
-}
-
-[id^="beaver-pane-"] .variant-surface:hover {
-    color: var(--fill-primary);    
-}
-
-[id^="beaver-pane-"] .variant-surface:disabled {
-    cursor: not-allowed;
-    background-color: var(--fill-quinary);
-    color: var(--fill-tertiary);
-    border-color: var(--fill-quinary);
-}
-
-[id^="beaver-pane-"] .variant-surface.loading {
-    position: relative;
-}
-
-[id^="beaver-pane-"] .variant-surface .spinner {
-    color: currentColor;
-}
-
-[id^="beaver-pane-"] .variant-surface.has-loading-text .spinner {
-    margin-left: 0.5rem;
-}
-
-[id^="beaver-pane-"] .variant-surface.icon-only {
-    /* padding: 0.375rem; */
-    /* min-width: 2rem; */    
-    align-items: center;
-    justify-content: center;
-}
-
-[id^="beaver-pane-"] .variant-surface svg {
-    width: 1em;
-    height: 1em;
-    flex-shrink: 0;
-}
-
-[id^="beaver-pane-"] .variant-surface.faded {
-    background-color: var(--fill-quinary);
-    color: var(--fill-tertiary);
-    border-color: var(--fill-quinary);
-}
-
-/* Component: Beaver Context Item */
-[id^="beaver-pane-"] .source-button {
-    padding-right: 0.5rem;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
-    border: 1px solid var(--fill-quinary);
-    background-color: var(--fill-quinary);
-    /* padding: 3px 4px; */
-    border-radius: 4px;
-    color: var(--fill-secondary);
-    transition: all 0.2s ease-in-out;
-    user-select: none;
-    line-height: 1.2;
-    font-size: 0.85rem;
-}
-
-[id^="beaver-pane-"] .source-button.pinned {
-    border: 1px solid var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] .source-button:hover {
-    border-color: var(--fill-quarternary);
-    background-color: var(--fill-quarternary);
-    /* color: var(--fill-primary); */
-}
-
-[id^="beaver-pane-"] .source-button:disabled {
-    cursor: default;
-}
-
-[id^="beaver-pane-"] .source-button:hover:disabled {
-    border-color: var(--fill-quarternary);
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .source-button .icon:hover {
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .source-button-icon {
-    margin-right: 0.15rem;
-    display: inline-flex;
-    align-items: center;
-}
-
-[id^="beaver-pane-"] .source-button-icon span {
-    transform: scale(0.75);
-}
-
 [id^="beaver-pane-"] .sources-info {
     display: inline-flex;
     align-items: center;
@@ -225,7 +60,9 @@
 
 [id^="beaver-pane-"] .source-remove:hover {
     opacity: 1;
-    color: var(--fill-secondary);
+    color: var(--fill-primary);
+    background-color: var(--fill-quinary);
+    border-radius: 4px;
 }
 
 /* Component: Beaver Chat */
@@ -326,37 +163,10 @@
     border-radius: 4px;
 }
 
-/* Ghost buttons for the actions */
-[id^="beaver-pane-"] .source-ghost-button {
-    cursor: pointer;
-    background-color: transparent;
-    color: var(--fill-secondary);
-    border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 0.9rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: all 0.2s ease-in-out;
-}
-
-[id^="beaver-pane-"] .source-ghost-button:hover {
-    /* background-color: var(--fill-quinary); */
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .source-ghost-button:disabled {
-    cursor: not-allowed;
-    color: var(--fill-tertiary);
-}
-
 /* Optional: style for content area if needed */
 [id^="beaver-pane-"] .source-content {
     min-height: 1.5rem;
 }
-
-
 
 [id^="beaver-pane-"] .chat-input {
     width: 100%;
@@ -448,10 +258,12 @@
 [id^="beaver-pane-"] .pb-2 { padding-bottom: 0.5rem; }
 [id^="beaver-pane-"] .pb-3 { padding-bottom: 0.75rem; }
 [id^="beaver-pane-"] .pb-4 { padding-bottom: 1rem; }
+[id^="beaver-pane-"] .pt-0 { padding-top: 0rem; }
 [id^="beaver-pane-"] .pt-1 { padding-top: 0.25rem; }
 [id^="beaver-pane-"] .pt-2 { padding-top: 0.5rem; }
 [id^="beaver-pane-"] .pt-3 { padding-top: 0.75rem; }
 [id^="beaver-pane-"] .pt-4 { padding-top: 1rem; }
+[id^="beaver-pane-"] .m-0 { margin: 0rem; }
 [id^="beaver-pane-"] .m-1 { margin: 0.25rem; }
 [id^="beaver-pane-"] .m-2 { margin: 0.5rem; }
 [id^="beaver-pane-"] .m-3 { margin: 0.75rem; }
@@ -461,6 +273,7 @@
 [id^="beaver-pane-"] .mx-auto { margin-left: auto; margin-right: auto; }
 [id^="beaver-pane-"] .mb-2 { margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .mb-4 { margin-bottom: 1rem; }
+[id^="beaver-pane-"] .mr-015 { margin-right: 0.15rem; }
 [id^="beaver-pane-"] .mr-1 { margin-right: 0.25rem; }
 [id^="beaver-pane-"] .mr-2 { margin-right: 0.5rem; }
 [id^="beaver-pane-"] .mr-3 { margin-right: 0.75rem; }
@@ -479,6 +292,7 @@
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
+[id^="beaver-pane-"] .-mr-015 { margin-right: -0.15rem; }
 [id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
 [id^="beaver-pane-"] .-mr-2 { margin-right: -0.5rem; }
 [id^="beaver-pane-"] .-mr-3 { margin-right: -0.75rem; }
@@ -532,6 +346,13 @@
 [id^="beaver-pane-"] .overflow-y-auto { overflow-y: auto; }
 [id^="beaver-pane-"] .overflow-x-auto { overflow-x: auto; }
 [id^="beaver-pane-"] .overflow-hidden { overflow: hidden; }
+
+/* Opacity */
+[id^="beaver-pane-"] .opacity-0 { opacity: 0; }
+[id^="beaver-pane-"] .opacity-25 { opacity: 0.25; }
+[id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
+[id^="beaver-pane-"] .opacity-75 { opacity: 0.75; }
+[id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 
 /* Background colors */
 [id^="beaver-pane-"] .bg-primary { background-color: var(--fill-primary); }
@@ -779,32 +600,6 @@
     border-top: 1px solid var(--fill-secondary);
 }
 
-[id^="beaver-pane-"] .scroll-down-button {
-    transform: translateY(-29px);
-    background: var(--color-button);
-    border: 1px solid var(--color-border50);
-    border-radius: 50%;
-    width: 2rem;
-    height: 2rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
-}
-
-[id^="beaver-pane-"] .scroll-down-button svg {
-    transform: scale(1.2);
-}
-
-[id^="beaver-pane-"] .scroll-down-button:hover {
-    background: var(--color-panedivider);
-    border-color: var(--color-border);
-    transform: translateY(-30px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
 /* Hover-based fade utility classes */
 [id^="beaver-pane-"] .hover-trigger { position: relative; }
 [id^="beaver-pane-"] .hover-fade { 
@@ -917,4 +712,352 @@
 
 [id^="beaver-pane-"] .tooltip-fade-in-top {
     animation: tooltipFadeInTop 0.2s ease-in-out forwards;
+}
+
+
+/* Common button styles - shared across all variants */
+[id^="beaver-pane-"] .button-base {
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .button-base:disabled {
+    cursor: not-allowed;
+}
+
+[id^="beaver-pane-"] .button-base.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .button-base .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .button-base.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .button-base.icon-only {
+    padding: 4px;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .button-base svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Button: Solid variant */
+[id^="beaver-pane-"] .variant-solid {
+    cursor: pointer;
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--accent-blue);
+    color: var(--accent-white);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-solid:hover {
+    filter: brightness(1.1);
+}
+
+[id^="beaver-pane-"] .variant-solid:disabled {
+    cursor: not-allowed;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-tertiary);
+    border-color: var(--fill-quarternary);
+    filter: none;
+}
+
+[id^="beaver-pane-"] .variant-solid.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-solid .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-solid.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-solid.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-solid svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Button: Surface variant - refined from existing CSS */
+[id^="beaver-pane-"] .variant-surface {
+    cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-secondary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-surface:hover {
+    color: var(--fill-primary);
+    background-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .variant-surface:disabled {
+    cursor: not-allowed;
+    background-color: var(--fill-quinary);
+    color: var(--fill-tertiary);
+    border-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .variant-surface.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-surface .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-surface.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-surface.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-surface svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Button: Outline variant */
+[id^="beaver-pane-"] .variant-outline {
+    cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-outline:hover {
+    /* color: var(--fill-primary); */
+    /* border-color: var(--fill-tertiary); */
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .variant-outline:disabled {
+    cursor: not-allowed;
+    color: var(--fill-tertiary);
+    border-color: var(--fill-quarternary);
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .variant-outline.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-outline .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-outline.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-outline.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-outline svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Button: Subtle variant */
+[id^="beaver-pane-"] .variant-subtle {
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--fill-senary);
+    color: var(--fill-secondary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-subtle:hover {
+    color: var(--fill-primary);
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .variant-subtle:disabled {
+    cursor: not-allowed;
+    color: var(--fill-tertiary);
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .variant-subtle.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-subtle .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-subtle.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-subtle.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-subtle svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Button: Ghost variant */
+[id^="beaver-pane-"] .variant-ghost {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-ghost:hover {
+    /* color: var(--fill-primary); */
+    background-color: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .variant-ghost:disabled {
+    cursor: not-allowed;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .variant-ghost:disabled:hover {
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .variant-ghost.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-ghost .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-ghost.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-ghost.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-ghost svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+/* Updated IconButton class - compatible with the Ghost variant */
+[id^="beaver-pane-"] .icon-button {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    transition: all 0.2s ease-in-out;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    align-items: center;
+    padding: 4px;
+    display: inline-flex;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .icon-button svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+[id^="beaver-pane-"] .icon-button:hover {
+    color: var(--fill-primary);
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .icon-button:disabled {
+    color: var(--fill-tertiary);
+    cursor: not-allowed;
+}
+
+[id^="beaver-pane-"] .icon-button:disabled:hover {
+    color: var(--fill-tertiary);
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .source-button {
+    padding-right: 0.5rem;
+    line-height: 1.2;
+    font-size: 0.85rem;
+}
+
+[id^="beaver-pane-"] .source-citation {
+    background: var(--fill-quarternary);
+    padding-right: 0.35em;
+    padding-left: 0.35em;
+    border-radius: 0.5em;
+    border: 1px solid var(--fill-quarternary);
+    color: var(--fill-secondary);
 }
