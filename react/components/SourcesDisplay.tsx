@@ -26,19 +26,21 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                         </div>
 
                         {/* Right column */}
-                        <div className="flex flex-col justify-between items-center">
+                        <div className="flex flex-col justify-between w-full min-w-0">
                             {/* Right top section */}
-                            <div className="flex flex-row w-full items-center">
+                            <div className="flex flex-row w-full items-center min-w-0">
                                 
-                                <div className="flex-1 p-2 inline-flex">
+                                <div className="flex flex-1 min-w-0 p-2">
                                     {source.icon &&
-                                        <span className="mr-2" style={{ transform: 'translateY(-2px)' }}>
+                                        <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                             <CSSItemTypeIcon className="scale-85" itemType={source.icon} />
                                         </span>
                                     }
-                                    {source.citation}
+                                    <span className="truncate">
+                                        {source.citation}
+                                    </span>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-shrink-0">
                                     <Button
                                         variant="outline"
                                         className="text-xs py-1 px-2 scale-90"
@@ -65,7 +67,8 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                             </div>
 
                             {/* Right bottom section */}
-                            <div className="flex-1 px-2 text-sm font-color-secondary">
+                            <div className="flex-1 px-2 text-sm font-color-secondary
+                                            min-w-0 overflow-hidden text-ellipsis">
                                 {source.reference}
                             </div>
                         </div>
