@@ -134,16 +134,20 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
 
     const handleOpen = async () => {
         if (currentSource.type === 'zotero_item' && item) {
-            await openPDFInNewWindow(item);
+            if (item.isNote()) {
+                await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            } else {
+                await openPDFInNewWindow(item);
+            }
         }
         setPreviewedSource(null);
     };
 
     // Determine if the PDF can be opened
-    const canOpenPDF = isZoteroItem && (
+    const canOpen = isZoteroItem && (
         item.isPDFAttachment() ||
-        (item.isRegularItem() && 
-         item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment()))
+        (item.isRegularItem() && item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment())) ||
+        item.isNote()
     );
 
     // Render appropriate content based on attachment type
@@ -197,7 +201,7 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                         <Button
                             variant="ghost"
                             onClick={handleOpen}
-                            disabled={!canOpenPDF}
+                            disabled={!canOpen}
                         >
                             <ZoteroIcon 
                                 icon={ZOTERO_ICONS.OPEN} 
