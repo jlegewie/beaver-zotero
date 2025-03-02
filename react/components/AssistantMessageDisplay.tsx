@@ -134,7 +134,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                             rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
                             className="text-sm"
                         >
-                            {threadSourcesWithCitations.length} Source{threadSourcesWithCitations.length === 1 ? '' : 's'}
+                            {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
                         </Button>
                     )}
                 </div>
