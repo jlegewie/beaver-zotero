@@ -4,7 +4,10 @@ import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
 import { getZoteroItem } from "../utils/sourceUtils";
+import { truncateText } from "../utils/stringUtils";
 
+const MAX_NOTE_TITLE_LENGTH = 20;
+const MAX_NOTE_CONTENT_LENGTH = 150;
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
@@ -50,15 +53,21 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
                 if(!item) return null;
                 const parent = item.parentItem;
                 // Format in-text citations
-                const citation = getAuthorYearCitation(parent || item, cslEngine);
+                const citation = item.isNote()
+                    ? `Note: ${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}`
+                    : getAuthorYearCitation(parent || item, cslEngine);
                 // Format reference
-                const reference = Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [parent || item], "text").trim();
+                const reference = item.isNote()
+                    // @ts-ignore unescapeHTML exists
+                    ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
+                    // ? truncateText(item.getNote())
+                    : Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [parent || item], "text").trim();
                 // Return formatted source
                 return {
                     ...source,
                     citation: citation,
                     numericCitation: String(index + 1),
-                    reference: reference,
+                    reference: reference.replace(/\n/g, '<br />'),
                 } as SourceWithCitations;
             }
             if (source.type === 'file') {
