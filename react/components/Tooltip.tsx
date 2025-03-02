@@ -136,6 +136,8 @@ const Tooltip: React.FC<TooltipProps> = ({
     // Handle mouse enter/leave for the anchor element
     const handleMouseEnter = () => {
         if (disabled) return;
+        // Don't show tooltip if content is empty
+        if (content === null || content === undefined || content === '') return;
         setIsOpen(true);
     };
     
