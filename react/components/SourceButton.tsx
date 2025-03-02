@@ -62,7 +62,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
             if (source.icon) {
                 const iconElement = source.icon ? (
-                    <span className={disabled ? "scale-80 opacity-50" : "scale-80"}>
+                    <span className="scale-80">
                         <CSSItemTypeIcon itemType={source.icon} />
                     </span>
                 ) : null
@@ -152,7 +152,11 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 ref={ref}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
-                className={`variant-outline source-button ${className || ''}`}
+                className={
+                    `variant-outline source-button
+                    ${className || ''}
+                    ${disabled ? 'disabled-but-styled' : ''}
+                `}
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();

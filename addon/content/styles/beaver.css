@@ -1059,3 +1059,22 @@
     border: 1px solid var(--fill-quarternary);
     color: var(--fill-secondary);
 }
+
+/* Make disabled buttons look normal */
+[id^="beaver-pane-"] .disabled-but-styled {
+    cursor: not-allowed;
+    pointer-events: none;
+    /* Prevents hover effects */
+}
+
+[id^="beaver-pane-"] .variant-outline.disabled-but-styled:disabled {
+    cursor: not-allowed;
+    color: var(--fill-secondary);
+    border-color: var(--fill-quarternary);
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .variant-outline.disabled-but-styled:hover {
+    cursor: not-allowed;
+    background-color: transparent;
+}
