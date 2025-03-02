@@ -63,7 +63,7 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             const reference = getBibliography(parentItem);
             // @ts-ignore unescapeHTML exists
             const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            const noteData = `# Note (id: ${id})\nType of parent: ${type}\nReference of parent: ${reference}\nNote Content: ${content}`;
+            const noteData = `# Note (id: ${id})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
             return [{ type: 'text', text: noteData }]
         // Top-level attachment
         } else if (!parentItem && item.isAttachment()) {
