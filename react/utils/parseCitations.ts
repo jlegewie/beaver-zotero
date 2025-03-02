@@ -120,7 +120,8 @@ function parseCitations(
             
             // Create link URL using createOpenPDFURL
             const page = pages.length > 0 ? pages[0] : null;
-            const url = createOpenPDFURL(item, page);
+            let url = createOpenPDFURL(item, page);
+            if (item.isNote()) url = url.replace('open-pdf', 'open-note');
             
             // Label for the citation link
             let label = '';
