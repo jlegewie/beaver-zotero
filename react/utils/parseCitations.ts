@@ -109,14 +109,14 @@ function parseCitations(
             // Get the item from Zotero for citation formatting
             const item = Zotero.Items.getByLibraryAndKey(libraryId, itemKey);
             if (!item) continue;
-            const parentItem = item?.parentItem;
             
             // Format citation using CSL
-            const pageLocator = pageString ? pageString : null;
-            const cslCitation = {
-                citationItems: [{ id: parentItem?.id || item.id, locator: pageLocator }],
-                properties: { inText: true }
-            };
+            // const parentItem = item.isNote() ? item : item?.parentItem;
+            // const pageLocator = pageString ? pageString : null;
+            // const cslCitation = {
+            //     citationItems: [{ id: parentItem?.id || item.id, locator: pageLocator }],
+            //     properties: { inText: true }
+            // };
             
             // Create link URL using createOpenPDFURL
             const page = pages.length > 0 ? pages[0] : null;
