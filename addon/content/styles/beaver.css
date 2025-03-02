@@ -202,6 +202,7 @@
 [id^="beaver-pane-"] .flex-col { flex-direction: column; }
 [id^="beaver-pane-"], [id^="beaver-pane-"] .flex-1 { flex: 1; }
 [id^="beaver-pane-"] .flex-wrap { flex-wrap: wrap; }
+[id^="beaver-pane-"] .flex-shrink-0 { flex-shrink: 0 }
 [id^="beaver-pane-"] .items-center { align-items: center; }
 [id^="beaver-pane-"] .items-start { align-items: flex-start; }
 [id^="beaver-pane-"] .justify-between { justify-content: space-between; }
@@ -215,6 +216,7 @@
 [id^="beaver-pane-"] .min-h-0 { min-height: 0; }
 [id^="beaver-pane-"] .relative { position: relative; }
 [id^="beaver-pane-"] .fixed { position: fixed; }
+[id^="beaver-pane-"] .truncate { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 
 [id^="beaver-pane-"] .absolute { position: absolute; }
 [id^="beaver-pane-"] .left-1\/2 { left: 50%; }
