@@ -210,6 +210,7 @@
 [id^="beaver-pane-"] .h-screen { height: 100vh; }
 [id^="beaver-pane-"] .w-full { width: 100%; }
 [id^="beaver-pane-"] .w-screen { width: 100vw; }
+[id^="beaver-pane-"] .fit-content { width: fit-content; }
 [id^="beaver-pane-"] .min-w-0 { min-width: 0; }
 [id^="beaver-pane-"] .min-h-0 { min-height: 0; }
 [id^="beaver-pane-"] .relative { position: relative; }
@@ -331,8 +332,9 @@
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
 
-[id^="beaver-pane-"] .scale-70 { transform: scale(0.70); }
+[id^="beaver-pane-"] .scale-70 { transform: scale(0.7); }
 [id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
+[id^="beaver-pane-"] .scale-85 { transform: scale(0.85); }
 [id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
 [id^="beaver-pane-"] .scale-11 { transform: scale(1.1); }
 [id^="beaver-pane-"] .scale-12 { transform: scale(1.2); }
@@ -346,6 +348,7 @@
 [id^="beaver-pane-"] .overflow-y-auto { overflow-y: auto; }
 [id^="beaver-pane-"] .overflow-x-auto { overflow-x: auto; }
 [id^="beaver-pane-"] .overflow-hidden { overflow: hidden; }
+[id^="beaver-pane-"] .text-ellipsis { text-overflow: ellipsis; }
 
 /* Opacity */
 [id^="beaver-pane-"] .opacity-0 { opacity: 0; }
@@ -422,7 +425,7 @@
 
 [id^="beaver-pane-"] .markdown a[href^="zotero"] {
     cursor: pointer;
-    font-size: 0.75em;
+    font-size: 0.8em;
     margin-left: -0.1em;
     text-decoration: none;
     background: var(--fill-quarternary);
