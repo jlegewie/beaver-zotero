@@ -25,6 +25,8 @@ export interface TooltipProps {
     usePortal?: boolean;
     /** Whether to show the tooltip on hover */
     width?: string;
+    /** Whether to parse HTML in the content (use with caution) */
+    allowHtml?: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     disabled = false,
     usePortal = false,
     width,
+    allowHtml = false,
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
     const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
@@ -157,6 +160,22 @@ const Tooltip: React.FC<TooltipProps> = ({
         </div>
     );
     
+    // Render content with HTML support if enabled
+    const renderContent = () => {
+        if (typeof content === 'string' && allowHtml) {
+            return <div dangerouslySetInnerHTML={{ __html: content }} />;
+        }
+        return content;
+    };
+    
+    // Render secondary content with HTML support if enabled
+    const renderSecondaryContent = () => {
+        if (typeof secondaryContent === 'string' && allowHtml) {
+            return <div dangerouslySetInnerHTML={{ __html: secondaryContent }} />;
+        }
+        return secondaryContent;
+    };
+    
     // Tooltip element
     const tooltipElement = isOpen && (
         <div
@@ -180,8 +199,8 @@ const Tooltip: React.FC<TooltipProps> = ({
                 ${singleLine ? 'flex items-center' : ''}
                 ${singleLine ? 'single-line' : ''}
             `}>
-                <div className={`text-base font-color-secondary ${singleLine ? 'single-line' : ''}`}>
-                    {content}
+                <div className={`text-base font-color-secondary overflow-hidden text-ellipsis ${singleLine ? 'single-line' : ''}`}>
+                    {renderContent()}
                 </div>
                 {secondaryContent && (
                     <div className={`
@@ -189,7 +208,7 @@ const Tooltip: React.FC<TooltipProps> = ({
                         ${singleLine ? 'ml-3' : 'mt-1'}
                         ${singleLine ? 'single-line' : ''}
                     `}>
-                        {secondaryContent}
+                        {renderSecondaryContent()}
                     </div>
                 )}
             </div>
