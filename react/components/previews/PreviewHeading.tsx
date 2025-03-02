@@ -13,7 +13,7 @@ const PreviewHeading: React.FC<PreviewHeadingProps> = ({ source, item }) => {
             <span className="fit-content">
                 {<CSSItemTypeIcon itemType={item ? item.getItemTypeIconName() : source.icon} className="scale-85" />}
             </span>
-            <span className="ml-2 overflow-hidden text-ellipsis">{source.name}</span>
+            <span className="ml-2 truncate">{source.name}</span>
         </span>
     );
 };
