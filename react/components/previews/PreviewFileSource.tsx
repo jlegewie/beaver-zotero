@@ -1,6 +1,7 @@
 import React from 'react';
 import { CSSItemTypeIcon } from '../icons';
 import { FileSource } from '../../types/sources';
+import PreviewHeading from './PreviewHeading';
 
 interface PreviewFileSourceProps {
     source: FileSource;
@@ -9,11 +10,8 @@ interface PreviewFileSourceProps {
 const PreviewFileSource: React.FC<PreviewFileSourceProps> = ({ source }) => {
     return (
         <div className="flex flex-col gap-2">
-            <span className="flex items-center font-color-primary">
-                {<CSSItemTypeIcon itemType={source.icon} />}
-                <span className="ml-2">{source.name}</span>
-            </span>
-            <p className="text-base my-2">{source.filePath}</p>
+            <PreviewHeading source={source} />
+            <p className="text-base my-2 overflow-hidden text-ellipsis">{source.filePath}</p>
         </div>
     );
 };

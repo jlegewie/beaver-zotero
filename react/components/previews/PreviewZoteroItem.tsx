@@ -8,6 +8,7 @@ import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroSource } from '../../types/sources';
+import PreviewHeading from './PreviewHeading';
 
 interface PreviewZoteroItemProps {
     source: ZoteroSource;
@@ -75,11 +76,8 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
 
     return (
         <>
-            <span className="flex items-center font-color-primary">
-                {<CSSItemTypeIcon itemType={source.icon} />}
-                <span className="ml-2">{source.name}</span>
-            </span>
-            <p className="text-base my-2">{item.getDisplayTitle()}</p>
+            <PreviewHeading source={source} />                
+            <p className="text-base my-2 overflow-hidden text-ellipsis">{item.getDisplayTitle()}</p>
             
             {/* Combined Attachments and Notes Section */}
             <div className="mt-3">
@@ -122,7 +120,9 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
                                 disabled={!validItemIds[att.id]}
                             />
                             
-                            <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={att.getItemTypeIconName()} /></span>
+                            <span className="mr-1 fit-content">
+                                <CSSItemTypeIcon className="scale-85" itemType={att.getItemTypeIconName()} />
+                            </span>
                             {truncateText(att.getDisplayTitle(), 32)}
                         </div>
                     ))}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ZoteroSource } from '../../types/sources';
 import { CSSItemTypeIcon } from '../icons';
-
+import PreviewHeading from './PreviewHeading';
 interface PreviewZoteroSourceProps {
     source: ZoteroSource;
     item: Zotero.Item;
@@ -24,10 +24,7 @@ const PreviewZoteroSource: React.FC<PreviewZoteroSourceProps> = ({ source, item 
 
     return (
         <>
-            <span className="flex items-center font-color-primary">
-                {<CSSItemTypeIcon itemType={item.getItemTypeIconName()} />}
-                <span className="ml-2">{source.name}</span>
-            </span>
+            <PreviewHeading source={source} item={item}/>
             <p className="text-base my-2">{formatContent(item)}</p>
         </>
     );

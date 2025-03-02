@@ -32,8 +32,8 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                                 
                                 <div className="flex-1 p-2 inline-flex">
                                     {source.icon &&
-                                        <span className="scale-90 mr-2" style={{ transform: 'translateY(-2px)' }}>
-                                            <CSSItemTypeIcon itemType={source.icon} />
+                                        <span className="mr-2" style={{ transform: 'translateY(-2px)' }}>
+                                            <CSSItemTypeIcon className="scale-85" itemType={source.icon} />
                                         </span>
                                     }
                                     {source.citation}
