@@ -50,4 +50,5 @@ export const ZOTERO_ICONS = {
     CROSS: '16/universal/cross.svg',
     PLUS: '16/universal/plus.svg',
     MINUS: '16/universal/minus.svg',
+    SHOW_ITEM: '16/universal/show-item.svg',
 } as const; 

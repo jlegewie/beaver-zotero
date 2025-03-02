@@ -3,6 +3,8 @@ import { SourceWithCitations } from '../types/sources';
 import { openSource, revealSource } from '../utils/sourceUtils';
 import { CSSItemTypeIcon } from './icons';
 import Button from './Button';
+import { ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { ZoteroIcon } from './icons/ZoteroIcon';
 
 interface SourcesDisplayProps {
     sources: SourceWithCitations[];
@@ -42,6 +44,10 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                                         className="text-xs py-1 px-2 scale-90"
                                         onClick={() => revealSource(source)}
                                     >
+                                        <ZoteroIcon 
+                                            icon={ZOTERO_ICONS.SHOW_ITEM} 
+                                            size={12}
+                                        />
                                         Reveal
                                     </Button>
                                     <Button
@@ -49,6 +55,10 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                                         className="text-xs py-1 px-2 scale-90"
                                         onClick={() => openSource(source)}
                                     >
+                                        <ZoteroIcon 
+                                            icon={ZOTERO_ICONS.OPEN} 
+                                            size={12}
+                                        />
                                         Open
                                     </Button>
                                 </div>
