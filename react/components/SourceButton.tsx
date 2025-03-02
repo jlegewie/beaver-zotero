@@ -62,7 +62,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
             if (source.icon) {
                 const iconElement = source.icon ? (
-                    <span className={disabled ? "mr-015 scale-80 opacity-50" : "mr-015 scale-80"}>
+                    <span className={disabled ? "scale-80 opacity-50" : "scale-80"}>
                         <CSSItemTypeIcon itemType={source.icon} />
                     </span>
                 ) : null
