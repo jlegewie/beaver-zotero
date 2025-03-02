@@ -197,7 +197,7 @@ export async function openSource(source: Source) {
         // Notes
         if (item.isNote()) {
             // @ts-ignore selectItem exists
-            Zotero.getActiveZoteroPane().itemsView.selectItem(item.id)
+            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
         }
 
     } else if (source.type === 'file') {
