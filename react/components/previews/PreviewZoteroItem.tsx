@@ -6,7 +6,7 @@ import { updateSourceChildItemKeysAtom } from '../../atoms/input';
 import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { truncateText } from '../../utils/truncateText';
+import { truncateText } from '../../utils/stringUtils';
 import { ZoteroSource } from '../../types/sources';
 
 interface PreviewZoteroItemProps {

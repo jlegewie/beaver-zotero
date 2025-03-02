@@ -1,4 +1,4 @@
-import { truncateText } from "../../react/utils/truncateText";
+import { truncateText } from "../../react/utils/stringUtils";
 
 export interface ZoteroStyle {
     getCiteProc(locale: string, format: 'text' | 'html'): CSLEngine;
