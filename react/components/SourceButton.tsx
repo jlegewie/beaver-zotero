@@ -7,8 +7,11 @@ import { removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedSourceAtom } from '../atoms/ui'
+import { truncateText } from '../utils/stringUtils'
 import { CancelIcon } from './icons'
 import Button from './Button'
+
+const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 import { atom } from 'jotai'
@@ -172,7 +175,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 } */}
                 {getIconElement(source, isHovered, disabled)}
                 <span className={!isValid ? 'font-color-red' : undefined}>
-                    {source.name}
+                    {truncateText(source.name, MAX_SOURCEBUTTON_TEXT_LENGTH)}
                 </span>
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
                 {/* {!disabled && (
