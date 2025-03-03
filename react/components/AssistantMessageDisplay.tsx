@@ -66,8 +66,38 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     }
 
     const handleCopy = async () => {
-        const { text: parsedText } = parseCitations(message.content, threadSourcesWithCitations);
-        await copyToClipboard(parsedText, {
+        // Format citations for human-readable clipboard content
+        let formattedContent = message.content;
+        
+        // Replace citation elements with human-readable text
+        // <citation id="1-ABC123" pages="3-5"></citation> becomes [Author, Year, p. 3-5]
+        formattedContent = formattedContent.replace(
+            /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)(?:pages="([^"]+)")?(?:[^>]*?)\s*(?:\/>|>.*?<\/citation>)/g,
+            (match, id, pages) => {
+                // Parse the id to get libraryID and itemKey
+                id = id.replace('user-content-', '');
+                const [libraryIDString, itemKey] = id.includes('-') ? id.split('-') : [id, id];
+                const libraryID = parseInt(libraryIDString) || 1;
+                
+                // Find the source in the sources array
+                const source = threadSourcesWithCitations.find(
+                    s => s.type === 'zotero_item' && 
+                    (s.itemKey === itemKey || s.childItemKeys?.includes(itemKey)) && 
+                    s.libraryID === libraryID
+                );
+                
+                if (!source) {
+                    return match; // If no source found, keep original
+                }
+                
+                // Format the citation
+                return pages 
+                    ? `[${source.citation}, p. ${pages}]` 
+                    : `[${source.citation}]`;
+            }
+        );
+        
+        await copyToClipboard(formattedContent, {
             onSuccess: () => {
                 setJustCopied(true);
                 setTimeout(() => setJustCopied(false), 600);
