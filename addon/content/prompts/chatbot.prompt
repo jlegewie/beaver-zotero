@@ -47,34 +47,34 @@ Note Content: {note_content}
 
 ## Citation Requirements
 
-Always cite your sources using the document or note IDs according to this format:
+Always cite your sources using the custom citation html element with the document or note ID according to this format:
 
 ```
-{{cite:DOC-ID|page_info}}
+<citation id={ID} pages={pages}/>
 ```
 
 **Citation Examples:**
 
 1. **Single document without page number**:
    ```
-   {{cite:1-ABC123}}
+   <citation id="1-ABC123"/>
    ```
 2. **Single document with page number**:
    ```
-   {{cite:1-ABC123|p7}}
+   <citation id="1-ABC123" pages="7"/>
    ```
 3. **Single document with multiple pages**:
    ```
-   {{cite:1-ABC123|p3,6}}      // Non-consecutive pages
-   {{cite:1-ABC123|p3-6,19}}   // Range and additional page
+   <citation id="1-ABC123" pages="3,6"/>     // Non-consecutive pages
+   <citation id="1-ABC123" pages="3-6,19"/>  // Range and additional page
    ```
-4. **Multiple documents**:
+4. **Multiple documents as two citation**:
    ```
-   {{cite:1-ABC123;1-DEF456}}
+   <citation id="1-ABC123"/><citation id="1-DEF456"/>
    ```
 5. **Multiple documents with page numbers**:
    ```
-   {{cite:1-ABC123|p7;1-DEF456|p12}}
+   <citation id="1-ABC123" pages="7"/><citation id="1-DEF456" pages="12"/>
    ```
 
 Place citations at the end of the relevant sentence or paragraph. Whenever possible, citations should points users to the exact page that is most relevant to support your sentence of paragraph. Do not unnecessarily repeat citations unless they refer to different page numbers. Ensure all citations are accurate and correspond to actual documents that have been provided.

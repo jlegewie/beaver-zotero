@@ -425,10 +425,10 @@
     text-decoration: underline;
 }
 
-[id^="beaver-pane-"] .markdown a[href^="zotero"] {
+[id^="beaver-pane-"] .markdown a.zotero-citation {
     cursor: pointer;
     font-size: 0.8em;
-    margin-left: -0.1em;
+    margin-left: 0.25em;
     text-decoration: none;
     background: var(--fill-quarternary);
     padding-right: 0.35em;
@@ -439,7 +439,7 @@
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .markdown a[href^="zotero"]:hover {
+[id^="beaver-pane-"] .markdown a.zotero-citation:hover {
     color: var(--fill-primary);
     border: 1px solid var(--fill-tertiary);
 }

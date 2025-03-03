@@ -15,7 +15,7 @@ import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import { parseCitations } from '../utils/parseCitations';
 import Button from './Button';
 import SourcesDisplay from './SourcesDisplay';
-
+import { SourceWithCitations } from '../types/sources';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -99,7 +99,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
     };
 
-    const { text: parsedText, citations, sources: citedSources } = parseCitations(message.content, threadSourcesWithCitations);
+    const citedSources: SourceWithCitations[] = [];
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
@@ -108,7 +108,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={parsedText} />
+                <MarkdownRenderer className="markdown" content={message.content} />
                 {message.status === 'in_progress' && message.content == '' && 
                     <Spinner />
                 }

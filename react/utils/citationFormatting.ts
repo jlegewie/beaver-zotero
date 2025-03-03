@@ -116,17 +116,30 @@ export function formatReference(
 * @param cslEngine CSL engine
 * @returns Formatted citation and reference
 */
-export function citationFromItem(
+export function citationDataFromItem(
     item: Zotero.Item,
-    cslEngine: CSLEngine
+    cslEngine?: CSLEngine | null,
+    style = 'http://www.zotero.org/styles/chicago-author-date',
+    locale = 'en-US'
 ) : { citation: string, reference: string, url: string } {
     const parent = item.parentItem;
     const itemToFormat = item.isNote() ? item : (parent || item);
-    return {
-        citation: formatCitation(itemToFormat, cslEngine),
-        reference: formatReference(itemToFormat, cslEngine).replace(/\n/g, '<br />'),
-        url: createOpenPDFURL(item)
-    };
+    
+    // Get the CSL engine
+    const engineToUse = cslEngine || getCslEngine(style, locale);
+    const shouldFreeEngine = !cslEngine;
+    
+    try {
+        return {
+            citation: formatCitation(itemToFormat, engineToUse),
+            reference: formatReference(itemToFormat, engineToUse).replace(/\n/g, '<br />'),
+            url: createOpenPDFURL(item)
+        };
+    } finally {
+        if (shouldFreeEngine) {
+            engineToUse.free();
+        }
+    }
 }
 
 /**
@@ -145,7 +158,7 @@ export function citationDataFromSource(
         if(!item) return null;
         
         // Format citation and reference
-        const { citation, reference, url } = citationFromItem(item, cslEngine);
+        const { citation, reference, url } = citationDataFromItem(item, cslEngine);
         
         // Return formatted source
         return {
