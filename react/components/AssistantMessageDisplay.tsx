@@ -66,7 +66,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     }
 
     const handleCopy = async () => {
-        await copyToClipboard(message.content, {
+        const { text: parsedText } = parseCitations(message.content, threadSourcesWithCitations);
+        await copyToClipboard(parsedText, {
             onSuccess: () => {
                 setJustCopied(true);
                 setTimeout(() => setJustCopied(false), 600);
