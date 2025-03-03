@@ -1,5 +1,6 @@
 import { ZoteroStyle } from "../../src/utils/citations";
 import { Source } from "../types/sources";
+import { createOpenPDFURL } from "./createOpenPDFURL";
 import { getZoteroItem } from "./sourceUtils";
 import { truncateText } from "./stringUtils";
 
@@ -118,12 +119,13 @@ export function formatReference(
 export function citationFromItem(
     item: Zotero.Item,
     cslEngine: CSLEngine
-) : { citation: string, reference: string } {
+) : { citation: string, reference: string, url: string } {
     const parent = item.parentItem;
     const itemToFormat = item.isNote() ? item : (parent || item);
     return {
         citation: formatCitation(itemToFormat, cslEngine),
-        reference: formatReference(itemToFormat, cslEngine).replace(/\n/g, '<br />')
+        reference: formatReference(itemToFormat, cslEngine).replace(/\n/g, '<br />'),
+        url: createOpenPDFURL(item)
     };
 }
 
@@ -136,25 +138,27 @@ export function citationFromItem(
 export function citationDataFromSource(
     source: Source,
     cslEngine: CSLEngine
-) : { citation: string, reference: string } | null {
+) : { citation: string, reference: string, url: string } | null {
     if (source.type === 'zotero_item') {
         // Get item and parent item
         const item = getZoteroItem(source);
         if(!item) return null;
         
         // Format citation and reference
-        const { citation, reference } = citationFromItem(item, cslEngine);
+        const { citation, reference, url } = citationFromItem(item, cslEngine);
         
         // Return formatted source
         return {
             citation: citation,
             reference: reference,
+            url: url
         } ;
     }
     if (source.type === 'file') {
         return {
             citation: 'File',
             reference: source.filePath,
+            url: `file://${source.filePath}`
         };
     }
     return null;

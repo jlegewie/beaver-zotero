@@ -42,4 +42,5 @@ export type SourceWithCitations = Source & {
     reference: string;       // Reference for the source
     citation: string;        // Citation for the source
     numericCitation: string; // Numeric citation for the source
+    url: string;             // URL for the source
 }
