@@ -1,6 +1,14 @@
 export function createOpenPDFURL(item: Zotero.Item, page: number | null = null) {
     
-    const baseURL = "zotero://open-pdf/";
+    // Determine the base URL based on the item type
+    let baseURL;
+    if (item.isFileAttachment()) {
+        baseURL = "zotero://open-pdf/";
+    } else if (item.isNote()) {
+        baseURL = "zotero://open-note/";
+    } else {
+        baseURL = "zotero://select/";
+    }
     let url;
     
     // Check if item is in a group library
