@@ -488,8 +488,8 @@
 }
 
 [id^="beaver-pane-"] .markdown p:not(:last-child) {
-    margin-top: 0px;
-    margin-bottom: 15px;
+    margin-top: 0px !important;
+    margin-bottom: 0.5em !important;
 }
 
 [id^="beaver-pane-"] .markdown ul,
