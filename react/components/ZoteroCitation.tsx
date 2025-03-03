@@ -10,7 +10,7 @@ const TOOLTIP_WIDTH = '250px';
 
 // Define prop types for the component
 interface ZoteroCitationProps {
-    id: string;           // Format: "libraryID_itemKey"
+    id: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization)
     pages?: string;       // Format: "3-6,19"
     consecutive?: boolean;
     children?: React.ReactNode;
@@ -29,6 +29,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const authorYearFormat = getPref("citationFormat") !== "numeric";
     
     // Parse the id to get libraryID and itemKey
+    id = id.replace('user-content-', '');
     const [libraryIDString, itemKey] = id.includes('-') ? id.split('-') : [id, id];
     const libraryID = parseInt(libraryIDString) || 1;
 
