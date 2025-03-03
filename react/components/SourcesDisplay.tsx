@@ -2,7 +2,7 @@ import React from 'react';
 import { SourceWithCitations } from '../types/sources';
 import { openSource, revealSource } from '../utils/sourceUtils';
 import { CSSItemTypeIcon } from './icons';
-import Button from './Button';
+import IconButton from './IconButton';
 import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 
@@ -41,28 +41,22 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
                                     </span>
                                 </div>
                                 <div className="flex gap-2 flex-shrink-0">
-                                    <Button
+                                    <IconButton
+                                        icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
                                         variant="outline"
-                                        className="text-xs py-1 px-2 scale-90"
                                         onClick={() => revealSource(source)}
-                                    >
-                                        <ZoteroIcon 
-                                            icon={ZOTERO_ICONS.SHOW_ITEM} 
-                                            size={12}
-                                        />
-                                        Reveal
-                                    </Button>
-                                    <Button
+                                        ariaLabel="Reveal source"
+                                        title="Reveal"
+                                        className="scale-90 flex"
+                                    />
+                                    <IconButton
+                                        icon={() => <ZoteroIcon icon={ZOTERO_ICONS.OPEN} size={10} />}
                                         variant="outline"
-                                        className="text-xs py-1 px-2 scale-90"
                                         onClick={() => openSource(source)}
-                                    >
-                                        <ZoteroIcon 
-                                            icon={ZOTERO_ICONS.OPEN} 
-                                            size={12}
-                                        />
-                                        Open
-                                    </Button>
+                                        ariaLabel="Open source"
+                                        title="Open"
+                                        className="scale-90 flex"
+                                    />
                                 </div>
                             </div>
 
