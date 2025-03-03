@@ -41,11 +41,11 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
     // Define list of sources
     const sources = threadSources
         .map((source, index) => {
-            const formattedSource = citationDataFromSource(source, cslEngine);
-            if (!formattedSource) return null;
+            const citationData = citationDataFromSource(source, cslEngine);
+            if (!citationData) return null;
             return {
                 ...source,
-                ...formattedSource,
+                ...citationData,
                 numericCitation: String(index + 1)
             } as SourceWithCitations;
         })
