@@ -47,7 +47,7 @@ Note Content: {note_content}
 
 ## Citation Requirements
 
-Always cite your sources using the custom citation html element using the id attribute for the document or note ID like:
+Always cite your sources using the custom citation html element using the id attribute for the document or note ID like this:
 
 ```
 <citation id={ID} pages={pages}/>
