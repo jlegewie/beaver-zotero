@@ -30,16 +30,23 @@ export const isStreamingAtom = atom((get) => {
 });
 
 // Derived atom for thread sources with citations
-export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
-    const threadSources = get(threadSourcesAtom)
-        .sort((a, b) => a.timestamp - b.timestamp);
+export const threadFlattenedSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
+    const flatThreadSources = get(threadSourcesAtom)
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .flatMap((source) => {
+            if (source.type === 'zotero_item' && source.childItemKeys && source.childItemKeys.length > 0) {
+                return source.childItemKeys.map(key => ({...source, itemKey: key}));
+            }
+            return [source];
+        });
+
     // Citation preferences
     const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
     const locale = getPref("citationLocale") || 'en-US';
     // CSL engine for in-text citations
     const cslEngine = getCslEngine(style, locale);
     // Define list of sources
-    const sources = threadSources
+    const sources = flatThreadSources
         .map((source, index) => {
             const citationData = citationDataFromSource(source, cslEngine);
             if (!citationData) return null;

@@ -1,10 +1,10 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
-import { isStreamingAtom, threadSourcesWithCitationsAtom } from '../atoms/threads';
+import { isStreamingAtom, threadFlattenedSourcesWithCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
@@ -29,7 +29,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const threadSourcesWithCitations = useAtomValue(threadSourcesWithCitationsAtom);
+    const threadSourcesWithCitations = useAtomValue(threadFlattenedSourcesWithCitationsAtom);
     
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -99,7 +99,37 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
     };
 
-    const citedSources: SourceWithCitations[] = [];
+    // Extract citation IDs from message content and match with sources in threadSourcesWithCitations
+    const citedSources: SourceWithCitations[] = useMemo(() => {
+        if (message.status !== 'completed' || !message.content) {
+            return [];
+        }
+
+        // Extract all citation IDs from the message content
+        const citationIdSet = new Set<string>();
+        const citationRegex = /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)\s*(?:\/>|><\/citation>)/g;
+        
+        let match;
+        while ((match = citationRegex.exec(message.content)) !== null) {
+            if (match[1]) {
+                citationIdSet.add(match[1]);
+            }
+        }
+
+        // Filter threadSourcesWithCitations to only include those with IDs in citationIdSet
+        const sourcesWithCitations = threadSourcesWithCitations.filter((source: SourceWithCitations) => {
+            // For Zotero items, check if the ID matches the pattern libraryID-itemKey
+            if (source.type === 'zotero_item') {
+                const sourceId = `${source.libraryID}-${source.itemKey}`;
+                const sourceChildrenIds = source.childItemKeys.map((key) => `${source.libraryID}-${key}`);
+                return citationIdSet.has(sourceId) || sourceChildrenIds.some((id) => citationIdSet.has(id));
+            }
+            // For other source types, check if the ID is in the set
+            return citationIdSet.has(source.id);
+        });
+
+        return sourcesWithCitations;
+    }, [message.status, message.content, threadSourcesWithCitations]);
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
@@ -124,7 +154,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             <div
                 className={`
                     flex flex-row items-center pt-2 mr-4 ml-3
-                    ${isLastMessage ? '' : 'hover-fade'}
+                    ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
                     ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1">
