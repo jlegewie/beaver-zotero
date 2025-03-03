@@ -150,6 +150,12 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             checkAttachmentValidity();
         }, [source])
 
+        // Truncate the name and add a count if there are child items
+        let displayName = truncateText(source.name, MAX_SOURCEBUTTON_TEXT_LENGTH);
+        if (source.type === 'zotero_item' && source.childItemKeys.length > 1) {
+            displayName = `${displayName} (${source.childItemKeys.length})`;
+        }
+
         return (
             <button
                 ref={ref}
@@ -175,7 +181,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 } */}
                 {getIconElement(source, isHovered, disabled)}
                 <span className={!isValid ? 'font-color-red' : undefined}>
-                    {truncateText(source.name, MAX_SOURCEBUTTON_TEXT_LENGTH)}
+                    {displayName}
                 </span>
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
                 {/* {!disabled && (
