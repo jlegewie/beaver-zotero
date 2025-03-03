@@ -2,12 +2,7 @@ import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
-import { getAuthorYearCitation, ZoteroStyle } from "../../src/utils/citations";
-import { getZoteroItem } from "../utils/sourceUtils";
-import { truncateText } from "../utils/stringUtils";
-
-const MAX_NOTE_TITLE_LENGTH = 20;
-const MAX_NOTE_CONTENT_LENGTH = 150;
+import { citationDataFromSource, getCslEngine } from "../utils/citationFormatting";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
@@ -42,44 +37,17 @@ export const threadSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) 
     const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
     const locale = getPref("citationLocale") || 'en-US';
     // CSL engine for in-text citations
-    const csl_style: ZoteroStyle = Zotero.Styles.get(style);
-    const cslEngine = csl_style.getCiteProc(locale, 'text');
+    const cslEngine = getCslEngine(style, locale);
     // Define list of sources
     const sources = threadSources
         .map((source, index) => {
-            if (source.type === 'zotero_item') {
-                // Get item and parent item
-                const item = getZoteroItem(source);
-                if(!item) return null;
-                const parent = item.parentItem;
-                // Format in-text citations
-                const citation = item.isNote()
-                    ? `Note: ${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}`
-                    : getAuthorYearCitation(parent || item, cslEngine);
-                // Format reference
-                const reference = item.isNote()
-                    // @ts-ignore unescapeHTML exists
-                    ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
-                    // ? truncateText(item.getNote())
-                    : Zotero.Cite.makeFormattedBibliographyOrCitationList(cslEngine, [parent || item], "text").trim();
-                // Return formatted source
-                return {
-                    ...source,
-                    citation: citation,
-                    numericCitation: String(index + 1),
-                    reference: reference.replace(/\n/g, '<br />'),
-                } as SourceWithCitations;
-            }
-            if (source.type === 'file') {
-                // Return formatted source
-                return {
-                    ...source,
-                    citation: 'File',
-                    numericCitation: String(index + 1),
-                    reference: source.filePath,
-                } as SourceWithCitations;
-            }
-            return null;
+            const formattedSource = citationDataFromSource(source, cslEngine);
+            if (!formattedSource) return null;
+            return {
+                ...source,
+                ...formattedSource,
+                numericCitation: String(index + 1)
+            } as SourceWithCitations;
         })
         .filter(Boolean) as SourceWithCitations[];
     cslEngine.free();
