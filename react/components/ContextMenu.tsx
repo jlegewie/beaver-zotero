@@ -87,6 +87,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+    const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     
     // Block scrolling when menu is open
@@ -234,6 +235,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         } else {
             setFocusedIndex(-1);
         }
+        
+        // Reset hovered index when menu opens/closes
+        setHoveredIndex(-1);
     }, [isOpen, menuItems]);
     
     if (!isOpen) return null;
@@ -261,18 +265,27 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     key={index}
                     role="menuitem"
                     tabIndex={focusedIndex === index ? 0 : -1}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md transition user-select-none ${
-                        item.disabled 
-                        ? 'opacity-50 cursor-not-allowed'
-                        : 'cursor-pointer hover:bg-quarternary'
-                    } ${
-                        focusedIndex === index ? 'bg-quarternary' : ''
-                    }`}
+                    className={`
+                        flex items-center gap-2 px-3 py-2 rounded-md transition user-select-none
+                        ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                        ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-tertiary' : ''}
+                    `}
                     onClick={(e) => {
                         e.stopPropagation(); // Prevent click from reaching parent elements
                         if (!item.disabled) {
                             item.onClick();
                             onClose();
+                        }
+                    }}
+                    onMouseEnter={() => {
+                        if (!item.disabled) {
+                            setHoveredIndex(index);
+                            setFocusedIndex(index); // Also update focus index for keyboard navigation
+                        }
+                    }}
+                    onMouseLeave={() => {
+                        if (hoveredIndex === index) {
+                            setHoveredIndex(-1);
                         }
                     }}
                     onFocus={() => setFocusedIndex(index)}
