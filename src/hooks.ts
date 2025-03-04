@@ -15,6 +15,7 @@ import { getPref } from "./utils/prefs";
 import { ItemService } from "./services/ItemService";
 import eventBus from "../react/eventBus";
 import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
+import { CitationService } from "./services/CitationService";
 
 
 async function onStartup() {
@@ -51,6 +52,11 @@ async function onStartup() {
 		provider = new OpenAIProvider(getPref("openAiApiKey"));
 	}
 	addon.aiProvider = provider;
+	
+	// Initialize Citation Service with caching
+	const citationService = new CitationService(ztoolkit);
+	addon.citationService = citationService;
+	ztoolkit.log("CitationService initialized successfully");
 	
 	// Instantiate item service and store reference
 	const itemService = new ItemService(vectorStore, voyageClient, 'local');
@@ -210,6 +216,12 @@ async function onShutdown(): Promise<void> {
 		}
 		// Clear item service
 		addon.itemService = undefined;
+
+		// Dispose CitationService if it exists
+		if (addon.citationService) {
+			addon.citationService.dispose();
+			addon.citationService = undefined;
+		}
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}

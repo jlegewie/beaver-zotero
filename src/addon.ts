@@ -8,6 +8,7 @@ import { VoyageClient } from "./services/voyage";
 import { ItemService } from "./services/ItemService";
 import { QuickChat } from "./ui/quickChat"
 import { AIProvider } from "./services/OpenAIProvider";
+import { CitationService } from "./services/CitationService";
 
 class Addon {
     public data: {
@@ -29,6 +30,7 @@ class Addon {
     };
     public itemService?: ItemService;
     public aiProvider?: AIProvider;
+    public citationService?: CitationService;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs
