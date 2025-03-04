@@ -14,7 +14,7 @@ interface ZoteroCitationProps {
     pages?: string;       // Format: "3-6,19"
     consecutive?: boolean;
     children?: React.ReactNode;
-    tooltip?: boolean;
+    exportRendering?: boolean;
 }
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
@@ -22,7 +22,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     pages = '',
     consecutive = false,
     children,
-    tooltip = true,
+    exportRendering = false
 }) => {
     // Get the sources from atom state
     const sources = useAtomValue(threadFlattenedSourcesWithCitationsAtom);
@@ -117,6 +117,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     } else {
         displayText = source?.numericCitation || citation;
     }
+    if (exportRendering) {
+        displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
+    }
 
     const citationElement = (
         <a 
@@ -134,12 +137,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Return the citation with tooltip and click handler
     return (
         <>
-            {tooltip && (
+            {exportRendering ?
+                citationElement
+            :
                 <Tooltip content={reference} width={TOOLTIP_WIDTH}>
                     {citationElement}
                 </Tooltip>
-            )}
-            {!tooltip && citationElement}
+            }
         </>
     );
 

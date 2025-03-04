@@ -22,12 +22,14 @@ type MarkdownRendererProps = {
     content: string;
     className?: string;
     tooltip?: boolean;
+    exportRendering?: boolean;
 };
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
     className = 'markdown', 
-    tooltip = true 
+    tooltip = true,
+    exportRendering = false
 }) => {
 
     // Preprocess citation tags:
@@ -72,7 +74,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             // rehypePlugins={[rehypeKatex]}
             components={{
                 citation: ({node, ...props}: any) => {
-                    return <ZoteroCitation {...props} tooltip={tooltip} />;
+                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
                 }
             }}
         >
