@@ -47,7 +47,7 @@ Note Content: {note_content}
 
 ## Citation Requirements
 
-Always cite your sources using the custom citation html element using the id attribute for the document or note ID like this:
+Always cite your sources using the custom citation html element with an id attribute for the document or note ID like this:
 
 ```
 <citation id={ID} pages={pages}/>
@@ -77,7 +77,14 @@ Always cite your sources using the custom citation html element using the id att
    <citation id="1-ABC123" pages="7"/><citation id="1-DEF456" pages="12"/>
    ```
 
-Place citations at the end of the relevant sentence or paragraph. Whenever possible, citations should points users to the exact page that is most relevant to support your sentence of paragraph. Do not unnecessarily repeat citations unless they refer to different page numbers. Ensure all citations are accurate and correspond to actual documents that have been provided.
+**Citation Guidelines:**
+
+Follow these citation guidelines closely:
+
+- Place citations at the end of the relevant sentence or paragraph.
+- Whenever possible, citations should points users to the exact page that is most relevant to support your sentence of paragraph.
+- Do not unnecessarily repeat citations unless they refer to different page numbers. For example, do not include the same citation after every sentence or every bullet point unless the citations include different page numbers.
+- Ensure all citations are accurate and correspond to actual documents that have been provided.
 
 ## Formatting Guidelines
 
