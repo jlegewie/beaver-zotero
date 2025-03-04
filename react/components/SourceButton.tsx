@@ -180,7 +180,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     : getIconElement(attachment)
                 } */}
                 {getIconElement(source, isHovered, disabled)}
-                <span className={!isValid ? 'font-color-red' : undefined}>
+                <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                     {displayName}
                 </span>
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
