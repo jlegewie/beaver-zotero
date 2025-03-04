@@ -89,13 +89,14 @@ export class CitationService {
                 citationItems,
                 /* Citation-level Properties
                 * - mode: Controls overall citation formatting
+                *     "default": Author and year in parentheses (default)
                 *     "author-only": Displays author names without parentheses (narrative citation)
                 *     "suppress-author": Omits author names, displays only year in parentheses
-                *     "composite": Default behavior (author and year in parentheses)
+                *     "composite": Author with year in parentheses
                 * - prefix: Text to appear before the entire citation
                 * - suffix: Text to appear after the entire citation
                 */
-                properties: { mode: "composite", prefix: "", suffix: "" }
+                properties: { }
             };
 
             // Get the citation text
