@@ -1,6 +1,5 @@
 import { Source } from '../types/sources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
-import { getBibliography } from '../../src/utils/citations';
 import { getZoteroItem } from './sourceUtils';
 
 
@@ -43,7 +42,8 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             const authors = parentItem?.getCreators();
             const year = parentItem.getField('date', true).slice(0, 4);*/
             const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-            const reference = getBibliography(parentItem);
+            // @ts-ignore Beaver exists
+            const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
             const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
             const metadata = `# Document (id: ${id})\nType: ${type}\nReference: ${reference}`;
 
@@ -60,7 +60,8 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
         // Note with parent item
         } else if (parentItem && item.isNote()) {
             const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-            const reference = getBibliography(parentItem);
+            // @ts-ignore Beaver exists
+            const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
             // @ts-ignore unescapeHTML exists
             const content = Zotero.Utilities.unescapeHTML(item.getNote());
             const noteData = `# Note (id: ${id})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
