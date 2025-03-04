@@ -32,6 +32,48 @@ export function getCslEngine(style: string, locale: string): CSLEngine {
 }
 
 /**
+ * Get an in-text citation for a Zotero item or array of items
+ * @param items Zotero item or array of items
+ * @param cslEngine Optional CSL engine (will be created if not provided)
+ * @param style Citation style (used only if cslEngine not provided)
+ * @param locale Locale (used only if cslEngine not provided)
+ * @returns In-text citation
+ */
+export function getInTextCitation(
+    items: Zotero.Item | Zotero.Item[],
+    parentheses: boolean = true,
+    cslEngine?: CSLEngine | null,
+    style = 'http://www.zotero.org/styles/chicago-author-date',
+    locale = 'en-US'
+): string {
+    // Format citation with CSL engine
+    const engineToUse = cslEngine || getCslEngine(style, locale);
+    const shouldFreeEngine = !cslEngine; // Free only if we created it
+
+    // Format citation for each item
+    const citationItems = Array.isArray(items) ? items.map(item => ({id: item.id})) : [{id: items.id}];
+    const citation = {
+        citationItems: citationItems,
+        properties: { inText: true }
+    };
+
+    try {
+        let citation_formatted = engineToUse.previewCitationCluster(citation, [], [], "text");
+        citation_formatted = parentheses ? citation_formatted : citation_formatted.replace(/^\(|\)$/g, '');
+        return citation_formatted
+            .trim()
+            .replace(/,$/, '')
+            .replace(/”/g, '"')
+            .replace(/“/g, '"')
+            .replace(/,"$/, '"');
+    } finally {
+        if (shouldFreeEngine) {
+            engineToUse.free();
+        }
+    }
+}
+
+/**
 * Format an in-text citation for a Zotero item
 * @param item Zotero item to format
 * @param cslEngine Optional CSL engine (will be created if not provided)
@@ -51,29 +93,8 @@ export function formatCitation(
     }
     
     // Format citation with CSL engine
-    const engineToUse = cslEngine || getCslEngine(style, locale);
-    const shouldFreeEngine = !cslEngine; // Free only if we created it
-    
-    try {
-        const citation = {
-            citationItems: [{ id: item.id }],
-            properties: { inText: true }
-        };
-        
-        const citation_formatted = engineToUse.previewCitationCluster(citation, [], [], "text")
-            .replace(/^\(|\)$/g, '') // Remove parentheses
-            .trim()
-            .replace(/,$/, '') // Remove trailing comma
-            .replace(/"/g, '"')
-            .replace(/"/g, '"')
-            .replace(/,"$/, '"');
-        
-        return citation_formatted;
-    } finally {
-        if (shouldFreeEngine) {
-            engineToUse.free();
-        }
-    }
+    const citation = getInTextCitation(item, false, cslEngine, style, locale);
+    return citation;
 }
 
 /**
