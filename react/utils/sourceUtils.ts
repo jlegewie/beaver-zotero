@@ -39,14 +39,20 @@ export function getCitationFromItem(item: Zotero.Item): string {
     return citation;
 }
 
+export function getReferenceFromItem(item: Zotero.Item): string {
+    const reference = item.isNote()
+        // @ts-ignore unescapeHTML exists
+        ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
+        // @ts-ignore Beaver exists
+        : Zotero.Beaver.citationService.formatCitation(item, true);
+    return reference.replace(/\n/g, '<br />');
+}
+
 export async function createZoteroSource(
     item: Zotero.Item,
     pinned: boolean = false
 ): Promise<ZoteroSource> {
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
-
-     // @ts-ignore Beaver exists
-    const reference = Zotero.Beaver.citationService.formatBibliography(item);
 
     return {
         id: uuidv4(),
@@ -56,7 +62,7 @@ export async function createZoteroSource(
         icon: item.getItemTypeIconName(),
         name: getNameFromItem(item),
         citation: getCitationFromItem(item),
-        reference: reference.replace(/\n/g, '<br />'),
+        reference: getReferenceFromItem(item),
         url: createOpenPDFURL(item),
         pinned: pinned,
         childItemKeys: bestAtt ? [bestAtt.key] : [],
