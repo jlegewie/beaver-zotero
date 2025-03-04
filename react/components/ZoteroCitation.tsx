@@ -3,7 +3,7 @@ import Tooltip from './Tooltip';
 import { useAtomValue } from 'jotai';
 import { flattenedThreadSourcesAtom } from '../atoms/threads';
 import { getPref } from '../../src/utils/prefs';
-import { parseZoteroURI } from '../utils/parseZoteroURI';
+import { parseZoteroURI } from '../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createOpenPDFURL } from '../utils/pdfUtils';
 
