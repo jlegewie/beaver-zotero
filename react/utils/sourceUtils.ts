@@ -23,17 +23,29 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 /**
 * Factory function to create a ZoteroSource from a Zotero item
 */
+export function getNameFromItem(item: Zotero.Item): string {
+    const name = item.isNote()
+        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
+        // @ts-ignore Beaver exists
+        : Zotero.Beaver.citationService.formatCitation(item, true);
+    return name;
+}
+
+export function getCitationFromItem(item: Zotero.Item): string {
+    const citation = item.isNote()
+        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
+        // @ts-ignore Beaver exists
+        : Zotero.Beaver.citationService.formatCitation(item, true);
+    return citation;
+}
+
 export async function createZoteroSource(
     item: Zotero.Item,
     pinned: boolean = false
 ): Promise<ZoteroSource> {
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
 
-    const citation = item.isNote()
-        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
-        // @ts-ignore Beaver exists
-        : Zotero.Beaver.citationService.formatCitation(item, true);
-    // @ts-ignore Beaver exists
+     // @ts-ignore Beaver exists
     const reference = Zotero.Beaver.citationService.formatBibliography(item);
 
     return {
@@ -42,8 +54,8 @@ export async function createZoteroSource(
         libraryID: item.libraryID,
         itemKey: item.key,
         icon: item.getItemTypeIconName(),
-        name: citation,
-        citation: citation,
+        name: getNameFromItem(item),
+        citation: getCitationFromItem(item),
         reference: reference.replace(/\n/g, '<br />'),
         url: createOpenPDFURL(item),
         pinned: pinned,
