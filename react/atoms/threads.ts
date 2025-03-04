@@ -3,6 +3,8 @@ import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { citationDataFromSource, getCslEngine } from "../utils/citationFormatting";
+import { getChildItems, getCitationFromItem, getNameFromItem } from "../utils/sourceUtils";
+import { createOpenPDFURL } from "../utils/pdfUtils";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
@@ -59,6 +61,33 @@ export const threadFlattenedSourcesWithCitationsAtom = atom<SourceWithCitations[
         .filter(Boolean) as SourceWithCitations[];
     cslEngine.free();
     return sources;
+});
+
+
+export const threadFlattenedSourcesAtom = atom<Source[]>((get) => {
+    let numericIndex = 0;
+    const flatThreadSources = get(threadSourcesAtom)
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .flatMap((source) => {
+            if (source.type === 'zotero_item' && source.childItemKeys && source.childItemKeys.length > 0) {
+                const childItems = getChildItems(source);
+                return childItems.map(item => {
+                    numericIndex++;
+                    return {
+                        ...source,
+                        itemKey: item.key,
+                        numericCitation: String(numericIndex),
+                        url: createOpenPDFURL(item),
+                        name: item.isNote() ? getNameFromItem(item) : source.name,
+                        citation: item.isNote() ? getCitationFromItem(item) : source.citation,
+                        icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
+                    };
+                });
+            }
+            return [source];
+        });
+    
+    return flatThreadSources;
 });
 
 
