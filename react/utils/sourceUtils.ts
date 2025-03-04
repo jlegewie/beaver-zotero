@@ -94,12 +94,11 @@ export function getChildItems(source: ZoteroSource): Zotero.Item[] {
     }
     
     try {
-        const childItems = 
-            source.childItemKeys.map(key => 
-                Zotero.Items.getByLibraryAndKey(source.libraryID, key)
-            )
+        const childItems = source.childItemKeys
+            .map(key => Zotero.Items.getByLibraryAndKey(source.libraryID, key))
+            .filter(Boolean) as Zotero.Item[];
         
-        return childItems.filter(Boolean) as Zotero.Item[];
+        return childItems;
     } catch (error) {
         console.error("Error retrieving child items:", error);
         return [];
