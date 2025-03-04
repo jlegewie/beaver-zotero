@@ -1,4 +1,4 @@
-import { createOpenPDFURL } from "./createOpenPDFURL";
+import { createOpenPDFURL } from "./pdfUtils";
 import { ZoteroSource, SourceWithCitations, FileSource } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 

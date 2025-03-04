@@ -1,6 +1,6 @@
 import { ZoteroStyle } from "../../src/utils/citations";
 import { Source } from "../types/sources";
-import { createOpenPDFURL } from "./createOpenPDFURL";
+import { createOpenPDFURL } from "./pdfUtils";
 import { getZoteroItem } from "./sourceUtils";
 import { truncateText } from "./stringUtils";
 
