@@ -8,6 +8,10 @@ export interface BaseSource {
     icon: string;             // Icon for the source
     pinned: boolean;          // If true, the source persists across selections
     timestamp: number;        // Creation timestamp
+    citation: string;         // In-text citation for the source used in assistant messages
+    reference: string;        // Bibliographic reference for the source
+    url: string;              // URL for the source
+    numericCitation?: string; // Numeric citation for the source used in assistant messages
 }
 
 // Zotero item source

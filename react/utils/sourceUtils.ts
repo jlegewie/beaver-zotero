@@ -1,5 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
+import { createOpenPDFURL } from './pdfUtils';
+import { truncateText } from './stringUtils';
+
+// Constants
+export const MAX_NOTE_TITLE_LENGTH = 20;
+export const MAX_NOTE_CONTENT_LENGTH = 150;
 
 // Limits
 export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
@@ -15,20 +21,6 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 }
 
 /**
-* Define source names
-*/
-function getNameForZoteroSource(item: Zotero.Item): string {
-    // @ts-ignore Beaver exists
-    const citation = Zotero.Beaver.citationService.formatCitation(item, true);
-    return item.isNote() ? `Note: ${citation}` : citation;
-}
-
-function getNameForFileSource(file: File): string {
-    return file.name;
-}
-
-
-/**
 * Factory function to create a ZoteroSource from a Zotero item
 */
 export async function createZoteroSource(
@@ -36,16 +28,27 @@ export async function createZoteroSource(
     pinned: boolean = false
 ): Promise<ZoteroSource> {
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
+
+    const citation = item.isNote()
+        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
+        // @ts-ignore Beaver exists
+        : Zotero.Beaver.citationService.formatCitation(item, true);
+    // @ts-ignore Beaver exists
+    const reference = Zotero.Beaver.citationService.formatBibliography(item);
+
     return {
         id: uuidv4(),
         type: 'zotero_item',
         libraryID: item.libraryID,
         itemKey: item.key,
         icon: item.getItemTypeIconName(),
-        name: getNameForZoteroSource(item),
+        name: citation,
+        citation: citation,
+        reference: reference.replace(/\n/g, '<br />'),
+        url: createOpenPDFURL(item),
         pinned: pinned,
         childItemKeys: bestAtt ? [bestAtt.key] : [],
-        timestamp: Date.now()
+        timestamp: Date.now(),
     };
 }
 
@@ -59,23 +62,11 @@ export function createFileSource(file: File): FileSource {
         fileName: file.name,
         filePath: file.mozFullPath,
         fileType: file.type,
-        name: getNameForFileSource(file),
+        name: file.name,
+        citation: 'File',
+        reference: file.mozFullPath,
+        url: `file://${file.mozFullPath}`,
         icon: file.type === 'application/pdf' ? 'attachmentPDF' : 'attachmentImage',
-        pinned: false,
-        timestamp: Date.now()
-    };
-}
-
-/**
-* Factory function to create a RemoteFileSource
-*/
-export function createRemoteFileSource(url: string, name: string): RemoteFileSource {
-    return {
-        id: uuidv4(),
-        type: 'remote_file',
-        name,
-        icon: 'link',
-        url,
         pinned: false,
         timestamp: Date.now()
     };
