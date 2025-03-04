@@ -19,11 +19,16 @@ const customSchema = deepmerge(defaultSchema, {
 });
 
 type MarkdownRendererProps = {
-    className: string;
     content: string;
+    className?: string;
+    tooltip?: boolean;
 };
 
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className }) => {
+const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+    content, 
+    className = 'markdown', 
+    tooltip = true 
+}) => {
 
     // Preprocess citation tags:
     // - transform self-closing citation tags into proper open/close tags
@@ -67,7 +72,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
             // rehypePlugins={[rehypeKatex]}
             components={{
                 citation: ({node, ...props}: any) => {
-                    return <ZoteroCitation {...props} />;
+                    return <ZoteroCitation {...props} tooltip={tooltip} />;
                 }
             }}
         >

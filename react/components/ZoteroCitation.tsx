@@ -14,6 +14,7 @@ interface ZoteroCitationProps {
     pages?: string;       // Format: "3-6,19"
     consecutive?: boolean;
     children?: React.ReactNode;
+    tooltip?: boolean;
 }
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
@@ -21,6 +22,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     pages = '',
     consecutive = false,
     children,
+    tooltip = true,
 }) => {
     // Get the sources from atom state
     const sources = useAtomValue(threadFlattenedSourcesWithCitationsAtom);
@@ -114,21 +116,30 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     } else {
         displayText = source?.numericCitation || citation;
     }
+
+    const citationElement = (
+        <a 
+            href={url} 
+            onClick={handleClick} 
+            className="zotero-citation"
+            data-pages={pages}
+            data-item-key={itemKey}
+            data-library-id={libraryID}
+            >
+            {displayText}
+        </a>
+    );
     
     // Return the citation with tooltip and click handler
     return (
-        <Tooltip content={reference} width={TOOLTIP_WIDTH}>
-            <a 
-                href={url} 
-                onClick={handleClick} 
-                className="zotero-citation"
-                data-pages={pages}
-                data-item-key={itemKey}
-                data-library-id={libraryID}
-            >
-                {displayText}
-            </a>
-        </Tooltip>
+        <>
+            {tooltip && (
+                <Tooltip content={reference} width={TOOLTIP_WIDTH}>
+                    {citationElement}
+                </Tooltip>
+            )}
+            {!tooltip && citationElement}
+        </>
     );
 
 };
