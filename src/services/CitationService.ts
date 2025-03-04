@@ -55,9 +55,10 @@ export class CitationService {
     /**
      * Format an in-text citation for one or multiple Zotero items
      * @param items Single Zotero item or array of items to format
+     * @param clean If true, removes parentheses and normalizes quotes
      * @returns Formatted in-text citation or empty string on error
      */
-    public formatCitation(items: Zotero.Item | Zotero.Item[]): string {
+    public formatCitation(items: Zotero.Item | Zotero.Item[], clean: boolean = false): string {
         if (!items) return "";
 
         // Convert single item to array for unified processing
@@ -96,15 +97,35 @@ export class CitationService {
                 * - prefix: Text to appear before the entire citation
                 * - suffix: Text to appear after the entire citation
                 */
-                properties: { }
+                properties: {}
             };
 
             // Get the citation text
-            return engine.previewCitationCluster(citation, [], [], "text");
+            let result = engine.previewCitationCluster(citation, [], [], "text");
+
+            if (clean) {
+                result = this.cleanCitationFormatting(result);
+            }
+            return result;
         } catch (e) {
             this.ztoolkit.log(`Error formatting citation: ${e}`);
             return "";
         }
+    }
+
+    /**
+     * Clean citation formatting - removes parentheses, normalizes quotes, etc.
+     * @param citation The citation string to clean
+     * @returns Cleaned citation string
+     */
+    private cleanCitationFormatting(citation: string): string {
+        return citation
+            .trim()
+            .replace(/^\(|\)$/g, '')  // Remove opening and closing parentheses
+            .replace(/,$/, '')         // Remove trailing comma
+            .replace(/"/g, '"')        // Normalize opening quotes
+            .replace(/"/g, '"')        // Normalize closing quotes
+            .replace(/,"$/, '"');      // Fix comma-quote pattern
     }
 
     /**
