@@ -162,7 +162,7 @@ export class CitationService {
      * @param items Array of Zotero items
      * @returns Formatted bibliography HTML or empty string on error
      */
-    public formatBibliography(items: Zotero.Item | Zotero.Item[]): string {
+    public formatBibliography(items: Zotero.Item | Zotero.Item[], format: "text" | "html" = "text"): string {
         if (!items) return "";
 
         // Convert single item to array for unified processing
@@ -176,7 +176,7 @@ export class CitationService {
             }
 
             // Generate bibliography
-            const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(engine, itemsArray, "text").trim();
+            const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(engine, itemsArray, format).trim();
             return bibliography;
 
         } catch (e) {
