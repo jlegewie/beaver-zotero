@@ -77,13 +77,29 @@ export class CitationService {
             // Create a citation object with all items
             const citationItems = itemIds.map(id => ({ id }));
             const citation = {
+                /* Citation Item Properties
+                * - id: The item ID (required)
+                * - locator: Page number or other locator (e.g., "42")
+                * - label: Type of locator (e.g., "page", "chapter", "section")
+                * - prefix: Text to display before the citation
+                * - suffix: Text to display after the citation
+                * - suppress-author: Boolean to suppress the author name (shows only year)
+                * - author-only: Boolean to display only the author name
+                */
                 citationItems,
-                properties: { inText: true}
+                /* Citation-level Properties
+                * - mode: Controls overall citation formatting
+                *     "author-only": Displays author names without parentheses (narrative citation)
+                *     "suppress-author": Omits author names, displays only year in parentheses
+                *     "composite": Default behavior (author and year in parentheses)
+                * - prefix: Text to appear before the entire citation
+                * - suffix: Text to appear after the entire citation
+                */
+                properties: { mode: "composite", prefix: "", suffix: "" }
             };
 
             // Get the citation text
-            const citations = engine.processCitationCluster(citation, [], [], "text");
-            return citations;
+            return engine.previewCitationCluster(citation, [], [], "text");
         } catch (e) {
             this.ztoolkit.log(`Error formatting citation: ${e}`);
             return "";
