@@ -15,7 +15,7 @@ import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './Button';
 import SourcesDisplay from './SourcesDisplay';
 import { SourceWithCitations } from '../types/sources';
-import { renderToMarkdown } from '../utils/citationRenderers';
+import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -52,7 +52,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         },
         {
             label: 'Save as Note',
-            onClick: () => console.log('Save as Note clicked')
+            onClick: () => saveAsNote()
         }
     ];
 
@@ -75,6 +75,13 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             }
         });
     };
+
+    const saveAsNote = async () => {
+        const formattedContent = renderToHTML(message.content);
+        const newNote = new Zotero.Item('note');
+        newNote.setNote(formattedContent);
+        await newNote.saveTx();
+    }
 
     // Get appropriate error message based on the error type
     const getErrorMessage = () => {
