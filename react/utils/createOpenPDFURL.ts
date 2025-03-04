@@ -5,7 +5,7 @@ export function createOpenPDFURL(item: Zotero.Item, page: number | null = null) 
     if (item.isFileAttachment()) {
         baseURL = "zotero://open-pdf/";
     } else if (item.isNote()) {
-        baseURL = "zotero://open-note/";
+        baseURL = "zotero://select/";
     } else {
         baseURL = "zotero://select/";
     }

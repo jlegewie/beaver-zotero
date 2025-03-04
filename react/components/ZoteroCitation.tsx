@@ -77,32 +77,33 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     
     // Handle click on citation
     const handleClick = async (e: React.MouseEvent) => {
-        if (url.startsWith('zotero://open-note')) {
-            e.preventDefault();
-
-            // Get the item key and library ID from the data attributes
-            let itemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
-            let libraryID: number | null = parseInt((e.target as HTMLElement).dataset.libraryId || '0');
-            // Fallback: parse the URL if the data attributes are not set
-            if (!libraryID || !itemKey) {
-                ({ libraryID, itemKey } = parseZoteroURI(url));
-            }
-            if (!libraryID || !itemKey) return;
-            
-            // Get the item
-            const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-            if (!item) return;
-
-            // Open the note window
-            if (item.isNote()) {
-                await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
-            } else {
-                await Zotero.getActiveZoteroPane().selectItem(item.id);
-            }
-        } else if (url.startsWith('file:///')) {
+        // Handle file links
+        if (url.startsWith('file:///')) {
             e.preventDefault();
             const filePath = url.replace('file:///', '');
             Zotero.launchFile(filePath);
+            return;
+        }
+
+        // Get the item key and library ID from the data attributes
+        let itemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
+        let libraryID: number | null = parseInt((e.target as HTMLElement).dataset.libraryId || '0');
+        // Fallback: parse the URL if the data attributes are not set
+        if (!libraryID || !itemKey) {
+            ({ libraryID, itemKey } = parseZoteroURI(url));
+        }
+        if (!libraryID || !itemKey) return;
+
+        // Get the item
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+        if (!item) return;
+
+        // Handle note links
+        if (item.isNote()) {
+            e.preventDefault();
+            // Open the note window
+            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            // await Zotero.getActiveZoteroPane().selectItem(item.id);
         }
         // Default behavior for zotero://open-pdf, zotero://select and other protocols
     };
@@ -125,7 +126,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             data-pages={pages}
             data-item-key={itemKey}
             data-library-id={libraryID}
-            >
+        >
             {displayText}
         </a>
     );
