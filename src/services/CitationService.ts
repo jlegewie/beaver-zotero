@@ -121,11 +121,12 @@ export class CitationService {
     private cleanCitationFormatting(citation: string): string {
         return citation
             .trim()
-            .replace(/^\(|\)$/g, '')  // Remove opening and closing parentheses
-            .replace(/,$/, '')         // Remove trailing comma
-            .replace(/"/g, '"')        // Normalize opening quotes
-            .replace(/"/g, '"')        // Normalize closing quotes
-            .replace(/,"$/, '"');      // Fix comma-quote pattern
+            .replace(/^\(|\)$/g, '')    // Remove opening and closing parentheses
+            .replace(/,? ?n\.d\.$/, '') // Remove n.d.
+            .replace(/,$/, '')          // Remove trailing comma
+            .replace(/”/g, '"')         // Normalize opening quotes
+            .replace(/“/g, '"')         // Normalize closing quotes
+            .replace(/,"$/, '"');       // Fix comma-quote pattern
     }
 
     /**
