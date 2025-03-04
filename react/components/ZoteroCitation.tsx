@@ -108,7 +108,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
-        const displayText = consecutive
+        displayText = consecutive
             ? (pages ? `p.${pages}` : 'Ibid')
             : (pages ? `${citation}, p.${pages}` : citation);
     } else {
