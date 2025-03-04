@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
-import { getInTextCitation } from './citationFormatting';
 
 // Limits
 export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
@@ -19,8 +18,8 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 * Define source names
 */
 function getNameForZoteroSource(item: Zotero.Item): string {
-    const citation = getInTextCitation(item, false)
-        .replace(/,? ?n\.d\.$/, '');
+    // @ts-ignore Beaver exists
+    const citation = Zotero.Beaver.citationService.formatCitation(item, true);
     return item.isNote() ? `Note: ${citation}` : citation;
 }
 
