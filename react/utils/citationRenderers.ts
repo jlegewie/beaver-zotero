@@ -41,13 +41,8 @@ function parseId(id: string): { libraryID: number; itemKey: string } {
  * @returns Formatted text
  */
 export function renderToMarkdown(
-    text: string,
-    style: string | null = null,
-    locale: string | null = null
+    text: string
 ) : string {
-    // Citation preferences
-    style = style || getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
-    locale = locale || getPref("citationLocale") || 'en-US';
 
     // Format citations for human-readable clipboard content
     let bibliography = '';
