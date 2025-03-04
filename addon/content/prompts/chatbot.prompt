@@ -50,8 +50,15 @@ Note Content: {note_content}
 Always cite your sources using the custom citation html element with an id attribute for the document or note ID like this:
 
 ```
-<citation id={ID} pages={pages}/>
+<citation id={ID} pages={page}/>
 ```
+
+Follow these citation guidelines closely:
+
+- Place citations at the end of the relevant sentence or paragraph.
+- Whenever possible, citations should include the exact page that is most relevant to support your sentence or paragraph.
+- Do not repeat citations unless they refer to different page numbers.
+- Ensure all citations are accurate and correspond to actual documents that have been provided.
 
 **Citation Examples:**
 
@@ -63,28 +70,14 @@ Always cite your sources using the custom citation html element with an id attri
    ```
    <citation id="1-ABC123" pages="7"/>
    ```
-3. **Single document with multiple pages**:
-   ```
-   <citation id="1-ABC123" pages="3,6"/>     // Non-consecutive pages
-   <citation id="1-ABC123" pages="3-6,19"/>  // Range and additional page
-   ```
-4. **Multiple documents as two citation**:
+3. **Multiple documents as two citation**:
    ```
    <citation id="1-ABC123"/><citation id="1-DEF456"/>
    ```
-5. **Multiple documents with page numbers**:
+4. **Multiple documents with page numbers**:
    ```
    <citation id="1-ABC123" pages="7"/><citation id="1-DEF456" pages="12"/>
    ```
-
-**Citation Guidelines:**
-
-Follow these citation guidelines closely:
-
-- Place citations at the end of the relevant sentence or paragraph.
-- Whenever possible, citations should points users to the exact page that is most relevant to support your sentence of paragraph.
-- Do not unnecessarily repeat citations unless they refer to different page numbers. For example, do not include the same citation after every sentence or every bullet point unless the citations include different page numbers.
-- Ensure all citations are accurate and correspond to actual documents that have been provided.
 
 ## Formatting Guidelines
 
