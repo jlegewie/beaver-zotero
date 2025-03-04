@@ -178,7 +178,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                     )}
                 </div>
                 <div className="flex gap-4">
-                    {isLastMessage && message.status !== 'error' &&
+                    {message.status !== 'error' &&
                         <MenuButton
                             icon={ShareIcon}
                             menuItems={shareMenuItems}
