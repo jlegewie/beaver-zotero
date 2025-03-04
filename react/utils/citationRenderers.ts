@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import MarkdownRenderer from '../components/MarkdownRenderer';
-import { citationDataFromItem } from './citationFormatting';
 import { getPref } from '../../src/utils/prefs';
+import { getCitationFromItem, getReferenceFromItem } from './sourceUtils';
 
 // Regex for citation syntax
 const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
@@ -72,7 +72,8 @@ export function renderToMarkdown(
         }
 
         // Get the citation data
-        const { citation, reference, url } = citationDataFromItem(item, null, style, locale);
+        const citation = getCitationFromItem(item);
+        const reference = getReferenceFromItem(item);
 
         // Format the citation
         bibliography += reference + '\n\n';

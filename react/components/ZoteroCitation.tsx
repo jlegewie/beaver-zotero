@@ -4,7 +4,8 @@ import { useAtomValue } from 'jotai';
 import { flattenedThreadSourcesAtom } from '../atoms/threads';
 import { getPref } from '../../src/utils/prefs';
 import { parseZoteroURI } from '../utils/parseZoteroURI';
-import { citationDataFromItem } from '../utils/citationFormatting';
+import { getCitationFromItem, getReferenceFromItem } from '../utils/sourceUtils';
+import { createOpenPDFURL } from '../utils/pdfUtils';
 
 const TOOLTIP_WIDTH = '250px';
 
@@ -62,13 +63,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return null;
         }
 
-        // Citation preferences
-        const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
-        const locale = getPref("citationLocale") || 'en-US';
-
         // Get the citation data
-        ({ citation, reference, url } = citationDataFromItem(item, null, style, locale));
-        
+        citation = getCitationFromItem(item);
+        reference = getReferenceFromItem(item);
+        url = createOpenPDFURL(item);
     }
     
     // Add the URL to open the PDF/Note

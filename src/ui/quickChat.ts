@@ -1,7 +1,6 @@
 import { BasicOptions } from "zotero-plugin-toolkit/dist/basic";
 import { BasicTool, ManagerTool } from "zotero-plugin-toolkit/dist/basic";
 import { UITool } from "zotero-plugin-toolkit/dist/tools/ui";
-import { getFormattedReferences } from "../utils/citations"
 
 /**
 * Options for the QuickChat's callbacks.
@@ -9,6 +8,11 @@ import { getFormattedReferences } from "../utils/citations"
 export interface QuickChatOptions {
     deepSearch?: (question: string) => void;
     send?: (question: string) => void;
+}
+
+interface FormattedReference {
+    inTextCitation: string;
+    bibliography: string;
 }
 
 /**
@@ -206,7 +210,7 @@ export class QuickChat extends BasicTool {
         this.itemsContainer.innerHTML = "";
         const doc = this.getGlobal("document");
 
-        const formatedItems = getFormattedReferences(this.items);
+        const formatedItems: FormattedReference[] = [];
         
         formatedItems.forEach((item, idx) => {
             const itemEl = this.ui.createElement(doc, "span", {
