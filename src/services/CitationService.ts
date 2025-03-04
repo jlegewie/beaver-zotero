@@ -1,6 +1,19 @@
 import { getPref } from "../utils/prefs";
 
 /**
+ * Citation object
+ */
+export type Citation = {
+    id: number;
+    locator?: string;
+    label?: string;
+    prefix?: string;
+    suffix?: string;
+    suppressAuthor?: boolean;
+    authorOnly?: boolean;
+}
+
+/**
  * Service for formatting citations using CSL
  * Caches the CSL engine for better performance
  */
@@ -53,16 +66,27 @@ export class CitationService {
     }
 
     /**
-     * Format an in-text citation for one or multiple Zotero items
+     * Format an in-text citation for either based on an array of Zotero items or an array of citation objects
      * @param items Single Zotero item or array of items to format
      * @param clean If true, removes parentheses and normalizes quotes
      * @returns Formatted in-text citation or empty string on error
      */
-    public formatCitation(items: Zotero.Item | Zotero.Item[], clean: boolean = false): string {
-        if (!items) return "";
+    public formatCitation(items: Zotero.Item | Zotero.Item[], clean?: boolean): string;
+    public formatCitation(citationItems: Citation[], clean?: boolean): string;
+    public formatCitation(
+        itemsOrCitationItems?: Zotero.Item | Zotero.Item[] | Citation[],
+        clean: boolean = false
+    ): string {
+        if (!itemsOrCitationItems) return "";
 
-        // Convert single item to array for unified processing
-        const itemsArray = Array.isArray(items) ? items : [items];
+        // Determine if the input is an array of Zotero items
+        const isItems =
+            itemsOrCitationItems instanceof Zotero.Item ||
+            (
+                Array.isArray(itemsOrCitationItems) &&
+                itemsOrCitationItems.length > 0 &&
+                itemsOrCitationItems[0] instanceof Zotero.Item
+            );
 
         try {
             const engine = this.getCitationProcessor();
@@ -71,12 +95,16 @@ export class CitationService {
                 return "";
             }
 
-            // Get the IDs and update the processor
-            const itemIds = itemsArray.map(item => item.id);
-            engine.updateItems(itemIds);
+            // Create a citation object with all items
+            let citationItems: Citation[] = [];
+            if (isItems) {
+                const itemsArray = Array.isArray(itemsOrCitationItems) ? itemsOrCitationItems : [itemsOrCitationItems];
+                citationItems = itemsArray.map(item => ({ id: item.id }));
+            } else {
+                citationItems = itemsOrCitationItems;
+            }
 
             // Create a citation object with all items
-            const citationItems = itemIds.map(id => ({ id }));
             const citation = {
                 /* Citation Item Properties
                 * - id: The item ID (required)
