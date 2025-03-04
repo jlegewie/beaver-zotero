@@ -3,7 +3,7 @@ import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
 import { getPref } from "../../src/utils/prefs";
 import { citationDataFromSource, getCslEngine } from "../utils/citationFormatting";
-import { getChildItems, getCitationFromItem, getNameFromItem } from "../utils/sourceUtils";
+import { getZoteroItem, getCitationFromItem, getNameFromItem } from "../utils/sourceUtils";
 import { createOpenPDFURL } from "../utils/pdfUtils";
 
 // Thread messages and sources
@@ -64,30 +64,35 @@ export const threadFlattenedSourcesWithCitationsAtom = atom<SourceWithCitations[
 });
 
 
-export const threadFlattenedSourcesAtom = atom<Source[]>((get) => {
-    let numericIndex = 0;
+export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
+    // Flatten sources
     const flatThreadSources = get(threadSourcesAtom)
         .sort((a, b) => a.timestamp - b.timestamp)
         .flatMap((source) => {
             if (source.type === 'zotero_item' && source.childItemKeys && source.childItemKeys.length > 0) {
-                const childItems = getChildItems(source);
-                return childItems.map(item => {
-                    numericIndex++;
-                    return {
-                        ...source,
-                        itemKey: item.key,
-                        numericCitation: String(numericIndex),
-                        url: createOpenPDFURL(item),
-                        name: item.isNote() ? getNameFromItem(item) : source.name,
-                        citation: item.isNote() ? getCitationFromItem(item) : source.citation,
-                        icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
-                    };
-                });
+                return source.childItemKeys.map(key => ({...source, itemKey: key}));
             }
             return [source];
         });
+
+    // Update sources with item details
+    const updatedFlatThreadSources = flatThreadSources
+        .map((source, index) => {
+            if (source.type !== 'zotero_item') return source;
+            const item = getZoteroItem(source);
+            if (!item) return null;
+            return {
+                ...source,
+                numericCitation: String(index + 1),
+                url: createOpenPDFURL(item),
+                name: item.isNote() ? getNameFromItem(item) : source.name,
+                citation: item.isNote() ? getCitationFromItem(item) : source.citation,
+                icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
+            };
+        })
+        .filter(Boolean) as Source[];
     
-    return flatThreadSources;
+    return updatedFlatThreadSources;
 });
 
 
