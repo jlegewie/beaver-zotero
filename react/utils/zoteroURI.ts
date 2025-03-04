@@ -108,3 +108,41 @@ export function parseZoteroURI(uri: string): ZoteroURIResult {
     
     return result;
 }
+
+/**
+ * Create a Zotero URI for a given item and page
+ * @param {Zotero.Item} item - The Zotero item to create a URI for
+ * @param {number | null} page - The page number to add to the URI
+ * @returns {string} The Zotero URI
+ */
+export function createZoteroURI(item: Zotero.Item, page: number | null = null) {
+    
+    // Determine the base URL based on the item type
+    let baseURL;
+    if (item.isFileAttachment()) {
+        baseURL = "zotero://open-pdf/";
+    } else if (item.isNote()) {
+        baseURL = "zotero://select/";
+    } else {
+        baseURL = "zotero://select/";
+    }
+    let url;
+    
+    // Check if item is in a group library
+    const library = Zotero.Libraries.get(item.libraryID);
+    if (library && library.isGroup) {
+        const groupID = Zotero.Groups.getGroupIDFromLibraryID(item.libraryID);
+        url = `${baseURL}groups/${groupID}/items/${item.key}`;
+    }
+    // Regular user library
+    else {
+        url = `${baseURL}library/items/${item.key}`;
+    }
+    
+    // Add page parameter if specified
+    if (page !== null) {
+        url += "?page=" + page;
+    }
+    
+    return url;
+}

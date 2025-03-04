@@ -5,7 +5,7 @@ import { flattenedThreadSourcesAtom } from '../atoms/threads';
 import { getPref } from '../../src/utils/prefs';
 import { parseZoteroURI } from '../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../utils/sourceUtils';
-import { createOpenPDFURL } from '../utils/pdfUtils';
+import { createZoteroURI } from '../utils/zoteroURI';
 
 const TOOLTIP_WIDTH = '250px';
 
@@ -66,7 +66,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Get the citation data
         citation = getCitationFromItem(item);
         reference = getReferenceFromItem(item);
-        url = createOpenPDFURL(item);
+        url = createZoteroURI(item);
     }
     
     // Add the URL to open the PDF/Note

@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem } from "../utils/sourceUtils";
-import { createOpenPDFURL } from "../utils/pdfUtils";
+import { createZoteroURI } from "../utils/zoteroURI";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
@@ -49,7 +49,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
             return {
                 ...source,
                 numericCitation: String(index + 1),
-                url: createOpenPDFURL(item),
+                url: createZoteroURI(item),
                 name: item.isNote() ? getNameFromItem(item) : source.name,
                 citation: item.isNote() ? getCitationFromItem(item) : source.citation,
                 reference: item.isNote() ? getReferenceFromItem(item) : source.reference,

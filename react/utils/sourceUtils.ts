@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
-import { createOpenPDFURL } from './pdfUtils';
+import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
 
 // Constants
@@ -63,7 +63,7 @@ export async function createZoteroSource(
         name: getNameFromItem(item),
         citation: getCitationFromItem(item),
         reference: getReferenceFromItem(item),
-        url: createOpenPDFURL(item),
+        url: createZoteroURI(item),
         pinned: pinned,
         childItemKeys: bestAtt ? [bestAtt.key] : [],
         timestamp: Date.now(),
