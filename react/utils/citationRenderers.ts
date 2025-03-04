@@ -1,8 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import MarkdownRenderer from '../components/MarkdownRenderer';
-import { getPref } from '../../src/utils/prefs';
-import { getCitationFromItem, getReferenceFromItem } from './sourceUtils';
+import { Citation } from '../../src/services/CitationService';
 
 // Regex for citation syntax
 const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
@@ -44,9 +43,9 @@ export function renderToMarkdown(
     text: string
 ) : string {
 
-    // Format citations for human-readable clipboard content
-    let bibliography = '';
-    
+    // Array of cited items
+    const citedItems: Zotero.Item[] = [];    
+
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
         // Parse the attributes
@@ -65,19 +64,41 @@ export function renderToMarkdown(
             console.warn(`No Zotero item found for libraryID: ${libraryID}, itemKey: ${itemKey}`);
             return '';
         }
+        
+        // Item to cite
+        const parent = item.parentItem;
+        const itemToCite = item.isNote() ? item : (parent || item);
+
+        // Add the item to the array of cited items
+        citedItems.push(itemToCite);
 
         // Get the citation data
-        const citation = getCitationFromItem(item);
-        const reference = getReferenceFromItem(item);
+        let citation = '';
+        if (itemToCite.isRegularItem()) {
+            const citationObject: Citation = {id: itemToCite.id};
+            if (attrs.pages) {
+                citationObject.locator = attrs.pages;
+                citationObject.label = 'p.';
+            }
+            // @ts-ignore Beaver exists
+            citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
+        } else if (itemToCite.isNote()) {
+            citation = '(Note)';
+        } else if (itemToCite.isAttachment()) {
+            citation = '(File)';
+        }
+  
+        // Format the citation with page locator if provided
+        // return attrs.pages ? `${citation}, p. ${attrs.pages}` : citation; 
+        return ' ' + citation; 
+    }).replace('  (', ' (');
 
-        // Format the citation
-        bibliography += reference + '\n\n';
-        return attrs.pages
-            ? `(${citation}, p. ${attrs.pages})`
-            : `(${citation})`; 
-    });
+    // Format the bibliography
+    // @ts-ignore Beaver exists
+    const bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
 
-    return `${formattedContent}\n\n## Sources\n\n${bibliography}`;
+    // Return the formatted content
+    return `${formattedContent}\n## Sources\n\n${bibliography}`;
 }
 
 /**
