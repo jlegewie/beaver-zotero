@@ -12,10 +12,10 @@ import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
-import { parseCitations } from '../utils/parseCitations';
 import Button from './Button';
 import SourcesDisplay from './SourcesDisplay';
 import { SourceWithCitations } from '../types/sources';
+import { renderToMarkdown } from '../utils/citationRenderers';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -66,36 +66,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     }
 
     const handleCopy = async () => {
-        // Format citations for human-readable clipboard content
-        let formattedContent = message.content;
-        
-        // Replace citation elements with human-readable text
-        // <citation id="1-ABC123" pages="3-5"></citation> becomes [Author, Year, p. 3-5]
-        formattedContent = formattedContent.replace(
-            /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)(?:pages="([^"]+)")?(?:[^>]*?)\s*(?:\/>|>.*?<\/citation>)/g,
-            (match, id, pages) => {
-                // Parse the id to get libraryID and itemKey
-                id = id.replace('user-content-', '');
-                const [libraryIDString, itemKey] = id.includes('-') ? id.split('-') : [id, id];
-                const libraryID = parseInt(libraryIDString) || 1;
-                
-                // Find the source in the sources array
-                const source = threadSourcesWithCitations.find(
-                    s => s.type === 'zotero_item' && 
-                    (s.itemKey === itemKey || s.childItemKeys?.includes(itemKey)) && 
-                    s.libraryID === libraryID
-                );
-                
-                if (!source) {
-                    return match; // If no source found, keep original
-                }
-                
-                // Format the citation
-                return pages 
-                    ? `[${source.citation}, p. ${pages}]` 
-                    : `[${source.citation}]`;
-            }
-        );
+        const formattedContent = renderToMarkdown(message.content);
         
         await copyToClipboard(formattedContent, {
             onSuccess: () => {
