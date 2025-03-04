@@ -95,7 +95,8 @@ export function renderToHTML(content: string, className: string = "markdown"): s
     // @ts-ignore createElement exists in React
     const markdownElement = React.createElement(MarkdownRenderer, {
         content,
-        className
+        className,
+        tooltip: false
     });
 
     // Render the React element to an HTML string
