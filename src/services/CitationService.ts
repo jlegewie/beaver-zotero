@@ -1,0 +1,142 @@
+import { getPref } from "../utils/prefs";
+
+/**
+ * Service for formatting citations using CSL
+ * Caches the CSL engine for better performance
+ */
+export class CitationService {
+    private _cslEngine: any = null;
+    private _styleID: string | null = null;
+    private _locale: string | null = null;
+    private ztoolkit: any;
+
+    /**
+     * Initialize the Citation Service
+     * @param ztoolkit ZToolkit instance for logging
+     */
+    constructor(ztoolkit: any) {
+        this.ztoolkit = ztoolkit;
+        this.ztoolkit.log("CitationService initialized");
+    }
+
+    /**
+     * Get a cached CSL citation processor
+     * Creates a new one only if needed (style or locale changed)
+     * @returns CSL citation processor or null if creation fails
+     */
+    private getCitationProcessor() {
+        const style = getPref("citationStyle");
+        const locale = getPref("citationLocale");
+
+        // Only recreate if style or locale changed, or engine doesn't exist
+        if (!this._cslEngine || this._styleID !== style || this._locale !== locale) {
+            try {
+                this.ztoolkit.log(`Creating new CSL engine for style: ${style}, locale: ${locale}`);
+                const cslStyle = Zotero.Styles.get(style);
+                if (!cslStyle) {
+                    this.ztoolkit.log(`Warning: Style ${style} not found, using default style`);
+                    // Fallback to a default style
+                    const defaultStyle = "http://www.zotero.org/styles/chicago-author-date";
+                    this._cslEngine = Zotero.Styles.get(defaultStyle).getCiteProc(locale, 'text');
+                    this._styleID = defaultStyle;
+                } else {
+                    this._cslEngine = cslStyle.getCiteProc(locale, 'text');
+                    this._styleID = style;
+                }
+                this._locale = locale;
+            } catch (e) {
+                this.ztoolkit.log(`Error creating CSL engine: ${e}`);
+                return null;
+            }
+        }
+        return this._cslEngine;
+    }
+
+    /**
+     * Format an in-text citation for one or multiple Zotero items
+     * @param items Single Zotero item or array of items to format
+     * @returns Formatted in-text citation or empty string on error
+     */
+    public formatCitation(items: Zotero.Item | Zotero.Item[]): string {
+        if (!items) return "";
+
+        // Convert single item to array for unified processing
+        const itemsArray = Array.isArray(items) ? items : [items];
+
+        try {
+            const engine = this.getCitationProcessor();
+            if (!engine) {
+                this.ztoolkit.log("Error: No CSL engine available");
+                return "";
+            }
+
+            // Get the IDs and update the processor
+            const itemIds = itemsArray.map(item => item.id);
+            engine.updateItems(itemIds);
+
+            // Create a citation object with all items
+            const citationItems = itemIds.map(id => ({ id }));
+            const citation = {
+                citationItems,
+                properties: { inText: true}
+            };
+
+            // Get the citation text
+            const citations = engine.processCitationCluster(citation, [], [], "text");
+            return citations;
+        } catch (e) {
+            this.ztoolkit.log(`Error formatting citation: ${e}`);
+            return "";
+        }
+    }
+
+    /**
+     * Format multiple items as a bibliography entry
+     * @param items Array of Zotero items
+     * @returns Formatted bibliography HTML or empty string on error
+     */
+    public formatBibliography(items: Zotero.Item | Zotero.Item[]): string {
+        if (!items) return "";
+
+        // Convert single item to array for unified processing
+        const itemsArray = Array.isArray(items) ? items : [items];
+
+        try {
+            const engine = this.getCitationProcessor();
+            if (!engine) {
+                this.ztoolkit.log("Error: No CSL engine available");
+                return "";
+            }
+
+            // Generate bibliography
+            const bibliography = Zotero.Cite.makeFormattedBibliographyOrCitationList(engine, itemsArray, "text").trim();
+            return bibliography;
+
+        } catch (e) {
+            this.ztoolkit.log(`Error formatting bibliography: ${e}`);
+            return "";
+        }
+    }
+
+    /**
+     * Force recreation of the CSL engine on next use
+     * Call this when preferences change
+     */
+    public reset(): void {
+        this._cslEngine = null;
+        this._styleID = null;
+        this._locale = null;
+        this.ztoolkit.log("CSL engine cache reset");
+    }
+
+    /**
+     * Free resources when the service is no longer needed
+     * Call during plugin shutdown
+     */
+    public dispose(): void {
+        this._cslEngine = null;
+        this._styleID = null;
+        this._locale = null;
+        this.ztoolkit.log("CitationService disposed");
+    }
+} 
