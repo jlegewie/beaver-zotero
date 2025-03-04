@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
-import { getInTextCitations } from '../../src/utils/citations';
+import { getInTextCitation } from './citationFormatting';
 
 // Limits
 export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
@@ -16,6 +16,20 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 }
 
 /**
+* Define source names
+*/
+function getNameForZoteroSource(item: Zotero.Item): string {
+    const citation = getInTextCitation(item, false)
+        .replace(/,? ?n\.d\.$/, '');
+    return item.isNote() ? `Note: ${citation}` : citation;
+}
+
+function getNameForFileSource(file: File): string {
+    return file.name;
+}
+
+
+/**
 * Factory function to create a ZoteroSource from a Zotero item
 */
 export async function createZoteroSource(
@@ -29,7 +43,7 @@ export async function createZoteroSource(
         libraryID: item.libraryID,
         itemKey: item.key,
         icon: item.getItemTypeIconName(),
-        name: getInTextCitations([item])[0],
+        name: getNameForZoteroSource(item),
         pinned: pinned,
         childItemKeys: bestAtt ? [bestAtt.key] : [],
         timestamp: Date.now()
@@ -46,7 +60,7 @@ export function createFileSource(file: File): FileSource {
         fileName: file.name,
         filePath: file.mozFullPath,
         fileType: file.type,
-        name: file.name,
+        name: getNameForFileSource(file),
         icon: file.type === 'application/pdf' ? 'attachmentPDF' : 'attachmentImage',
         pinned: false,
         timestamp: Date.now()
