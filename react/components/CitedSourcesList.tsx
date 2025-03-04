@@ -6,11 +6,11 @@ import IconButton from './IconButton';
 import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 
-interface SourcesDisplayProps {
+interface CitedSourcesListProps {
     sources: SourceWithCitations[];
 }
 
-const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
+const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     sources
 }) => {
     return (
@@ -73,4 +73,4 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({
     );
 };
 
-export default SourcesDisplay;
+export default CitedSourcesList;

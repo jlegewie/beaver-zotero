@@ -13,7 +13,7 @@ import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './Button';
-import SourcesDisplay from './SourcesDisplay';
+import CitedSourcesList from './CitedSourcesList';
 import { SourceWithCitations } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 
@@ -207,7 +207,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
             {/* Sources section */}
             {sourcesVisible && citedSources.length > 0 && (
-                <SourcesDisplay sources={citedSources} />
+                <CitedSourcesList sources={citedSources} />
             )}
 
             {/* Text selection context menu */}
