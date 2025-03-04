@@ -1,5 +1,5 @@
 import React from 'react';
-import { SourceWithCitations } from '../types/sources';
+import { Source } from '../types/sources';
 import { openSource, revealSource } from '../utils/sourceUtils';
 import { CSSItemTypeIcon } from './icons';
 import IconButton from './IconButton';
@@ -7,7 +7,7 @@ import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 
 interface CitedSourcesListProps {
-    sources: SourceWithCitations[];
+    sources: Source[];
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({

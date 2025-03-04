@@ -44,7 +44,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
         // @ts-ignore unescapeHTML exists
         ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
         // @ts-ignore Beaver exists
-        : Zotero.Beaver.citationService.formatCitation(item, true);
+        : Zotero.Beaver.citationService.formatBibliography(item);
     return reference.replace(/\n/g, '<br />');
 }
 

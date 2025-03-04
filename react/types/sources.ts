@@ -39,12 +39,3 @@ export interface RemoteFileSource extends BaseSource {
 
 // Union type for all source types
 export type Source = ZoteroSource | FileSource | RemoteFileSource;
-
-
-// SourceWithCitations type
-export type SourceWithCitations = Source & {
-    reference: string;       // Reference for the source
-    citation: string;        // Citation for the source
-    numericCitation: string; // Numeric citation for the source
-    url: string;             // URL for the source
-}

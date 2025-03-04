@@ -1,9 +1,7 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { Source, ZoteroSource, SourceWithCitations } from "../types/sources";
-import { getPref } from "../../src/utils/prefs";
-import { citationDataFromSource, getCslEngine } from "../utils/citationFormatting";
-import { getZoteroItem, getCitationFromItem, getNameFromItem } from "../utils/sourceUtils";
+import { Source, ZoteroSource } from "../types/sources";
+import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem } from "../utils/sourceUtils";
 import { createOpenPDFURL } from "../utils/pdfUtils";
 
 // Thread messages and sources
@@ -31,39 +29,6 @@ export const isStreamingAtom = atom((get) => {
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
-// Derived atom for thread sources with citations
-export const threadFlattenedSourcesWithCitationsAtom = atom<SourceWithCitations[]>((get) => {
-    const flatThreadSources = get(threadSourcesAtom)
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .flatMap((source) => {
-            if (source.type === 'zotero_item' && source.childItemKeys && source.childItemKeys.length > 0) {
-                return source.childItemKeys.map(key => ({...source, itemKey: key}));
-            }
-            return [source];
-        });
-
-    // Citation preferences
-    const style = getPref("citationStyle") || 'http://www.zotero.org/styles/chicago-author-date';
-    const locale = getPref("citationLocale") || 'en-US';
-    // CSL engine for in-text citations
-    const cslEngine = getCslEngine(style, locale);
-    // Define list of sources
-    const sources = flatThreadSources
-        .map((source, index) => {
-            const citationData = citationDataFromSource(source, cslEngine);
-            if (!citationData) return null;
-            return {
-                ...source,
-                ...citationData,
-                numericCitation: String(index + 1)
-            } as SourceWithCitations;
-        })
-        .filter(Boolean) as SourceWithCitations[];
-    cslEngine.free();
-    return sources;
-});
-
-
 export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
     // Flatten sources
     const flatThreadSources = get(threadSourcesAtom)
@@ -87,6 +52,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
                 url: createOpenPDFURL(item),
                 name: item.isNote() ? getNameFromItem(item) : source.name,
                 citation: item.isNote() ? getCitationFromItem(item) : source.citation,
+                reference: item.isNote() ? getReferenceFromItem(item) : source.reference,
                 icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
             };
         })

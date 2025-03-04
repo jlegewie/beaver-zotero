@@ -4,7 +4,7 @@ import { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
-import { isStreamingAtom, threadFlattenedSourcesWithCitationsAtom } from '../atoms/threads';
+import { isStreamingAtom, flattenedThreadSourcesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
@@ -14,7 +14,7 @@ import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './Button';
 import CitedSourcesList from './CitedSourcesList';
-import { SourceWithCitations } from '../types/sources';
+import { Source } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 
 interface AssistantMessageDisplayProps {
@@ -29,7 +29,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const threadSourcesWithCitations = useAtomValue(threadFlattenedSourcesWithCitationsAtom);
+    const threadSources = useAtomValue(flattenedThreadSourcesAtom);
     
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -107,8 +107,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
     };
 
-    // Extract citation IDs from message content and match with sources in threadSourcesWithCitations
-    const citedSources: SourceWithCitations[] = useMemo(() => {
+    // Extract citation IDs from message content and match with sources in threadSources
+    const citedSources: Source[] = useMemo(() => {
         if (message.status !== 'completed' || !message.content) {
             return [];
         }
@@ -124,8 +124,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             }
         }
 
-        // Filter threadSourcesWithCitations to only include those with IDs in citationIdSet
-        const sourcesWithCitations = threadSourcesWithCitations.filter((source: SourceWithCitations) => {
+        // Filter threadSources to only include those with IDs in citationIdSet
+        const sourcesWithCitations = threadSources.filter((source: Source) => {
             // For Zotero items, check if the ID matches the pattern libraryID-itemKey
             if (source.type === 'zotero_item') {
                 const sourceId = `${source.libraryID}-${source.itemKey}`;
@@ -137,7 +137,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         });
 
         return sourcesWithCitations;
-    }, [message.status, message.content, threadSourcesWithCitations]);
+    }, [message.status, message.content, threadSources]);
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>

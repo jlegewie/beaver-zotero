@@ -1,7 +1,7 @@
 import React from 'react';
 import Tooltip from './Tooltip';
 import { useAtomValue } from 'jotai';
-import { threadFlattenedSourcesWithCitationsAtom } from '../atoms/threads';
+import { flattenedThreadSourcesAtom } from '../atoms/threads';
 import { getPref } from '../../src/utils/prefs';
 import { parseZoteroURI } from '../utils/parseZoteroURI';
 import { citationDataFromItem } from '../utils/citationFormatting';
@@ -25,7 +25,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     exportRendering = false
 }) => {
     // Get the sources from atom state
-    const sources = useAtomValue(threadFlattenedSourcesWithCitationsAtom);
+    const sources = useAtomValue(flattenedThreadSourcesAtom);
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
