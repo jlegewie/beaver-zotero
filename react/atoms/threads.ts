@@ -14,7 +14,10 @@ export const threadSourceKeysAtom = atom((get) => {
     const keys = sources
         .filter((source): source is ZoteroSource => source.type === 'zotero_item')
         .map((source) => source.itemKey);
-    return keys;
+    const childrenKeys = sources
+        .filter((source) => source.type === 'zotero_item' && source.childItemKeys)
+        .flatMap((source) => (source as ZoteroSource).childItemKeys);
+    return [...keys, ...childrenKeys];
 });
 
 // Derived atom for thread source count
