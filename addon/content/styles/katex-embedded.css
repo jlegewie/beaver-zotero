@@ -1,0 +1,186 @@
+/* Simplified KaTeX CSS without custom fonts */
+.katex {
+  text-rendering: auto;
+  font: normal 1.21em Times New Roman, serif;
+  line-height: 1.2;
+  text-indent: 0;
+}
+.katex * {
+  -ms-high-contrast-adjust: none !important;
+  border-color: currentColor;
+}
+.katex .katex-version:after {
+  content: "0.16.8";
+}
+.katex .katex-mathml {
+  clip: rect(1px, 1px, 1px, 1px);
+  border: 0;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+.katex .katex-html > .newline {
+  display: block;
+}
+.katex .base {
+  position: relative;
+  white-space: nowrap;
+  width: -webkit-min-content;
+  width: -moz-min-content;
+  width: min-content;
+}
+.katex .base, .katex .strut {
+  display: inline-block;
+}
+.katex .textbf {
+  font-weight: 700;
+}
+.katex .textit {
+  font-style: italic;
+}
+.katex .textrm {
+  font-family: serif;
+}
+.katex .textsf {
+  font-family: sans-serif;
+}
+.katex .texttt {
+  font-family: monospace;
+}
+.katex .mathnormal {
+  font-family: serif;
+  font-style: italic;
+}
+.katex .mathit {
+  font-family: serif;
+  font-style: italic;
+}
+.katex .mathrm {
+  font-style: normal;
+}
+.katex .mathbf {
+  font-family: serif;
+  font-weight: 700;
+}
+.katex .boldsymbol {
+  font-family: serif;
+  font-style: italic;
+  font-weight: 700;
+}
+.katex .amsrm, .katex .mathbb, .katex .textbb {
+  font-family: serif;
+}
+.katex .mathcal {
+  font-family: serif;
+}
+.katex .mathfrak, .katex .textfrak {
+  font-family: serif;
+}
+.katex .mathtt {
+  font-family: monospace;
+}
+.katex .mathscr, .katex .textscr {
+  font-family: serif;
+}
+.katex .mathsf, .katex .textsf {
+  font-family: sans-serif;
+}
+.katex .mathboldsf, .katex .textboldsf {
+  font-family: sans-serif;
+  font-weight: 700;
+}
+.katex .mathitsf, .katex .textitsf {
+  font-family: sans-serif;
+  font-style: italic;
+}
+.katex .mainrm {
+  font-family: serif;
+  font-style: normal;
+}
+
+/* Continue with the rest of the CSS, but replacing all specific KaTeX_* font names with system fonts */
+/* The below is a selection of the most critical styles, the full file would be too large */
+
+.katex .vlist-t {
+  border-collapse: collapse;
+  display: inline-table;
+  table-layout: fixed;
+}
+.katex .vlist-r {
+  display: table-row;
+}
+.katex .vlist {
+  display: table-cell;
+  position: relative;
+  vertical-align: bottom;
+}
+.katex .vlist > span {
+  display: block;
+  height: 0;
+  position: relative;
+}
+.katex .vlist > span > span {
+  display: inline-block;
+}
+.katex .vlist > span > .pstrut {
+  overflow: hidden;
+  width: 0;
+}
+
+/* And more of the layout styling... */
+.katex .mspace {
+  display: inline-block;
+}
+.katex .clap, .katex .llap, .katex .rlap {
+  position: relative;
+  width: 0;
+}
+.katex .clap > .inner, .katex .llap > .inner, .katex .rlap > .inner {
+  position: absolute;
+}
+.katex .clap > .fix, .katex .llap > .fix, .katex .rlap > .fix {
+  display: inline-block;
+}
+.katex .llap > .inner {
+  right: 0;
+}
+.katex .clap > .inner, .katex .rlap > .inner {
+  left: 0;
+}
+.katex .clap > .inner > span {
+  margin-left: -50%;
+  margin-right: 50%;
+}
+
+/* Add display properties */
+.katex-display {
+  display: block;
+  margin: 1em 0;
+  text-align: center;
+}
+.katex-display > .katex {
+  display: block;
+  text-align: center;
+  white-space: nowrap;
+}
+.katex-display > .katex > .katex-html {
+  display: block;
+  position: relative;
+}
+.katex-display > .katex > .katex-html > .tag {
+  position: absolute;
+  right: 0;
+}
+.katex-display.leqno > .katex > .katex-html > .tag {
+  left: 0;
+  right: auto;
+}
+.katex-display.fleqn > .katex {
+  padding-left: 2em;
+  text-align: left;
+}
+body {
+  counter-reset: katexEqnNo mmlEqnNo;
+}

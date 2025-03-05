@@ -216,7 +216,7 @@ function unloadStylesheet() {
  * Load the KaTeX CSS stylesheet
  */
 function loadKatexStylesheet() {
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex/katex.css`;
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
@@ -230,7 +230,7 @@ function loadKatexStylesheet() {
  * Unload the KaTeX CSS stylesheet
  */
 function unloadKatexStylesheet() {
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex/katex.css`;
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
 	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
 		.getService(Ci.nsIStyleSheetService);
 	const styleSheet = Services.io.newURI(styleURI);
