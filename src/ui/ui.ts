@@ -4,6 +4,7 @@ import { triggerToggleChat } from "./toggleChat";
 import { QuickChat } from "./quickChat";
 import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
+import { getPref } from "../utils/prefs";
 
 const windowQuickChats = new WeakMap<Window, QuickChat>();
 
@@ -240,13 +241,14 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for chat panel
+        const keyboardShortcut = getPref("keyboardShortcut") || "l";
         keyboardManager.register(
             (ev, keyOptions) => {
                 
                 // Check for accel+l shortcut
-                const isAccelL = (ev.key.toLowerCase() === 'l' && (ev.ctrlKey || ev.metaKey));
+                const isAccelL = (ev.key.toLowerCase() === keyboardShortcut && (ev.ctrlKey || ev.metaKey));
                 
-                if (isAccelL || keyOptions.keyboard?.equals("accel,l")) {
+                if (isAccelL || keyOptions.keyboard?.equals(`accel,${keyboardShortcut}`)) {
                     // Prevent default behavior
                     ev.preventDefault();
                     
