@@ -39,13 +39,13 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         let processed = content;
         
         // Complete unclosed code blocks
-        const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;
-        const codeBlockMatch = processed.match(codeBlockRegex);
-        if (codeBlockMatch && codeBlockMatch.index !== undefined && 
-            codeBlockMatch.index + codeBlockMatch[0].length === processed.length) {
-            // Add closing ``` for proper formatting during streaming
-            return processed + "\n```";
-        }
+        // const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;
+        // const codeBlockMatch = processed.match(codeBlockRegex);
+        // if (codeBlockMatch && codeBlockMatch.index !== undefined && 
+        //     codeBlockMatch.index + codeBlockMatch[0].length === processed.length) {
+        //     // Add closing ``` for proper formatting during streaming
+        //     return processed + "\n```";
+        // }
         
         // Filter out other partial tags
         const partialTagPatterns = [
@@ -67,9 +67,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         return processed;
     };
     
-    // const processedContent = processPartialContent(content);
+    const processedContent = processPartialContent(content);
     
-    const preprocessedContent = content
+    const preprocessedContent = processedContent
         .replace(
             /<citation\s+((?:[^>])+?)\s*\/>/g,
             (match, attributesStr) => {
