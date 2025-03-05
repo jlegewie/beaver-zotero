@@ -150,20 +150,20 @@ const Tooltip: React.FC<TooltipProps> = ({
     
     // Wrap children to add mouse event handlers
     const wrappedChildren = (
-        <div 
+        <span 
             ref={anchorRef}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             style={{ display: 'inline-block' }}
         >
             {children}
-        </div>
+        </span>
     );
     
     // Render content with HTML support if enabled
     const renderContent = () => {
         if (typeof content === 'string' && allowHtml) {
-            return <div dangerouslySetInnerHTML={{ __html: content }} />;
+            return <span dangerouslySetInnerHTML={{ __html: content }} />;
         }
         return content;
     };
@@ -171,17 +171,17 @@ const Tooltip: React.FC<TooltipProps> = ({
     // Render secondary content with HTML support if enabled
     const renderSecondaryContent = () => {
         if (typeof secondaryContent === 'string' && allowHtml) {
-            return <div dangerouslySetInnerHTML={{ __html: secondaryContent }} />;
+            return <span dangerouslySetInnerHTML={{ __html: secondaryContent }} />;
         }
         return secondaryContent;
     };
     
     // Tooltip element
     const tooltipElement = isOpen && (
-        <div
+        <span
             ref={tooltipRef}
             className={`
-                bg-quaternary rounded-md p-0 shadow-md fixed z-1000 border-quinary
+                bg-quaternary rounded-md p-0 shadow-md fixed z-1000 border-quinary block
                 ${position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'}
                 ${classNames}
             `}
@@ -190,36 +190,47 @@ const Tooltip: React.FC<TooltipProps> = ({
                 left: position.x,
                 transform: 'translateX(-50%)',
                 width: width,
+                display: 'block'
             }}
             role="tooltip"
             aria-hidden={!isOpen}
         >
-            <div className={`
-                px-2 py-1
+            <span className={`
+                px-2 py-1 block
                 ${singleLine ? 'flex items-center' : ''}
                 ${singleLine ? 'single-line' : ''}
-            `}>
-                <div className={`text-base font-color-secondary overflow-hidden text-ellipsis ${singleLine ? 'single-line' : ''}`}>
+            `}
+            style={{ display: singleLine ? 'flex' : 'block' }}
+            >
+                <span 
+                    className={`text-base font-color-secondary overflow-hidden text-ellipsis ${singleLine ? 'single-line' : ''}`}
+                    style={{ display: 'inline-block', verticalAlign: 'middle' }}
+                >
                     {renderContent()}
-                </div>
+                </span>
                 {secondaryContent && (
-                    <div className={`
+                    <span className={`
                         text-sm font-color-tertiary
                         ${singleLine ? 'ml-3' : 'mt-1'}
                         ${singleLine ? 'single-line' : ''}
-                    `}>
+                    `}
+                    style={{ 
+                        display: singleLine ? 'inline-block' : 'block',
+                        verticalAlign: 'middle'
+                    }}
+                    >
                         {renderSecondaryContent()}
-                    </div>
+                    </span>
                 )}
-            </div>
+            </span>
             
             {showArrow && (
-                <div 
-                    className={`tooltip-arrow tooltip-arrow-${position.placement}`}
-                    style={{ left: arrowPosition }}
+                <span 
+                    className={`tooltip-arrow tooltip-arrow-${position.placement} block`}
+                    style={{ left: arrowPosition, display: 'block' }}
                 />
             )}
-        </div>
+        </span>
     );
     
     // Use portal if requested - this helps when the tooltip needs to 
