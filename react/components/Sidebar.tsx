@@ -53,7 +53,11 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                {userScrolled && <ScrollDownButton onClick={handleScrollToBottom} />}
+                {userScrolled && !previewedSource && (
+                    <div className="relative w-full h-0">
+                        <ScrollDownButton onClick={handleScrollToBottom} />
+                    </div>
+                )}
                 {previewedSource && <SourcePreview source={previewedSource} />}
                 <InputArea inputRef={inputRef} />
             </div>

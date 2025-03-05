@@ -1083,3 +1083,19 @@
     cursor: not-allowed;
     background-color: transparent;
 }
+
+/* Scroll down button */
+[id^="beaver-pane-"] .scroll-down-button {
+    transform: translateY(-29px);
+    background: var(--color-button);
+    border: 1px solid var(--color-border50);
+    border-radius: 50%;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}

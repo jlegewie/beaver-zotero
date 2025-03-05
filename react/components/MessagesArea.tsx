@@ -32,16 +32,16 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             if (ref && 'current' in ref && ref.current) {
                 const { scrollTop, scrollHeight, clientHeight } = ref.current;
                 const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-                const scrollDifference = Math.abs(scrollTop - lastScrollTopRef.current);
-
-                if (scrollDifference > SCROLL_THRESHOLD) {
-                    if (distanceFromBottom > BOTTOM_THRESHOLD) {
-                        setUserScrolled(true);
-                    } else {
-                        setUserScrolled(false);
-                    }
-                    lastScrollTopRef.current = scrollTop;
+                            
+                // Check if not at the bottom
+                if (distanceFromBottom > BOTTOM_THRESHOLD) {
+                    setUserScrolled(true);
+                } else {
+                    setUserScrolled(false);
                 }
+                
+                // Still track last scroll position for reference
+                lastScrollTopRef.current = scrollTop;
             }
         };
 
