@@ -108,12 +108,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                         {threadSourceCount}
                     </button>
                 )}
-                {currentSources.length == 0 && (
+                {currentSources.length == 0 && threadSourceCount == 0 && (
                     <Button
                         variant="outline"
                         icon={PlusSignIcon}
                         disabled={true}
-                        title={`This thread has no sources.`}
+                        title="Select in Library to Add"
                     >
                         Select to Add
                     </Button>
