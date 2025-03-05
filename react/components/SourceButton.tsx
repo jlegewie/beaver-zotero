@@ -144,10 +144,10 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         }, []);
 
         useEffect(() => {
-            const checkAttachmentValidity = async () => {
+            const checkSourceValidity = async () => {
                 setIsValid(await isSourceValid(source));
             }
-            checkAttachmentValidity();
+            checkSourceValidity();
         }, [source])
 
         // Truncate the name and add a count if there are child items
