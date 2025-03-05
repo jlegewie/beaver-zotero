@@ -20,7 +20,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
                 {sources.map((source, index) => (
-                    <div key={source.id} className={`p-2 rounded-md flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                    <div key={index} className={`p-2 rounded-md flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         <div className="p-2">
                             <div className="source-citation text-sm">
