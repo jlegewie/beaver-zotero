@@ -87,12 +87,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Message sources */}
             <div className="flex flex-wrap gap-3 mb-2">
-                <IconButton
+                {/* <IconButton
                     icon={PlusSignIcon}
                     onClick={handleAddSources}
                     className="scale-11"
                     ariaLabel="Add sources"
-                />
+                /> */}
                 {threadSourceCount > 0 && (
                     <button
                         className="sources-info"
@@ -108,6 +108,17 @@ const InputArea: React.FC<InputAreaProps> = ({
                         {threadSourceCount}
                     </button>
                 )}
+                {currentSources.length == 0 && (
+                    <Button
+                        variant="outline"
+                        icon={PlusSignIcon}
+                        disabled={true}
+                        title={`This thread has no sources.`}
+                    >
+                        Select to Add
+                    </Button>
+                )}
+
                 {currentSources.map((source, index) => (
                     <SourceButton
                         key={index}
