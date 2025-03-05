@@ -3,8 +3,12 @@ import { getItemMetadata } from "../utils/metadata";
 import { triggerToggleChat } from "./toggleChat";
 import { QuickChat } from "./quickChat";
 import { initializeReactUI } from "../../react/ui/initialization";
+import { KeyboardManager } from "../utils/keyboardManager";
 
 const windowQuickChats = new WeakMap<Window, QuickChat>();
+
+// Create a single instance of keyboard manager
+const keyboardManager = new KeyboardManager();
 
 export class BeaverUIFactory {
     static registerQuickChat(win: Window) {
@@ -216,13 +220,19 @@ export class BeaverUIFactory {
     }
 
     static registerShortcuts() {
-        // Unregister existing shortcuts
-        // ztoolkit.Keyboard.unregisterAll();
+        // Always unregister all existing shortcuts first to prevent duplicates
+        keyboardManager.unregisterAll();
+        
+        ztoolkit.log("Registering keyboard shortcuts...");
         
         // Register keyboard shortcut for quick chat
-        ztoolkit.Keyboard.register(
-            (ev, keyOptions) => {
+        keyboardManager.register(
+            (ev, keyOptions) => {                
                 if (keyOptions.keyboard?.equals("shift,p")) {
+                    // Prevent default behavior
+                    ev.preventDefault();
+                    ztoolkit.log("Shift+P shortcut triggered");
+                    
                     const win = Zotero.getMainWindow();
                     windowQuickChats.get(win)?.show();
                 }
@@ -230,16 +240,46 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for chat panel
-        ztoolkit.Keyboard.register(
+        keyboardManager.register(
             (ev, keyOptions) => {
-                if (keyOptions.keyboard?.equals("accel,l")) {
-                    const win = Zotero.getMainWindow();
-                    triggerToggleChat(win);
+                
+                // Check for accel+l shortcut
+                const isAccelL = (ev.key.toLowerCase() === 'l' && (ev.ctrlKey || ev.metaKey));
+                
+                if (isAccelL || keyOptions.keyboard?.equals("accel,l")) {
                     // Prevent default behavior
                     ev.preventDefault();
+                    
+                    // The Reader view requires a different approach than the library view
+                    let win;
+                    
+                    // First check if we're in a reader window
+                    if (ev.target && (ev.target as HTMLElement).ownerDocument) {
+                        const doc = (ev.target as HTMLElement).ownerDocument;
+                        if (doc.defaultView) {
+                            win = doc.defaultView;
+                        }
+                    }
+                    
+                    // If we couldn't get the window from the event target,
+                    // fall back to the main window
+                    if (!win) {
+                        win = Zotero.getMainWindow();
+                    }
+                    
+                    // Toggle the chat panel
+                    triggerToggleChat(win);
                 }
             }
         );
+    }
+    
+    /**
+     * Unregister all keyboard shortcuts 
+     * Should be called during plugin shutdown or window unload
+     */
+    static unregisterShortcuts() {
+        keyboardManager.unregisterAll();
     }
 
     static updateItemPaneStatus(itemId: number, status: string) {

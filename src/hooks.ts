@@ -175,6 +175,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	// Clean up QuickChat for this window
 	BeaverUIFactory.removeQuickChat(win);
 	BeaverUIFactory.removeChatPanel(win);
+	// Unregister keyboard shortcuts
+	// BeaverUIFactory.unregisterShortcuts();
 	// Unload the stylesheet
 	unloadKatexStylesheet();
 	unloadStylesheet();
@@ -254,6 +256,9 @@ async function onShutdown(): Promise<void> {
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}
+	
+	// Unregister keyboard shortcuts
+	BeaverUIFactory.unregisterShortcuts();
 	
 	// Unload stylesheets
 	unloadKatexStylesheet();
