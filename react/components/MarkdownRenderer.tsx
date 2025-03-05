@@ -21,14 +21,12 @@ const customSchema = deepmerge(defaultSchema, {
 type MarkdownRendererProps = {
     content: string;
     className?: string;
-    tooltip?: boolean;
     exportRendering?: boolean;
 };
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
     className = 'markdown', 
-    tooltip = true,
     exportRendering = false
 }) => {
 
