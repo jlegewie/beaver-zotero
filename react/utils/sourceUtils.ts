@@ -65,6 +65,7 @@ export async function createZoteroSource(
         reference: getReferenceFromItem(item),
         url: createZoteroURI(item),
         parentKey: item.parentKey || null,
+        isRegularItem: item.isRegularItem(),
         pinned: pinned,
         childItemKeys: bestAtt ? [bestAtt.key] : [],
         timestamp: Date.now(),

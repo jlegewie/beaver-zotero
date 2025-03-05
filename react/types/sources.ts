@@ -20,6 +20,7 @@ export interface ZoteroSource extends BaseSource {
     libraryID: number;        // Zotero library ID
     itemKey: string;          // Zotero item key
     parentKey: string | null; // Key of the parent item
+    isRegularItem: boolean;   // Whether the item is a regular item or an attachment, note etc
     childItemKeys: string[];  // Keys of child items that are part of this source
 }
 
