@@ -54,7 +54,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
                 citation: item.isNote() ? getCitationFromItem(item) : source.citation,
                 reference: item.isNote() ? getReferenceFromItem(item) : source.reference,
                 icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
-                parentKey: item.parentID || null,
+                parentKey: item.parentKey || null,
             };
         })
         .filter(Boolean) as Source[];
