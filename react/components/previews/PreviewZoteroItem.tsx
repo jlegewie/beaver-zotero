@@ -3,7 +3,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { updateSourceChildItemKeysAtom } from '../../atoms/input';
-import { isValidZoteroItem } from '../../utils/sourceUtils';
+import { isValidAttachment } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
@@ -35,7 +35,7 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
             const validityMap: {[id: number]: boolean} = {};
             for (const att of atts) {
                 try {
-                    const isValid = await isValidZoteroItem(att);
+                    const isValid = att.isNote() ? true : await isValidAttachment(att);
                     validityMap[att.id] = isValid;
                 } catch (e) {
                     validityMap[att.id] = false;
