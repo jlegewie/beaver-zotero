@@ -81,7 +81,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     return (
         <DragDropWrapper addFileSource={addFileSource}>
         <div
-            className="user-message-display"
+            className="user-message-display shadow-md"
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >

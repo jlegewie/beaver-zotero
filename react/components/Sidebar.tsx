@@ -38,7 +38,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     };
 
     return (
-        <div className="sidebar-container h-full flex flex-col gap-3 min-w-0">
+        <div className="sidebar-container h-full flex flex-col min-w-0">
             
             {/* Header */}
             <Header />

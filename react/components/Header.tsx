@@ -27,7 +27,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     }
 
     return (
-        <div id="beaver-header" className="flex flex-row p-3 pb-2">
+        <div id="beaver-header" className="flex flex-row px-3 py-2">
             <div className="flex-1">
                 <Tooltip content="Close chat" showArrow singleLine>
                     <IconButton
