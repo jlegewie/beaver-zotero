@@ -22,7 +22,7 @@ export const threadSourceKeysAtom = atom((get) => {
 
 // Derived atom for thread source count
 export const threadSourceCountAtom = atom((get) => {
-    const sources = get(threadSourcesAtom);
+    const sources = get(flattenedThreadSourcesAtom);
     return sources.length;
 });
 
