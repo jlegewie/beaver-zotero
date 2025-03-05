@@ -18,8 +18,7 @@ const PreviewZoteroSource: React.FC<PreviewZoteroSourceProps> = ({ source, item 
             return content.replace(title, '').trim().slice(0, MAX_NOTE_CONTENT_LENGTH) + '...';
         }
         if (item.isAttachment()) {
-            // @ts-ignore getFilename exists
-            return item.getFilename();
+            return item.attachmentFilename;
         }
         return item.getDisplayTitle();
     };

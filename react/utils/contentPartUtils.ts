@@ -68,8 +68,7 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             return [{ type: 'text', text: noteData }]
         // Top-level attachment
         } else if (!parentItem && item.isAttachment()) {
-            // @ts-ignore getFilename exists
-            const fileName = item.getFileName();
+            const fileName = item.attachmentFilename;
             const metadata = `# Document (id: ${id})\nFile Name: ${fileName}`;
 
             // Get the file path
