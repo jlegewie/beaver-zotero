@@ -119,6 +119,30 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
     }
 
+    // Rendering for export to Zotero note (using CSL JSON for citations)
+    /*if (exportRendering) {
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+        if (!item) return null;
+        const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
+        const citation = {
+            citationItems: [{
+                uris: [Zotero.URI.getItemURI(item.parentItem || item)],
+                itemData: itemData,
+                locator: pages || null
+            }],
+            properties: {}
+        };
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+        return (
+            <span
+                className="citation" 
+                data-citation={encodeURIComponent(JSON.stringify(citation))}
+            >
+                {formatted}
+            </span>
+        );
+    }*/
+
     const citationElement = (
         <a 
             href={url} 
