@@ -14,7 +14,7 @@ import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './Button';
 import CitedSourcesList from './CitedSourcesList';
-import { Source } from '../types/sources';
+import { Source, ZoteroSource } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 
 interface AssistantMessageDisplayProps {
@@ -76,11 +76,16 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         });
     };
 
-    const saveAsNote = async () => {
+    const saveAsNote = async (source?: ZoteroSource) => {
         const formattedContent = renderToHTML(message.content);
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
+        if (source && source.parentKey) {
+            newNote.parentKey = source.parentKey;
+        }
         await newNote.saveTx();
+        // @ts-ignore selectItem exists
+        Zotero.getActiveZoteroPane().itemsView.selectItem(newNote.id);
     }
 
     // Get appropriate error message based on the error type
@@ -207,7 +212,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
             {/* Sources section */}
             {sourcesVisible && citedSources.length > 0 && (
-                <CitedSourcesList sources={citedSources} />
+                <CitedSourcesList sources={citedSources} saveAsNote={saveAsNote} />
             )}
 
             {/* Text selection context menu */}

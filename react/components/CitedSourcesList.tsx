@@ -1,5 +1,5 @@
 import React from 'react';
-import { Source } from '../types/sources';
+import { Source, ZoteroSource } from '../types/sources';
 import { openSource, revealSource } from '../utils/sourceUtils';
 import { CSSItemTypeIcon } from './icons';
 import IconButton from './IconButton';
@@ -8,11 +8,14 @@ import { ZoteroIcon } from './icons/ZoteroIcon';
 
 interface CitedSourcesListProps {
     sources: Source[];
+    saveAsNote: (source?: ZoteroSource) => Promise<void>;
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
-    sources
+    sources,
+    saveAsNote
 }) => {
+    
     return (
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
@@ -41,6 +44,16 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     </span>
                                 </div>
                                 <div className="flex gap-2 flex-shrink-0">
+                                    {source.type === 'zotero_item' && source.parentKey &&
+                                        <IconButton
+                                            icon={() => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={10} />}
+                                            variant="outline"
+                                            onClick={() => saveAsNote(source)}
+                                            ariaLabel="Save as Item Note"
+                                            title="Save as Item Note"
+                                            className="scale-90 flex"
+                                        />
+                                    }
                                     <IconButton
                                         icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
                                         variant="outline"
