@@ -128,27 +128,32 @@ export function getChildItems(source: ZoteroSource): Zotero.Item[] {
 /**
 * Source method: Check if a source is valid
 */
-export const isValidZoteroItem = async (item: Zotero.Item): Promise<boolean> => {
-    if (item.isNote()) return true;
-    const attachmentItem: Zotero.Item | false = item.isRegularItem() ? await item.getBestAttachment() : item;
-    const attachmentExists = attachmentItem ? await attachmentItem.fileExists() : false;
-    // @ts-ignore getAttachmentMIMEType exists
-        const mimeType = attachmentItem ? attachmentItem.getAttachmentMIMEType() : '';
-    return attachmentExists && isValidMimeType(mimeType);
+export const isValidRegularItem = async (source: ZoteroSource, item: Zotero.Item): Promise<boolean> => {
+    if (source.childItemKeys.length == 0) return false;
+    const bestAttachment = await item.getBestAttachment();
+    if (!bestAttachment) return false;
+    if (!source.childItemKeys.includes(bestAttachment.key)) return false;
+    const isBestAttachmentValid = await isValidAttachment(bestAttachment);
+    return isBestAttachmentValid;
 }
 
-export async function isSourceValid(source: Source, confirmChildItems: boolean = false): Promise<boolean> {
+const isValidAttachment = async (att: Zotero.Item): Promise<boolean> => {
+    if (!att.isAttachment()) return false;
+    const exists = await att.fileExists();
+    // @ts-ignore getAttachmentMIMEType exists
+    const mimeType = att.getAttachmentMIMEType();
+    return exists && isValidMimeType(mimeType);
+}
+
+export async function isSourceValid(source: Source): Promise<boolean> {
     switch (source.type) {
         case 'zotero_item': {
             const item = getZoteroItem(source);
             if (!item) return false;
-            const isValid = await isValidZoteroItem(item);
-            if (item.isRegularItem() && confirmChildItems) {
-                const childItems = getChildItems(source);
-                const childItemValidities = await Promise.all(childItems.map(isValidZoteroItem));
-                return isValid && childItemValidities.length > 0 && childItemValidities.some(Boolean);
-            }
-            return isValid;
+            if (item.isNote()) return true;
+            if (item.isAttachment()) return await isValidAttachment(item);
+            if (item.isRegularItem()) return await isValidRegularItem(source,item);
+            return false;
         }
         case 'file':
             // TODO: Implement file existence check

@@ -1,10 +1,76 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom } from './threads';
-import { Source } from '../types/sources';
-import { isSourceValid } from '../utils/sourceUtils';
+import { Source, ZoteroSource } from '../types/sources';
+import { createZoteroSource, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
+
+
+/**
+ * Processes and organizes sources for use in a message.
+ * 
+ * This function performs the following operations:
+ * 1. Organizes sources by associating child sources with their parent sources
+ * 2. Ensures regular Zotero items include their best attachment, or fall back to using child items
+ * 3. Validates all sources and removes invalid ones
+ * 4. Returns sources sorted by timestamp
+ * 
+ * @param sources - Array of Source objects to be processed
+ * @param userMsg - Object containing the user message ID
+ * @returns Promise resolving to an array of valid sources sorted by timestamp
+ */
+async function prepareSources(
+    sources: Source[],
+    userMsg: { id: string }
+) {
+    // Keys for regular zotero items
+    const regularItemKeys = new Set(
+        sources.filter((s) => s.type === 'zotero_item' && s.isRegularItem).map((s) => (s as ZoteroSource).itemKey)
+    );
+
+    // Sources that should be added as children of regular items
+    const childrenSources = sources.filter((s) => s.type === 'zotero_item' && s.parentKey && regularItemKeys.has(s.parentKey)) as ZoteroSource[];
+    const childrenSourcesIds = new Set(childrenSources.map((s) => s.id));
+
+    // Main source list
+    const payloadSources = sources.filter((s) => !childrenSourcesIds.has(s.id));
+    
+    // Add child sources to parent sources
+    childrenSources.forEach((childSource) => {
+        const parentSource = payloadSources.find((s) => s.type === 'zotero_item' && s.itemKey === childSource.parentKey) as ZoteroSource;
+        if (parentSource && !parentSource.childItemKeys.includes(childSource.itemKey)) {
+            parentSource.childItemKeys = [...parentSource.childItemKeys, childSource.itemKey];
+        }
+    });
+
+    // Ensure that regular zotero items include best attachment. If not, return children items as sources.
+    const updatedPayloadSources = (await Promise.all(payloadSources.flatMap(async (s) => {
+        if (!(s.type === 'zotero_item' && s.isRegularItem)) return s;
+        const item = getZoteroItem(s);
+        if (!item) return []
+        // Return regular item if child items include best attachment
+        const bestAttachment = await item.getBestAttachment();
+        if (bestAttachment && s.childItemKeys.includes(bestAttachment.key)) return s;
+        // Otherwise, return children items
+        const childItems = getChildItems(s);
+        const childSources = await Promise.all(childItems.map(async (item) => {
+            return {
+                ...(await createZoteroSource(item)),
+                messageId: userMsg.id,
+                timestamp: s.timestamp
+            } as ZoteroSource;
+        }));
+        return childSources;
+    }))).flat();
+
+    // Filter out invalid sources
+    const validSources = updatedPayloadSources.filter(async (s) => await isSourceValid(s));
+
+    // Sort sources by timestamp
+    return validSources.sort((a, b) => a.timestamp - b.timestamp);
+}
+
 
 export const generateResponseAtom = atom(
     null,
@@ -23,16 +89,17 @@ export const generateResponseAtom = atom(
         // Update thread messages atom
         const newMessages = [...threadMessages, userMsg, assistantMsg];
         set(threadMessagesAtom, newMessages);
+        
+        // Prepare sources
+        const payloadSources = await prepareSources(payload.sources, userMsg);
 
-        // Update thread source atom
+        // Combine existing thread sources with payload sources
         const newThreadSources: Source[] = [...threadSources];
-        if (payload.sources && payload.sources.length > 0) {
-            for (const source of payload.sources) {
-                if (await isSourceValid(source, true)) {
-                    newThreadSources.push({...source, messageId: userMsg.id});
-                }
-            }
+        for (const source of payloadSources) {
+            newThreadSources.push({...source, messageId: userMsg.id});
         }
+        
+        // Update thread sources atom
         set(threadSourcesAtom, newThreadSources);
         
         // Reset user message and source after adding to message
