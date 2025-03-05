@@ -126,6 +126,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	
 	// Load styles for this window
 	loadStylesheet();
+	loadKatexStylesheet();
 	ztoolkit.log("Styles loaded for window");
 
 	// const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
@@ -175,6 +176,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	BeaverUIFactory.removeQuickChat(win);
 	BeaverUIFactory.removeChatPanel(win);
 	// Unload the stylesheet
+	unloadKatexStylesheet();
 	unloadStylesheet();
 
 	ztoolkit.unregisterAll();
@@ -208,6 +210,33 @@ function unloadStylesheet() {
 	}	
 }
 
+/**
+ * Load the KaTeX CSS stylesheet
+ */
+function loadKatexStylesheet() {
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex/katex.css`;
+    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+        .getService(Ci.nsIStyleSheetService);
+    const styleSheet = Services.io.newURI(styleURI);
+	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
+		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	}
+    ssService.loadAndRegisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+}
+
+/**
+ * Unload the KaTeX CSS stylesheet
+ */
+function unloadKatexStylesheet() {
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex/katex.css`;
+	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+		.getService(Ci.nsIStyleSheetService);
+	const styleSheet = Services.io.newURI(styleURI);
+	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
+		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	}	
+}
+
 async function onShutdown(): Promise<void> {
 	try {
 		// Close database connection if it exists
@@ -225,6 +254,10 @@ async function onShutdown(): Promise<void> {
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}
+	
+	// Unload stylesheets
+	unloadKatexStylesheet();
+	unloadStylesheet();
 	
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();

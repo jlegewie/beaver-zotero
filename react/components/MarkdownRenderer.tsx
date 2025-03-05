@@ -5,8 +5,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import ZoteroCitation from './ZoteroCitation';
-// import rehypeKatex from 'rehype-katex';
-// import 'katex/dist/katex.min.css';
+import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 
 // Create a custom schema that extends GitHub's defaults but allows citation tags
@@ -104,7 +103,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             // "markdown-body"
             className={className}
             remarkPlugins={[remarkMath,remarkGfm]}
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema]]}
+            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
             // rehypePlugins={[rehypeKatex]}
             components={{
                 citation: ({node, ...props}: any) => {

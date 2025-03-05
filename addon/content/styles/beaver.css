@@ -409,8 +409,7 @@
 [id^="beaver-pane-"] .markdown .katex-display {
     /* Styles for display math */
     /* display: block; */
-    margin-top: 5rem !;
-    font-size: 1.2em !important;
+    /* font-size: 1.2em !important; */
     padding: 0rem;
     overflow: auto;
 }
