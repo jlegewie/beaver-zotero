@@ -34,6 +34,42 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     // - transform self-closing citation tags into proper open/close tags
     // - tracks repeated citations with the same ID to add the `consecutive` attribute
     let lastCitationId = "";
+    
+    // Process partial tags at the end of content
+    const processPartialContent = (content: string): string => {
+        let processed = content;
+        
+        // Complete unclosed code blocks
+        const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;
+        const codeBlockMatch = processed.match(codeBlockRegex);
+        if (codeBlockMatch && codeBlockMatch.index !== undefined && 
+            codeBlockMatch.index + codeBlockMatch[0].length === processed.length) {
+            // Add closing ``` for proper formatting during streaming
+            return processed + "\n```";
+        }
+        
+        // Filter out other partial tags
+        const partialTagPatterns = [
+            /<citation[^>]*$/,                // Partial citation tag
+            /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i, // Any partial HTML tag
+            /\$\$[^$]*$/                      // Unclosed math equation
+        ];
+        
+        // Check if content ends with any of our partial tag patterns
+        for (const pattern of partialTagPatterns) {
+            const match = processed.match(pattern);
+            if (match && match.index !== undefined && match.index + match[0].length === processed.length) {
+                // Remove the partial tag if it's at the end of the content
+                processed = processed.substring(0, match.index);
+                break; // Only apply one filter
+            }
+        }
+        
+        return processed;
+    };
+    
+    // const processedContent = processPartialContent(content);
+    
     const preprocessedContent = content
         .replace(
             /<citation\s+((?:[^>])+?)\s*\/>/g,
