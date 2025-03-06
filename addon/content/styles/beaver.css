@@ -375,6 +375,7 @@
 
 /* Borders */
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 
 /* Shadows */
 [id^="beaver-pane-"] .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }
@@ -1097,4 +1098,23 @@
     cursor: pointer;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
+}
+
+/* Surface light variant */
+[id^="beaver-pane-"] .welcome-page-button {
+    cursor: pointer;
+    border: 1px solid var(--fill-quinary);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    padding: 12px 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .welcome-page-button:hover {
+    background-color: var(--fill-quarternary);
 }

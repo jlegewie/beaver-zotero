@@ -10,6 +10,7 @@ import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { previewedSourceAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
+import WelcomePage from './WelcomePage';
 import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
@@ -44,12 +45,16 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <Header />
 
             {/* Messages area (scrollable) */}
-            <MessagesArea 
-                messages={threadMessages} 
-                userScrolled={userScrolled} 
-                setUserScrolled={setUserScrolled}
-                ref={messagesContainerRef}
-            />
+            {threadMessages.length > 0 ? (
+                <MessagesArea 
+                    messages={threadMessages} 
+                    userScrolled={userScrolled} 
+                    setUserScrolled={setUserScrolled}
+                    ref={messagesContainerRef}
+                />
+            ) : (
+                <WelcomePage />
+            )}
 
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
