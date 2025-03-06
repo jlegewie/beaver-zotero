@@ -6,6 +6,14 @@ import { createZoteroSource, getChildItems, getZoteroItem, isSourceValid } from 
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 
+/**
+ * Context for the reader.
+ */
+export type ReaderContext = {
+    itemKey: string;
+    page: number | null;
+    selection: string | null;
+}
 
 /**
  * Processes and organizes sources for use in a message.
@@ -90,6 +98,7 @@ export const generateResponseAtom = atom(
     async (get, set, payload: {
         content: string;
         sources: Source[];
+        readerContext?: ReaderContext;
     }) => {
         // Get current messages
         const threadMessages = get(threadMessagesAtom);
@@ -114,13 +123,24 @@ export const generateResponseAtom = atom(
         
         // Update thread sources atom
         set(threadSourcesAtom, newThreadSources);
+
+        // Provide reader context sources contain current reader item
+        let context: ReaderContext | undefined;
+        if (payload.readerContext) {
+            const sourceKeys = newThreadSources
+                .filter((s) => s.type === 'zotero_item')
+                .flatMap((s) => [s.itemKey, ...s.childItemKeys]);
+            if (sourceKeys.includes(payload.readerContext.itemKey)) {
+                context = payload.readerContext;
+            }
+        }
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
         set(currentUserMessageAtom, '');
         
         // Execute chat completion
-        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, set);
+        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, context, set);
         
         return assistantMsg.id;
     }
@@ -154,7 +174,7 @@ export const regenerateFromMessageAtom = atom(
         set(threadSourcesAtom, newThreadSources);
         
         // Execute chat completion
-        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, set);
+        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, undefined, set);
         
         return assistantMsg.id;
     }
@@ -165,6 +185,7 @@ function _processChatCompletion(
     messages: ChatMessage[],
     sources: Source[],
     assistantMsgId: string,
+    context: ReaderContext | undefined,
     set: any
 ) {
     // Filter out empty assistant messages
@@ -175,6 +196,7 @@ function _processChatCompletion(
     chatCompletion(
         filteredMessages,
         sources,
+        context,
         (chunk: string) => {
             set(streamToMessageAtom, { id: assistantMsgId, chunk });
         },

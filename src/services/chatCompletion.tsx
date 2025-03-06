@@ -3,6 +3,7 @@ import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/sourceUtils";
 import { Source } from "react/types/sources";
+import { ReaderContext } from "react/atoms/generateMessages";
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
@@ -35,10 +36,12 @@ function chatMessageToRequestMessage(message: ChatMessage): APIMessage {
 export const chatCompletion = async (
     messages: ChatMessage[],
     sources: Source[],
+    context: ReaderContext | undefined,
     onChunk: (chunk: string) => void,
     onFinish: () => void,
     onError: (error: Error) => void
 ) => {
+    console.log('context', context);
     // System prompt
     const systemPrompt = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
     const requestMessages: APIMessage[] = [{ role: 'system', content: systemPrompt }];

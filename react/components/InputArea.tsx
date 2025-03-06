@@ -6,10 +6,11 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom } from '../atoms/threads';
 import { currentSourcesAtom, addFileSourceAtom, currentUserMessageAtom } from '../atoms/input';
 import DragDropWrapper from './DragDropWrapper';
-import { generateResponseAtom } from '../atoms/generateMessages';
+import { generateResponseAtom, ReaderContext } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
 import Button from './Button';
+import { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem } from '../utils/readerUtils';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -35,9 +36,22 @@ const InputArea: React.FC<InputAreaProps> = ({
             return;
         }
 
+        // Get context from reader if it exists
+        const reader = getCurrentReader();
+        let context: ReaderContext | undefined;
+        if (reader && reader.type === 'pdf') {
+            context = {
+                itemKey: getCurrentItem(reader).key,
+                page: getCurrentPage(reader),
+                selection: getSelectedText(reader),
+            };
+        }
+
+        // Generate response
         generateResponse({
             content: userMessage,
             sources: currentSources,
+            readerContext: context,
         });
 
         // If command is pressed, handle library search
