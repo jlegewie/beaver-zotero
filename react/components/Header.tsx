@@ -18,10 +18,14 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
         await newThread();
     }
 
+    // Get platform-specific shortcut text
+    const newChatShortcut = !Zotero.isMac ? '⌘N' : 'Ctrl+N';
+    const closeChatShortcut = !Zotero.isMac ? '⌘L' : 'Ctrl+L';
+
     return (
         <div id="beaver-header" className="flex flex-row px-3 py-2">
             <div className="flex-1">
-                <Tooltip content="Close chat" secondaryContent="⌘L" showArrow singleLine>
+                <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
                     <IconButton
                         icon={CancelIcon}
                         onClick={() => triggerToggleChat(Zotero.getMainWindow())}
@@ -42,7 +46,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         ariaLabel="Show chat history"
                     />
                 </Tooltip>
-                <Tooltip content="New Chat" secondaryContent="⌘N" showArrow singleLine>
+                <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                     <IconButton
                         icon={PlusSignIcon}
                         onClick={handleNewThread}

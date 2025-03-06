@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, threadSourceCountAtom } from '../atoms/threads';
+import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/threads';
 import { currentSourcesAtom, addFileSourceAtom, currentUserMessageAtom } from '../atoms/input';
 import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
@@ -26,6 +26,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const threadSourceCount = useAtomValue(threadSourceCountAtom);
     const addFileSource = useSetAtom(addFileSourceAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
+    const newThread = useSetAtom(newThreadAtom);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -60,8 +61,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Meta') {
+        if ((Zotero.isMac && e.key === 'Meta') || (!Zotero.isMac && e.key === 'Control')) {
             setIsCommandPressed(true);
+        }
+        
+        // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
+        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
+            e.preventDefault();
+            newThread();
         }
     };
 
@@ -173,7 +180,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                             onClick={handleLibrarySearch}
                             disabled={isStreaming || userMessage.length === 0}
                         >
-                            Library Search ⌘ ⏎
+                            Library Search
+                            <span className="opacity-50">
+                                {Zotero.isMac ? '⌘' : '⌃'}⏎
+                            </span>
                         </Button>
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
@@ -183,7 +193,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                             onClick={isStreaming ? handleStop : handleSubmit}
                             disabled={userMessage.length === 0 && !isStreaming}
                         >
-                            {isStreaming ? 'Stop' : 'Send ⏎'}
+                            {isStreaming
+                                ? 'Stop'
+                                : (<span>Send <span className="opacity-50">⏎</span></span>)
+                            }
                         </Button>
                     </div>
                 </div>
