@@ -3,6 +3,7 @@ import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
+import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
@@ -69,6 +70,17 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
 
 
 // Setter atoms
+export const newThreadAtom = atom(
+    null,
+    async (_, set) => {
+        set(threadMessagesAtom, []);
+        set(threadSourcesAtom, []);
+        set(currentUserMessageAtom, '');
+        set(resetCurrentSourcesAtom);
+        set(updateSourcesFromZoteroSelectionAtom);
+    }
+);
+
 export const setMessageContentAtom = atom(
     null,
     (get, set, { id, content }: { id: string; content: string }) => {
