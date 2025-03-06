@@ -98,8 +98,11 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
+        const key = getPref("keyboardShortcut").toUpperCase() || "L";
+        const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
+        chatToggleBtn.setAttribute("tooltiptext", `Toggle AI Chat (${shortcut})`);
         chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
@@ -241,7 +244,7 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for chat panel
-        const keyboardShortcut = getPref("keyboardShortcut") || "l";
+        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
         keyboardManager.register(
             (ev, keyOptions) => {
                 
