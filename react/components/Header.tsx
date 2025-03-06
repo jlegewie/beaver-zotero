@@ -1,9 +1,8 @@
 import React from 'react';
 import { CancelIcon, ClockIcon, PlusSignIcon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { threadMessagesAtom, threadSourcesAtom } from '../atoms/threads';
-import { resetCurrentSourcesAtom, currentUserMessageAtom, updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
-import { useAtom, useSetAtom } from 'jotai';
+import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
+import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';
 
@@ -12,18 +11,11 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
-    const [threadMessages, setThreadMessages] = useAtom(threadMessagesAtom);
-    const setThreadSources = useSetAtom(threadSourcesAtom);
-    const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
-    const resetCurrentResources = useSetAtom(resetCurrentSourcesAtom);
-    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
+    const threadMessages = useAtomValue(threadMessagesAtom);
+    const newThread = useSetAtom(newThreadAtom);
     
     const handleNewThread = async () => {
-        setThreadMessages([]);
-        setThreadSources([]);
-        setCurrentUserMessage('');
-        resetCurrentResources();
-        await updateSourcesFromZoteroSelection();
+        await newThread();
     }
 
     return (
