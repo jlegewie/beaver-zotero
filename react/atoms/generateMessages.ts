@@ -5,15 +5,8 @@ import { Source, ZoteroSource } from '../types/sources';
 import { createZoteroSource, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
+import { ReaderContext } from '../utils/readerUtils';
 
-/**
- * Context for the reader.
- */
-export type ReaderContext = {
-    itemKey: string;
-    page: number | null;
-    selection: string | null;
-}
 
 /**
  * Processes and organizes sources for use in a message.

@@ -81,7 +81,7 @@ export type ReaderContext = {
     itemKey: string;
     page: number | null;
     identifier: string;
-    type: string;
+    itemType: string;
     reference: string | null;
     selection: string | null;
 }
@@ -110,7 +110,7 @@ function getReaderContext(): ReaderContext | undefined {
             page: getCurrentPage(reader),
             selection: getSelectedText(reader),
             identifier: `${item.libraryID}-${item.key}`,
-            type: type,
+            itemType: type,
             reference: reference,
         } as ReaderContext;
     }

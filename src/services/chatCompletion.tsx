@@ -3,7 +3,8 @@ import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/sourceUtils";
 import { Source } from "react/types/sources";
-import { ReaderContext } from "react/atoms/generateMessages";
+import { ReaderContext } from "react/utils/readerUtils";
+import Handlebars from 'handlebars';
 
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
@@ -42,8 +43,13 @@ export const chatCompletion = async (
     onError: (error: Error) => void
 ) => {
     console.log('context', context);
-    // System prompt
-    const systemPrompt = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
+    
+    // Compile system prompt
+    const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
+    const compiledTemplate = Handlebars.compile(systemPromptTemplate);
+    const systemPrompt = compiledTemplate({ context });
+
+    // Create request messages
     const requestMessages: APIMessage[] = [{ role: 'system', content: systemPrompt }];
 
     // Thread messages
