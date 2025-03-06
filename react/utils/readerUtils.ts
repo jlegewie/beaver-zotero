@@ -74,4 +74,48 @@ function getCurrentItem(reader: any): Zotero.Item {
 }
 
 
-export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem };
+/**
+ * Context for the reader.
+ */
+export type ReaderContext = {
+    itemKey: string;
+    page: number | null;
+    identifier: string;
+    type: string;
+    reference: string | null;
+    selection: string | null;
+}
+
+
+/**
+ * Retrieves the reader context.
+ * 
+ * @returns The reader context.
+ */
+function getReaderContext(): ReaderContext | undefined {
+    let context: ReaderContext | undefined;
+    const reader = getCurrentReader();
+    if (reader && reader.type === 'pdf') {
+        const item = getCurrentItem(reader);
+        const parentItem = item.parentItem;
+        const reference = parentItem
+            // @ts-ignore Beaver exists
+            ? Zotero.Beaver.citationService.formatBibliography(parentItem)
+            : null;
+        const type = parentItem
+            ? Zotero.ItemTypes.getLocalizedString(parentItem.itemType)
+            : 'article, book, report or other document';
+        context = {
+            itemKey: item.key,
+            page: getCurrentPage(reader),
+            selection: getSelectedText(reader),
+            identifier: `${item.libraryID}-${item.key}`,
+            type: type,
+            reference: reference,
+        } as ReaderContext;
+    }
+    return context;
+}
+
+
+export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem, getReaderContext };
