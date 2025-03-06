@@ -1,7 +1,7 @@
 // @ts-ignore no idea
 import React, { useState } from 'react';
 import { SourceButton } from "./SourceButton";
-import { PlusSignIcon } from './icons';
+import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom } from '../atoms/threads';
 import { currentSourcesAtom, addFileSourceAtom, currentUserMessageAtom } from '../atoms/input';
@@ -32,7 +32,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     ) => {
         e.preventDefault();
         
-        if (isStreaming) return;
+        if (isStreaming || userMessage.length === 0) return;
 
         // Get context from reader if it exists
         const context = getReaderContext();
@@ -44,12 +44,11 @@ const InputArea: React.FC<InputAreaProps> = ({
             readerContext: context,
         });
 
-        // If command is pressed, handle library search
-        if (isCommandPressed) {
-            handleLibrarySearch();
-        } else {
-            console.log('Chat completion:', userMessage);
-        }
+        console.log('Chat completion:', userMessage);
+    };
+
+    const handleStop = () => {
+        console.log('Stopping chat completion');
     };
 
     const handleLibrarySearch = () => {
@@ -150,7 +149,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Submit on Enter (without Shift)
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
-                                handleSubmit(e as any);
+                                if (isCommandPressed && !isStreaming && userMessage.length > 0) {
+                                    handleLibrarySearch();
+                                } else if (!isStreaming && userMessage.length > 0) {
+                                    handleSubmit(e as any);
+                                }
                             }
                         }}
                         onKeyUp={handleKeyUp}
@@ -163,8 +166,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <div className="flex-1" />
                     <div className="flex gap-2">
                         <Button
-                            type={isCommandPressed ? "button" : undefined}
-                            variant={isCommandPressed ? 'solid' : 'outline'}
+                            type={(isCommandPressed && !isStreaming && userMessage.length > 0) ? "button" : undefined}
+                            variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
                             // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                             className="mr-1"
                             onClick={handleLibrarySearch}
@@ -173,13 +176,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                             Library Search ⌘ ⏎
                         </Button>
                         <Button
-                            type={isCommandPressed ? undefined : "button"}
-                            variant={isCommandPressed ? 'outline' : 'solid' }
+                            rightIcon={isStreaming ? StopIcon : undefined}
+                            type={!isCommandPressed && !isStreaming && userMessage.length > 0 ? "button" : undefined}
+                            variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
                             className="mr-1"
-                            onClick={handleSubmit}
-                            disabled={isStreaming || userMessage.length === 0}
+                            onClick={isStreaming ? handleStop : handleSubmit}
+                            disabled={userMessage.length === 0 && !isStreaming}
                         >
-                            Send ⏎
+                            {isStreaming ? 'Stop' : 'Send ⏎'}
                         </Button>
                     </div>
                 </div>
