@@ -23,7 +23,7 @@ import { chatCompletion } from '../../src/services/chatCompletion';
 async function prepareSources(
     sources: Source[],
     userMsg: { id: string }
-) {
+): Promise<Source[]> {
     // Keys for regular zotero items
     const regularItemKeys = new Set(
         sources.filter((s) => s.type === 'zotero_item' && s.isRegularItem).map((s) => (s as ZoteroSource).itemKey)
