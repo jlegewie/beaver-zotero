@@ -29,7 +29,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     return (
         <div id="beaver-header" className="flex flex-row px-3 py-2">
             <div className="flex-1">
-                <Tooltip content="Close chat" showArrow singleLine>
+                <Tooltip content="Close chat" secondaryContent="⌘L" showArrow singleLine>
                     <IconButton
                         icon={CancelIcon}
                         onClick={() => triggerToggleChat(Zotero.getMainWindow())}
