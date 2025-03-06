@@ -72,6 +72,19 @@ async function prepareSources(
 }
 
 
+/**
+ * Generates a response from the assistant based on the user's message and sources.
+ * 
+ * This function performs the following operations:
+ * 1. Creates a user message from the provided content
+ * 2. Creates an assistant message
+ * 3. Updates the thread messages atom with the new messages
+ * 4. Prepares sources for the chat completion
+ * 5. Combines existing thread sources with payload sources
+ * 6. Updates the thread sources atom with the new sources
+ * 7. Resets the current user message and source after adding to message
+ * 8. Executes chat completion
+ */
 export const generateResponseAtom = atom(
     null,
     async (get, set, payload: {
