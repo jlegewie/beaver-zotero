@@ -50,18 +50,29 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
             if (source.type !== 'zotero_item') return source;
             const item = getZoteroItem(source);
             if (!item) return null;
-            return {
+
+            const sourceData = {
                 ...source,
+                identifier: `${item.libraryID}-${item.key}`,
                 numericCitation: String(index + 1),
                 url: createZoteroURI(item),
-                name: item.isNote() ? getNameFromItem(item) : source.name,
-                citation: item.isNote() ? getCitationFromItem(item) : source.citation,
-                reference: item.isNote() ? getReferenceFromItem(item) : source.reference,
-                icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
                 parentKey: item.parentKey || null,
                 isRegularItem: item.isRegularItem(),
-                isNote: item.isNote(),
-                childItemKeys: [],
+                childItemKeys: []
+            };
+            if (item.isNote()) {
+                return {
+                    ...sourceData,
+                    name: getNameFromItem(item),
+                    citation: getCitationFromItem(item),
+                    reference: getReferenceFromItem(item),
+                    icon: item.getItemTypeIconName(),
+                    isNote: true,
+                };
+            }
+            return {
+                ...sourceData,
+                isNote: false,
             };
         })
         .filter(Boolean) as Source[];

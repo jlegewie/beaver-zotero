@@ -56,6 +56,7 @@ export async function createZoteroSource(
 
     return {
         id: uuidv4(),
+        identifier: `${item.libraryID}-${item.key}`,
         type: 'zotero_item',
         libraryID: item.libraryID,
         itemKey: item.key,
@@ -79,6 +80,7 @@ export async function createZoteroSource(
 export function createFileSource(file: File): FileSource {
     return {
         id: uuidv4(),
+        identifier: `${file.mozFullPath}`,
         type: 'file',
         fileName: file.name,
         filePath: file.mozFullPath,

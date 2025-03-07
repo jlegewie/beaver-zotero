@@ -2,6 +2,7 @@
 // Base source interface
 export interface BaseSource {
     id: string;               // Unique identifier for tracking
+    identifier: string;       // Identifier for the source
     messageId?: string;       // Message ID for tracking
     type: string;             // Type discriminator
     name: string;             // Name for the source
