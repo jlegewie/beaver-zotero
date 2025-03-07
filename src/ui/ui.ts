@@ -1,39 +1,14 @@
 import { getLocaleID, getString } from "../utils/locale";
 import { getItemMetadata } from "../utils/metadata";
 import { triggerToggleChat } from "./toggleChat";
-import { QuickChat } from "./quickChat";
 import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
-
-const windowQuickChats = new WeakMap<Window, QuickChat>();
 
 // Create a single instance of keyboard manager
 const keyboardManager = new KeyboardManager();
 
 export class BeaverUIFactory {
-    static registerQuickChat(win: Window) {
-        // Remove existing QuickChat if present
-        this.removeQuickChat(win);
-        
-        const quickChat = new QuickChat(win, {
-            deepSearch: () => {
-                ztoolkit.log("Performing deep search...");
-            },
-            send: () => {
-                ztoolkit.log("Sending message...");
-            }
-        });
-        windowQuickChats.set(win, quickChat);
-    }
-
-    static removeQuickChat(win: Window) {
-        const quickChat = windowQuickChats.get(win);
-        if (quickChat) {
-            quickChat.hide();
-            windowQuickChats.delete(win);
-        }
-    }
 
     static registerChatPanel(win: Window) {
         // Remove existing panel if present
@@ -228,20 +203,6 @@ export class BeaverUIFactory {
         keyboardManager.unregisterAll();
         
         ztoolkit.log("Registering keyboard shortcuts...");
-        
-        // Register keyboard shortcut for quick chat
-        keyboardManager.register(
-            (ev, keyOptions) => {                
-                if (keyOptions.keyboard?.equals("shift,p")) {
-                    // Prevent default behavior
-                    ev.preventDefault();
-                    ztoolkit.log("Shift+P shortcut triggered");
-                    
-                    const win = Zotero.getMainWindow();
-                    windowQuickChats.get(win)?.show();
-                }
-            }
-        );
 
         // Register keyboard shortcut for chat panel
         const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";

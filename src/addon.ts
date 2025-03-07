@@ -6,7 +6,6 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { ItemService } from "./services/ItemService";
-import { QuickChat } from "./ui/quickChat"
 import { AIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 

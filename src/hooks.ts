@@ -108,7 +108,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	// Register Beaver UI elements
 	BeaverUIFactory.registerMenuItems();
 	BeaverUIFactory.registerInfoRow();
-	// BeaverUIFactory.registerQuickChat(win);
 
 	// Create (or reuse) an EventTarget for this window
 	if (!win.__beaverEventBus) {
@@ -120,9 +119,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	// BeaverUIFactory.registerSearchCommand();
 
 	ztoolkit.log("UI ready");
-
-	// Initialize QuickChat for this window
-	BeaverUIFactory.registerQuickChat(win);
 	
 	// Load styles for this window
 	loadStylesheet();
@@ -172,8 +168,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-	// Clean up QuickChat for this window
-	BeaverUIFactory.removeQuickChat(win);
+	// Clean up Chat Panel for this window
 	BeaverUIFactory.removeChatPanel(win);
 	// Unregister keyboard shortcuts
 	// BeaverUIFactory.unregisterShortcuts();
