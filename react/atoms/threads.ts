@@ -60,6 +60,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
                 icon: item.isNote() ? item.getItemTypeIconName() : source.icon,
                 parentKey: item.parentKey || null,
                 isRegularItem: item.isRegularItem(),
+                isNote: item.isNote(),
                 childItemKeys: [],
             };
         })
