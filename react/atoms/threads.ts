@@ -58,6 +58,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
                 url: createZoteroURI(item),
                 parentKey: item.parentKey || null,
                 isRegularItem: item.isRegularItem(),
+                itemType: Zotero.ItemTypes.getLocalizedString(item.itemType),
                 childItemKeys: []
             };
             if (item.isNote()) {
@@ -67,7 +68,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
                     citation: getCitationFromItem(item),
                     reference: getReferenceFromItem(item),
                     icon: item.getItemTypeIconName(),
-                    isNote: true,
+                    isNote: true
                 };
             }
             return {

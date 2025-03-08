@@ -74,6 +74,7 @@ export async function createZoteroSource(
         reference: getReferenceFromItem(item),
         url: createZoteroURI(item),
         parentKey: item.parentKey || null,
+        itemType: Zotero.ItemTypes.getLocalizedString(item.itemType),
         isRegularItem: item.isRegularItem(),
         isNote: item.isNote(),
         pinned: pinned,
