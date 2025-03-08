@@ -6,7 +6,26 @@ import { Source } from "react/types/sources";
 import { ReaderContext } from "react/utils/readerUtils";
 import Handlebars from 'handlebars';
 
+// Handlebars helpers
+Handlebars.registerHelper('arrayLength', function(array) {
+    if (Array.isArray(array)) {
+        return array.length;
+    } else {
+        return 0;
+    }
+});
+
+Handlebars.registerHelper('identifiers', function(array) {
+    if (Array.isArray(array)) {
+        return array.map(item => `"${item.identifier}"`).join(', ');
+    } else {
+        return '';
+    }
+});
+
+// System prompt path
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
+
 
 async function sourceToRequestMessage(source: Source): Promise<APIMessage> {
     // Flatten sources
@@ -46,8 +65,11 @@ export const chatCompletion = async (
     
     // Compile system prompt
     const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
-    const compiledTemplate = Handlebars.compile(systemPromptTemplate);
-    const systemPrompt = compiledTemplate({ context });
+    const compiledTemplate = Handlebars.compile(systemPromptTemplate, { noEscape: true });
+    const documents = sources.filter(source => source.type === 'zotero_item' && !source.isNote);
+    const notes = sources.filter(source => source.type === 'zotero_item' && source.isNote);
+    const systemPrompt = compiledTemplate({ context, documents, notes });
+    console.log('systemPrompt', systemPrompt);
 
     // Create request messages
     const requestMessages: APIMessage[] = [{ role: 'system', content: systemPrompt }];
