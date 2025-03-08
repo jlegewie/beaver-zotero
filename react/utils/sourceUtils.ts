@@ -48,6 +48,14 @@ export function getReferenceFromItem(item: Zotero.Item): string {
     return reference.replace(/\n/g, '<br />');
 }
 
+export function getChildIdentifiers(source: ZoteroSource): string[] {
+    return source.childItemKeys.map((key) => `${source.libraryID}-${key}`);
+}
+
+export function createSourceIdentifier(item: Zotero.Item): string {
+    return `${item.libraryID}-${item.key}`;
+}
+
 export async function createZoteroSource(
     item: Zotero.Item,
     pinned: boolean = false
@@ -56,7 +64,7 @@ export async function createZoteroSource(
 
     return {
         id: uuidv4(),
-        identifier: `${item.libraryID}-${item.key}`,
+        identifier: createSourceIdentifier(item),
         type: 'zotero_item',
         libraryID: item.libraryID,
         itemKey: item.key,

@@ -33,7 +33,6 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
         if (!item || item.isRegularItem()) return [];
 
         // Define id and parent item
-        const id = `${source.libraryID}-${source.itemKey}`;
         const parentItem = item.parentItem;
 
         // Attachment with parent item
@@ -45,7 +44,7 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             // @ts-ignore Beaver exists
             const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
             const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
-            const metadata = `# Document (id: ${id})\nType: ${type}\nReference: ${reference}`;
+            const metadata = `# Document (id: ${source.identifier})\nType: ${type}\nReference: ${reference}`;
 
             // Get the file path
             const filePath = await item.getFilePath();
@@ -64,12 +63,12 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
             // @ts-ignore unescapeHTML exists
             const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            const noteData = `# Note (id: ${id})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
+            const noteData = `# Note (id: ${source.identifier})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
             return [{ type: 'text', text: noteData }]
         // Top-level attachment
         } else if (!parentItem && item.isAttachment()) {
             const fileName = item.attachmentFilename;
-            const metadata = `# Document (id: ${id})\nFile Name: ${fileName}`;
+            const metadata = `# Document (id: ${source.identifier})\nFile Name: ${fileName}`;
 
             // Get the file path
             const filePath = await item.getFilePath();
@@ -86,12 +85,12 @@ export async function sourceToContentParts(source: Source): Promise<ContentPart[
             // const content = await getNoteAsMarkdown(item);
             // @ts-ignore unescapeHTML exists
             const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            const noteData = `# Note (id: ${id})\nNote Content: ${content}`;
+            const noteData = `# Note (id: ${source.identifier})\nNote Content: ${content}`;
             return [{ type: 'text', text: noteData }]
         }
     }
     if (source.type === 'file') {
-        const metadata = `# Document (id: ${source.id})\nFile Name: ${source.fileName}`;
+        const metadata = `# Document (id: ${source.identifier})\nFile Name: ${source.fileName}`;
         // Get the file path
         const filePath = source.filePath;
         if (!filePath) return [];

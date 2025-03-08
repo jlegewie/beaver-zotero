@@ -16,6 +16,7 @@ import Button from './Button';
 import CitedSourcesList from './CitedSourcesList';
 import { Source, ZoteroSource } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
+import { getChildIdentifiers } from 'react/utils/sourceUtils';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -133,9 +134,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         const sourcesWithCitations = threadSources.filter((source: Source) => {
             // For Zotero items, check if the ID matches the pattern libraryID-itemKey
             if (source.type === 'zotero_item') {
-                const sourceId = `${source.libraryID}-${source.itemKey}`;
-                const sourceChildrenIds = source.childItemKeys.map((key) => `${source.libraryID}-${key}`);
-                return citationIdSet.has(sourceId) || sourceChildrenIds.some((id) => citationIdSet.has(id));
+                const sourceChildrenIds = getChildIdentifiers(source);
+                return citationIdSet.has(source.identifier) || sourceChildrenIds.some((id) => citationIdSet.has(id));
             }
             // For other source types, check if the ID is in the set
             return citationIdSet.has(source.id);

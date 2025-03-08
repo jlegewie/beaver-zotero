@@ -1,3 +1,4 @@
+import { createSourceIdentifier } from './sourceUtils';
 
 /**
  * Retrieves the current reader instance.
@@ -109,7 +110,7 @@ function getReaderContext(): ReaderContext | undefined {
             itemKey: item.key,
             page: getCurrentPage(reader),
             selection: getSelectedText(reader),
-            identifier: `${item.libraryID}-${item.key}`,
+            identifier: createSourceIdentifier(item),
             itemType: type,
             reference: reference,
         } as ReaderContext;

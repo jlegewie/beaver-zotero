@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { Source, ZoteroSource } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem } from "../utils/sourceUtils";
+import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
@@ -53,7 +53,7 @@ export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
 
             const sourceData = {
                 ...source,
-                identifier: `${item.libraryID}-${item.key}`,
+                identifier: createSourceIdentifier(item),
                 numericCitation: String(index + 1),
                 url: createZoteroURI(item),
                 parentKey: item.parentKey || null,
