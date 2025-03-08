@@ -16,7 +16,7 @@ import Button from './Button';
 import CitedSourcesList from './CitedSourcesList';
 import { Source, ZoteroSource } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
-import { getChildIdentifiers } from 'react/utils/sourceUtils';
+import { getChildIdentifiers } from '../utils/sourceUtils';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
