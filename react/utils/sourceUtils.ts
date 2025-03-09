@@ -178,9 +178,6 @@ export async function isSourceValid(source: Source): Promise<boolean> {
         case 'file':
             // TODO: Implement file existence check
             return true;
-        case 'remote_file':
-            // TODO: Potentially check if URL is valid/reachable
-            return Boolean(source.url);
         default:
             return false;
     }
