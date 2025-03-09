@@ -5,7 +5,6 @@ import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/threads';
 import { currentSourcesAtom, addFileSourceAtom, currentUserMessageAtom } from '../atoms/input';
-import DragDropWrapper from './DragDropWrapper';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
@@ -89,7 +88,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     return (
-        <DragDropWrapper addFileSource={addFileSource}>
+        // <DragDropWrapper addFileSource={addFileSource}>
         <div
             className="user-message-display shadow-md"
             onClick={handleContainerClick}
@@ -202,7 +201,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             </form>
         </div>
-        </DragDropWrapper>
+        // </DragDropWrapper>
     );
 };
 
