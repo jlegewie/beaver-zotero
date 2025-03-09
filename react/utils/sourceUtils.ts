@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroSource, FileSource, RemoteFileSource, Source } from '../types/sources';
+import { ZoteroSource, FileSource, Source } from '../types/sources';
 import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
 
@@ -54,6 +54,14 @@ export function getChildIdentifiers(source: ZoteroSource): string[] {
 
 export function createSourceIdentifier(item: Zotero.Item): string {
     return `${item.libraryID}-${item.key}`;
+}
+
+export function getMetadataFromSource(source: Source): string {
+    // let metadata = `# Document (id: ${source.identifier})\nType: ${source.itemType}\nReference: ${source.reference}`;
+    // if (source.isNote) {
+    //     metadata = `# Note (id: ${source.identifier})\nNote attached to ${source.itemType}: ${source.reference}\nNote Content: ${source.content}`;
+    // }
+    return '';
 }
 
 export async function createZoteroSource(
@@ -197,8 +205,6 @@ export function sourceFromDb(data: any): Source | null {
             return data as ZoteroSource;
         case 'file':
             return data as FileSource;
-        case 'remote_file':
-            return data as RemoteFileSource;
         default:
             return null;
     }

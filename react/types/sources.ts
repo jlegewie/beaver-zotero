@@ -35,12 +35,5 @@ export interface FileSource extends BaseSource {
     fileType: string;
 }
 
-// Remote file source from URL
-export interface RemoteFileSource extends BaseSource {
-    type: 'remote_file';
-    url: string;
-    name: string;
-}
-
 // Union type for all source types
-export type Source = ZoteroSource | FileSource | RemoteFileSource;
+export type Source = ZoteroSource | FileSource;
