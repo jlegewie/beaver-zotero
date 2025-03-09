@@ -37,7 +37,7 @@ const WelcomePage: React.FC = () => {
             shortcut: "⌘5"
         },
         {
-            title: "Generate testable hypotheses",
+            title: "Propose testable hypotheses",
             prompt: "Generate testable hypotheses for future research that build on and follow up on the article. The hypotheses should be specific and testable. Describe each hypothesis in a separate paragraph.",
             shortcut: "⌘6"
         }
