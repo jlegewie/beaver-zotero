@@ -96,7 +96,7 @@ export function organizeSourcesByRegularItems(sources: InputSource[]): InputSour
     const regularItemSources = sources.filter((s) => s.type === "regularItem");
     return sources.reduce((acc, source) => {
         // If the source is not a regular item, skip it (already in regularItemSources)
-        if(source.type !== "regularItem") return acc;
+        if(source.type === "regularItem") return acc;
 
         // If the source has no parent, add it to the accumulator
         if(!source.parentKey) {
