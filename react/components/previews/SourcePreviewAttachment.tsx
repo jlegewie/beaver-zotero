@@ -1,15 +1,14 @@
 import React from 'react';
 import { InputSource } from '../../types/sources';
-import { CSSItemTypeIcon } from '../icons';
-import PreviewHeading from './PreviewHeading';
-interface PreviewZoteroSourceProps {
+import SourcePreviewHeading from './SourcePreviewHeading';
+interface SourcePreviewAttachmentProps {
     source: InputSource;
     item: Zotero.Item;
 }
 
 const MAX_NOTE_CONTENT_LENGTH = 250;
 
-const PreviewZoteroSource: React.FC<PreviewZoteroSourceProps> = ({ source, item }) => {
+const SourcePreviewAttachment: React.FC<SourcePreviewAttachmentProps> = ({ source, item }) => {
     const formatContent = (item: Zotero.Item) => {
         if (item.isNote()) {
             const title = item.getNoteTitle();
@@ -25,10 +24,10 @@ const PreviewZoteroSource: React.FC<PreviewZoteroSourceProps> = ({ source, item 
 
     return (
         <>
-            <PreviewHeading source={source} item={item}/>
+            <SourcePreviewHeading source={source} item={item}/>
             <p className="text-base my-2">{formatContent(item)}</p>
         </>
     );
 };
 
-export default PreviewZoteroSource; 
+export default SourcePreviewAttachment; 

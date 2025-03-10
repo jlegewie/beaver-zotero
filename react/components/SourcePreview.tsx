@@ -8,8 +8,8 @@ import { previewedSourceAtom } from '../atoms/ui';
 import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
-import PreviewZoteroItem from './previews/PreviewZoteroItem';
-import PreviewZoteroSource from './previews/PreviewZoteroSource';
+import SourcePreviewRegularItem from './previews/SourcePreviewRegularItem';
+import SourcePreviewAttachment from './previews/SourcePreviewAttachment';
 import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
 import Button from './Button';
@@ -152,9 +152,9 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
         if (!currentSource) return null;
         
         if (isRegularZoteroItem) {
-            return <PreviewZoteroItem source={currentSource} item={item} />;
+            return <SourcePreviewRegularItem source={currentSource} item={item} />;
         } else if (item) {
-            return <PreviewZoteroSource source={currentSource} item={item} />;
+            return <SourcePreviewAttachment source={currentSource} item={item} />;
         } else {
             return null;
         }

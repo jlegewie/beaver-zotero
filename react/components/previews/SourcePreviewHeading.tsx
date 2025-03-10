@@ -3,12 +3,12 @@ import { CSSItemTypeIcon } from '../icons';
 import { InputSource } from '../../types/sources';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 
-interface PreviewHeadingProps {
+interface SourcePreviewHeadingProps {
     source: InputSource;
     item: Zotero.Item;
 }
 
-const PreviewHeading: React.FC<PreviewHeadingProps> = ({ source, item }) => {
+const SourcePreviewHeading: React.FC<SourcePreviewHeadingProps> = ({ source, item }) => {
     return (
         <span className="flex items-center font-color-primary">
             <span className="fit-content">
@@ -19,4 +19,4 @@ const PreviewHeading: React.FC<PreviewHeadingProps> = ({ source, item }) => {
     );
 };
 
-export default PreviewHeading;
+export default SourcePreviewHeading;

@@ -8,15 +8,15 @@ import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { InputSource } from '../../types/sources';
-import PreviewHeading from './PreviewHeading';
+import SourcePreviewHeading from './SourcePreviewHeading';
 import { threadSourceKeysAtom } from '../../atoms/threads';
 
-interface PreviewZoteroItemProps {
+interface SourcePreviewRegularItemProps {
     source: InputSource;
     item: Zotero.Item;
 }
 
-const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) => {
+const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ source, item }) => {
     const updateSourceChildItemKeys = useSetAtom(updateSourceChildItemKeysAtom);
     const [attachments, setAttachments] = useState<Zotero.Item[]>([]);
     const [notes, setNotes] = useState<Zotero.Item[]>([]);
@@ -78,7 +78,7 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
 
     return (
         <>
-            <PreviewHeading source={source} item={item}/>                
+            <SourcePreviewHeading source={source} item={item}/>                
             <p className="text-base my-2 overflow-hidden text-ellipsis">{item.getDisplayTitle()}</p>
             
             {/* Combined Attachments and Notes Section */}
@@ -158,4 +158,4 @@ const PreviewZoteroItem: React.FC<PreviewZoteroItemProps> = ({ source, item }) =
     );
 };
 
-export default PreviewZoteroItem; 
+export default SourcePreviewRegularItem; 
