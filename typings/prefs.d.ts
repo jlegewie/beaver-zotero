@@ -16,6 +16,7 @@ declare namespace _ZoteroTypes {
       "citationStyle": string;
       "citationLocale": string;
       "keyboardShortcut": string;
+      "mode": string;
     };
   }
 }
