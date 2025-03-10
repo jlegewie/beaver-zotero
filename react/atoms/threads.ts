@@ -22,7 +22,7 @@ export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) =>
         const identifier = getIdentifierFromSource(source);
         const item = getZoteroItem(source);
         const parentItem = getParentItem(source);
-        const itemToCite = item && item.isNote() ? item || item : parentItem;
+        const itemToCite = item && item.isNote() ? item : parentItem || item;
         if(!item || !itemToCite) return acc;
         acc[identifier] = {
             ...source,
