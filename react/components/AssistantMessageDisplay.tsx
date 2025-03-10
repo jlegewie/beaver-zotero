@@ -130,9 +130,9 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         }
 
         // Filter sourceCitations to only include those with IDs in citationIdSet
-        const citations = Object.values(sourceCitations).filter((citation: SourceCitation) => {
-            return citationIdSet.has(citation.id);
-        });
+        const citations = Object.entries(sourceCitations)
+            .filter(([key, _]) => citationIdSet.has(key))
+            .map(([_, citation]) => citation);
 
         return citations;
     }, [message.status, message.content, sourceCitations]);
