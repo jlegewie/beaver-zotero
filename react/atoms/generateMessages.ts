@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom } from './threads';
-import { InputSource } from '../types/sources';
+import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
@@ -24,19 +24,19 @@ import { ReaderContext } from '../utils/readerUtils';
 async function prepareSources(
     inputSources: InputSource[],
     messageId: string
-): Promise<InputSource[]> {
+): Promise<ThreadSource[]> {
     const sourcesFromRegularItems = inputSources
-        .filter((s) => s.isRegularItem)
+        .filter((s) => s.type === "regularItem")
         .flatMap((s) => getChildItems(s).map((item) => {
             const source = createSourceFromAttachmentOrNote(item);
             return {...source, messageId: messageId, timestamp: s.timestamp};
-        }));
+        })) as ThreadSource[];
     const sourcesFromAttachmentsOrNotes = inputSources
-        .filter((s) => !s.isRegularItem)
+        .filter((s) => s.type !== "regularItem")
         .map((s) => ({
             ...s,
             messageId: messageId
-        }));
+        })) as ThreadSource[];
     const sources = [...sourcesFromRegularItems, ...sourcesFromAttachmentsOrNotes];
     const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
@@ -78,7 +78,7 @@ export const generateResponseAtom = atom(
         const payloadSources = await prepareSources(payload.sources, userMsg.id);
 
         // Combine existing thread sources with payload sources
-        const newThreadSources: InputSource[] = [...threadSources, ...payloadSources];
+        const newThreadSources: ThreadSource[] = [...threadSources, ...payloadSources];
         
         // Update thread sources atom
         set(threadSourcesAtom, newThreadSources);
@@ -140,7 +140,7 @@ export const regenerateFromMessageAtom = atom(
 // Helper function to process chat completion
 function _processChatCompletion(
     messages: ChatMessage[],
-    sources: InputSource[],
+    sources: ThreadSource[],
     assistantMsgId: string,
     context: ReaderContext | undefined,
     set: any

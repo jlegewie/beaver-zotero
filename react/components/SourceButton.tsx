@@ -165,7 +165,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     `variant-outline source-button
                     ${className || ''}
                     ${disabled ? 'disabled-but-styled' : ''}
-                    ${source.isRegularItem && source.childItemKeys.length == 0 ? 'opacity-60' : ''}
+                    ${source.type === "regularItem" && source.childItemKeys.length == 0 ? 'opacity-60' : ''}
                 `}
                 disabled={disabled}
                 onClick={(e) => {

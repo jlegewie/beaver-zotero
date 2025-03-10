@@ -2,7 +2,7 @@ import { ChatMessage } from "react/types/messages";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/sourceUtils";
-import { InputSource } from "react/types/sources";
+import { InputSource, ThreadSource } from "react/types/sources";
 import { ReaderContext } from "react/utils/readerUtils";
 import Handlebars from 'handlebars';
 
@@ -27,7 +27,7 @@ Handlebars.registerHelper('identifiers', function(array) {
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
 
-async function sourceToRequestMessage(source: InputSource): Promise<APIMessage> {
+async function sourceToRequestMessage(source: ThreadSource): Promise<APIMessage> {
     // Convert sources to content parts
     const sourcesContent = await sourceToContentParts(source);
     
@@ -48,7 +48,7 @@ function chatMessageToRequestMessage(message: ChatMessage): APIMessage {
 
 export const chatCompletion = async (
     messages: ChatMessage[],
-    sources: InputSource[],
+    sources: ThreadSource[],
     context: ReaderContext | undefined,
     onChunk: (chunk: string) => void,
     onFinish: () => void,
@@ -59,8 +59,8 @@ export const chatCompletion = async (
     // Compile system prompt
     const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
     const compiledTemplate = Handlebars.compile(systemPromptTemplate, { noEscape: true });
-    const attachments = sources.filter(source => !source.isRegularItem && !source.isNote);
-    const notes = sources.filter(source => !source.isRegularItem && source.isNote);
+    const attachments = sources.filter(source => source.type === "attachment");
+    const notes = sources.filter(source => source.type === "note");
     const systemPrompt = compiledTemplate({ context, attachments, notes });
     console.log('systemPrompt', systemPrompt);
 

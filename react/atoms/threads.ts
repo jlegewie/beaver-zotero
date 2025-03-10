@@ -1,13 +1,13 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { InputSource, SourceCitation } from "../types/sources";
+import { ThreadSource, SourceCitation } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
-export const threadSourcesAtom = atom<InputSource[]>([]);
+export const threadSourcesAtom = atom<ThreadSource[]>([]);
 
 // Derived atom for thread source keys
 export const threadSourceKeysAtom = atom((get) => {

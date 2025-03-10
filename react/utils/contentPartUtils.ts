@@ -1,4 +1,4 @@
-import { InputSource } from '../types/sources';
+import { ThreadSource } from '../types/sources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
 import { getIdentifierFromItem, getZoteroItem } from './sourceUtils';
 
@@ -24,7 +24,7 @@ async function getNoteAsMarkdown(item: Zotero.Item) {
  * @param source - The source to convert
  * @returns Promise<ContentPart[]> - The content parts
  */
-export async function sourceToContentParts(source: InputSource): Promise<ContentPart[]> {
+export async function sourceToContentParts(source: ThreadSource): Promise<ContentPart[]> {
 
     // Get the Zotero item
     const item = getZoteroItem(source);

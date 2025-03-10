@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { InputSource } from '../types/sources';
+import { InputSource, ThreadSource } from '../types/sources';
 import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
 
@@ -62,6 +62,13 @@ export function getIdentifierFromSource(source: InputSource): string {
     return `${source.libraryID}-${source.itemKey}`;
 }
 
+export function getSourceTypeFromItem(item: Zotero.Item): InputSource["type"] {
+    if (item.isRegularItem()) return "regularItem";
+    if (item.isAttachment()) return "attachment";
+    if (item.isNote()) return "note";
+    throw new Error("Invalid item type");
+}
+
 
 /**
 * Factory function to create a Source from a Zotero item
@@ -75,22 +82,21 @@ export async function createSourceFromItem(
 
     return {
         id: uuidv4(),
+        type: getSourceTypeFromItem(item),
         libraryID: item.libraryID,
         itemKey: item.key,
         pinned: pinned,
-        timestamp: Date.now(),
-        isRegularItem: item.isRegularItem(),
-        isNote: item.isNote(),
         parentKey: item.parentKey || null,
         childItemKeys: bestAtt && !excludeKeys.includes(bestAtt.key) ? [bestAtt.key] : [],
+        timestamp: Date.now(),
     } as InputSource;
 }
 
 export function organizeSourcesByRegularItems(sources: InputSource[]): InputSource[] {
-    const regularItemSources = sources.filter((s) => s.isRegularItem);
+    const regularItemSources = sources.filter((s) => s.type === "regularItem");
     return sources.reduce((acc, source) => {
         // If the source is not a regular item, skip it (already in regularItemSources)
-        if(source.isRegularItem) return acc;
+        if(source.type !== "regularItem") return acc;
 
         // If the source has no parent, add it to the accumulator
         if(!source.parentKey) {
@@ -109,8 +115,7 @@ export function organizeSourcesByRegularItems(sources: InputSource[]): InputSour
                 ...source,
                 id: uuidv4(),
                 itemKey: parentItem.key,
-                isRegularItem: true,
-                isNote: false,
+                type: "regularItem",
                 parentKey: null,
                 childItemKeys: [source.itemKey]
             } as InputSource);
@@ -127,7 +132,7 @@ export function organizeSourcesByRegularItems(sources: InputSource[]): InputSour
 export function createSourceFromAttachmentOrNote(
     item: Zotero.Item,
     pinned: boolean = false
-): InputSource {
+): ThreadSource {
     if (item.isRegularItem()) {
         throw new Error("Cannot call createSourceFromAttachment on a regular item");
     }
@@ -137,8 +142,7 @@ export function createSourceFromAttachmentOrNote(
         itemKey: item.key,
         pinned: pinned,
         timestamp: Date.now(),
-        isRegularItem: false,
-        isNote: item.isNote(),
+        type: item.isNote() ? "note" : "attachment",
         parentKey: item.parentKey || null,
         childItemKeys: [],
     };
