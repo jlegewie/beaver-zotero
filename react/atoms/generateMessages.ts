@@ -6,7 +6,11 @@ import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, 
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
+import { requestChatCompletion } from '../../src/services/chatSSE';
+import API_BASE_URL from '../../src/utils/getAPIBaseURL';
+import { getPref } from '../../src/utils/prefs';
 
+const MODE = getPref('mode');
 
 /**
  * Processes and organizes sources for use in a message.
@@ -97,7 +101,18 @@ export const generateResponseAtom = atom(
         set(currentUserMessageAtom, '');
         
         // Execute chat completion
-        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, context, set);
+        if (MODE === 'local') {
+            _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, context, set);
+        } else {
+            _processChatCompletionViaBackend(
+                // currentThreadId,
+                null,
+                userMsg.id,         // the ID from createUserMessage
+                assistantMsg.id,    // the ID from createAssistantMessage
+                userMsg.content,
+                set
+            );
+        }
         
         return assistantMsg.id;
     }
@@ -168,6 +183,50 @@ function _processChatCompletion(
                 status: 'error', 
                 errorType 
             });
+        }
+    );
+}
+
+function _processChatCompletionViaBackend(
+    currentThreadId: string | null,
+    userMessageId: string,
+    assistantMessageId: string,
+    content: string,
+    set: any
+) {
+    console.log('API_BASE_URL', API_BASE_URL);
+    requestChatCompletion(
+        {
+            backendUrl: API_BASE_URL,
+            threadId: currentThreadId,
+            userMessageId,
+            assistantMessageId,
+            content
+        },
+        {
+            onThread: (newThreadId) => {
+                console.log('SSE new thread:', newThreadId);
+                // set(currentThreadIdAtom, newThreadId);
+            },
+            onToken: (partial) => {
+                // SSE partial chunk → append to the assistant message
+                set(streamToMessageAtom, {
+                    id: assistantMessageId,
+                    chunk: partial
+                });
+            },
+            onDone: () => {
+                // Mark the assistant as completed
+                set(setMessageStatusAtom, { id: assistantMessageId, status: 'completed' });
+            },
+            onError: (errorType) => {
+                // Mark the assistant message as error
+                set(setMessageStatusAtom, {
+                    id: assistantMessageId,
+                    status: 'error',
+                    errorType
+                });
+            }
         }
     );
 }
