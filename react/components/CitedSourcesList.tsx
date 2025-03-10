@@ -40,7 +40,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         </span>
                                     }
                                     <span className="truncate">
-                                        {source.citation}
+                                        {source.name}
                                     </span>
                                 </div>
                                 <div className="flex gap-2 flex-shrink-0">

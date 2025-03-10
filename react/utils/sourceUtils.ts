@@ -44,7 +44,7 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
 
 export function getCitationFromItem(item: Zotero.Item): string {
     const citation = item.isNote()
-        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
+        ? "Note"
         // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatCitation(item, true);
     return citation;

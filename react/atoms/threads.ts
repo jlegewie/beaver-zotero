@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { InputSource, SourceCitation } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier, createSourceFromItem, createParentSource, getParentItem, getIdentifierFromSource } from "../utils/sourceUtils";
+import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier, createSourceFromItem, createParentSource, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
@@ -23,11 +23,12 @@ export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) =>
         const identifier = getIdentifierFromSource(source);
         const item = getZoteroItem(source);
         const parentItem = getParentItem(source);
-        const itemToCite = parentItem || item;
+        const itemToCite = item && item.isNote() ? item || item : parentItem;
         if(!item || !itemToCite) return acc;
         acc[identifier] = {
             ...source,
             citation: getCitationFromItem(itemToCite),
+            name: getDisplayNameFromItem(itemToCite),
             reference: getReferenceFromItem(itemToCite),
             url: createZoteroURI(item),
             icon: item.getItemTypeIconName(),
