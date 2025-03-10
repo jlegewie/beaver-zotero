@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
 import { InputSource, SourceCitation } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier, createSourceFromItem, createParentSource, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
+import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 

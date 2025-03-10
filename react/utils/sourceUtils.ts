@@ -20,15 +20,6 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
     return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
 }
 
-
-export function getNameFromItem(item: Zotero.Item): string {
-    const name = item.isNote()
-        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
-        // @ts-ignore Beaver exists
-        : Zotero.Beaver.citationService.formatCitation(item, true);
-    return name;
-}
-
 export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null): string {
     // Get the display name
     let displayName = item.isNote()
@@ -57,10 +48,6 @@ export function getReferenceFromItem(item: Zotero.Item): string {
         // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatBibliography(item);
     return reference.replace(/\n/g, '<br />');
-}
-
-export function getChildIdentifiers(source: InputSource): string[] {
-    return source.childItemKeys.map((key) => `${source.libraryID}-${key}`);
 }
 
 export function createSourceIdentifier(item: Zotero.Item): string {
@@ -98,25 +85,6 @@ export async function createSourceFromItem(
         childItemKeys: bestAtt && !excludeKeys.includes(bestAtt.key) ? [bestAtt.key] : [],
     } as InputSource;
 }
-
-export function createParentSource(
-    item: Zotero.Item,
-    sources: InputSource[]
-): InputSource {
-    return {
-        id: uuidv4(),
-        libraryID: item.libraryID,
-        messageId: sources[0].messageId,
-        itemKey: item.key,
-        pinned: false,
-        timestamp: sources.reduce((oldest, source) => Math.min(oldest, source.timestamp), Date.now()),
-        isRegularItem: item.isRegularItem(),
-        isNote: item.isNote(),
-        parentKey: item.parentKey || null,
-        childItemKeys: sources.map((source) => source.itemKey),
-    };
-}
-
 
 export function organizeSourcesByRegularItems(sources: InputSource[]): InputSource[] {
     const regularItemSources = sources.filter((s) => s.isRegularItem);
@@ -203,8 +171,6 @@ export function getParentItem(source: InputSource): Zotero.Item | null {
         return null;
     }
 }
-
-
 
 /**
 * Source method: Get child items for a Source
