@@ -6,6 +6,7 @@ import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
 // Thread messages and sources
+export const currentThreadIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
 export const threadSourcesAtom = atom<ThreadSource[]>([]);
 
@@ -52,6 +53,7 @@ export const isStreamingAtom = atom((get) => {
 export const newThreadAtom = atom(
     null,
     async (_, set) => {
+        set(currentThreadIdAtom, null);
         set(threadMessagesAtom, []);
         set(threadSourcesAtom, []);
         set(currentUserMessageAtom, '');

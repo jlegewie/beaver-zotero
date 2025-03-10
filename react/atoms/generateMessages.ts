@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom } from './threads';
+import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
@@ -105,8 +105,7 @@ export const generateResponseAtom = atom(
             _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, context, set);
         } else {
             _processChatCompletionViaBackend(
-                // currentThreadId,
-                null,
+                get(currentThreadIdAtom),
                 userMsg.id,         // the ID from createUserMessage
                 assistantMsg.id,    // the ID from createAssistantMessage
                 userMsg.content,
@@ -206,7 +205,7 @@ function _processChatCompletionViaBackend(
         {
             onThread: (newThreadId) => {
                 console.log('SSE new thread:', newThreadId);
-                // set(currentThreadIdAtom, newThreadId);
+                set(currentThreadIdAtom, newThreadId);
             },
             onToken: (partial) => {
                 // SSE partial chunk → append to the assistant message
