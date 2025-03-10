@@ -8,7 +8,7 @@ import { ZoteroIcon } from './icons/ZoteroIcon';
 
 interface CitedSourcesListProps {
     sources: SourceCitation[];
-    saveAsNote: (source?: InputSource) => Promise<void>;
+    saveAsNote: (source?: SourceCitation) => Promise<void>;
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({

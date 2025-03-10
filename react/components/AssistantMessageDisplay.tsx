@@ -76,7 +76,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         });
     };
 
-    const saveAsNote = async (source?: InputSource) => {
+    const saveAsNote = async (source?: SourceCitation) => {
         const formattedContent = renderToHTML(message.content);
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
