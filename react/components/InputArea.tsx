@@ -4,7 +4,7 @@ import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/threads';
-import { currentSourcesAtom, addFileSourceAtom, currentUserMessageAtom } from '../atoms/input';
+import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
@@ -23,7 +23,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
     const threadSourceCount = useAtomValue(threadSourceCountAtom);
-    const addFileSource = useSetAtom(addFileSourceAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
 

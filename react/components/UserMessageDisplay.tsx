@@ -1,4 +1,6 @@
 import React from 'react';
+// @ts-ignore no idea why
+import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/messages';
@@ -7,6 +9,8 @@ import { isStreamingAtom, threadSourcesAtom } from '../atoms/threads';
 import { useRef } from 'react';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
+import { InputSource } from 'react/types/sources';
+import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -17,10 +21,15 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const threadSources = useAtomValue(threadSourcesAtom);
-    const messageSources = threadSources.filter(r => r.messageId === message.id);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
-    const { 
+    const messageSources: InputSource[] = useMemo(() => {
+        const messageSources = threadSources.filter(r => r.messageId === message.id);
+        const organizedSources = organizeSourcesByRegularItems(messageSources);
+        return organizedSources;
+    }, [threadSources]);
+
+    const {
         isMenuOpen: isSelectionMenuOpen, 
         menuPosition: selectionMenuPosition,
         closeMenu: closeSelectionMenu,

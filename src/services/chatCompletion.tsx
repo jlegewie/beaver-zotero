@@ -2,7 +2,7 @@ import { ChatMessage } from "react/types/messages";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/sourceUtils";
-import { Source } from "react/types/sources";
+import { InputSource } from "react/types/sources";
 import { ReaderContext } from "react/utils/readerUtils";
 import Handlebars from 'handlebars';
 
@@ -27,16 +27,9 @@ Handlebars.registerHelper('identifiers', function(array) {
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
 
 
-async function sourceToRequestMessage(source: Source): Promise<APIMessage> {
-    // Flatten sources
-    const sources = source.type === 'zotero_item' && getZoteroItem(source)?.isRegularItem()
-            ? source.childItemKeys.map(key => ({...source, itemKey: key}))
-            : [source];
-
+async function sourceToRequestMessage(source: InputSource): Promise<APIMessage> {
     // Convert sources to content parts
-    const sourcesContent: ContentPart[] = (await Promise.all(
-        sources.map(source => sourceToContentParts(source))
-    )).flat();
+    const sourcesContent = await sourceToContentParts(source);
     
     // Return the sources as a user message
     return {
@@ -55,7 +48,7 @@ function chatMessageToRequestMessage(message: ChatMessage): APIMessage {
 
 export const chatCompletion = async (
     messages: ChatMessage[],
-    sources: Source[],
+    sources: InputSource[],
     context: ReaderContext | undefined,
     onChunk: (chunk: string) => void,
     onFinish: () => void,
@@ -66,9 +59,9 @@ export const chatCompletion = async (
     // Compile system prompt
     const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
     const compiledTemplate = Handlebars.compile(systemPromptTemplate, { noEscape: true });
-    const documents = sources.filter(source => source.type === 'zotero_item' && !source.isNote);
-    const notes = sources.filter(source => source.type === 'zotero_item' && source.isNote);
-    const systemPrompt = compiledTemplate({ context, documents, notes });
+    const attachments = sources.filter(source => !source.isRegularItem && !source.isNote);
+    const notes = sources.filter(source => !source.isRegularItem && source.isNote);
+    const systemPrompt = compiledTemplate({ context, attachments, notes });
     console.log('systemPrompt', systemPrompt);
 
     // Create request messages

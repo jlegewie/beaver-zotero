@@ -1,13 +1,13 @@
 import { atom } from "jotai";
-import { Source, ZoteroSource } from "../types/sources";
-import { createZoteroSource, createFileSource } from "../utils/sourceUtils";
+import { InputSource } from "../types/sources";
+import { createSourceFromItem } from "../utils/sourceUtils";
 import { threadSourceKeysAtom } from "./threads";
 
 /**
 * Current user message and sources
 */
 export const currentUserMessageAtom = atom<string>('');
-export const currentSourcesAtom = atom<Source[]>([]);
+export const currentSourcesAtom = atom<InputSource[]>([]);
 
 
 /**
@@ -36,15 +36,10 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         const threadSourceKeys = get(threadSourceKeysAtom);
         
         // Map of existing Zotero sources by item key
-        const existingMap = new Map(
-            currentSources
-            .filter((res): res is ZoteroSource => res.type === 'zotero_item')
-            .map((res) => [res.itemKey, res])
-        );
+        const existingMap = new Map(currentSources.map((res) => [res.itemKey, res]));
         
         // Pinned sources
-        const pinnedSources = currentSources
-            .filter((res): res is ZoteroSource => res.type === 'zotero_item' && res.pinned);
+        const pinnedSources = currentSources.filter((res) => res.pinned);
     
         // Excluded keys
         const excludedKeys = new Set([
@@ -60,7 +55,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
                 if (existingMap.has(item.key)) {
                     return existingMap.get(item.key)!;
                 }
-                return await createZoteroSource(item, false);
+                return await createSourceFromItem(item, false, threadSourceKeys);
             });
         
         // Wait for all sources to be created
@@ -71,14 +66,11 @@ export const updateSourcesFromZoteroItemsAtom = atom(
             ...pinnedSources,
             ...newItemSources
         ];
-    
-        // Combine with non-Zotero sources
-        const nonZoteroSources = currentSources.filter((res) => res.type !== 'zotero_item');
-    
+        
         // Update state: merge and sort by timestamp
         set(
             currentSourcesAtom,
-            [...newSources, ...nonZoteroSources].sort((a, b) => a.timestamp - b.timestamp)
+            newSources.sort((a, b) => a.timestamp - b.timestamp)
         );
     }
 );
@@ -100,14 +92,14 @@ export const updateSourcesFromZoteroSelectionAtom = atom(
 export const addFileSourceAtom = atom(
     null,
     (get, set, file: File) => {
-        const currentSources = get(currentSourcesAtom);
-        // Use file.name as a unique identifier for files
-        const exists = currentSources.find(
-            (res) => res.type === 'file' && (res as any).filePath === file.name
-        );
-        if (!exists) {
-            set(currentSourcesAtom, [...currentSources, createFileSource(file)]);
-        }
+        // const currentSources = get(currentSourcesAtom);
+        // // Use file.name as a unique identifier for files
+        // const exists = currentSources.find(
+        //     (res) => res.type === 'file' && (res as any).filePath === file.name
+        // );
+        // if (!exists) {
+        //     set(currentSourcesAtom, [...currentSources, createFileSource(file)]);
+        // }
     }
 );
 
@@ -121,9 +113,7 @@ export const updateSourceChildItemKeysAtom = atom(
         const currentSources = get(currentSourcesAtom);
         
         const updated = currentSources.map((res) => {
-            if (res.id === sourceId && res.type === 'zotero_item') {
-                return { ...res, childItemKeys };
-            }
+            if (res.id === sourceId) return { ...res, childItemKeys };
             return res;
         });
         
@@ -136,11 +126,9 @@ export const updateSourceChildItemKeysAtom = atom(
 */
 export const removeSourceAtom = atom(
     null,
-    (get, set, source: Source) => {
+    (get, set, source: InputSource) => {
         const currentSources = get(currentSourcesAtom);
-        if (source.type === 'zotero_item') {
-            removedItemKeysCache.add((source as ZoteroSource).itemKey);
-        }
+        removedItemKeysCache.add(source.itemKey);
         set(
             currentSourcesAtom,
             currentSources.filter((res) => res.id !== source.id)
@@ -181,6 +169,3 @@ export const togglePinSourceAtom = atom(
 //     default:
 //         return null;
 // }
-
-
-

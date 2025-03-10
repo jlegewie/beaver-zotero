@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroSource, FileSource, Source } from '../types/sources';
+import { InputSource } from '../types/sources';
 import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
 
@@ -20,15 +20,26 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
     return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
 }
 
-/**
-* Factory function to create a ZoteroSource from a Zotero item
-*/
+
 export function getNameFromItem(item: Zotero.Item): string {
     const name = item.isNote()
         ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
         // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatCitation(item, true);
     return name;
+}
+
+export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null): string {
+    // Get the display name
+    let displayName = item.isNote()
+        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
+        // @ts-ignore Beaver exists
+        : Zotero.Beaver.citationService.formatCitation(item, true);
+
+    // Add a count
+    if (count && count > 1) displayName = `${displayName} (${count})`;
+
+    return displayName;
 }
 
 export function getCitationFromItem(item: Zotero.Item): string {
@@ -48,7 +59,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
     return reference.replace(/\n/g, '<br />');
 }
 
-export function getChildIdentifiers(source: ZoteroSource): string[] {
+export function getChildIdentifiers(source: InputSource): string[] {
     return source.childItemKeys.map((key) => `${source.libraryID}-${key}`);
 }
 
@@ -56,66 +67,119 @@ export function createSourceIdentifier(item: Zotero.Item): string {
     return `${item.libraryID}-${item.key}`;
 }
 
-export function getMetadataFromSource(source: Source): string {
-    // let metadata = `# Document (id: ${source.identifier})\nType: ${source.itemType}\nReference: ${source.reference}`;
-    // if (source.isNote) {
-    //     metadata = `# Note (id: ${source.identifier})\nNote attached to ${source.itemType}: ${source.reference}\nNote Content: ${source.content}`;
-    // }
-    return '';
+export function getIdentifierFromItem(item: Zotero.Item): string {
+    return `${item.libraryID}-${item.key}`;
 }
 
-export async function createZoteroSource(
+export function getIdentifierFromSource(source: InputSource): string {
+    return `${source.libraryID}-${source.itemKey}`;
+}
+
+
+/**
+* Factory function to create a Source from a Zotero item
+*/
+export async function createSourceFromItem(
     item: Zotero.Item,
-    pinned: boolean = false
-): Promise<ZoteroSource> {
+    pinned: boolean = false,
+    excludeKeys: string[] = []
+): Promise<InputSource> {
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
 
     return {
         id: uuidv4(),
-        identifier: createSourceIdentifier(item),
-        type: 'zotero_item',
         libraryID: item.libraryID,
         itemKey: item.key,
-        icon: item.getItemTypeIconName(),
-        name: getNameFromItem(item),
-        citation: getCitationFromItem(item),
-        reference: getReferenceFromItem(item),
-        url: createZoteroURI(item),
-        parentKey: item.parentKey || null,
-        itemType: Zotero.ItemTypes.getLocalizedString(item.itemType),
+        pinned: pinned,
+        timestamp: Date.now(),
         isRegularItem: item.isRegularItem(),
         isNote: item.isNote(),
-        pinned: pinned,
-        childItemKeys: bestAtt ? [bestAtt.key] : [],
-        timestamp: Date.now(),
-    };
+        parentKey: item.parentKey || null,
+        childItemKeys: bestAtt && !excludeKeys.includes(bestAtt.key) ? [bestAtt.key] : [],
+    } as InputSource;
 }
 
-/**
-* Factory function to create a FileSource from a File
-*/
-export function createFileSource(file: File): FileSource {
+export function createParentSource(
+    item: Zotero.Item,
+    sources: InputSource[]
+): InputSource {
     return {
         id: uuidv4(),
-        identifier: `${file.mozFullPath}`,
-        type: 'file',
-        fileName: file.name,
-        filePath: file.mozFullPath,
-        fileType: file.type,
-        name: file.name,
-        citation: 'File',
-        reference: file.mozFullPath,
-        url: `file://${file.mozFullPath}`,
-        icon: file.type === 'application/pdf' ? 'attachmentPDF' : 'attachmentImage',
+        libraryID: item.libraryID,
+        messageId: sources[0].messageId,
+        itemKey: item.key,
         pinned: false,
-        timestamp: Date.now()
+        timestamp: sources.reduce((oldest, source) => Math.min(oldest, source.timestamp), Date.now()),
+        isRegularItem: item.isRegularItem(),
+        isNote: item.isNote(),
+        parentKey: item.parentKey || null,
+        childItemKeys: sources.map((source) => source.itemKey),
+    };
+}
+
+
+export function organizeSourcesByRegularItems(sources: InputSource[]): InputSource[] {
+    const regularItemSources = sources.filter((s) => s.isRegularItem);
+    return sources.reduce((acc, source) => {
+        // If the source is not a regular item, skip it (already in regularItemSources)
+        if(source.isRegularItem) return acc;
+
+        // If the source has no parent, add it to the accumulator
+        if(!source.parentKey) {
+            acc.push(source);
+            return acc;
+        }
+
+        // Get the parent key
+        const parent = acc.find((s) => s.itemKey === source.parentKey);
+        
+        // If the parent is not in the accumulator, add it
+        if(!parent) {
+            const parentItem = getParentItem(source);
+            if(!parentItem) return acc;
+            acc.push({
+                ...source,
+                id: uuidv4(),
+                itemKey: parentItem.key,
+                isRegularItem: true,
+                isNote: false,
+                parentKey: null,
+                childItemKeys: [source.itemKey]
+            } as InputSource);
+            return acc;
+        }
+
+        // Add the source to the parent
+        parent.childItemKeys.push(source.itemKey);
+
+        return acc;
+    }, regularItemSources);
+}
+
+export function createSourceFromAttachmentOrNote(
+    item: Zotero.Item,
+    pinned: boolean = false
+): InputSource {
+    if (item.isRegularItem()) {
+        throw new Error("Cannot call createSourceFromAttachment on a regular item");
+    }
+    return {
+        id: uuidv4(),
+        libraryID: item.libraryID,
+        itemKey: item.key,
+        pinned: pinned,
+        timestamp: Date.now(),
+        isRegularItem: false,
+        isNote: item.isNote(),
+        parentKey: item.parentKey || null,
+        childItemKeys: [],
     };
 }
 
 /**
-* Source method: Get the Zotero item from a ZoteroSource
+* Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: ZoteroSource): Zotero.Item | null {
+export function getZoteroItem(source: InputSource): Zotero.Item | null {
     try {
         const item = Zotero.Items.getByLibraryAndKey(source.libraryID, source.itemKey);
         return item || null;
@@ -126,19 +190,30 @@ export function getZoteroItem(source: ZoteroSource): Zotero.Item | null {
 }
 
 /**
-* Source method: Get child items for a ZoteroSource
+* Source method: Get the parent item from a Source
 */
-export function getChildItems(source: ZoteroSource): Zotero.Item[] {
-    if (!source.childItemKeys || source.childItemKeys.length === 0) {
-        return [];
-    }
-    
+export function getParentItem(source: InputSource): Zotero.Item | null {
     try {
-        const childItems = source.childItemKeys
+        const parentItem = source.parentKey
+            ? Zotero.Items.getByLibraryAndKey(source.libraryID, source.parentKey)
+            : null;
+        return parentItem || null;
+    } catch (error) {
+        console.error("Error retrieving Zotero item:", error);
+        return null;
+    }
+}
+
+
+
+/**
+* Source method: Get child items for a Source
+*/
+export function getChildItems(source: InputSource): Zotero.Item[] {
+    try {
+        return source.childItemKeys
             .map(key => Zotero.Items.getByLibraryAndKey(source.libraryID, key))
             .filter(Boolean) as Zotero.Item[];
-        
-        return childItems;
     } catch (error) {
         console.error("Error retrieving child items:", error);
         return [];
@@ -148,13 +223,9 @@ export function getChildItems(source: ZoteroSource): Zotero.Item[] {
 /**
 * Source method: Check if a source is valid
 */
-export const isValidRegularItem = async (source: ZoteroSource, item: Zotero.Item): Promise<boolean> => {
-    if (source.childItemKeys.length == 0) return false;
-    const bestAttachment = await item.getBestAttachment();
-    if (!bestAttachment) return false;
-    if (!source.childItemKeys.includes(bestAttachment.key)) return false;
-    const isBestAttachmentValid = await isValidAttachment(bestAttachment);
-    return isBestAttachmentValid;
+export const isValidRegularItem = async (source: InputSource, item: Zotero.Item): Promise<boolean> => {
+    if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
+    return true;
 }
 
 export const isValidAttachment = async (att: Zotero.Item): Promise<boolean> => {
@@ -165,85 +236,43 @@ export const isValidAttachment = async (att: Zotero.Item): Promise<boolean> => {
     return exists && isValidMimeType(mimeType);
 }
 
-export async function isSourceValid(source: Source): Promise<boolean> {
-    switch (source.type) {
-        case 'zotero_item': {
-            const item = getZoteroItem(source);
-            if (!item) return false;
-            if (item.isNote()) return true;
-            if (item.isAttachment()) return await isValidAttachment(item);
-            if (item.isRegularItem()) return await isValidRegularItem(source,item);
-            return false;
-        }
-        case 'file':
-            // TODO: Implement file existence check
-            return true;
-        default:
-            return false;
-    }
-}
-
-/**
-* Source method: Convert source to database-friendly format
-*/
-export function sourceToDb(source: Source): any {
-    // Strip any circular references or complex objects
-    return { ...source };
-}
-
-/**
-* Source method: Create source from database data
-*/
-export function sourceFromDb(data: any): Source | null {
-    if (!data || !data.type) return null;
-    
-    switch (data.type) {
-        case 'zotero_item':
-            return data as ZoteroSource;
-        case 'file':
-            return data as FileSource;
-        default:
-            return null;
-    }
-}
-
-export function revealSource(source: Source) {
-    if (source.type === 'zotero_item') {
-        const itemID = Zotero.Items.getIDFromLibraryAndKey(source.libraryID, source.itemKey);
-        if (itemID && Zotero.getActiveZoteroPane()) {
-            // @ts-ignore selectItem exists
-            Zotero.getActiveZoteroPane().itemsView.selectItem(itemID);
-        }
-    } else if (source.type === 'file') {
-        Zotero.File.reveal(source.filePath);
-    }
-}
-
-export async function openSource(source: Source) {
-    if (source.type === 'zotero_item') {
+export async function isSourceValid(source: InputSource): Promise<boolean> {
         const item = getZoteroItem(source);
-        if (!item) return;
-        
-        // Regular items
-        if (item.isRegularItem()) {
-            const bestAttachment = await item.getBestAttachment();
-            if (bestAttachment) {
-                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
-            }
-        }
+        if (!item) return false;
+        if (item.isNote()) return true;
+        if (item.isAttachment()) return await isValidAttachment(item);
+        if (item.isRegularItem()) return await isValidRegularItem(source as InputSource, item);
+        return false;
+}
 
-        // Attachments
-        if (item.isAttachment()) {
-            Zotero.getActiveZoteroPane().viewAttachment(item.id);
-        }
+export function revealSource(source: InputSource) {
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(source.libraryID, source.itemKey);
+    if (itemID && Zotero.getActiveZoteroPane()) {
+        // @ts-ignore selectItem exists
+        Zotero.getActiveZoteroPane().itemsView.selectItem(itemID);
+    }
+}
 
-        // Notes
-        if (item.isNote()) {
-            // @ts-ignore selectItem exists
-            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+export async function openSource(source: InputSource) {
+    const item = getZoteroItem(source);
+    if (!item) return;
+    
+    // Regular items
+    if (item.isRegularItem()) {
+        const bestAttachment = await item.getBestAttachment();
+        if (bestAttachment) {
+            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
         }
+    }
 
-    } else if (source.type === 'file') {
-        Zotero.launchFile(source.filePath);
+    // Attachments
+    if (item.isAttachment()) {
+        Zotero.getActiveZoteroPane().viewAttachment(item.id);
+    }
+
+    // Notes
+    if (item.isNote()) {
+        // @ts-ignore selectItem exists
+        await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
     }
 }

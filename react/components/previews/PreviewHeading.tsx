@@ -1,19 +1,20 @@
 import React from 'react';
 import { CSSItemTypeIcon } from '../icons';
-import { Source } from '../../types/sources';
+import { InputSource } from '../../types/sources';
+import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 
 interface PreviewHeadingProps {
-    source: Source;
-    item?: Zotero.Item;
+    source: InputSource;
+    item: Zotero.Item;
 }
 
 const PreviewHeading: React.FC<PreviewHeadingProps> = ({ source, item }) => {
     return (
         <span className="flex items-center font-color-primary">
             <span className="fit-content">
-                {<CSSItemTypeIcon itemType={item ? item.getItemTypeIconName() : source.icon} className="scale-85" />}
+                {<CSSItemTypeIcon itemType={item.getItemTypeIconName()} className="scale-85" />}
             </span>
-            <span className="ml-2 truncate">{source.name}</span>
+            <span className="ml-2 truncate">{getDisplayNameFromItem(item, source.childItemKeys.length)}</span>
         </span>
     );
 };

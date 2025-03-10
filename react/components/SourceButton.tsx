@@ -1,10 +1,10 @@
 // @ts-ignore no idea
 import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { Source } from '../types/sources'
+import { InputSource } from '../types/sources'
 import { useSetAtom, useAtom } from 'jotai'
 import { removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
-import { isSourceValid } from '../utils/sourceUtils'
+import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedSourceAtom } from '../atoms/ui'
 import { truncateText } from '../utils/stringUtils'
@@ -19,7 +19,7 @@ import IconButton from './IconButton'
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
-    source: Source
+    source: InputSource
     disabled?: boolean
 }
 
@@ -38,11 +38,15 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const setPreviewedSource = useSetAtom(previewedSourceAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
         const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
+
+        // Get the Zotero item
+        const item = getZoteroItem(source);
+        if (!item) return null;
         
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
 
-        const getIconElement = (source: Source, isHovered: boolean, disabled: boolean) => {
+        const getIconElement = (source: InputSource, isHovered: boolean, disabled: boolean) => {
             if (isHovered) {
                 // return (<IconButton
                 //     icon={CancelIcon}
@@ -63,15 +67,13 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
             }
-            if (source.icon) {
-                const iconElement = source.icon ? (
-                    <span className="scale-80">
-                        <CSSItemTypeIcon itemType={source.icon} />
-                    </span>
-                ) : null
-                return iconElement
-            }
-            return null
+            const iconName = item.getItemTypeIconName();
+            const iconElement = iconName ? (
+                <span className="scale-80">
+                    <CSSItemTypeIcon itemType={iconName} />
+                </span>
+            ) : null
+            return iconElement
         }
 
         const handleRemove = () => {
@@ -151,10 +153,8 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         }, [source])
 
         // Truncate the name and add a count if there are child items
-        let displayName = truncateText(source.name, MAX_SOURCEBUTTON_TEXT_LENGTH);
-        if (source.type === 'zotero_item' && source.childItemKeys.length > 1) {
-            displayName = `${displayName} (${source.childItemKeys.length})`;
-        }
+        let displayName = truncateText(getDisplayNameFromItem(item), MAX_SOURCEBUTTON_TEXT_LENGTH);
+        if (source.childItemKeys.length > 1) displayName = `${displayName} (${source.childItemKeys.length})`;
 
         return (
             <button
@@ -165,6 +165,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     `variant-outline source-button
                     ${className || ''}
                     ${disabled ? 'disabled-but-styled' : ''}
+                    ${source.isRegularItem && source.childItemKeys.length == 0 ? 'opacity-60' : ''}
                 `}
                 disabled={disabled}
                 onClick={(e) => {

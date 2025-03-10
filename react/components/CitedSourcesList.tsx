@@ -1,5 +1,5 @@
 import React from 'react';
-import { Source, ZoteroSource } from '../types/sources';
+import { InputSource, SourceCitation } from '../types/sources';
 import { openSource, revealSource } from '../utils/sourceUtils';
 import { CSSItemTypeIcon } from './icons';
 import IconButton from './IconButton';
@@ -7,8 +7,8 @@ import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 
 interface CitedSourcesListProps {
-    sources: Source[];
-    saveAsNote: (source?: ZoteroSource) => Promise<void>;
+    sources: SourceCitation[];
+    saveAsNote: (source?: InputSource) => Promise<void>;
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
@@ -44,7 +44,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     </span>
                                 </div>
                                 <div className="flex gap-2 flex-shrink-0">
-                                    {source.type === 'zotero_item' && source.parentKey &&
+                                    {source.parentKey &&
                                         <IconButton
                                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={10} />}
                                             variant="outline"

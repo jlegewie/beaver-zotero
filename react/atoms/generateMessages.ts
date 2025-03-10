@@ -1,8 +1,8 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom } from './threads';
-import { Source, ZoteroSource } from '../types/sources';
-import { createZoteroSource, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
+import { InputSource } from '../types/sources';
+import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
@@ -22,56 +22,25 @@ import { ReaderContext } from '../utils/readerUtils';
  * @returns Promise resolving to an array of valid sources sorted by timestamp
  */
 async function prepareSources(
-    sources: Source[],
-    userMsg: { id: string }
-): Promise<Source[]> {
-    // Keys for regular zotero items
-    const regularItemKeys = new Set(
-        sources.filter((s) => s.type === 'zotero_item' && s.isRegularItem).map((s) => (s as ZoteroSource).itemKey)
-    );
-
-    // Sources that should be added as children of regular items
-    const childrenSources = sources.filter((s) => s.type === 'zotero_item' && s.parentKey && regularItemKeys.has(s.parentKey)) as ZoteroSource[];
-    const childrenSourcesIds = new Set(childrenSources.map((s) => s.id));
-
-    // Main source list
-    const payloadSources = sources.filter((s) => !childrenSourcesIds.has(s.id));
-    
-    // Add child sources to parent sources
-    childrenSources.forEach((childSource) => {
-        const parentSource = payloadSources.find((s) => s.type === 'zotero_item' && s.itemKey === childSource.parentKey) as ZoteroSource;
-        if (parentSource && !parentSource.childItemKeys.includes(childSource.itemKey)) {
-            parentSource.childItemKeys = [...parentSource.childItemKeys, childSource.itemKey];
-        }
-    });
-
-    // Ensure that regular zotero items include best attachment. If not, return children items as sources.
-    const updatedPayloadSources = (await Promise.all(payloadSources.flatMap(async (s) => {
-        if (!(s.type === 'zotero_item' && s.isRegularItem)) return s;
-        const item = getZoteroItem(s);
-        if (!item) return []
-        // Return regular item if child items include best attachment
-        const bestAttachment = await item.getBestAttachment();
-        if (bestAttachment && s.childItemKeys.includes(bestAttachment.key)) return s;
-        // Otherwise, return children items
-        const childItems = getChildItems(s);
-        const childSources = await Promise.all(childItems.map(async (item) => {
-            return {
-                ...(await createZoteroSource(item)),
-                messageId: userMsg.id,
-                timestamp: s.timestamp
-            } as ZoteroSource;
+    inputSources: InputSource[],
+    messageId: string
+): Promise<InputSource[]> {
+    const sourcesFromRegularItems = inputSources
+        .filter((s) => s.isRegularItem)
+        .flatMap((s) => getChildItems(s).map((item) => {
+            const source = createSourceFromAttachmentOrNote(item);
+            return {...source, messageId: messageId, timestamp: s.timestamp};
         }));
-        return childSources;
-    }))).flat();
-
-    // Filter out invalid sources
-    const validSources = updatedPayloadSources.filter(async (s) => await isSourceValid(s));
-
-    // Sort sources by timestamp
+    const sourcesFromAttachmentsOrNotes = inputSources
+        .filter((s) => !s.isRegularItem)
+        .map((s) => ({
+            ...s,
+            messageId: messageId
+        }));
+    const sources = [...sourcesFromRegularItems, ...sourcesFromAttachmentsOrNotes];
+    const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
 }
-
 
 /**
  * Generates a response from the assistant based on the user's message and sources.
@@ -90,7 +59,7 @@ export const generateResponseAtom = atom(
     null,
     async (get, set, payload: {
         content: string;
-        sources: Source[];
+        sources: InputSource[];
         readerContext?: ReaderContext;
     }) => {
         // Get current messages
@@ -106,13 +75,10 @@ export const generateResponseAtom = atom(
         set(threadMessagesAtom, newMessages);
         
         // Prepare sources
-        const payloadSources = await prepareSources(payload.sources, userMsg);
+        const payloadSources = await prepareSources(payload.sources, userMsg.id);
 
         // Combine existing thread sources with payload sources
-        const newThreadSources: Source[] = [...threadSources];
-        for (const source of payloadSources) {
-            newThreadSources.push({...source, messageId: userMsg.id});
-        }
+        const newThreadSources: InputSource[] = [...threadSources, ...payloadSources];
         
         // Update thread sources atom
         set(threadSourcesAtom, newThreadSources);
@@ -120,9 +86,7 @@ export const generateResponseAtom = atom(
         // Provide reader context sources contain current reader item
         let context: ReaderContext | undefined;
         if (payload.readerContext) {
-            const sourceKeys = newThreadSources
-                .filter((s) => s.type === 'zotero_item')
-                .flatMap((s) => [s.itemKey, ...s.childItemKeys]);
+            const sourceKeys = newThreadSources.map((s) => s.itemKey);
             if (sourceKeys.includes(payload.readerContext.itemKey)) {
                 context = payload.readerContext;
             }
@@ -176,7 +140,7 @@ export const regenerateFromMessageAtom = atom(
 // Helper function to process chat completion
 function _processChatCompletion(
     messages: ChatMessage[],
-    sources: Source[],
+    sources: InputSource[],
     assistantMsgId: string,
     context: ReaderContext | undefined,
     set: any

@@ -330,6 +330,10 @@
 
 /* States */
 [id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
+[id^="beaver-pane-"] .opacity-60 { opacity: 0.6; }
+[id^="beaver-pane-"] .opacity-70 { opacity: 0.7; }
+[id^="beaver-pane-"] .opacity-80 { opacity: 0.8; }
+[id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */

@@ -1,6 +1,6 @@
-import { Source } from '../types/sources';
+import { InputSource } from '../types/sources';
 import { ContentPart } from '../../src/services/OpenAIProvider';
-import { getZoteroItem } from './sourceUtils';
+import { getIdentifierFromItem, getZoteroItem } from './sourceUtils';
 
 
 // Utility function to get note content as markdown
@@ -24,86 +24,72 @@ async function getNoteAsMarkdown(item: Zotero.Item) {
  * @param source - The source to convert
  * @returns Promise<ContentPart[]> - The content parts
  */
-export async function sourceToContentParts(source: Source): Promise<ContentPart[]> {
-    if (source.type === 'zotero_item') {
-        // Get the Zotero item
-        const item = getZoteroItem(source);
+export async function sourceToContentParts(source: InputSource): Promise<ContentPart[]> {
 
-        // Skip if the item is not a regular item (regular items should already be flattened)
-        if (!item || item.isRegularItem()) return [];
+    // Get the Zotero item
+    const item = getZoteroItem(source);
 
-        // Define id and parent item
-        const parentItem = item.parentItem;
+    // Skip if the item is not a regular item (regular items should already be flattened)
+    if (!item || item.isRegularItem()) return [];
 
-        // Attachment with parent item
-        if (parentItem && item.isAttachment()) {
-            /*const title = parentItem.getDisplayTitle();
-            const authors = parentItem?.getCreators();
-            const year = parentItem.getField('date', true).slice(0, 4);*/
-            const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-            // @ts-ignore Beaver exists
-            const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
-            const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
-            const metadata = `# Document (id: ${source.identifier})\nType: ${type}\nReference: ${reference}`;
+    // Define id and parent item
+    const parentItem = item.parentItem;
+    const identifier = getIdentifierFromItem(item);
 
-            // Get the file path
-            const filePath = await item.getFilePath();
-            if (!filePath) return [];
+    // Attachment with parent item
+    if (parentItem && item.isAttachment()) {
+        /*const title = parentItem.getDisplayTitle();
+        const authors = parentItem?.getCreators();
+        const year = parentItem.getField('date', true).slice(0, 4);*/
+        const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
+        // @ts-ignore Beaver exists
+        const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
+        const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
+        const metadata = `# Document (id: ${identifier})\nType: ${type}\nReference: ${reference}`;
 
-            // return content parts
-            return [
-                { type: 'text', text: metadata },
-                await fileToContentPart(filePath)
-            ]
-
-        // Note with parent item
-        } else if (parentItem && item.isNote()) {
-            const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-            // @ts-ignore Beaver exists
-            const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
-            // @ts-ignore unescapeHTML exists
-            const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            const noteData = `# Note (id: ${source.identifier})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
-            return [{ type: 'text', text: noteData }]
-        // Top-level attachment
-        } else if (!parentItem && item.isAttachment()) {
-            const fileName = item.attachmentFilename;
-            const metadata = `# Document (id: ${source.identifier})\nFile Name: ${fileName}`;
-
-            // Get the file path
-            const filePath = await item.getFilePath();
-            if (!filePath) return [];
-
-            // return content parts
-            return [
-                { type: 'text', text: metadata },
-                await fileToContentPart(filePath)
-            ]
-            
-        // Top-level note
-        } else if (!parentItem && item.isNote()) {
-            // const content = await getNoteAsMarkdown(item);
-            // @ts-ignore unescapeHTML exists
-            const content = Zotero.Utilities.unescapeHTML(item.getNote());
-            const noteData = `# Note (id: ${source.identifier})\nNote Content: ${content}`;
-            return [{ type: 'text', text: noteData }]
-        }
-    }
-    if (source.type === 'file') {
-        const metadata = `# Document (id: ${source.identifier})\nFile Name: ${source.fileName}`;
         // Get the file path
-        const filePath = source.filePath;
+        const filePath = await item.getFilePath();
         if (!filePath) return [];
 
         // return content parts
         return [
             { type: 'text', text: metadata },
             await fileToContentPart(filePath)
-        ];
+        ]
+
+    // Note with parent item
+    } else if (parentItem && item.isNote()) {
+        const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
+        // @ts-ignore Beaver exists
+        const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
+        // @ts-ignore unescapeHTML exists
+        const content = Zotero.Utilities.unescapeHTML(item.getNote());
+        const noteData = `# Note (id: ${identifier})\nNote attached to ${type}: ${reference}\nNote Content: ${content}`;
+        return [{ type: 'text', text: noteData }]
+    // Top-level attachment
+    } else if (!parentItem && item.isAttachment()) {
+        const fileName = item.attachmentFilename;
+        const metadata = `# Document (id: ${identifier})\nFile Name: ${fileName}`;
+
+        // Get the file path
+        const filePath = await item.getFilePath();
+        if (!filePath) return [];
+
+        // return content parts
+        return [
+            { type: 'text', text: metadata },
+            await fileToContentPart(filePath)
+        ]
+        
+    // Top-level note
+    } else if (!parentItem && item.isNote()) {
+        // const content = await getNoteAsMarkdown(item);
+        // @ts-ignore unescapeHTML exists
+        const content = Zotero.Utilities.unescapeHTML(item.getNote());
+        const noteData = `# Note (id: ${identifier})\nNote Content: ${content}`;
+        return [{ type: 'text', text: noteData }]
     }
-    if (source.type === 'remote_file') {
-        return [urlToContentPart(source.url)];
-    }
+
     return [];
 }
 

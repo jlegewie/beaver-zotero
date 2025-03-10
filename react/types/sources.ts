@@ -1,39 +1,49 @@
 
-// Base source interface
-export interface BaseSource {
-    id: string;               // Unique identifier for tracking
-    identifier: string;       // Identifier for the source
+export interface InputSource {
+    id: string;               // Unique identifier
     messageId?: string;       // Message ID for tracking
-    type: string;             // Type discriminator
-    name: string;             // Name for the source
-    icon: string;             // Icon for the source
+    libraryID: number;        // Zotero library ID
+    itemKey: string;          // Zotero item key
     pinned: boolean;          // If true, the source persists across selections
     timestamp: number;        // Creation timestamp
+    isRegularItem: boolean;   // Whether the item is a regular item or an attachment, note etc
+    isNote: boolean;          // Whether the item is a note
+    parentKey: string | null; // Key of the parent item
+    childItemKeys: string[];  // Keys of child items
+}
+
+export interface SourceCitation extends InputSource {
+    icon: string | null;
     citation: string;         // In-text citation for the source used in assistant messages
     reference: string;        // Bibliographic reference for the source
     url: string;              // URL for the source
-    numericCitation?: string; // Numeric citation for the source used in assistant messages
-}
+    numericCitation: string;  // Numeric citation for the source used in assistant messages
+};
 
-// Zotero item source
-export interface ZoteroSource extends BaseSource {
-    type: 'zotero_item';
+
+export interface BaseSource {
+    id: string;               // Unique identifier for tracking
+    messageId?: string;       // Message ID for tracking
     libraryID: number;        // Zotero library ID
     itemKey: string;          // Zotero item key
+    pinned: boolean;          // If true, the source persists across selections
+    timestamp: number;        // Creation timestamp
+}
+
+export interface RegularItemSource extends BaseSource {
+    type: "regularItem";
+    childItemKeys: string[];  // Keys of child items
+}
+
+export interface AttachmentSource extends BaseSource {
+    type: "attachment";
     parentKey: string | null; // Key of the parent item
-    itemType: string;         // Type of the item
-    isRegularItem: boolean;   // Whether the item is a regular item or an attachment, note etc
-    isNote: boolean;          // Whether the item is a note
-    childItemKeys: string[];  // Keys of child items that are part of this source
 }
 
-// File source from local file system
-export interface FileSource extends BaseSource {
-    type: 'file';
-    filePath: string;
-    fileName: string;
-    fileType: string;
+export interface NoteSource extends BaseSource {
+    type: "note";
+    parentKey: string | null; // Key of the parent item
 }
-
-// Union type for all source types
-export type Source = ZoteroSource | FileSource;
+ 
+// export type InputSource = RegularItemSource | AttachmentSource | NoteSource;
+// export type ThreadSource = AttachmentSource | NoteSource;

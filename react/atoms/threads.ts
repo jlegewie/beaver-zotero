@@ -1,30 +1,45 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage } from "../types/messages";
-import { Source, ZoteroSource } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier } from "../utils/sourceUtils";
+import { InputSource, SourceCitation } from "../types/sources";
+import { getZoteroItem, getCitationFromItem, getNameFromItem, getReferenceFromItem, createSourceIdentifier, createSourceFromItem, createParentSource, getParentItem, getIdentifierFromSource } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 
 // Thread messages and sources
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
-export const threadSourcesAtom = atom<Source[]>([]);
+export const threadSourcesAtom = atom<InputSource[]>([]);
 
 // Derived atom for thread source keys
 export const threadSourceKeysAtom = atom((get) => {
     const sources = get(threadSourcesAtom);
-    const keys = sources
-        .filter((source): source is ZoteroSource => source.type === 'zotero_item')
-        .map((source) => source.itemKey);
-    const childrenKeys = sources
-        .filter((source) => source.type === 'zotero_item' && source.childItemKeys)
-        .flatMap((source) => (source as ZoteroSource).childItemKeys);
-    return [...keys, ...childrenKeys];
+    console.log('threadSourceKeysAtom', sources.map((source) => source.itemKey))
+    return sources.map((source) => source.itemKey);
+});
+
+// Derived atom for source citations
+export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) => {
+    const sources = get(threadSourcesAtom);
+    return sources.reduce((acc, source) => {
+        const identifier = getIdentifierFromSource(source);
+        const item = getZoteroItem(source);
+        const parentItem = getParentItem(source);
+        const itemToCite = parentItem || item;
+        if(!item || !itemToCite) return acc;
+        acc[identifier] = {
+            ...source,
+            citation: getCitationFromItem(itemToCite),
+            reference: getReferenceFromItem(itemToCite),
+            url: createZoteroURI(item),
+            icon: item.getItemTypeIconName(),
+            numericCitation: Object.keys(acc).length > 0 ? (Object.keys(acc).length + 1).toString() : '1',
+        };
+        return acc;
+    }, {} as Record<string, SourceCitation>);
 });
 
 // Derived atom for thread source count
 export const threadSourceCountAtom = atom((get) => {
-    const sources = get(flattenedThreadSourcesAtom);
-    return sources.length;
+    return get(threadSourcesAtom).length;
 });
 
 // Derived atoms for thread status
@@ -32,55 +47,6 @@ export const isStreamingAtom = atom((get) => {
     const messages = get(threadMessagesAtom);
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
-
-export const flattenedThreadSourcesAtom = atom<Source[]>((get) => {
-    // Flatten sources
-    const flatThreadSources = get(threadSourcesAtom)
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .flatMap((source) => {
-            if (source.type === 'zotero_item' && source.childItemKeys && source.childItemKeys.length > 0) {
-                return source.childItemKeys.map(key => ({...source, itemKey: key}));
-            }
-            return [source];
-        });
-
-    // Update sources with item details
-    const updatedFlatThreadSources = flatThreadSources
-        .map((source, index) => {
-            if (source.type !== 'zotero_item') return source;
-            const item = getZoteroItem(source);
-            if (!item) return null;
-
-            const sourceData = {
-                ...source,
-                identifier: createSourceIdentifier(item),
-                numericCitation: String(index + 1),
-                url: createZoteroURI(item),
-                parentKey: item.parentKey || null,
-                isRegularItem: item.isRegularItem(),
-                itemType: Zotero.ItemTypes.getLocalizedString(item.itemType),
-                childItemKeys: []
-            };
-            if (item.isNote()) {
-                return {
-                    ...sourceData,
-                    name: getNameFromItem(item),
-                    citation: getCitationFromItem(item),
-                    reference: getReferenceFromItem(item),
-                    icon: item.getItemTypeIconName(),
-                    isNote: true
-                };
-            }
-            return {
-                ...sourceData,
-                isNote: false,
-            };
-        })
-        .filter(Boolean) as Source[];
-    
-    return updatedFlatThreadSources;
-});
-
 
 // Setter atoms
 export const newThreadAtom = atom(

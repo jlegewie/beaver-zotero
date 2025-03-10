@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useRef, useEffect, useState } from 'react';
 import { Icon, CancelIcon } from './icons';
-import { Source } from '../types/sources';
+import { InputSource } from '../types/sources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedSourceAtom } from '../atoms/ui';
 import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/input';
@@ -10,13 +10,13 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import PreviewZoteroItem from './previews/PreviewZoteroItem';
 import PreviewZoteroSource from './previews/PreviewZoteroSource';
-import PreviewFileSource from './previews/PreviewFileSource';
 import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
 import Button from './Button';
 import IconButton from './IconButton';
+
 interface SourcePreviewProps {
-    source: Source;
+    source: InputSource;
 }
 
 const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
@@ -32,9 +32,9 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
     const currentSource = currentSources.find(att => att.id === source.id) || source;
 
     // Type of source
-    const item = currentSource.type === 'zotero_item' ? getZoteroItem(currentSource) : null;
-    const isZoteroItem = currentSource.type === 'zotero_item' && item;
-    const isRegularZoteroItem = isZoteroItem && item.isRegularItem();
+    const item = getZoteroItem(currentSource);
+    if (!item) return null;
+    const isRegularZoteroItem = item.isRegularItem();
 
     // Calculate available space for the preview
     useEffect(() => {
@@ -133,37 +133,28 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
     };
 
     const handleOpen = async () => {
-        if (currentSource.type === 'zotero_item' && item) {
-            if (item.isNote()) {
-                await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
-            } else {
-                await openPDFInNewWindow(item);
-            }
+        if (item.isNote()) {
+            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+        } else {
+            await openPDFInNewWindow(item);
         }
         setPreviewedSource(null);
     };
 
     // Determine if the PDF can be opened
-    const canOpen = isZoteroItem && (
+    const canOpen =
         item.isPDFAttachment() ||
         (item.isRegularItem() && item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment())) ||
-        item.isNote()
-    );
+        item.isNote();
 
     // Render appropriate content based on attachment type
     const renderContent = () => {
         if (!currentSource) return null;
         
-        if (currentSource.type === 'zotero_item') {
-            if (isRegularZoteroItem) {
-                return <PreviewZoteroItem source={currentSource} item={item} />;
-            } else if (item) {
-                return <PreviewZoteroSource source={currentSource} item={item} />;
-            } else {
-                return null;
-            }
-        } else if (currentSource.type === 'file') {
-            return <PreviewFileSource source={currentSource as any} />;
+        if (isRegularZoteroItem) {
+            return <PreviewZoteroItem source={currentSource} item={item} />;
+        } else if (item) {
+            return <PreviewZoteroSource source={currentSource} item={item} />;
         } else {
             return null;
         }

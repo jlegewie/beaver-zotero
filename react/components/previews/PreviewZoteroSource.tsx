@@ -1,9 +1,9 @@
 import React from 'react';
-import { ZoteroSource } from '../../types/sources';
+import { InputSource } from '../../types/sources';
 import { CSSItemTypeIcon } from '../icons';
 import PreviewHeading from './PreviewHeading';
 interface PreviewZoteroSourceProps {
-    source: ZoteroSource;
+    source: InputSource;
     item: Zotero.Item;
 }
 

@@ -84,7 +84,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     // Create ZoteroSources for each item
                     for (const item of items) {
                         // Create a source with pinned set to true
-                        const source = await createZoteroSource(item, true);
+                        const source = await createSourceFromItem(item, true);
                         // Add source directly to the sources atom
                         const currentSources = [...sources];
                         // Check if source already exists
