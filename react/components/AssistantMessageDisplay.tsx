@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { CopyIcon, Icon, RepeatIcon, TickIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
+import { Icon, RepeatIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
 import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
@@ -16,6 +16,7 @@ import Button from './Button';
 import CitedSourcesList from './CitedSourcesList';
 import { InputSource, SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
+import CopyButton from './CopyButton';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -33,9 +34,6 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
-    
-    // Manage copy feedback state manually
-    const [justCopied, setJustCopied] = useState(false);
     
     const { 
         isMenuOpen: isSelectionMenuOpen, 
@@ -67,13 +65,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     const handleCopy = async () => {
         const formattedContent = renderToMarkdown(message.content);
-        
-        await copyToClipboard(formattedContent, {
-            onSuccess: () => {
-                setJustCopied(true);
-                setTimeout(() => setJustCopied(false), 600);
-            }
-        });
+        await copyToClipboard(formattedContent);
     };
 
     const saveAsNote = async (source?: SourceCitation) => {
@@ -193,11 +185,10 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                         ariaLabel="Regenerate response"
                     />
                     {message.status !== 'error' &&
-                        <IconButton
-                            icon={justCopied ? TickIcon : CopyIcon}
-                            onClick={handleCopy}
+                        <CopyButton
+                            content={message.content}
+                            formatContent={renderToMarkdown}
                             className="scale-12"
-                            ariaLabel="Copy to clipboard"
                         />
                     }
                 </div>
