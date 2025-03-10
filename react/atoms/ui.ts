@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { currentSourcesAtom } from './input';
-import { Source } from 'react/types/sources';
+import { InputSource } from 'react/types/sources';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -17,7 +17,7 @@ export const previewedSourceAtom = atom(
         // Find the attachment with the latest data from attachmentsAtom
         return currentSources.find(source => source.id === previewSourceId) || null;
     },
-    (get, set, source: Source | null) => {
+    (get, set, source: InputSource | null) => {
         // When setting a new attachment to preview, just store its ID
         set(previewedSourceIdAtom, source?.id || null);
     }

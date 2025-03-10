@@ -38,7 +38,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // Find the source in the available sources
     const source = sourceCitations[id];
-    // const fileSource = sources.find(s => s.type === 'file' && (s as FileSource).id === idParts);
 
     // Get citation data
     let reference = '';
