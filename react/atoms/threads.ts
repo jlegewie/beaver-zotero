@@ -12,7 +12,6 @@ export const threadSourcesAtom = atom<InputSource[]>([]);
 // Derived atom for thread source keys
 export const threadSourceKeysAtom = atom((get) => {
     const sources = get(threadSourcesAtom);
-    console.log('threadSourceKeysAtom', sources.map((source) => source.itemKey))
     return sources.map((source) => source.itemKey);
 });
 
