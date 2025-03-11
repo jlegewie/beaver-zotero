@@ -1,4 +1,5 @@
 import { ChatMessage } from '../../react/types/messages';
+import { ApiService } from './apiService';
 
 // Types that match the backend models
 export interface Thread {
@@ -25,65 +26,41 @@ export interface PaginatedThreadsResponse {
 }
 
 /**
- * Fetches a thread by its ID
- * @param backendUrl The base URL of the backend API
- * @param threadId The ID of the thread to fetch
- * @returns Promise with the thread data
+ * Thread-specific API service that extends the base API service
  */
-export async function getThread(
-    backendUrl: string,
-    threadId: string
-): Promise<Thread> {
-    const endpoint = `${backendUrl}/threads/${threadId}`;
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-                // Add authorization headers if needed
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch thread: ${response.statusText}`);
-        }
-
-        const data = await response.json() as unknown;
-        return data as Thread;
-    } catch (error) {
-        console.error('Error fetching thread:', error);
-        throw error;
+export class ThreadService extends ApiService {
+    /**
+     * Creates a new ThreadService instance
+     * @param backendUrl The base URL of the backend API
+     */
+    constructor(backendUrl: string) {
+        super(backendUrl);
     }
-}
 
-/**
- * Fetches messages for a specific thread
- * @param backendUrl The base URL of the backend API
- * @param threadId The ID of the thread
- * @returns Promise with an array of messages
- */
-export async function getThreadMessages(
-    backendUrl: string,
-    threadId: string
-): Promise<ChatMessage[]> {
-    const endpoint = `${backendUrl}/threads/${threadId}/messages`;
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-                // Add authorization headers if needed
-            }
-        });
+    /**
+     * Gets the base URL of this service
+     * @returns The base URL
+     */
+    getBaseUrl(): string {
+        return this.baseUrl;
+    }
 
-        if (!response.ok) {
-            throw new Error(`Failed to fetch thread messages: ${response.statusText}`);
-        }
+    /**
+     * Fetches a thread by its ID
+     * @param threadId The ID of the thread to fetch
+     * @returns Promise with the thread data
+     */
+    async getThread(threadId: string): Promise<Thread> {
+        return this.get<Thread>(`/threads/${threadId}`);
+    }
 
-        const data = await response.json() as unknown;
-        const messages = data as ThreadMessage[];
+    /**
+     * Fetches messages for a specific thread
+     * @param threadId The ID of the thread
+     * @returns Promise with an array of messages
+     */
+    async getThreadMessages(threadId: string): Promise<ChatMessage[]> {
+        const messages = await this.get<ThreadMessage[]>(`/threads/${threadId}/messages`);
         
         // Convert backend ThreadMessage to frontend ChatMessage format
         return messages.map(message => ({
@@ -93,116 +70,87 @@ export async function getThreadMessages(
             status: message.status as 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error',
             errorType: message.error || undefined
         }));
-    } catch (error) {
-        console.error('Error fetching thread messages:', error);
-        throw error;
     }
-}
 
-/**
- * Renames a thread
- * @param backendUrl The base URL of the backend API
- * @param threadId The ID of the thread to rename
- * @param newName The new name for the thread
- * @returns Promise with the updated thread data
- */
-export async function renameThread(
-    backendUrl: string,
-    threadId: string,
-    newName: string
-): Promise<Thread> {
-    // The FastAPI endpoint expects new_name in the request body
-    const endpoint = `${backendUrl}/threads/${threadId}/rename`;
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json'
-                // Add authorization headers if needed
-            },
-            body: JSON.stringify({ new_name: newName })
-        });
+    /**
+     * Renames a thread
+     * @param threadId The ID of the thread to rename
+     * @param newName The new name for the thread
+     * @returns Promise with the updated thread data
+     */
+    async renameThread(threadId: string, newName: string): Promise<Thread> {
+        return this.patch<Thread>(`/threads/${threadId}/rename`, { new_name: newName });
+    }
 
-        if (!response.ok) {
-            throw new Error(`Failed to rename thread: ${response.statusText}`);
+    /**
+     * Deletes a thread
+     * @param threadId The ID of the thread to delete
+     * @returns Promise that resolves when the thread is deleted
+     */
+    async deleteThread(threadId: string): Promise<void> {
+        return this.delete(`/threads/${threadId}`);
+    }
+
+    /**
+     * Fetches paginated threads
+     * @param limit Maximum number of threads to return
+     * @param after Cursor for pagination (thread ID of the last item from previous page)
+     * @returns Promise with paginated threads data
+     */
+    async getPaginatedThreads(limit: number = 10, after: string | null = null): Promise<PaginatedThreadsResponse> {
+        let endpoint = `/threads/paginated?limit=${limit}`;
+        if (after) {
+            endpoint += `&after=${after}`;
         }
+        
+        return this.get<PaginatedThreadsResponse>(endpoint);
+    }
 
-        const data = await response.json() as unknown;
-        return data as Thread;
-    } catch (error) {
-        console.error('Error renaming thread:', error);
-        throw error;
+    /**
+     * Creates a new thread
+     * @param name Optional name for the thread
+     * @returns Promise with the created thread data
+     */
+    async createThread(name?: string): Promise<Thread> {
+        return this.post<Thread>('/threads', { name });
     }
 }
 
 /**
- * Deletes a thread
- * @param backendUrl The base URL of the backend API
- * @param threadId The ID of the thread to delete
- * @returns Promise that resolves when the thread is deleted
+ * Helper functions that use the ThreadService class
+ * These maintain backward compatibility with the existing code
  */
-export async function deleteThread(
-    backendUrl: string,
-    threadId: string
-): Promise<void> {
-    const endpoint = `${backendUrl}/threads/${threadId}`;
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-                // Add authorization headers if needed
-            }
-        });
 
-        if (!response.ok) {
-            throw new Error(`Failed to delete thread: ${response.statusText}`);
-        }
+// Create a singleton instance for the old function-based API
+let threadServiceInstance: ThreadService | null = null;
 
-        // No content is returned on successful delete (204 status)
-        return;
-    } catch (error) {
-        console.error('Error deleting thread:', error);
-        throw error;
+function getThreadService(backendUrl: string): ThreadService {
+    if (!threadServiceInstance || threadServiceInstance.getBaseUrl() !== backendUrl) {
+        threadServiceInstance = new ThreadService(backendUrl);
     }
+    return threadServiceInstance;
 }
 
-/**
- * Fetches paginated threads
- * @param backendUrl The base URL of the backend API
- * @param limit Maximum number of threads to return
- * @param after Cursor for pagination (thread ID of the last item from previous page)
- * @returns Promise with paginated threads data
- */
+export async function getThread(backendUrl: string, threadId: string): Promise<Thread> {
+    return getThreadService(backendUrl).getThread(threadId);
+}
+
+export async function getThreadMessages(backendUrl: string, threadId: string): Promise<ChatMessage[]> {
+    return getThreadService(backendUrl).getThreadMessages(threadId);
+}
+
+export async function renameThread(backendUrl: string, threadId: string, newName: string): Promise<Thread> {
+    return getThreadService(backendUrl).renameThread(threadId, newName);
+}
+
+export async function deleteThread(backendUrl: string, threadId: string): Promise<void> {
+    return getThreadService(backendUrl).deleteThread(threadId);
+}
+
 export async function getPaginatedThreads(
     backendUrl: string,
     limit: number = 10,
     after: string | null = null
 ): Promise<PaginatedThreadsResponse> {
-    let endpoint = `${backendUrl}/threads/paginated?limit=${limit}`;
-    if (after) {
-        endpoint += `&after=${after}`;
-    }
-    
-    try {
-        const response = await fetch(endpoint, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-                // Add authorization headers if needed
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch paginated threads: ${response.statusText}`);
-        }
-
-        const data = await response.json() as unknown;
-        return data as PaginatedThreadsResponse;
-    } catch (error) {
-        console.error('Error fetching paginated threads:', error);
-        throw error;
-    }
-} 
+    return getThreadService(backendUrl).getPaginatedThreads(limit, after);
+}

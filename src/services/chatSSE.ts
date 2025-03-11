@@ -1,3 +1,5 @@
+import { supabase } from './supabaseClient';
+
 export interface SSERequestParams {
     backendUrl: string;             // e.g. "http://localhost:8000"
     threadId: string | null;        // If continuing an existing thread, else null
@@ -11,6 +13,19 @@ export interface SSECallbacks {
     onToken: (token: string) => void;
     onDone: () => void;
     onError: (errorType: string) => void;
+}
+
+/**
+ * Gets authentication headers with JWT token if user is signed in
+ */
+async function getAuthHeaders(): Promise<Record<string, string>> {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    
+    return {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
 }
 
 /**
@@ -47,10 +62,9 @@ export async function requestChatCompletion(
     };
 
     const endpoint = `${backendUrl}/chat/completions`;
-    const headers = {
-        'Content-Type': 'application/json'
-        // Add authorization headers
-    };
+    
+    // Get authentication headers
+    const headers = await getAuthHeaders();
 
     return new Promise<void>((resolve, reject) => {
         try {
