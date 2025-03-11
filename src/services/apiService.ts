@@ -11,6 +11,14 @@ export class ApiService {
     }
     
     /**
+    * Sets the base URL for API requests
+    * @param baseUrl The new base URL
+    */
+    setBaseUrl(baseUrl: string): void {
+        this.baseUrl = baseUrl;
+    }
+    
+    /**
     * Gets authentication headers with JWT token if user is signed in
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
