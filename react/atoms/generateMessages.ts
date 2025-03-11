@@ -6,7 +6,7 @@ import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, 
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { chatService } from '../../src/services/chatSSE';
+import { chatService } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 
 const MODE = getPref('mode');
