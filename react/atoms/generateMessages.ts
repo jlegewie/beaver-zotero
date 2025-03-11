@@ -6,8 +6,7 @@ import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, 
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { requestChatCompletion } from '../../src/services/chatSSE';
-import API_BASE_URL from '../../src/utils/getAPIBaseURL';
+import { chatService } from '../../src/services/chatSSE';
 import { getPref } from '../../src/utils/prefs';
 
 const MODE = getPref('mode');
@@ -193,10 +192,8 @@ function _processChatCompletionViaBackend(
     content: string,
     set: any
 ) {
-    console.log('API_BASE_URL', API_BASE_URL);
-    requestChatCompletion(
+    chatService.requestChatCompletion(
         {
-            backendUrl: API_BASE_URL,
             threadId: currentThreadId,
             userMessageId,
             assistantMessageId,
@@ -204,7 +201,7 @@ function _processChatCompletionViaBackend(
         },
         {
             onThread: (newThreadId) => {
-                console.log('SSE new thread:', newThreadId);
+                console.log('Current thread ID:', newThreadId);
                 set(currentThreadIdAtom, newThreadId);
             },
             onToken: (partial) => {

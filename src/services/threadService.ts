@@ -1,5 +1,6 @@
 import { ChatMessage } from '../../react/types/messages';
 import { ApiService } from './apiService';
+import API_BASE_URL from '../utils/getAPIBaseURL';
 
 // Types that match the backend models
 export interface Thread {
@@ -112,45 +113,10 @@ export class ThreadService extends ApiService {
      * @returns Promise with the created thread data
      */
     async createThread(name?: string): Promise<Thread> {
-        return this.post<Thread>('/threads', { name });
+        const payload = { name: name || null };
+        return this.post<Thread>('/threads', payload);
     }
 }
 
-/**
- * Helper functions that use the ThreadService class
- * These maintain backward compatibility with the existing code
- */
-
-// Create a singleton instance for the old function-based API
-let threadServiceInstance: ThreadService | null = null;
-
-function getThreadService(backendUrl: string): ThreadService {
-    if (!threadServiceInstance || threadServiceInstance.getBaseUrl() !== backendUrl) {
-        threadServiceInstance = new ThreadService(backendUrl);
-    }
-    return threadServiceInstance;
-}
-
-export async function getThread(backendUrl: string, threadId: string): Promise<Thread> {
-    return getThreadService(backendUrl).getThread(threadId);
-}
-
-export async function getThreadMessages(backendUrl: string, threadId: string): Promise<ChatMessage[]> {
-    return getThreadService(backendUrl).getThreadMessages(threadId);
-}
-
-export async function renameThread(backendUrl: string, threadId: string, newName: string): Promise<Thread> {
-    return getThreadService(backendUrl).renameThread(threadId, newName);
-}
-
-export async function deleteThread(backendUrl: string, threadId: string): Promise<void> {
-    return getThreadService(backendUrl).deleteThread(threadId);
-}
-
-export async function getPaginatedThreads(
-    backendUrl: string,
-    limit: number = 10,
-    after: string | null = null
-): Promise<PaginatedThreadsResponse> {
-    return getThreadService(backendUrl).getPaginatedThreads(limit, after);
-}
+// Export threadService
+export const threadService = new ThreadService(API_BASE_URL);
