@@ -6,6 +6,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
+import RecentThreadsMenuButton from './RecentThreadsMenuButton';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -40,10 +41,8 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                 <div className="flex gap-4">
                     
                     <Tooltip content="Chat history" showArrow singleLine>
-                        <IconButton
-                            icon={ClockIcon}
+                        <RecentThreadsMenuButton
                             className="scale-14"
-                            onClick={() => console.log('History')}
                             ariaLabel="Show chat history"
                         />
                     </Tooltip>
