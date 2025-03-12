@@ -6,9 +6,11 @@ import { Thread } from '../types/messages';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 
+const MAX_THREADS = 6;
+
 /**
  * Hook that subscribes to thread changes in Supabase and keeps
- * the 5 most recent threads in the recentThreadsAtom
+ * the most recent threads in the recentThreadsAtom
  */
 export const useRecentThreads = (): void => {
     const setRecentThreads = useSetAtom(recentThreadsAtom);
@@ -34,7 +36,7 @@ export const useRecentThreads = (): void => {
                 .select('id, name, created_at, updated_at')
                 .eq('user_id', user.id)
                 .order('updated_at', { ascending: false })
-                .limit(5);
+                .limit(MAX_THREADS);
 
             if (error) {
                 console.error('Error fetching recent threads:', error);
@@ -67,10 +69,10 @@ export const useRecentThreads = (): void => {
                             const filteredThreads = current.filter(t => t.id !== updatedThread.id);
                             // Add the updated thread at the beginning
                             filteredThreads.unshift(updatedThread);
-                            // Sort by updated_at (newest first) and limit to 5
+                            // Sort by updated_at (newest first) and limit to MAX_THREADS
                             return filteredThreads
                                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-                                .slice(0, 5);
+                                .slice(0, MAX_THREADS);
                         });
                     }
                     
