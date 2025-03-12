@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from './icons';
+import Spinner from './icons/Spinner';
 
 type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
 
@@ -75,7 +76,7 @@ const Button: React.FC<ButtonProps> = ({
             {icon && <Icon icon={icon} className={iconClassName} />}
             {children}
             {rightIcon && <Icon icon={rightIcon} className={iconClassName} />}
-            {loading && <span className="spinner">●</span>}
+            {loading && <Spinner />}
             {loading && loadingText && <span>{loadingText}</span>}
         </button>
     );
