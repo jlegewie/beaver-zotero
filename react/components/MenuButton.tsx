@@ -12,6 +12,7 @@ interface MenuButtonProps {
     className?: string;
     iconClassName?: string;
     buttonLabel?: string;
+    disabled?: boolean;
     ariaLabel?: string;
     positionAdjustment?: {
         x?: number;
@@ -31,6 +32,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     iconClassName = '',
     buttonLabel,
     ariaLabel,
+    disabled = false,
     positionAdjustment
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
@@ -66,6 +68,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 aria-label={ariaLabel || buttonLabel}
                 aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
+                disabled={disabled}
             >
                 {icon && <Icon icon={icon} className={iconClassName} />}
                 {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
