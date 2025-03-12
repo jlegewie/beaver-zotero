@@ -11,7 +11,9 @@ import { scrollToBottom } from '../utils/scrollToBottom';
 import { previewedSourceAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
 import WelcomePage from './WelcomePage';
+import LoginPage from './LoginPage';
 import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
+import { isAuthenticatedAtom } from '../atoms/auth';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -20,6 +22,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useState(false);
     const previewedSource = useAtomValue(previewedSourceAtom);
+    const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     
     useZoteroSelection();
     
@@ -38,6 +41,17 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         }
     };
 
+    {/* Login page */}
+    if (!isAuthenticated) {
+        return (
+            <div className="sidebar-container h-full flex flex-col min-w-0">
+                <Header />
+                <LoginPage />
+            </div>
+        );
+    }
+
+    {/* Main page */}
     return (
         <div className="sidebar-container h-full flex flex-col min-w-0">
             
