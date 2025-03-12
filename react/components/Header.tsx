@@ -1,5 +1,5 @@
 import React from 'react';
-import { CancelIcon, ClockIcon, PlusSignIcon } from './icons';
+import { CancelIcon, PlusSignIcon } from './icons';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -39,13 +39,10 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
             </div>
             {isAuthenticated && (
                 <div className="flex gap-4">
-                    
-                    <Tooltip content="Chat history" showArrow singleLine>
-                        <RecentThreadsMenuButton
-                            className="scale-14"
-                            ariaLabel="Show chat history"
-                        />
-                    </Tooltip>
+                    <RecentThreadsMenuButton
+                        className="scale-14"
+                        ariaLabel="Show chat history"
+                    />
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}

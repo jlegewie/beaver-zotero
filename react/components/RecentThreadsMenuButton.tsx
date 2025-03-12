@@ -6,6 +6,7 @@ import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { ClockIcon } from './icons';
 import { formatRelativeDate } from '../utils/dateUtils';
+import Tooltip from './Tooltip';
 
 const MAX_THREADS = 5;
 
@@ -71,6 +72,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             icon={ClockIcon}
             className={className}
             ariaLabel={ariaLabel}
+            tooltipContent="Chat history"
             maxWidth="280px"
         />
     );
