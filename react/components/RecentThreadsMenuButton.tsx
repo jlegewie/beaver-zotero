@@ -45,13 +45,10 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     };
 
     // Create menu items from threads
-    const menuItems: MenuItem[] = threads.length === 0
-        ? [{ 
-            label: 'No recent conversations', 
-            onClick: () => {}, 
-            disabled: true 
-          }] 
-        : threads.slice(0, MAX_THREADS).filter(thread => thread.id !== currentThreadId).map(thread => ({
+    const menuItems: MenuItem[] = threads
+        .filter(thread => thread.id !== currentThreadId)
+        .slice(0, MAX_THREADS)
+        .map(thread => ({
             label: thread.name || 'Unnamed conversation',
             onClick: () => handleLoadThread(thread.id),
             customContent: (
