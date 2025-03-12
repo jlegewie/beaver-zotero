@@ -210,6 +210,7 @@
 [id^="beaver-pane-"], [id^="beaver-pane-"] .h-full { height: 100%; }
 [id^="beaver-pane-"] .h-screen { height: 100vh; }
 [id^="beaver-pane-"] .w-full { width: 100%; }
+[id^="beaver-pane-"] .w-90 { width: 90%; }
 [id^="beaver-pane-"] .w-screen { width: 100vw; }
 [id^="beaver-pane-"] .fit-content { width: fit-content; }
 [id^="beaver-pane-"] .min-w-0 { min-width: 0; }
@@ -289,6 +290,9 @@
 [id^="beaver-pane-"] .mt-1 { margin-top: 0.25rem; }
 [id^="beaver-pane-"] .mt-2 { margin-top: 0.5rem; }
 [id^="beaver-pane-"] .mt-3 { margin-top: 0.75rem; }
+[id^="beaver-pane-"] .mt-4 { margin-top: 1rem; }
+[id^="beaver-pane-"] .mt-5 { margin-top: 1.25rem; }
+[id^="beaver-pane-"] .mt-6 { margin-top: 1.5rem; }
 [id^="beaver-pane-"] .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; }
 [id^="beaver-pane-"] .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
