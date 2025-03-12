@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ChatMessage, createAssistantMessage } from "../types/messages";
+import { ChatMessage, createAssistantMessage, Thread } from "../types/messages";
 import { ThreadSource, SourceCitation } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
@@ -48,6 +48,9 @@ export const isStreamingAtom = atom((get) => {
     const messages = get(threadMessagesAtom);
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
+
+// Atom to store recent threads
+export const recentThreadsAtom = atom<Thread[]>([]);
 
 // Setter atoms
 export const newThreadAtom = atom(
