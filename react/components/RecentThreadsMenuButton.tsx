@@ -1,11 +1,11 @@
 import React from 'react';
-import { Thread } from '../types/messages';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { ClockIcon } from './icons';
+import { formatRelativeDate } from '../utils/dateUtils';
 
 const MAX_THREADS = 5;
 
@@ -57,7 +57,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
                         {thread.name || 'Unnamed conversation'}
                     </span>
                     <span className="text-xs font-color-tertiary">
-                        {new Date(thread.updatedAt).toLocaleString()}
+                        {formatRelativeDate(new Date(thread.updatedAt))}
                     </span>
                 </div>
             )
