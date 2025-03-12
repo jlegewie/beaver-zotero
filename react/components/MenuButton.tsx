@@ -3,6 +3,7 @@ import React from 'react';
 import { useState, useRef } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
+import Tooltip from './Tooltip';
 
 interface MenuButtonProps {
     menuItems: MenuItem[];
@@ -14,6 +15,7 @@ interface MenuButtonProps {
     buttonLabel?: string;
     disabled?: boolean;
     ariaLabel?: string;
+    tooltipContent?: string;
     positionAdjustment?: {
         x?: number;
         y?: number;
@@ -33,7 +35,8 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     buttonLabel,
     ariaLabel,
     disabled = false,
-    positionAdjustment
+    positionAdjustment,
+    tooltipContent
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -53,26 +56,34 @@ const MenuButton: React.FC<MenuButtonProps> = ({
         }
     };
 
-    const variantClass = `variant-${variant}`;
-    
+    const buttonElement = (
+        <button
+            className={`
+                variant-${variant}
+                ${icon && !buttonLabel ? 'icon-only' : ''}
+                ${className}`
+            }
+            ref={buttonRef}
+            onClick={handleButtonClick}
+            aria-label={ariaLabel || buttonLabel}
+            aria-haspopup="menu"
+            aria-expanded={isMenuOpen}
+            disabled={disabled}
+        >
+            {icon && <Icon icon={icon} className={iconClassName} />}
+            {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
+        </button>
+    );
+
     return (
         <>
-            <button
-                className={`
-                    ${variantClass}
-                    ${icon && !buttonLabel ? 'icon-only' : ''}
-                    ${className}`
-                }
-                ref={buttonRef}
-                onClick={handleButtonClick}
-                aria-label={ariaLabel || buttonLabel}
-                aria-haspopup="menu"
-                aria-expanded={isMenuOpen}
-                disabled={disabled}
-            >
-                {icon && <Icon icon={icon} className={iconClassName} />}
-                {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
-            </button>
+            {tooltipContent ? (
+                <Tooltip content={tooltipContent} showArrow singleLine>
+                    {buttonElement}
+                </Tooltip>
+            ) : (
+                buttonElement
+            )}
             <ContextMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
