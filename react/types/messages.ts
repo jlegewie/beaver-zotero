@@ -1,5 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 
+// Thread types
+export interface Thread {
+    id: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
 // Message types
 export interface ChatMessage {
     id: string;
