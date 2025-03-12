@@ -33,6 +33,7 @@
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
+        "date-fns": "^4.1.0",
         "deepmerge": "^4.3.1",
         "handlebars": "^4.7.8",
         "jotai": "^2.12.1",
