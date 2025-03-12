@@ -11,7 +11,7 @@ import { useZoteroTabSelection } from '../hooks/useZoteroTabSelection';
 import { isLibraryTabAtom } from "../atoms/ui";
 import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
 import { initializeSessionAtom } from '../atoms/auth';
-import { useRecentThreads } from 'react/hooks/useRecentThreads';
+import { useRecentThreads } from '../hooks/useRecentThreads';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
