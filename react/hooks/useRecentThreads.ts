@@ -49,7 +49,7 @@ export const useRecentThreads = (): void => {
 
         // Set up realtime subscription
         const subscription = supabase
-            .channel('recent-threads')
+            .channel(`recent-threads-${user.id}`)
             .on('postgres_changes', 
                 { 
                     event: '*', 
