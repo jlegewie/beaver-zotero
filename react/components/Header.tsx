@@ -5,6 +5,7 @@ import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';
+import { isAuthenticatedAtom } from '../atoms/auth';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -13,6 +14,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const newThread = useSetAtom(newThreadAtom);
+    const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     
     const handleNewThread = async () => {
         await newThread();
@@ -34,28 +36,34 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     />
                 </Tooltip>
             </div>
-            <div className="flex gap-4">
-                {/* <button className="icon-button scale-14">
-                    <Icon icon={Settings02Icon} />
-                </button> */}
-                <Tooltip content="Chat history" showArrow singleLine>
-                    <IconButton
-                        icon={ClockIcon}
+            {isAuthenticated && (
+                <div className="flex gap-4">
+                    
+                    <Tooltip content="Chat history" showArrow singleLine>
+                        <IconButton
+                            icon={ClockIcon}
+                            className="scale-14"
+                            onClick={() => console.log('History')}
+                            ariaLabel="Show chat history"
+                        />
+                    </Tooltip>
+                    <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                        <IconButton
+                            icon={PlusSignIcon}
+                            onClick={handleNewThread}
+                            className="scale-14"
+                            ariaLabel="New thread"
+                            disabled={threadMessages.length === 0}
+                        />
+                    </Tooltip>
+                    {/* <IconButton
+                        icon={Settings02Icon}
                         className="scale-14"
                         onClick={() => console.log('History')}
                         ariaLabel="Show chat history"
-                    />
-                </Tooltip>
-                <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
-                    <IconButton
-                        icon={PlusSignIcon}
-                        onClick={handleNewThread}
-                        className="scale-14"
-                        ariaLabel="New thread"
-                        disabled={threadMessages.length === 0}
-                    />
-                </Tooltip>
-            </div>
+                    /> */}
+                </div>
+            )}
         </div>
     );
 };
