@@ -9,7 +9,6 @@ import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useZoteroTabSelection } from '../hooks/useZoteroTabSelection';
 import { isLibraryTabAtom } from "../atoms/ui";
-import { useSidebarDOMEffects } from '../hooks/useSidebarDOMEffects';
 import { initializeSessionAtom } from '../atoms/auth';
 import { useRecentThreads } from '../hooks/useRecentThreads';
 
