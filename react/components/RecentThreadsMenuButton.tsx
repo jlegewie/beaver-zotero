@@ -7,6 +7,8 @@ import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { ClockIcon } from './icons';
 
+const MAX_THREADS = 5;
+
 interface RecentThreadsMenuButtonProps {
     className?: string;
     ariaLabel?: string;
@@ -49,7 +51,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             onClick: () => {}, 
             disabled: true 
           }] 
-        : threads.filter(thread => thread.id !== currentThreadId).map(thread => ({
+        : threads.slice(0, MAX_THREADS).filter(thread => thread.id !== currentThreadId).map(thread => ({
             label: thread.name || 'Unnamed conversation',
             onClick: () => handleLoadThread(thread.id),
             customContent: (
