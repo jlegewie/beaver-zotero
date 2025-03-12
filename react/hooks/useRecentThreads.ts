@@ -57,7 +57,7 @@ export const useRecentThreads = (): void => {
                     event: '*', 
                     schema: 'public', 
                     table: 'threads',
-                    filter: `user_id=eq.${user.id}` 
+                    filter: `user_id=eq.${user.id}`
                 }, 
                 (payload) => {
                     // Handle thread insertion or update
@@ -83,7 +83,9 @@ export const useRecentThreads = (): void => {
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                console.log(`recent-threads: realtime subscription status: ${status}`);
+            });
 
         // Clean up subscription on unmount
         return () => {
