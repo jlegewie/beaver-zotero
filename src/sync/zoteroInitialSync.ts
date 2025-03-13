@@ -210,32 +210,126 @@ export async function performInitialSync(
     }
 }
 
-export async function periodicVerificationSync() {
+/**
+ * Performs a periodic sync of modified items from a Zotero library to the backend
+ * 
+ * @param libraryID Zotero library ID to sync
+ * @param lastSyncDate Date of the last successful sync
+ * @param filterFunction Optional function to filter which items to sync
+ * @param batchSize Size of item batches to process (default: 50)
+ * @param onProgress Optional callback for progress updates (processed, total)
+ * @returns Promise resolving to the sync complete response
+ */
+export async function performPeriodicSync(
+    libraryID: number,
+    lastSyncDate: string,
+    filterFunction: ItemFilterFunction = defaultItemFilter,
+    batchSize: number = 20,
+    onProgress?: (processed: number, total: number) => void
+): Promise<any> {
+    try {
+        const libraryName = Zotero.Libraries.getName(libraryID);
+        console.log(`Starting periodic sync for library ${libraryID} (${libraryName})`);
+        
+        // 1. Get all items modified since last sync
+        const modifiedItems = await getModifiedItemsSince(libraryID, lastSyncDate);
+        
+        // 2. Filter items based on criteria
+        const itemsToSync = modifiedItems.filter(filterFunction);
+        const totalItems = itemsToSync.length;
+        
+        console.log(`Found ${totalItems} modified items to sync since ${lastSyncDate} from library "${libraryName}"`);
+        
+        if (totalItems === 0) {
+            console.log('No items to sync, skipping sync operation');
+            return { status: 'completed', message: 'No items to sync' };
+        }
+        
+        // 3. Start the sync operation
+        const syncDate = Zotero.Date.dateToSQL(new Date(), true);
+        console.log('Initiating sync operation...');
+        const syncResponse = await syncService.startSync(
+            libraryID,
+            'verification',
+            totalItems,
+            syncDate
+        );
+        
+        const syncId = syncResponse.sync_id;
+        console.log(`Sync operation started with ID: ${syncId}`);
+        
+        // 4. Process items in batches
+        await syncItemsToBackend(syncId, libraryID, itemsToSync, batchSize, onProgress);
+        
+        // 5. Complete the sync operation
+        console.log('Completing sync operation...');
+        const completeResponse = await syncService.completeSync(syncId);
+        
+        console.log(`Periodic sync completed successfully for library "${libraryName}"`);
+        return completeResponse;
+        
+    } catch (error) {
+        console.error('Error during periodic sync:', error);
+        throw error;
+    }
+}
+
+/**
+ * Performs periodic verification sync for all libraries
+ * @param filterFunction Optional function to filter which items to sync
+ * @param batchSize Size of item batches to process (default: 50)
+ * @param onProgress Optional callback for progress updates (processed, total)
+ * @returns Promise resolving when all libraries have been processed
+ */
+export async function periodicVerificationSync(
+    filterFunction: ItemFilterFunction = defaultItemFilter,
+    batchSize: number = 50,
+    onProgress?: (processed: number, total: number) => void
+): Promise<void> {
     const libraries = Zotero.Libraries.getAll();
 
     for (const library of libraries) {
         const libraryID = library.id;
-        const libraryInfo = await syncService.getLibraryInfo(libraryID);
-        console.log('libraryInfo', libraryInfo);
+        const libraryName = library.name;
         
-        // Get all objects modified since last sync
-        const modifiedItems = await getModifiedItemsSince(libraryID, libraryInfo.last_sync_time);
-        console.log('modifiedItems', modifiedItems);
-
-        // Get all objects modified since last sync
-        const itemsToSync = modifiedItems.filter(defaultItemFilter);
-
-        console.log('itemsToSync', itemsToSync);
-        // await syncItemsToBackend(syncId, libraryID, itemsToSync, batchSize, onProgress);
-        
-        
-        // Update last sync state
-        // await storeLastSyncState(libraryID);
+        try {
+            console.log(`Processing library ${libraryID} (${libraryName})`);
+            
+            // Get the last sync date for this library
+            const response = await syncService.getLastSyncDate(libraryID);
+            const lastSyncDate = response.last_sync_date;
+            
+            if (!lastSyncDate) {
+                console.log(`No previous sync found for library ${libraryID}, skipping`);
+                continue;
+            }
+            
+            // Perform periodic sync for this library
+            await performPeriodicSync(
+                libraryID,
+                lastSyncDate,
+                filterFunction,
+                batchSize,
+                onProgress
+            );
+            
+        } catch (error) {
+            console.error(`Error syncing library ${libraryID} (${libraryName}):`, error);
+            // Continue with next library even if one fails
+        }
     }
+    
+    console.log('Periodic verification sync completed for all libraries');
 }
 
-async function getModifiedItemsSince(libraryID: number, timestamp: string) {
+/**
+ * Gets items that have been modified since a specific date
+ * @param libraryID Zotero library ID
+ * @param lastSyncDate Date to check modifications since
+ * @returns Promise resolving to array of modified Zotero items
+ */
+async function getModifiedItemsSince(libraryID: number, lastSyncDate: string): Promise<Zotero.Item[]> {
     const sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
-    const ids = await Zotero.DB.columnQueryAsync(sql, [libraryID, timestamp]) as number[];
+    const ids = await Zotero.DB.columnQueryAsync(sql, [libraryID, lastSyncDate]) as number[];
     return await Zotero.Items.getAsync(ids);
 }
