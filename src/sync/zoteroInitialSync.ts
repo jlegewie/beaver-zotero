@@ -106,6 +106,49 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
 }
 
 /**
+ * Syncs an array of Zotero items to the backend in batches
+ * 
+ * @param syncId ID of the current sync operation
+ * @param libraryID Zotero library ID
+ * @param items Array of Zotero items to sync
+ * @param batchSize Size of item batches to process
+ * @param onProgress Optional callback for progress updates (processed, total)
+ * @returns Total number of successfully processed items
+ */
+async function syncItemsToBackend(
+    syncId: string,
+    libraryID: number,
+    items: Zotero.Item[],
+    batchSize: number = 50,
+    onProgress?: (processed: number, total: number) => void
+): Promise<number> {
+    const totalItems = items.length;
+    let processedCount = 0;
+    
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`);
+        
+        // Transform Zotero items to our format
+        const itemsData = batch.map(extractItemData);
+        
+        // Send batch to backend
+        const batchResult = await syncService.processItemsBatch(syncId, libraryID, itemsData);
+        
+        processedCount += batchResult.success;
+        
+        // Update progress
+        if (onProgress) {
+            onProgress(processedCount, totalItems);
+        }
+        
+        console.log(`Batch processed. Success: ${batchResult.success}/${batchResult.processed} items`);
+    }
+    
+    return processedCount;
+}
+
+/**
  * Performs an initial sync of items from a Zotero library to the backend
  * 
  * @param libraryID Zotero library ID to sync
@@ -155,28 +198,8 @@ export async function performInitialSync(
         const syncId = syncResponse.sync_id;
         console.log(`Sync operation started with ID: ${syncId}`);
         
-        // 5. Process items in batches
-        let processedCount = 0;
-        
-        for (let i = 0; i < itemsToSync.length; i += batchSize) {
-            const batch = itemsToSync.slice(i, i + batchSize);
-            console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(itemsToSync.length/batchSize)} (${batch.length} items)`);
-            
-            // Transform Zotero items to our format
-            const itemsData = batch.map(extractItemData);
-            
-            // Send batch to backend
-            const batchResult = await syncService.processItemsBatch(syncId, libraryID, itemsData);
-            
-            processedCount += batchResult.success;
-            
-            // Update progress
-            if (onProgress) {
-                onProgress(processedCount, totalItems);
-            }
-            
-            console.log(`Batch processed. Success: ${batchResult.success}/${batchResult.processed} items`);
-        }
+        // 5. Process items in batches using the new function
+        await syncItemsToBackend(syncId, libraryID, itemsToSync, batchSize, onProgress);
         
         // 6. Complete the sync operation
         console.log('Completing sync operation...');
