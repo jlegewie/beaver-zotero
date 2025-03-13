@@ -11,6 +11,7 @@ import { useZoteroTabSelection } from '../hooks/useZoteroTabSelection';
 import { isLibraryTabAtom } from "../atoms/ui";
 import { initializeSessionAtom } from '../atoms/auth';
 import { useRecentThreads } from '../hooks/useRecentThreads';
+import { useZoteroSync } from '../hooks/useZoteroSync';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
@@ -36,6 +37,9 @@ const LibrarySidebar = () => {
     // Control visibility of the sidebar across app
     useToggleSidebar();
     useZoteroTabSelection();
+
+    // Zotero sync
+    useZoteroSync();
 
     // Return the sidebar if it is visible and the currently selected tab is a library tab
     return isVisible && isLibraryTab ? <LibrarySidebarContent /> : null;
