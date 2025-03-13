@@ -229,7 +229,7 @@ export async function performPeriodicSync(
 ): Promise<any> {
     try {
         const libraryName = Zotero.Libraries.getName(libraryID);
-        console.log(`Starting periodic sync for library ${libraryID} (${libraryName})`);
+        console.log(`Starting periodic sync from ${lastSyncDate} for library ${libraryID} (${libraryName})`);
         
         // 1. Get all items modified since last sync
         const modifiedItems = await getModifiedItemsSince(libraryID, lastSyncDate);
@@ -274,14 +274,15 @@ export async function performPeriodicSync(
     }
 }
 
+
 /**
- * Performs periodic verification sync for all libraries
+ * Performs initial or periodic sync for all libraries
  * @param filterFunction Optional function to filter which items to sync
  * @param batchSize Size of item batches to process (default: 50)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Promise resolving when all libraries have been processed
  */
-export async function periodicVerificationSync(
+export async function syncZoteroDatabase(
     filterFunction: ItemFilterFunction = defaultItemFilter,
     batchSize: number = 50,
     onProgress?: (processed: number, total: number) => void
@@ -293,25 +294,18 @@ export async function periodicVerificationSync(
         const libraryName = library.name;
         
         try {
-            console.log(`Processing library ${libraryID} (${libraryName})`);
+            console.log(`Syncing library ${libraryID} (${libraryName})`);
             
             // Get the last sync date for this library
             const response = await syncService.getLastSyncDate(libraryID);
             const lastSyncDate = response.last_sync_date;
             
+            // Perform initial sync if no previous sync date is found, otherwise perform periodic sync
             if (!lastSyncDate) {
-                console.log(`No previous sync found for library ${libraryID}, skipping`);
-                continue;
+                await performInitialSync(libraryID, filterFunction, batchSize, onProgress);
+            } else {
+                await performPeriodicSync(libraryID, lastSyncDate, filterFunction, batchSize, onProgress);
             }
-            
-            // Perform periodic sync for this library
-            await performPeriodicSync(
-                libraryID,
-                lastSyncDate,
-                filterFunction,
-                batchSize,
-                onProgress
-            );
             
         } catch (error) {
             console.error(`Error syncing library ${libraryID} (${libraryName}):`, error);
@@ -319,7 +313,7 @@ export async function periodicVerificationSync(
         }
     }
     
-    console.log('Periodic verification sync completed for all libraries');
+    console.log('Sync completed for all libraries');
 }
 
 /**
