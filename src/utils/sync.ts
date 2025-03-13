@@ -47,7 +47,8 @@ function extractItemData(item: Zotero.Item): ItemData {
         date_added: item.dateAdded,
         date_modified: item.dateModified,
         version: item.version,
-        deleted: false,
+        // @ts-ignore isInTrash exists
+        deleted: item.isInTrash(),
         item_json: item.toJSON()
     };
     
