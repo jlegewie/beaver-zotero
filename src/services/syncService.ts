@@ -42,6 +42,17 @@ export interface LastSyncDateResponse {
     last_sync_date: string | null;
 }
 
+export interface ItemDeleteRequest {
+    library_id: number;
+    zotero_keys: string[];
+}
+
+export interface DeleteResult {
+    requested: number;
+    deleted: number;
+    failed: number;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -108,6 +119,19 @@ export class SyncService extends ApiService {
      */
     async getLastSyncDate(libraryId: number): Promise<LastSyncDateResponse> {
         return this.get<LastSyncDateResponse>(`/zotero/sync/library/${libraryId}/last-sync-date`);
+    }
+
+    /**
+     * Deletes items based on their Zotero keys and library
+     * @param libraryId The Zotero library ID
+     * @param zoteroKeys Array of Zotero keys to delete
+     * @returns Promise with the deletion result
+     */
+    async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteResult> {
+        return this.post<DeleteResult>('/zotero/sync/items/delete', {
+            library_id: libraryId,
+            zotero_keys: zoteroKeys
+        });
     }
 }
 
