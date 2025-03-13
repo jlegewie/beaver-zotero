@@ -116,7 +116,7 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
  * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Total number of successfully processed items
  */
-async function syncItemsToBackend(
+export async function syncItemsToBackend(
     libraryID: number,
     items: Zotero.Item[],
     syncId?: string,
