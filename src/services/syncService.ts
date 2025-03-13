@@ -2,17 +2,6 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 
 // Types that match the backend models
-export interface Library {
-    id: string;
-    user_id: string;
-    library_id: number;
-    sync_enabled: boolean;
-    name: string;
-    type: string;
-    last_sync_time: string | null;
-    last_sync_version: number | null;
-}
-
 export interface SyncResponse {
     sync_id: string;
     library_id: number;
@@ -28,7 +17,6 @@ export interface BatchResult {
 
 export interface SyncCompleteResponse {
     status: string;
-    library: Library;
 }
 
 export interface ItemData {
@@ -62,19 +50,17 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Initiates an initial sync for a library
+     * Initiates a sync for a library
      * @param libraryId The Zotero library ID
-     * @param name The library name
-     * @param type The library type (e.g., "user", "group")
      * @param totalItems Total number of items to sync
      * @returns Promise with the sync response
      */
-    async startInitialSync(libraryId: number, name: string, type: string, totalItems: number): Promise<SyncResponse> {
-        return this.post<SyncResponse>('/zotero/sync/initial', {
+    async startSync(libraryId: number, sync_type: string, totalItems: number, syncDate: string): Promise<SyncResponse> {
+        return this.post<SyncResponse>('/zotero/sync/start', {
             library_id: libraryId,
-            name,
-            type,
-            total_items: totalItems
+            sync_type: sync_type,
+            total_items: totalItems,
+            zotero_sync_date: syncDate
         });
     }
 
@@ -96,15 +82,10 @@ export class SyncService extends ApiService {
     /**
      * Completes a sync operation
      * @param syncId The sync operation ID
-     * @param newVersion The new library version (optional)
      * @returns Promise with the complete sync response
      */
-    async completeSync(syncId: string, newVersion?: number): Promise<SyncCompleteResponse> {
-        let endpoint = `/zotero/sync/${syncId}/complete`;
-        if (newVersion !== undefined) {
-            endpoint += `?new_version=${newVersion}`;
-        }
-        return this.post<SyncCompleteResponse>(endpoint, {});
+    async completeSync(syncId: string): Promise<SyncCompleteResponse> {
+        return this.post<SyncCompleteResponse>(`/zotero/sync/${syncId}/complete`, {});
     }
 
     /**

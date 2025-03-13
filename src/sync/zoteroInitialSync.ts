@@ -164,18 +164,14 @@ export async function performInitialSync(
     onProgress?: (processed: number, total: number) => void
 ): Promise<any> {
     try {
-        console.log(`Starting initial sync for library ${libraryID}`);
-        
-        // 1. Get library info from Zotero
         const libraryName = Zotero.Libraries.getName(libraryID);
-        const libraryType = Zotero.Libraries.getType(libraryID);
+        console.log(`Starting initial sync for library ${libraryID} (${libraryName})`);
         
-        // 2. Get all items from the library
-        console.log('Fetching all items from Zotero...');
+        // 1. Get all items from the library
+        const syncDate = Zotero.Date.dateToSQL(new Date(), true);
         const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
         
-        // 3. Filter items based on criteria
-        console.log('Filtering items...');
+        // 2. Filter items based on criteria
         const itemsToSync = allItems.filter(filterFunction);
         const totalItems = itemsToSync.length;
         
@@ -186,33 +182,24 @@ export async function performInitialSync(
             return { status: 'completed', message: 'No items to sync' };
         }
         
-        // 4. Start the sync operation
+        // 3. Start the sync operation
         console.log('Initiating sync operation...');
-        const syncResponse = await syncService.startInitialSync(
+        const syncResponse = await syncService.startSync(
             libraryID,
-            libraryName,
-            libraryType,
-            totalItems
+            'initial',
+            totalItems,
+            syncDate
         );
         
         const syncId = syncResponse.sync_id;
         console.log(`Sync operation started with ID: ${syncId}`);
         
-        // 5. Process items in batches using the new function
+        // 4. Process items in batches using the new function
         await syncItemsToBackend(syncId, libraryID, itemsToSync, batchSize, onProgress);
         
-        // 6. Complete the sync operation
+        // 5. Complete the sync operation
         console.log('Completing sync operation...');
-        
-        // Get the current library version if available
-        let libraryVersion;
-        try {
-            libraryVersion = Zotero.Libraries.getVersion(libraryID);
-        } catch (e) {
-            console.warn('Could not get library version:', e);
-        }
-        
-        const completeResponse = await syncService.completeSync(syncId, libraryVersion);
+        const completeResponse = await syncService.completeSync(syncId);
         
         console.log(`Initial sync completed successfully for library "${libraryName}"`);
         return completeResponse;
@@ -221,4 +208,34 @@ export async function performInitialSync(
         console.error('Error during initial sync:', error);
         throw error;
     }
+}
+
+export async function periodicVerificationSync() {
+    const libraries = Zotero.Libraries.getAll();
+
+    for (const library of libraries) {
+        const libraryID = library.id;
+        const libraryInfo = await syncService.getLibraryInfo(libraryID);
+        console.log('libraryInfo', libraryInfo);
+        
+        // Get all objects modified since last sync
+        const modifiedItems = await getModifiedItemsSince(libraryID, libraryInfo.last_sync_time);
+        console.log('modifiedItems', modifiedItems);
+
+        // Get all objects modified since last sync
+        const itemsToSync = modifiedItems.filter(defaultItemFilter);
+
+        console.log('itemsToSync', itemsToSync);
+        // await syncItemsToBackend(syncId, libraryID, itemsToSync, batchSize, onProgress);
+        
+        
+        // Update last sync state
+        // await storeLastSyncState(libraryID);
+    }
+}
+
+async function getModifiedItemsSince(libraryID: number, timestamp: string) {
+    const sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
+    const ids = await Zotero.DB.columnQueryAsync(sql, [libraryID, timestamp]) as number[];
+    return await Zotero.Items.getAsync(ids);
 }
