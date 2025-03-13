@@ -53,7 +53,6 @@ export class ApiService {
     */
     async post<T>(endpoint: string, body: any): Promise<T> {
         const headers = await this.getAuthHeaders();
-        console.log('headers', headers);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'POST',
             headers,
