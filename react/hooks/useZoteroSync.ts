@@ -2,6 +2,9 @@
 import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, defaultItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
+import { useAtomValue } from "jotai";
+import { userAtom } from "react/atoms/auth";
+import { isAuthenticatedAtom } from "react/atoms/auth";
 
 /**
  * Hook that sets up Zotero database synchronization:
@@ -11,10 +14,13 @@ import { syncService } from "../../src/services/syncService";
  * @param filterFunction Optional function to filter which items to sync
  */
 export function useZoteroSync(filterFunction: ItemFilterFunction = defaultItemFilter) {
+    const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
 
     useEffect(() => {
+        if (!isAuthenticated) return;
         console.log("[Beaver] Setting up Zotero sync");
         
         // Perform initial sync on mount
