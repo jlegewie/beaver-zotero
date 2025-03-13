@@ -82,17 +82,15 @@ export class SyncService extends ApiService {
 
     /**
      * Processes a batch of items for syncing
-     * @param syncId The sync operation ID
      * @param libraryId The Zotero library ID
      * @param items Array of items to process
+     * @param syncId The sync operation ID (optional)
      * @returns Promise with the batch processing result
      */
-    async processItemsBatch(syncId: string, libraryId: number, items: ItemData[]): Promise<BatchResult> {
-        return this.post<BatchResult>('/zotero/sync/items', {
-            sync_id: syncId,
-            library_id: libraryId,
-            items
-        });
+    async processItemsBatch(libraryId: number, items: ItemData[], syncId?: string): Promise<BatchResult> {
+        const payload: { library_id: number; items: ItemData[]; sync_id?: string } = { library_id: libraryId, items };
+        if (syncId) payload.sync_id = syncId;
+        return this.post<BatchResult>('/zotero/sync/items', payload);
     }
 
     /**
