@@ -3,8 +3,7 @@ import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, defaultItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue } from "jotai";
-import { userAtom } from "react/atoms/auth";
-import { isAuthenticatedAtom } from "react/atoms/auth";
+import { isAuthenticatedAtom } from "../atoms/auth";
 
 /**
  * Hook that sets up Zotero database synchronization:
