@@ -111,7 +111,8 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
  * 
  * @param libraryID Zotero library ID
  * @param items Array of Zotero items to sync
- * @param syncId ID of the current sync operation (optional)
+ * @param syncType Type of sync operation. (optional)
+ * @param syncId ID of the current sync operation. (optional)
  * @param batchSize Size of item batches to process (default: 50)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Total number of successfully processed items
@@ -119,6 +120,7 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
 export async function syncItemsToBackend(
     libraryID: number,
     items: Zotero.Item[],
+    syncType: string,
     syncId?: string,
     batchSize: number = 50,
     onProgress?: (processed: number, total: number) => void
@@ -134,7 +136,7 @@ export async function syncItemsToBackend(
         const itemsData = batch.map(extractItemData);
         
         // Send batch to backend
-        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, syncId);
+        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, syncType, syncId);
         
         processedCount += batchResult.success;
         
@@ -196,7 +198,7 @@ export async function performInitialSync(
         console.log(`[Beaver Sync] Sync operation started with ID: ${syncId}`);
         
         // 4. Process items in batches using the new function
-        await syncItemsToBackend(libraryID, itemsToSync, syncId, batchSize, onProgress);
+        await syncItemsToBackend(libraryID, itemsToSync, 'initial', syncId, batchSize, onProgress);
         
         // 5. Complete the sync operation
         console.log('[Beaver Sync] Completing sync operation...');
@@ -260,7 +262,7 @@ export async function performPeriodicSync(
         console.log(`[Beaver Sync] Sync operation started with ID: ${syncId}`);
         
         // 4. Process items in batches
-        await syncItemsToBackend(libraryID, itemsToSync, syncId, batchSize, onProgress);
+        await syncItemsToBackend(libraryID, itemsToSync, 'verification', syncId, batchSize, onProgress);
         
         // 5. Complete the sync operation
         console.log('[Beaver Sync] Completing sync operation...');

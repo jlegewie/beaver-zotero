@@ -48,7 +48,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = defaultItemFi
                             // Sync each library's items separately
                             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
                                 console.log(`[Beaver] Syncing ${libraryItems.length} changed items from library ${libraryID}`);
-                                await syncItemsToBackend(libraryID, libraryItems);
+                                await syncItemsToBackend(libraryID, libraryItems, 'incremental');
                             }
                         } catch (error) {
                             console.error("[Beaver] Error syncing modified items:", error);
