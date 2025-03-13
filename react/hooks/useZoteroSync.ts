@@ -96,5 +96,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = defaultItemFi
                 observerRef.current = null;
             }
         };
-    }, [filterFunction]);
+    }, [isAuthenticated, filterFunction]);
 } 
