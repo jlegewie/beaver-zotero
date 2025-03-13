@@ -37,6 +37,11 @@ export interface ItemData {
     item_json?: any;
 }
 
+export interface LastSyncDateResponse {
+    library_id: number;
+    last_sync_date: string | null;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -94,6 +99,15 @@ export class SyncService extends ApiService {
      */
     async getActiveSyncs(): Promise<any[]> {
         return this.get<any[]>('/zotero/sync/active');
+    }
+
+    /**
+     * Gets the last sync date for a library
+     * @param libraryId The Zotero library ID
+     * @returns Promise with the last sync date response
+     */
+    async getLastSyncDate(libraryId: number): Promise<LastSyncDateResponse> {
+        return this.get<LastSyncDateResponse>(`/zotero/sync/library/${libraryId}/last-sync-date`);
     }
 }
 
