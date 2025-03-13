@@ -1,5 +1,5 @@
 // @ts-ignore useEffect is defined in React
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { updateSourcesFromZoteroItemsAtom } from "../atoms/input";
 import { isLibraryTabAtom } from "../atoms/ui";
@@ -14,6 +14,8 @@ export function useZoteroTabSelection() {
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     const window = Zotero.getMainWindow();
+    // ref to prevent multiple registrations if dependencies change
+    const observerRef = useRef<any>(null);
 
     useEffect(() => {
         // Set initial state
@@ -64,7 +66,15 @@ export function useZoteroTabSelection() {
         // Register the observer
         // @ts-ignore registerObserver is not typed
         Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
-        // @ts-ignore unregisterObserver is not typed
-        return () => Zotero.Notifier.unregisterObserver(tabObserver);
+        observerRef.current = tabObserver;
+        
+        // Cleanup function
+        return () => {
+            console.log("[Beaver] Cleaning up Zotero sync");
+            if (observerRef.current) {
+                Zotero.Notifier.unregisterObserver(observerRef.current);
+                observerRef.current = null;
+            }
+        };
     }, [updateSourcesFromZoteroItems, setIsLibraryTab]);
 } 
