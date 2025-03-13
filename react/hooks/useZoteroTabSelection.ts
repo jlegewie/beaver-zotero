@@ -63,7 +63,7 @@ export function useZoteroTabSelection() {
 
         // Register the observer
         // @ts-ignore registerObserver is not typed
-        Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'tabSelectionObserver');
+        Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
         // @ts-ignore unregisterObserver is not typed
         return () => Zotero.Notifier.unregisterObserver(tabObserver);
     }, [updateSourcesFromZoteroItems, setIsLibraryTab]);
