@@ -123,7 +123,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         disabled={true}
                         title="Select in Library to Add"
                     >
-                        Select to Add
+                        Add Sources
                     </Button>
                 )}
 
