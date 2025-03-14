@@ -5,7 +5,7 @@ export { default as Spinner } from './icons/Spinner';
 export { default as ClockIcon } from './icons/ClockIcon';
 export { default as PlusSignIcon } from './icons/PlusSignIcon';
 export { default as SettingsIcon } from './icons/SettingsIcon';
-export { default as Settings02SolidIcon } from './icons/Settings02SolidIcon';
+export { default as SettingsSolidIcon } from './icons/SettingsSolidIcon';
 export { default as PinIcon } from './icons/PinIcon';
 export { default as AttachmentIcon } from './icons/AttachmentIcon';
 export { default as ArrowUpIcon } from './icons/ArrowUpIcon';
