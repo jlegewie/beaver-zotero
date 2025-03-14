@@ -53,7 +53,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         />
                     </Tooltip>
                     {/* <IconButton
-                        icon={Settings02Icon}
+                        icon={SettingsIcon}
                         className="scale-14"
                         onClick={() => console.log('History')}
                         ariaLabel="Show chat history"
