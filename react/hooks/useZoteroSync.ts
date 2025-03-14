@@ -2,8 +2,9 @@
 import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, itemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
+import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, SyncStatus } from "../atoms/ui";
 
 /**
  * Hook that sets up Zotero database synchronization:
@@ -14,6 +15,9 @@ import { isAuthenticatedAtom } from "../atoms/auth";
  */
 export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const setSyncStatus = useSetAtom(syncStatusAtom);
+    const setSyncTotal = useSetAtom(syncTotalAtom);
+    const setSyncCurrent = useSetAtom(syncCurrentAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
@@ -23,7 +27,14 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter) {
         console.log("[Beaver] Setting up Zotero sync");
         
         // Perform initial sync on mount
-        syncZoteroDatabase(filterFunction);
+        const onStatusChange = (status: SyncStatus) => {
+            setSyncStatus(status);
+        }
+        const onProgress = (processed: number, total: number) => {
+            setSyncTotal(total);
+            setSyncCurrent(processed);
+        }
+        syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
         
         // Create the notification observer
         const observer = {
@@ -53,7 +64,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter) {
                             // Sync each library's items separately
                             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
                                 console.log(`[Beaver] Syncing ${libraryItems.length} changed items from library ${libraryID}`);
-                                await syncItemsToBackend(libraryID, libraryItems, 'incremental');
+                                await syncItemsToBackend(libraryID, libraryItems, 'incremental', onStatusChange, onProgress);
                             }
                         } catch (error) {
                             console.error("[Beaver] Error syncing modified items:", error);

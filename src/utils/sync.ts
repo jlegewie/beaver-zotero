@@ -1,4 +1,5 @@
 import { syncService, ItemData, AttachmentData } from '../services/syncService';
+import { SyncStatus } from 'react/atoms/ui';
 
 
 /**
@@ -138,22 +139,24 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
  * @param libraryID Zotero library ID
  * @param items Array of Zotero items to sync
  * @param syncType Type of sync operation. (optional)
- * @param syncId ID of the current sync operation. (optional)
- * @param batchSize Size of item batches to process (default: 50)
+ * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
+ * @param batchSize Size of item batches to process (default: 50)
  * @returns Total number of successfully processed items
  */
 export async function syncItemsToBackend(
     libraryID: number,
     items: Zotero.Item[],
     syncType: string,
-    syncId?: string,
-    batchSize: number = 50,
-    onProgress?: (processed: number, total: number) => void
-): Promise<number> {
+    onStatusChange?: (status: SyncStatus) => void,
+    onProgress?: (processed: number, total: number) => void,
+    batchSize: number = 50
+) {
     const totalItems = items.length;
+    let syncId = undefined;
     let processedCount = 0;
     
+    onStatusChange?.('in_progress');
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
         console.log(`[Beaver Sync] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`);
@@ -161,21 +164,30 @@ export async function syncItemsToBackend(
         // Transform Zotero items to our format
         const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
         const attachmentsData = batch.filter(item => item.isAttachment()).map(extractAttachmentData);
-        
+
+        // sync options
+        const createLog = i === 0;
+        const closeLog = i + batchSize >= items.length;
+
         // Send batch to backend
-        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, syncId);
-        
+        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
+
+        // Process batch result
+        syncId = batchResult.sync_id;
+        if (batchResult.sync_status === 'failed') {
+            onStatusChange?.('failed');
+            console.error(`[Beaver Sync] Batch failed. Failed keys: ${batchResult.failed_keys}`);
+            break;
+        }
+        if (batchResult.sync_status === 'completed') onStatusChange?.('completed');
+
+        // Progress update
         processedCount += batchResult.success;
-        
-        // Update progress
         if (onProgress) {
             onProgress(processedCount, totalItems);
         }
         
-        console.log(`[Beaver Sync] Batch processed. Success: ${batchResult.success}/${batchResult.processed} items`);
     }
-    
-    return processedCount;
 }
 
 /**
@@ -183,15 +195,17 @@ export async function syncItemsToBackend(
  * 
  * @param libraryID Zotero library ID to sync
  * @param filterFunction Optional function to filter which items to sync
- * @param batchSize Size of item batches to process (default: 50)
+ * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
+ * @param batchSize Size of item batches to process (default: 50)
  * @returns Promise resolving to the sync complete response
  */
 export async function performInitialSync(
     libraryID: number,
     filterFunction: ItemFilterFunction = itemFilter,
-    batchSize: number = 50,
-    onProgress?: (processed: number, total: number) => void
+    onStatusChange?: (status: SyncStatus) => void,
+    onProgress?: (processed: number, total: number) => void,
+    batchSize: number = 50
 ): Promise<any> {
     try {
         const libraryName = Zotero.Libraries.getName(libraryID);
@@ -212,27 +226,8 @@ export async function performInitialSync(
             return { status: 'completed', message: 'No items to sync' };
         }
         
-        // 3. Start the sync operation
-        console.log('[Beaver Sync] Initiating sync operation...');
-        const syncResponse = await syncService.startSync(
-            libraryID,
-            'initial',
-            totalItems,
-            syncDate
-        );
-        
-        const syncId = syncResponse.sync_id;
-        console.log(`[Beaver Sync] Sync operation started with ID: ${syncId}`);
-        
-        // 4. Process items in batches using the new function
-        await syncItemsToBackend(libraryID, itemsToSync, 'initial', syncId, batchSize, onProgress);
-        
-        // 5. Complete the sync operation
-        console.log('[Beaver Sync] Completing sync operation...');
-        const completeResponse = await syncService.completeSync(syncId);
-        
-        console.log(`[Beaver Sync] Initial sync completed successfully for library "${libraryName}"`);
-        return completeResponse;
+        // 3. Process items in batches using the new function
+        await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
         
     } catch (error) {
         console.error('[Beaver Sync Error] Error during initial sync:', error);
@@ -246,17 +241,19 @@ export async function performInitialSync(
  * @param libraryID Zotero library ID to sync
  * @param lastSyncDate Date of the last successful sync
  * @param filterFunction Optional function to filter which items to sync
- * @param batchSize Size of item batches to process (default: 50)
+ * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
+ * @param batchSize Size of item batches to process (default: 50)
  * @returns Promise resolving to the sync complete response
  */
 export async function performPeriodicSync(
     libraryID: number,
     lastSyncDate: string,
     filterFunction: ItemFilterFunction = itemFilter,
-    batchSize: number = 20,
-    onProgress?: (processed: number, total: number) => void
-): Promise<any> {
+    onStatusChange?: (status: SyncStatus) => void,
+    onProgress?: (processed: number, total: number) => void,
+    batchSize: number = 20
+) {
     try {
         const libraryName = Zotero.Libraries.getName(libraryID);
         console.log(`[Beaver Sync] Starting periodic sync from ${lastSyncDate} for library ${libraryID} (${libraryName})`);
@@ -271,32 +268,13 @@ export async function performPeriodicSync(
         console.log(`[Beaver Sync] Found ${totalItems} modified items to sync since ${lastSyncDate} from library "${libraryName}"`);
         
         if (totalItems === 0) {
+            onStatusChange?.('completed');
             console.log('[Beaver Sync] No items to sync, skipping sync operation');
             return { status: 'completed', message: 'No items to sync' };
         }
         
-        // 3. Start the sync operation
-        const syncDate = Zotero.Date.dateToSQL(new Date(), true);
-        console.log('[Beaver Sync] Initiating sync operation...');
-        const syncResponse = await syncService.startSync(
-            libraryID,
-            'verification',
-            totalItems,
-            syncDate
-        );
-        
-        const syncId = syncResponse.sync_id;
-        console.log(`[Beaver Sync] Sync operation started with ID: ${syncId}`);
-        
-        // 4. Process items in batches
-        await syncItemsToBackend(libraryID, itemsToSync, 'verification', syncId, batchSize, onProgress);
-        
-        // 5. Complete the sync operation
-        console.log('[Beaver Sync] Completing sync operation...');
-        const completeResponse = await syncService.completeSync(syncId);
-        
-        console.log(`[Beaver Sync] Periodic sync completed successfully for library "${libraryName}"`);
-        return completeResponse;
+        // 3. Process items in batches
+        await syncItemsToBackend(libraryID, itemsToSync, 'verification', onStatusChange, onProgress, batchSize);
         
     } catch (error) {
         console.error('[Beaver Sync Error] Error during periodic sync:', error);
@@ -315,6 +293,7 @@ export async function performPeriodicSync(
 export async function syncZoteroDatabase(
     filterFunction: ItemFilterFunction = itemFilter,
     batchSize: number = 50,
+    onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
     const libraries = Zotero.Libraries.getAll();
@@ -332,9 +311,9 @@ export async function syncZoteroDatabase(
             
             // Perform initial sync if no previous sync date is found, otherwise perform periodic sync
             if (!lastSyncDate) {
-                await performInitialSync(libraryID, filterFunction, batchSize, onProgress);
+                await performInitialSync(libraryID, filterFunction, onStatusChange, onProgress, batchSize);
             } else {
-                await performPeriodicSync(libraryID, lastSyncDate, filterFunction, batchSize, onProgress);
+                await performPeriodicSync(libraryID, lastSyncDate, filterFunction, onStatusChange, onProgress, batchSize);
             }
             
         } catch (error) {

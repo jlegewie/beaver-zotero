@@ -9,19 +9,27 @@ export interface SyncResponse {
     sync_type: string;
 }
 
-export interface BatchPayload {
+export interface ItemBatchRequest {
     library_id: number;
     items: ItemData[];
     attachments: AttachmentData[];
     sync_type: string;
-    sync_id?: string;
     zotero_sync_date: string;
+    // sync options
+    sync_id?: string;
+    create_log?: boolean;
+    update_log?: boolean;
+    close_log?: boolean;
 }
 
+
 export interface BatchResult {
+    sync_id: string;
+    sync_status: "in_progress" | "completed" | "failed";
     processed: number;
     success: number;
     failed: number;
+    failed_keys: string[];
 }
 
 export interface SyncCompleteResponse {
@@ -112,14 +120,18 @@ export class SyncService extends ApiService {
         items: ItemData[],
         attachments: AttachmentData[],
         syncType: string,
-        syncId?: string
+        createLog: boolean,
+        closeLog: boolean,
+        syncId?: string,
     ): Promise<BatchResult> {
-        const payload: BatchPayload = {
+        const payload: ItemBatchRequest = {
             library_id: libraryId,
             items: items,
             attachments: attachments,
             sync_type: syncType,
-            zotero_sync_date: Zotero.Date.dateToSQL(new Date(), true)
+            zotero_sync_date: Zotero.Date.dateToSQL(new Date(), true),
+            create_log: createLog,
+            close_log: closeLog
         };
         if (syncId) payload.sync_id = syncId;
         return this.post<BatchResult>('/zotero/sync/items', payload);

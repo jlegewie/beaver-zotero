@@ -5,6 +5,12 @@ import { InputSource } from 'react/types/sources';
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 
+// Sync status
+export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
+export const syncStatusAtom = atom<SyncStatus>('idle');
+export const syncTotalAtom = atom<number>(0);
+export const syncCurrentAtom = atom<number>(0);
+
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);
 export const previewedSourceAtom = atom(
