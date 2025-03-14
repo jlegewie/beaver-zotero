@@ -9,6 +9,15 @@ export interface SyncResponse {
     sync_type: string;
 }
 
+export interface BatchPayload {
+    library_id: number;
+    items: ItemData[];
+    attachments: AttachmentData[];
+    sync_type: string;
+    sync_id?: string;
+    zotero_sync_date: string;
+}
+
 export interface BatchResult {
     processed: number;
     success: number;
@@ -35,6 +44,17 @@ export interface ItemData {
     version: number;
     deleted: boolean;
     item_json?: any;
+}
+
+export interface AttachmentData {
+    library_id: number;
+    zotero_key: string;
+    parent_key: string | null;
+    deleted: boolean;
+    title: string;
+    date_added: string;
+    date_modified: string;
+    item_json: any;
 }
 
 export interface LastSyncDateResponse {
@@ -87,9 +107,20 @@ export class SyncService extends ApiService {
      * @param syncId The sync operation ID (optional)
      * @returns Promise with the batch processing result
      */
-    async processItemsBatch(libraryId: number, items: ItemData[], syncType: string, syncId?: string): Promise<BatchResult> {
-        const payload: { library_id: number; items: ItemData[]; sync_type: string; sync_id?: string, zotero_sync_date: string } =
-            { library_id: libraryId, items, sync_type: syncType, zotero_sync_date: Zotero.Date.dateToSQL(new Date(), true) };
+    async processItemsBatch(
+        libraryId: number,
+        items: ItemData[],
+        attachments: AttachmentData[],
+        syncType: string,
+        syncId?: string
+    ): Promise<BatchResult> {
+        const payload: BatchPayload = {
+            library_id: libraryId,
+            items: items,
+            attachments: attachments,
+            sync_type: syncType,
+            zotero_sync_date: Zotero.Date.dateToSQL(new Date(), true)
+        };
         if (syncId) payload.sync_id = syncId;
         return this.post<BatchResult>('/zotero/sync/items', payload);
     }

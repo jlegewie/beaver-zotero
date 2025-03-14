@@ -1,6 +1,6 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
-import { syncZoteroDatabase, syncItemsToBackend, defaultItemFilter, ItemFilterFunction } from "../../src/utils/sync";
+import { syncZoteroDatabase, syncItemsToBackend, itemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
@@ -12,7 +12,7 @@ import { isAuthenticatedAtom } from "../atoms/auth";
  * 
  * @param filterFunction Optional function to filter which items to sync
  */
-export function useZoteroSync(filterFunction: ItemFilterFunction = defaultItemFilter) {
+export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
 
     // ref to prevent multiple registrations if dependencies change

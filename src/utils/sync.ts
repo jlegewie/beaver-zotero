@@ -1,4 +1,4 @@
-import { syncService, ItemData } from '../services/syncService';
+import { syncService, ItemData, AttachmentData } from '../services/syncService';
 
 
 /**
@@ -13,6 +13,10 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  */
 export const defaultItemFilter: ItemFilterFunction = (item) => {
     return item.isRegularItem();
+};
+
+export const itemFilter: ItemFilterFunction = (item) => {
+    return item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
 };
 
 /**
@@ -49,6 +53,28 @@ function extractItemData(item: Zotero.Item): ItemData {
         version: item.version,
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash(),
+        item_json: item.toJSON()
+    };
+    
+    return itemData;
+}
+
+/**
+ * Extracts relevant data from a Zotero item for syncing
+ * @param item Zotero item
+ * @returns ItemData object for syncing
+ */
+function extractAttachmentData(item: Zotero.Item): AttachmentData {
+    // Extract basic metadata
+    const itemData: AttachmentData = {
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        parent_key: item.parentKey || null,
+        // @ts-ignore isInTrash exists
+        deleted: item.isInTrash(),
+        title: item.getField('title'),
+        date_added: item.dateAdded,
+        date_modified: item.dateModified,
         item_json: item.toJSON()
     };
     
@@ -133,10 +159,11 @@ export async function syncItemsToBackend(
         console.log(`[Beaver Sync] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`);
         
         // Transform Zotero items to our format
-        const itemsData = batch.map(extractItemData);
+        const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
+        const attachmentsData = batch.filter(item => item.isAttachment()).map(extractAttachmentData);
         
         // Send batch to backend
-        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, syncType, syncId);
+        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, syncId);
         
         processedCount += batchResult.success;
         
@@ -162,7 +189,7 @@ export async function syncItemsToBackend(
  */
 export async function performInitialSync(
     libraryID: number,
-    filterFunction: ItemFilterFunction = defaultItemFilter,
+    filterFunction: ItemFilterFunction = itemFilter,
     batchSize: number = 50,
     onProgress?: (processed: number, total: number) => void
 ): Promise<any> {
@@ -226,7 +253,7 @@ export async function performInitialSync(
 export async function performPeriodicSync(
     libraryID: number,
     lastSyncDate: string,
-    filterFunction: ItemFilterFunction = defaultItemFilter,
+    filterFunction: ItemFilterFunction = itemFilter,
     batchSize: number = 20,
     onProgress?: (processed: number, total: number) => void
 ): Promise<any> {
@@ -286,7 +313,7 @@ export async function performPeriodicSync(
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
-    filterFunction: ItemFilterFunction = defaultItemFilter,
+    filterFunction: ItemFilterFunction = itemFilter,
     batchSize: number = 50,
     onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
