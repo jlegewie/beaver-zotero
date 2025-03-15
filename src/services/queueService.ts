@@ -19,15 +19,17 @@ export interface QueueStatus {
  */
 export interface UploadQueueItem {
     id: string;
+    user_id: string;
     file_id: string;
     library_id: number;
     attachment_key: string;
-    upload_url: string;
+    type: 'attachment' | 'fulltext';
     storage_path: string;
+    upload_url: string;
     status: 'pending' | 'in_progress' | 'completed' | 'failed';
     attempts: number;
     created_at: string;
-    updated_at: string;
+    completed_at?: string;
     last_attempt_at?: string;
 }
 
