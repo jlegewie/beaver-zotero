@@ -3,7 +3,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 
 export interface PopQueueResponse {
     items: UploadQueueItem[];
-    total_pending: number;
+    status: QueueStatus;
 }
 
 export interface QueueStatus {
