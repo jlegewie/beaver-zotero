@@ -32,9 +32,9 @@ export class FileUploader {
     
     /**
      * Start the file uploader
-     * @param pollIntervalMs Poll interval in milliseconds (default: 10 min = 600000 ms)
+     * @param pollIntervalMs Poll interval in milliseconds (default: 0 for no polling)
      */
-    public start(pollIntervalMs: number = 600000): void {
+    public start(pollIntervalMs: number = 0): void {
         if (this.isRunning) return;
         
         this.isRunning = true;
@@ -43,10 +43,12 @@ export class FileUploader {
         // Start immediately
         this.processQueue();
         
-        // Then poll at interval
-        // this.pollInterval = setInterval(() => {
-        //     this.processQueue();
-        // }, pollIntervalMs);
+        // Poll at interval if specified
+        if (pollIntervalMs > 0) {
+            this.pollInterval = setInterval(() => {
+                this.processQueue();
+            }, pollIntervalMs);
+        }
     }
     
     /**
