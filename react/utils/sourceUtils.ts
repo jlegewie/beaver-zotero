@@ -201,8 +201,7 @@ export const isValidRegularItem = async (source: InputSource, item: Zotero.Item)
 export const isValidAttachment = async (att: Zotero.Item): Promise<boolean> => {
     if (!att.isAttachment()) return false;
     const exists = await att.fileExists();
-    // @ts-ignore getAttachmentMIMEType exists
-    const mimeType = att.getAttachmentMIMEType();
+    const mimeType = att.attachmentContentType;
     return exists && isValidMimeType(mimeType);
 }
 
