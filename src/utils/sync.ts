@@ -1,5 +1,6 @@
 import { syncService, ItemData, AttachmentData } from '../services/syncService';
 import { SyncStatus } from 'react/atoms/ui';
+import { fileUploader } from '../services/FileUploader';
 
 
 /**
@@ -179,6 +180,7 @@ export async function syncItemsToBackend(
     batchSize: number = 50
 ) {
     const totalItems = items.length;
+    let attachmentCount = 0;
     let syncId = undefined;
     let processedCount = 0;
     
@@ -190,6 +192,7 @@ export async function syncItemsToBackend(
         // Transform Zotero items to our format
         const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
         const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData));
+        attachmentCount += attachmentsData.length;
 
         // sync options
         const createLog = i === 0;
@@ -211,8 +214,11 @@ export async function syncItemsToBackend(
         processedCount += batchResult.success;
         if (onProgress) {
             onProgress(processedCount, totalItems);
-        }
-        
+        }   
+    }
+    // Start file uploader if there are attachments to upload
+    if (attachmentCount > 0) {
+        fileUploader.start();
     }
 }
 
