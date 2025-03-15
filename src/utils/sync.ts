@@ -65,21 +65,47 @@ function extractItemData(item: Zotero.Item): ItemData {
  * @param item Zotero item
  * @returns ItemData object for syncing
  */
-function extractAttachmentData(item: Zotero.Item): AttachmentData {
+async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData> {
     // Extract basic metadata
     const itemData: AttachmentData = {
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
         // @ts-ignore isInTrash exists
-        deleted: item.isInTrash(),
+        deleted: item.isInTrash() as boolean,
         title: item.getField('title'),
         date_added: item.dateAdded,
         date_modified: item.dateModified,
-        item_json: item.toJSON()
+        item_json: item.toJSON(),
+        ...await extractFileMetadata(item)
     };
     
     return itemData;
+}
+
+/**
+ * Extracts file metadata from a Zotero attachment item
+ * @param item Zotero attachment item
+ * @returns Promise with file metadata or null if not applicable
+ */
+async function extractFileMetadata(item: Zotero.Item): Promise<{
+    file_hash?: string;
+    file_size?: number;
+    file_mime_type?: string;
+} | null> {
+    // if (!item.isFileAttachment()) return {}
+    if (!item.isAttachment()) return {};
+    if (!(await item.fileExists())) return {};
+    
+    // const path = await item.getFilePathAsync();
+    const hash = await item.attachmentHash;
+    const size = await Zotero.Attachments.getTotalFileSize(item);
+    const mimeType = item.attachmentContentType || 'application/octet-stream';
+    return {
+        file_hash: hash || '',
+        file_size: size || 0,
+        file_mime_type: mimeType
+    };
 }
 
 /**
@@ -163,7 +189,7 @@ export async function syncItemsToBackend(
         
         // Transform Zotero items to our format
         const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
-        const attachmentsData = batch.filter(item => item.isAttachment()).map(extractAttachmentData);
+        const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData));
 
         // sync options
         const createLog = i === 0;

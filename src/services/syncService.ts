@@ -63,6 +63,10 @@ export interface AttachmentData {
     date_added: string;
     date_modified: string;
     item_json: any;
+
+    file_hash?: string;
+    file_size?: number;
+    file_mime_type?: string;
 }
 
 export interface LastSyncDateResponse {
