@@ -4,7 +4,7 @@ import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
-import { useRecentThreads } from 'react/hooks/useRecentThreads';
+import { useRecentThreads } from '../hooks/useRecentThreads';
 
 // ReaderSidebarContent handles library-specific features
 const ReaderSidebarContent = () => {
