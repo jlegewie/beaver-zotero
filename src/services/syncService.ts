@@ -55,6 +55,7 @@ export interface ItemData {
 }
 
 export interface AttachmentData {
+    // attachments table fields
     library_id: number;
     zotero_key: string;
     parent_key: string | null;
@@ -63,10 +64,17 @@ export interface AttachmentData {
     date_added: string;
     date_modified: string;
     item_json: any;
+    // file table data
+    file: FileData | null;
+}
 
-    file_hash?: string;
-    file_size?: number;
-    file_mime_type?: string;
+export interface FileData {
+    name: string;
+    hash: string;
+    size: number;
+    mime_type: string;
+    storage_path?: string;
+    fulltext_indexed: boolean;
 }
 
 export interface LastSyncDateResponse {
