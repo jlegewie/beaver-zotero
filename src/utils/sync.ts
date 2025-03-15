@@ -1,4 +1,4 @@
-import { syncService, ItemData, AttachmentData } from '../services/syncService';
+import { syncService, ItemData, AttachmentData, FileData } from '../services/syncService';
 import { SyncStatus } from 'react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 
@@ -67,8 +67,10 @@ function extractItemData(item: Zotero.Item): ItemData {
  * @returns ItemData object for syncing
  */
 async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData> {
+
     // Extract basic metadata
     const itemData: AttachmentData = {
+        // attachments table fields
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
@@ -78,7 +80,8 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         date_added: item.dateAdded,
         date_modified: item.dateModified,
         item_json: item.toJSON(),
-        ...await extractFileMetadata(item)
+        // file table fields
+        file: await extractFileData(item)
     };
     
     return itemData;
@@ -87,26 +90,33 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
 /**
  * Extracts file metadata from a Zotero attachment item
  * @param item Zotero attachment item
- * @returns Promise with file metadata or null if not applicable
+ * @returns Promise with file metadata
  */
-async function extractFileMetadata(item: Zotero.Item): Promise<{
-    file_hash?: string;
-    file_size?: number;
-    file_mime_type?: string;
-} | null> {
+async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
     // if (!item.isFileAttachment()) return {}
-    if (!item.isAttachment()) return {};
-    if (!(await item.fileExists())) return {};
-    
-    // const path = await item.getFilePathAsync();
+    if (!item.isAttachment()) return null;
+    if (!(await item.fileExists())) return null;
+
+    // File metadata
+    const fileName = item.attachmentFilename;
     const hash = await item.attachmentHash;
     const size = await Zotero.Attachments.getTotalFileSize(item);
     const mimeType = item.attachmentContentType || 'application/octet-stream';
+
+    // Fulltext indexed
+    // @ts-ignore FullText exists
+    const indexState = await Zotero.FullText.getIndexedState(item);
+    // @ts-ignore FullText exists
+    const isIndexed = Boolean(indexState && (indexState == Zotero.FullText.INDEX_STATE_INDEXED || indexState == Zotero.FullText.INDEX_STATE_PARTIAL));
+
+    // Return file data
     return {
-        file_hash: hash || '',
-        file_size: size || 0,
-        file_mime_type: mimeType
-    };
+        name: fileName || '',
+        hash: hash || '',
+        size: size || 0,
+        mime_type: mimeType || '',
+        fulltext_indexed: isIndexed
+    } as FileData;
 }
 
 /**
