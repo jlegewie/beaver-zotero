@@ -17,6 +17,9 @@ import { useZoteroSync } from '../hooks/useZoteroSync';
 const LibrarySidebarContent = () => {
     useZoteroSelection();
     useObservePaneCollapse("library");
+    // Recent threads subscription
+    useRecentThreads();
+    // Render the sidebar
     return <Sidebar location="library" />;
 }
 
@@ -30,9 +33,6 @@ const LibrarySidebar = () => {
     useEffect(() => {
         initializeSession();
     }, [initializeSession]);
-
-    // Recent threads subscription
-    useRecentThreads();
 
     // Control visibility of the sidebar across app
     useToggleSidebar();
