@@ -35,10 +35,13 @@ export class FileUploader {
      * @param pollIntervalMs Poll interval in milliseconds (default: 0 for no polling)
      */
     public start(pollIntervalMs: number = 0): void {
-        if (this.isRunning) return;
+        if (this.isRunning) {
+            console.log('[Beaver File Uploader] File uploader already running');
+            return;
+        }
         
         this.isRunning = true;
-        console.log('[Beaver] Starting file uploader');
+        console.log('[Beaver File Uploader] Starting file uploader');
         
         // Start immediately
         this.processQueue();
@@ -58,7 +61,7 @@ export class FileUploader {
         if (!this.isRunning) return;
         
         this.isRunning = false;
-        console.log('[Beaver] Stopping file uploader');
+        console.log('[Beaver File Uploader] Stopping file uploader');
         
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
@@ -100,6 +103,7 @@ export class FileUploader {
      */
     private async processQueue(recursive: boolean = false): Promise<void> {
         if (!this.isRunning || this.activeUploads >= this.MAX_CONCURRENT) {
+            console.log('[Beaver File Uploader] File uploader not running or at max concurrent uploads');
             return;
         }
         
@@ -118,6 +122,7 @@ export class FileUploader {
             // Calculate how many uploads we can process
             const available = this.MAX_CONCURRENT - this.activeUploads;
             if (available <= 0) {
+                console.log('[Beaver File Uploader] No uploads available');
                 return;
             }
             
