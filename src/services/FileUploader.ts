@@ -165,9 +165,16 @@ export class FileUploader {
                 return;
             }
 
-            const filePath = await attachment.getFilePathAsync();
+            let filePath: string | null = null;
+            if (item.type === 'attachment') {
+                filePath = await attachment.getFilePathAsync() || null;
+            } else if (item.type === 'fulltext') {
+                // @ts-ignore FullText exists
+                const cacheFile = Zotero.FullText.getItemCacheFile(attachment);
+                filePath = cacheFile.path;
+            }
             if (!filePath) {
-                console.error(`[Beaver File Uploader] File path not found for attachment: ${item.attachment_key}`);
+                console.error(`[Beaver File Uploader] File path for ${item.type} not found for attachment: ${item.attachment_key}`);
                 await this.handlePermanentFailure(item, "File path not found");
                 return;
             }
@@ -182,7 +189,9 @@ export class FileUploader {
                 return;
             }
             
-            const blob = new Blob([fileArrayBuffer], { type: 'application/pdf' });
+            // const mimeType = Zotero.MIME.getMIMETypeFromFile(filePath);
+            const mimeType = item.type === 'attachment' ? attachment.attachmentContentType : 'text/plain';
+            const blob = new Blob([fileArrayBuffer], { type: mimeType });
 
             // Perform the file upload with retry for network issues
             let uploadSuccess = false;
@@ -195,9 +204,7 @@ export class FileUploader {
                     const response = await fetch(item.upload_url, {
                         method: 'PUT',
                         body: blob,
-                        headers: {
-                            'Content-Type': 'application/pdf'
-                        }
+                        headers: { 'Content-Type': mimeType }
                     });
 
                     if (!response.ok) {
@@ -217,13 +224,19 @@ export class FileUploader {
                     console.log(`[Beaver File Uploader] Successfully uploaded file for attachment ${item.attachment_key}`);
                     uploadSuccess = true;
                 } catch (uploadError: unknown) {
-                    if (uploadError instanceof TypeError || 
-                        (typeof uploadError === 'object' && 
-                         uploadError !== null && 
-                         'message' in uploadError && 
-                         typeof uploadError.message === 'string' && 
-                         (uploadError.message.includes('network') || 
-                          uploadError.message.includes('connection')))) {
+                    if (
+                        uploadError instanceof TypeError || 
+                        (
+                            typeof uploadError === 'object' &&
+                            uploadError !== null &&
+                            'message' in uploadError &&
+                            typeof uploadError.message === 'string' &&
+                            (
+                                uploadError.message.includes('network') ||
+                                uploadError.message.includes('connection')
+                            )
+                        )
+                    ) {
                         // Network error, retry with backoff
                         console.warn(`[Beaver File Uploader] Network error on attempt ${attempt}, will retry`, uploadError);
                         await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
