@@ -89,8 +89,20 @@ export class FileUploader {
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
+        let consecutiveErrors = 0;
+        const MAX_CONSECUTIVE_ERRORS = 5;
+        let backoffTime = 1000; // Start with 1 second backoff
+
         while (this.isRunning) {
             try {
+                // If we've had too many consecutive errors, add a longer backoff
+                if (consecutiveErrors > 0) {
+                    console.log(`[Beaver File Uploader] Backing off for ${backoffTime}ms after ${consecutiveErrors} consecutive errors`);
+                    await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    // Exponential backoff with max of 1 minute
+                    backoffTime = Math.min(backoffTime * 2, 60000);
+                }
+
                 // Fetch up to MAX_CONCURRENT items from the server, along with the updated status
                 const response: PopQueueResponse = await queueService.popQueueItems(this.MAX_CONCURRENT);
                 const items = response.items;
@@ -103,6 +115,10 @@ export class FileUploader {
                 // If no items returned or pending is zero, exit the loop
                 if (items.length === 0) break;
 
+                // Reset error counter on successful queue pop
+                consecutiveErrors = 0;
+                backoffTime = 1000;
+
                 // Add each upload task to the concurrency queue
                 for (const item of items) {
                     this.uploadQueue.add(() => this.uploadFile(item));
@@ -112,8 +128,19 @@ export class FileUploader {
                 await this.uploadQueue.onIdle();
             } catch (error) {
                 console.error('[Beaver File Uploader] runQueue encountered an error:', error);
-                // Break on unexpected error to avoid infinite error loops (alternative is to retry)
-                break;
+                
+                // Increment consecutive error counter
+                consecutiveErrors++;
+                
+                // If we've hit max consecutive errors, take a break
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    console.warn(`[Beaver File Uploader] Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, pausing for recovery`);
+                    await new Promise(resolve => setTimeout(resolve, 60000)); // 1 minute timeout
+                    consecutiveErrors = 0; // Reset counter after pause
+                }
+                
+                // Continue the loop instead of breaking - we'll try again with backoff
+                continue;
             }
         }
 
@@ -128,55 +155,117 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueItem): Promise<void> {
         try {
-            console.log(`[Beaver File Uploaded] Uploading file for attachment ${item.attachment_key}`);
+            console.log(`[Beaver File Uploader] Uploading file for attachment ${item.attachment_key}`);
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.attachment_key);
             if (!attachment) {
-                throw new Error(`Attachment not found: ${item.attachment_key}`);
+                console.error(`[Beaver File Uploader] Attachment not found: ${item.attachment_key}`);
+                await this.handlePermanentFailure(item, "Attachment not found in Zotero");
+                return;
             }
 
             const filePath = await attachment.getFilePathAsync();
             if (!filePath) {
-                throw new Error(`File path not found for attachment: ${item.attachment_key}`);
+                console.error(`[Beaver File Uploader] File path not found for attachment: ${item.attachment_key}`);
+                await this.handlePermanentFailure(item, "File path not found");
+                return;
             }
 
             // Read file content
-            const fileArrayBuffer = await IOUtils.read(filePath);
+            let fileArrayBuffer;
+            try {
+                fileArrayBuffer = await IOUtils.read(filePath);
+            } catch (readError) {
+                console.error(`[Beaver File Uploader] Error reading file: ${item.attachment_key}`, readError);
+                await this.handlePermanentFailure(item, "Error reading file");
+                return;
+            }
+            
             const blob = new Blob([fileArrayBuffer], { type: 'application/pdf' });
 
-            // Perform the file upload
-            const response = await fetch(item.upload_url, {
-                method: 'PUT',
-                body: blob,
-                headers: {
-                    'Content-Type': 'application/pdf'
-                }
-            });
+            // Perform the file upload with retry for network issues
+            let uploadSuccess = false;
+            let attempt = 0;
+            const maxUploadAttempts = 3;
+            
+            while (!uploadSuccess && attempt < maxUploadAttempts) {
+                attempt++;
+                try {
+                    const response = await fetch(item.upload_url, {
+                        method: 'PUT',
+                        body: blob,
+                        headers: {
+                            'Content-Type': 'application/pdf'
+                        }
+                    });
 
-            if (!response.ok) {
-                throw new Error(`Upload failed with status ${response.status}`);
+                    if (!response.ok) {
+                        if (response.status >= 500) {
+                            // Server error - may be temporary
+                            console.warn(`[Beaver File Uploader] Server error ${response.status} on attempt ${attempt}, will retry`);
+                            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                            continue;
+                        } else {
+                            // Client error - likely permanent
+                            throw new Error(`Upload failed with status ${response.status}`);
+                        }
+                    }
+                    
+                    // Mark upload as completed on the server
+                    await queueService.completeUpload(item.id, item.file_id, item.storage_path);
+                    console.log(`[Beaver File Uploader] Successfully uploaded file for attachment ${item.attachment_key}`);
+                    uploadSuccess = true;
+                } catch (uploadError: unknown) {
+                    if (uploadError instanceof TypeError || 
+                        (typeof uploadError === 'object' && 
+                         uploadError !== null && 
+                         'message' in uploadError && 
+                         typeof uploadError.message === 'string' && 
+                         (uploadError.message.includes('network') || 
+                          uploadError.message.includes('connection')))) {
+                        // Network error, retry with backoff
+                        console.warn(`[Beaver File Uploader] Network error on attempt ${attempt}, will retry`, uploadError);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                    } else {
+                        // Other errors, rethrow to be handled by outer catch
+                        throw uploadError;
+                    }
+                }
+            }
+            
+            // If we exhausted retries without success
+            if (!uploadSuccess) {
+                throw new Error(`Failed to upload after ${maxUploadAttempts} attempts`);
             }
 
-            // Mark upload as completed on the server
-            await queueService.completeUpload(item.id, item.file_id, item.storage_path);
-            console.log(`[Beaver File Uploaded] Successfully uploaded file for attachment ${item.attachment_key}`);
-
-        } catch (error) {
-            console.error(`[Beaver File Uploaded] Error uploading file for attachment ${item.attachment_key}:`, error);
+        } catch (error: unknown) {
+            console.error(`[Beaver File Uploader] Error uploading file for attachment ${item.attachment_key}:`, error);
 
             // If attempts are too high, treat as permanently failed
             if (item.attempts >= 3) {
-                console.error(`[Beaver File Uploaded] Max upload attempts reached. Marking permanently failed for ${item.attachment_key}`);
-                // TODO: call a fail endpoint
+                await this.handlePermanentFailure(item, error instanceof Error ? error.message : "Max attempts reached");
             } else {
                 // Otherwise, reset the item for retry later
                 try {
                     await queueService.resetUpload(item.id);
                 } catch (resetError) {
-                    console.error('[Beaver File Uploaded] Error resetting failed upload:', resetError);
+                    console.error('[Beaver File Uploader] Error resetting failed upload:', resetError);
                 }
             }
+        }
+    }
+    
+    /**
+     * Handles permanent failures by marking items as failed in the queue
+     */
+    private async handlePermanentFailure(item: UploadQueueItem, reason: string): Promise<void> {
+        console.error(`[Beaver File Uploader] Permanent failure for ${item.attachment_key}: ${reason}`);
+        try {
+            // Mark the item as failed
+            await queueService.markUploadAsFailed(item.id);
+        } catch (failError) {
+            console.error('[Beaver File Uploader] Error marking item as failed:', failError);
         }
     }
 
