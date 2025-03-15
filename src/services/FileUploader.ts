@@ -263,7 +263,7 @@ export class FileUploader {
         console.error(`[Beaver File Uploader] Permanent failure for ${item.attachment_key}: ${reason}`);
         try {
             // Mark the item as failed
-            await queueService.markUploadAsFailed(item.id);
+            await queueService.markUploadAsFailed(item.id, item.file_id);
         } catch (failError) {
             console.error('[Beaver File Uploader] Error marking item as failed:', failError);
         }

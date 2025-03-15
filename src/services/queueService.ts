@@ -71,10 +71,11 @@ export class QueueService extends ApiService {
     /**
      * Mark an upload as failed
      * @param queueId ID of the queue item
+     * @param fileId ID of the file
      * @returns Promise resolving to success indicator
      */
-    async markUploadAsFailed(queueId: string): Promise<boolean> {
-        return this.post<boolean>('/queue/fail', { queue_id: queueId });
+    async markUploadAsFailed(queueId: string, fileId: string): Promise<boolean> {
+        return this.post<boolean>('/queue/fail', { queue_id: queueId, file_id: fileId });
     }
 
     /**
