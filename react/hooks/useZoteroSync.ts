@@ -5,6 +5,8 @@ import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, SyncStatus } from "../atoms/ui";
+import { queueService, AddUploadQueueFromAttachmentRequest } from "../../src/services/queueService";
+import { fileUploader } from "../../src/services/FileUploader";
 
 /**
  * Hook that sets up Zotero database synchronization:
@@ -88,6 +90,38 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter) {
                             }
                         } catch (error) {
                             console.error("[Beaver] Error handling deleted items:", error);
+                        }
+                    } else if (event === 'index') {
+                        // Handle index event
+                        console.log("[Beaver] Handling index event");
+                        try {
+                            // Get the items from Zotero
+                            const items = await Zotero.Items.getAsync(ids);
+                            if (items.length === 0) return;
+                            
+                            // Create a request to upload the fulltext items
+                            const request = {
+                                library_id: items[0].libraryID,
+                                attachment_keys: [],
+                                type: 'fulltext'
+                            } as AddUploadQueueFromAttachmentRequest;
+                            
+                            // Add all fulltext items to the request
+                            for (const item of items) {
+                                // @ts-ignore FullText exists
+                                if (Zotero.FullText.canIndex(item) && await Zotero.FullText.isFullyIndexed(item)) {
+                                    request.attachment_keys.push(item.key);
+                                }
+                            }
+
+                            // Add upload task to the upload queue and start the file uploader
+                            if (request.attachment_keys.length > 0) {
+                                console.log(`[Beaver] Adding ${request.attachment_keys.length} upload tasks to the upload queue`);
+                                await queueService.addItemsFromAttachmentKeys(request);
+                                fileUploader.start();
+                            }
+                        } catch (error) {
+                            console.error("[Beaver] Error handling index event:", error);
                         }
                     }
                 }
