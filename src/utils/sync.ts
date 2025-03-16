@@ -106,6 +106,13 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
     // Fulltext indexed
     // @ts-ignore FullText exists
     const fulltextIndexed = Zotero.FullText.canIndex(item) && await Zotero.FullText.isFullyIndexed(item);
+    let fulltextLastModified = null;
+    if(fulltextIndexed) {
+        // @ts-ignore Zotero.FullText exists
+        const cacheFile = Zotero.FullText.getItemCacheFile(item);
+        const fileInfo = await IOUtils.stat(cacheFile.path);
+        fulltextLastModified = fileInfo.lastModified;
+    }
 
     // Return file data
     return {
@@ -113,7 +120,8 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
         hash: hash || '',
         size: size || 0,
         mime_type: mimeType || '',
-        fulltext_indexed: fulltextIndexed
+        fulltext_indexed: fulltextIndexed,
+        fulltext_last_modified: fulltextLastModified
     } as FileData;
 }
 

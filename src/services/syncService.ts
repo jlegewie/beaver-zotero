@@ -75,6 +75,7 @@ export interface FileData {
     mime_type: string;
     storage_path?: string;
     fulltext_indexed: boolean;
+    fulltext_last_modified: number | null;
 }
 
 export interface LastSyncDateResponse {
