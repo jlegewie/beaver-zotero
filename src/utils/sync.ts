@@ -193,7 +193,7 @@ export async function syncItemsToBackend(
     syncType: string,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 50
+    batchSize: number = 200
 ) {
     const totalItems = items.length;
     let attachmentCount = 0;
