@@ -155,7 +155,7 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueItem): Promise<void> {
         try {
-            console.log(`[Beaver File Uploader] Uploading file for attachment ${item.attachment_key}`);
+            console.log(`[Beaver File Uploader] Uploading ${item.type} file for ${item.attachment_key}`);
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.attachment_key);
@@ -220,7 +220,7 @@ export class FileUploader {
                     }
                     
                     // Mark upload as completed on the server
-                    await queueService.completeUpload(item.id, item.file_id, item.storage_path);
+                    await queueService.completeUpload(item);
                     console.log(`[Beaver File Uploader] Successfully uploaded file for attachment ${item.attachment_key}`);
                     uploadSuccess = true;
                 } catch (uploadError: unknown) {

@@ -49,16 +49,11 @@ export class QueueService extends ApiService {
 
     /**
      * Mark an upload as complete
-     * @param queueId ID of the queue item
-     * @param storagePath Path where the file was stored
+     * @param item Queue item
      * @returns Promise resolving to success indicator
      */
-    async completeUpload(queueId: string, fileId: string, storagePath: string): Promise<boolean> {
-        return this.post<boolean>('/queue/complete', {
-            queue_id: queueId,
-            file_id: fileId,
-            storage_path: storagePath
-        });
+    async completeUpload(item: UploadQueueItem): Promise<boolean> {
+        return this.post<boolean>('/queue/complete', { item });
     }
 
     /**
