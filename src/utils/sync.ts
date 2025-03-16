@@ -105,9 +105,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
 
     // Fulltext indexed
     // @ts-ignore FullText exists
-    const indexState = await Zotero.FullText.getIndexedState(item);
-    // @ts-ignore FullText exists
-    const isIndexed = Boolean(indexState && (indexState == Zotero.FullText.INDEX_STATE_INDEXED || indexState == Zotero.FullText.INDEX_STATE_PARTIAL));
+    const fulltextIndexed = Zotero.FullText.canIndex(item) && await Zotero.FullText.isFullyIndexed(item);
 
     // Return file data
     return {
@@ -115,7 +113,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
         hash: hash || '',
         size: size || 0,
         mime_type: mimeType || '',
-        fulltext_indexed: isIndexed
+        fulltext_indexed: fulltextIndexed
     } as FileData;
 }
 
