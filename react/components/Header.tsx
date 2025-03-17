@@ -22,8 +22,8 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     }
 
     // Get platform-specific shortcut text
-    const newChatShortcut = !Zotero.isMac ? '⌘N' : 'Ctrl+N';
-    const closeChatShortcut = !Zotero.isMac ? '⌘L' : 'Ctrl+L';
+    const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
+    const closeChatShortcut = Zotero.isMac ? '⌘L' : 'Ctrl+L';
 
     return (
         <div id="beaver-header" className="flex flex-row px-3 py-2">
