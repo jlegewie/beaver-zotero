@@ -27,6 +27,8 @@ export interface TooltipProps {
     width?: string;
     /** Whether to parse HTML in the content (use with caution) */
     allowHtml?: boolean;
+    /** Custom content to render instead of the default content */
+    customContent?: ReactNode;
 }
 
 /**
@@ -43,6 +45,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     usePortal = false,
     width,
     allowHtml = false,
+    customContent,
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
     const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
@@ -196,31 +199,37 @@ const Tooltip: React.FC<TooltipProps> = ({
             aria-hidden={!isOpen}
         >
             <span className={`
-                px-2 py-1 block
-                ${singleLine ? 'flex items-center' : ''}
-                ${singleLine ? 'single-line' : ''}
-            `}
-            style={{ display: singleLine ? 'flex' : 'block' }}
+                    px-2 py-1 block
+                    ${singleLine ? 'flex items-center' : ''}
+                    ${singleLine ? 'single-line' : ''}
+                `}
+                style={{ display: singleLine ? 'flex' : 'block' }}
             >
-                <span 
-                    className={`text-base font-color-secondary overflow-hidden text-ellipsis ${singleLine ? 'single-line' : ''}`}
-                    style={{ display: 'inline-block', verticalAlign: 'middle' }}
-                >
-                    {renderContent()}
-                </span>
-                {secondaryContent && (
-                    <span className={`
-                        text-sm font-color-tertiary
-                        ${singleLine ? 'ml-3' : 'mt-1'}
-                        ${singleLine ? 'single-line' : ''}
-                    `}
-                    style={{ 
-                        display: singleLine ? 'inline-block' : 'block',
-                        verticalAlign: 'middle'
-                    }}
-                    >
-                        {renderSecondaryContent()}
-                    </span>
+                {customContent ? (
+                    customContent
+                ) : (
+                    <>
+                        <span 
+                            className={`text-base font-color-secondary overflow-hidden text-ellipsis ${singleLine ? 'single-line' : ''}`}
+                            style={{ display: 'inline-block', verticalAlign: 'middle' }}
+                        >
+                            {renderContent()}
+                        </span>
+                        {secondaryContent && (
+                            <span className={`
+                                text-sm font-color-tertiary
+                                ${singleLine ? 'ml-3' : 'mt-1'}
+                                ${singleLine ? 'single-line' : ''}
+                            `}
+                            style={{ 
+                                display: singleLine ? 'inline-block' : 'block',
+                                verticalAlign: 'middle'
+                            }}
+                            >
+                                {renderSecondaryContent()}
+                            </span>
+                        )}
+                    </>
                 )}
             </span>
             
