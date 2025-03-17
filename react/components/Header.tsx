@@ -1,5 +1,6 @@
 import React from 'react';
-import { CancelIcon, PlusSignIcon } from './icons';
+import { CancelIcon, PlusSignIcon, UserIcon } from './icons';
+import DatabaseStatusIndicator from './DatabaseStatusIndicator';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -27,7 +28,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
 
     return (
         <div id="beaver-header" className="flex flex-row px-3 py-2">
-            <div className="flex-1">
+            <div className="flex-1 flex gap-4">
                 <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
                     <IconButton
                         icon={CancelIcon}
@@ -36,28 +37,31 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         ariaLabel="Close chat"
                     />
                 </Tooltip>
+                <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                    <IconButton
+                        icon={PlusSignIcon}
+                        onClick={handleNewThread}
+                        className="scale-14"
+                        ariaLabel="New thread"
+                        disabled={threadMessages.length === 0}
+                    />
+                </Tooltip>
+                <RecentThreadsMenuButton
+                    className="scale-14"
+                    ariaLabel="Show chat history"
+                />
             </div>
             {isAuthenticated && (
                 <div className="flex gap-4">
-                    <RecentThreadsMenuButton
-                        className="scale-14"
-                        ariaLabel="Show chat history"
-                    />
-                    <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                    <DatabaseStatusIndicator />
+                    <Tooltip content="User settings" showArrow singleLine>
                         <IconButton
-                            icon={PlusSignIcon}
-                            onClick={handleNewThread}
+                            icon={UserIcon}
                             className="scale-14"
-                            ariaLabel="New thread"
-                            disabled={threadMessages.length === 0}
+                            onClick={() => console.log('User settings')}
+                            ariaLabel="User settings"
                         />
                     </Tooltip>
-                    {/* <IconButton
-                        icon={SettingsIcon}
-                        className="scale-14"
-                        onClick={() => console.log('History')}
-                        ariaLabel="Show chat history"
-                    /> */}
                 </div>
             )}
         </div>
