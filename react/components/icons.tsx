@@ -18,3 +18,5 @@ export { default as TickIcon } from './icons/TickIcon';
 export { default as ShareIcon } from './icons/ShareIcon';
 export { default as AlertIcon } from './icons/AlertIcon';
 export { default as StopIcon } from './icons/StopIcon';
+export { default as DatabaseStatusIcon } from './icons/DatabaseStatusIcon';
+export { default as UserIcon } from './icons/UserIcon';
