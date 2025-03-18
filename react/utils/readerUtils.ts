@@ -79,6 +79,7 @@ function getCurrentItem(reader: any): Zotero.Item {
  * Context for the reader.
  */
 export type ReaderContext = {
+    libraryID: number;
     itemKey: string;
     page: number | null;
     identifier: string;
@@ -107,6 +108,7 @@ function getReaderContext(): ReaderContext | undefined {
             ? Zotero.ItemTypes.getLocalizedString(parentItem.itemType)
             : 'article, book, report or other document';
         context = {
+            libraryID: item.libraryID,
             itemKey: item.key,
             page: getCurrentPage(reader),
             selection: getSelectedText(reader),
@@ -117,6 +119,5 @@ function getReaderContext(): ReaderContext | undefined {
     }
     return context;
 }
-
 
 export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem, getReaderContext };

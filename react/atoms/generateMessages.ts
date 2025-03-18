@@ -89,10 +89,11 @@ export const generateResponseAtom = atom(
         // Provide reader context sources contain current reader item
         let context: ReaderContext | undefined;
         if (payload.readerContext) {
-            const sourceKeys = newThreadSources.map((s) => s.itemKey);
-            if (sourceKeys.includes(payload.readerContext.itemKey)) {
-                context = payload.readerContext;
-            }
+            context = payload.readerContext;
+            // const sourceKeys = newThreadSources.map((s) => s.itemKey);
+            // if (sourceKeys.includes(payload.readerContext.itemKey)) {
+            //     context = payload.readerContext;
+            // }
         }
         
         // Reset user message and source after adding to message
@@ -108,6 +109,8 @@ export const generateResponseAtom = atom(
                 userMsg.id,         // the ID from createUserMessage
                 assistantMsg.id,    // the ID from createAssistantMessage
                 userMsg.content,
+                payloadSources.map((s) => `${s.libraryID}-${s.itemKey}`),
+                context,
                 set
             );
         }
@@ -190,6 +193,8 @@ function _processChatCompletionViaBackend(
     userMessageId: string,
     assistantMessageId: string,
     content: string,
+    sources: string[],
+    context: ReaderContext | undefined,
     set: any
 ) {
     chatService.requestChatCompletion(
@@ -197,7 +202,9 @@ function _processChatCompletionViaBackend(
             threadId: currentThreadId,
             userMessageId,
             assistantMessageId,
-            content
+            content,
+            sources,
+            context
         },
         {
             onThread: (newThreadId) => {

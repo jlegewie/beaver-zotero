@@ -1,11 +1,26 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ReaderContext } from 'react/utils/readerUtils';
 
 export interface SSERequestParams {
-    threadId: string | null;        // If continuing an existing thread, else null
-    userMessageId: string;          // The UUID from the frontend
-    assistantMessageId: string;     // The in-progress assistant UUID
-    content: string;                // The user's input text
+    threadId: string | null;            // If continuing an existing thread, else null
+    userMessageId: string;              // The UUID from the frontend
+    assistantMessageId: string;         // The in-progress assistant UUID
+    content: string;                    // The user's input text
+    sources: string[];                  // The sources to include in the request
+    context: ReaderContext | undefined; // Current reader context (e.g. page user is on)
+}
+
+// Interface for the request body (matching 'ChatCompletionRequest' in backend)
+interface ChatCompletionRequestBody {
+    thread_id: string | null;
+    user_message_id: string;
+    assistant_message_id: string;
+    content: string;
+    sources: string[];
+    metadata?: {
+        reader_context: ReaderContext;
+    };
 }
 
 export interface SSECallbacks {
@@ -49,16 +64,20 @@ export class ChatService extends ApiService {
         params: SSERequestParams,
         callbacks: SSECallbacks
     ): Promise<void> {
-        const { threadId, userMessageId, assistantMessageId, content } = params;
+        const { threadId, userMessageId, assistantMessageId, content, sources, context } = params;
         const { onThread, onToken, onDone, onError } = callbacks;
 
         // Construct the request body
-        const body = {
+        const body: ChatCompletionRequestBody = {
             thread_id: threadId,
             user_message_id: userMessageId,
             assistant_message_id: assistantMessageId,
-            content
+            content,
+            sources
         };
+        if (context) {
+            body.metadata = {reader_context: context};
+        }
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
