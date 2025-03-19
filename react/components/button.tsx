@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon } from './icons';
 import Spinner from './icons/Spinner';
 
-type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
+type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'surface-light';
 
 interface ButtonProps {
     /** Button variant */

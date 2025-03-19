@@ -1109,6 +1109,55 @@
 }
 
 /* Surface light variant */
+[id^="beaver-pane-"] .variant-surface-light {
+    cursor: pointer;
+    border: 1px solid var(--fill-quinary);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    padding: 12px 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-surface-light:hover {
+    background-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .variant-surface-light:disabled {
+    cursor: not-allowed;
+    background-color: var(--fill-senary);
+    color: var(--fill-tertiary);
+    border-color: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .variant-surface-light.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-surface-light .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-surface-light.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-surface-light.icon-only {
+    padding: 4px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-surface-light svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
 [id^="beaver-pane-"] .welcome-page-button {
     cursor: pointer;
     border: 1px solid var(--fill-quinary);
@@ -1125,4 +1174,15 @@
 
 [id^="beaver-pane-"] .welcome-page-button:hover {
     background-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .card {
+    border: 1px solid var(--fill-quinary);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    padding: 6px 8px;
+    display: inline-flex;
+    gap: 6px;
 }
