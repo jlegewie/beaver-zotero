@@ -2,20 +2,21 @@
 import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { InputSource } from '../types/sources'
-import { useSetAtom, useAtom } from 'jotai'
-import { removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
+import { useSetAtom, useAtom, useAtomValue } from 'jotai'
+import { readerItemKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewedSourceAtom } from '../atoms/ui'
 import { truncateText } from '../utils/stringUtils'
+import { BookmarkIcon, Icon } from './icons'
 import { CancelIcon } from './icons'
-import Button from './Button'
+// import Button from './Button'
+import { atom } from 'jotai'
+import IconButton from './IconButton'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
-import { atom } from 'jotai'
-import IconButton from './IconButton'
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
@@ -37,6 +38,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const removeSource = useSetAtom(removeSourceAtom);
         const setPreviewedSource = useSetAtom(previewedSourceAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
+        const readerItemKey = useAtomValue(readerItemKeyAtom);
         const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
         // Get the Zotero item
@@ -184,6 +186,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                     {displayName}
                 </span>
+                {readerItemKey == source.itemKey && <Icon icon={BookmarkIcon} className="scale-11" /> }
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
                 {/* {!disabled && (
                     <span 

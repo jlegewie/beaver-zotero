@@ -1,15 +1,16 @@
 import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useRef, useEffect, useState } from 'react';
-import { Icon, CancelIcon } from './icons';
+import { Icon, CancelIcon, BookmarkIcon } from './icons';
 import { InputSource } from '../types/sources';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { previewedSourceAtom } from '../atoms/ui';
-import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom } from '../atoms/input';
+import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom, readerItemKeyAtom } from '../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../utils/openPDFInNewWindow';
 import SourcePreviewRegularItem from './previews/SourcePreviewRegularItem';
 import SourcePreviewAttachment from './previews/SourcePreviewAttachment';
+import { getCurrentPage } from '../utils/readerUtils';
 import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
 import Button from './Button';
@@ -26,6 +27,7 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
     const removeSource = useSetAtom(removeSourceAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
+    const readerItemKey = useAtomValue(readerItemKeyAtom);
 
     // Get source from sources atom
     const currentSources = useAtomValue(currentSourcesAtom);
@@ -174,6 +176,12 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                     style={{ maxHeight: maxContentHeight ? `${maxContentHeight}px` : '320px' }}
                 >
                     {renderContent()}
+                    {readerItemKey == source.itemKey &&
+                        <div className="flex flex-row items-center gap-1 opacity-50">
+                            <Icon icon={BookmarkIcon} className="scale-11" />
+                            <span>Current Reader Item, page {getCurrentPage()}</span>
+                        </div>
+                    }
                 </div>
 
                 {/* buttons */}
