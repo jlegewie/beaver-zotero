@@ -17,6 +17,7 @@ import {
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { supabase } from '../../src/services/supabaseClient';
 import { userAtom } from '../atoms/auth';
+import Spinner from './icons/Spinner';
 
 const MAX_THREADS = 10;
 
@@ -69,35 +70,68 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
-    const [allowBlur, setAllowBlur] = useState<boolean>(false);
+    const [allowBlur, setAllowBlur] = useState<boolean>(true);
+    
+    // New state for pagination
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
+    const [hasMore, setHasMore] = useState<boolean>(false);
 
+    // Fetch initial threads
     useEffect(() => {
         if (!user) return;
-
-        const formatThread = (thread: any): Thread => ({
-            id: thread.id,
-            name: thread.name,
-            createdAt: thread.created_at,
-            updatedAt: thread.updated_at,
-        });
-
-        const fetchRecentThreads = async () => {
-            const { data, error } = await supabase
-                .from('threads')
-                .select('id, name, created_at, updated_at')
-                .eq('user_id', user.id)
-                .order('updated_at', { ascending: false })
-                .limit(MAX_THREADS);
-
-            if (error) {
+        
+        const fetchThreads = async () => {
+            setIsLoading(true);
+            try {
+                const response = await threadService.getPaginatedThreads();
+                
+                setThreads(response.data.map(thread => ({
+                    id: thread.id,
+                    name: thread.name,
+                    createdAt: thread.created_at,
+                    updatedAt: thread.updated_at,
+                } as Thread)));
+                
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+            } catch (error) {
                 console.error('Error fetching recent threads:', error);
-                return;
+            } finally {
+                setIsLoading(false);
             }
-
-            setThreads(data.map(formatThread));
         };
-        fetchRecentThreads();
+        
+        fetchThreads();
     }, [setThreads, user]);
+
+    // Load more threads
+    const loadMoreThreads = async () => {
+        if (isLoading || !nextCursor) return;
+        
+        setIsLoading(true);
+        try {
+            const response = await threadService.getPaginatedThreads(10, nextCursor);
+            
+            // Append new threads to existing ones
+            setThreads(prevThreads => [
+                ...prevThreads,
+                ...response.data.map(thread => ({
+                    id: thread.id,
+                    name: thread.name,
+                    createdAt: thread.created_at,
+                    updatedAt: thread.updated_at,
+                } as Thread))
+            ]);
+            
+            setNextCursor(response.next_cursor);
+            setHasMore(response.has_more);
+        } catch (error) {
+            console.error('Error loading more threads:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleLoadThread = async (threadId: string) => {
         try {
@@ -146,8 +180,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
 
     // Filter out current thread and limit to MAX_THREADS
     const filteredThreads = threads
-        .filter(thread => thread.id !== currentThreadId)
-        .slice(0, MAX_THREADS);
+        .filter(thread => thread.id !== currentThreadId);
     
     // Group threads by date
     const groupedThreads = groupThreadsByDate(filteredThreads);
@@ -212,22 +245,6 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
                         </div>
                     ),
                     actionButtons: [
-                        // {
-                        //     icon: <ZoteroIcon icon={ZOTERO_ICONS.EDIT} size={12} />,
-                        //     onClick: (e) => {
-                        //         e.stopPropagation();
-                        //         e.preventDefault();
-                                
-                        //         if (editingThreadId === thread.id) {
-                        //             setAllowBlur(false);
-                        //         }
-                                
-                        //         handleStartRename(thread.id, threadName);
-                        //     },
-                        //     tooltip: "Rename thread",
-                        //     ariaLabel: "Rename thread",
-                        //     className: "scale-90 flex edit-button"
-                        // },
                         {
                             icon: <ZoteroIcon icon={ZOTERO_ICONS.TRASH} size={12} />,
                             onClick: (e) => {
@@ -248,7 +265,6 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
         <MenuButton
             menuItems={menuItems}
             variant="ghost"
-            // disabled={threads.length === 0}
             icon={ClockIcon}
             className={className}
             ariaLabel={ariaLabel}
@@ -257,9 +273,19 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             maxHeight="260px"
             showArrow={true}
             footer={
-                <button className="scale-85 variant-outline has-text mb-1">
-                    Show more
-                </button>
+                hasMore && (
+                    <button 
+                        className="scale-85 variant-outline has-text mb-1 flex items-center justify-center"
+                        onClick={loadMoreThreads}
+                        disabled={isLoading}
+                    >
+                        {isLoading ? (
+                            <Spinner size={12} className="mr-1" />
+                        ) : (
+                            "Show more"
+                        )}
+                    </button>
+                )
             }
         />
     );
