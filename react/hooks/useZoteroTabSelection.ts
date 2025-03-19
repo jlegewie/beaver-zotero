@@ -1,7 +1,7 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
-import { readerItemKeyAtom, updateSourcesFromZoteroItemsAtom } from "../atoms/input";
+import { readerItemKeyAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroItemsAtom } from "../atoms/input";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 
@@ -14,6 +14,7 @@ export function useZoteroTabSelection() {
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     const setReaderItemKey = useSetAtom(readerItemKeyAtom);
+    const updateSourcesFromReader = useSetAtom(updateSourcesFromReaderAtom);
     const window = Zotero.getMainWindow();
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
@@ -53,15 +54,7 @@ export function useZoteroTabSelection() {
                         setReaderItemKey(null);
                     } else if (selectedTab.type === 'reader') {
                         const reader = Zotero.Reader.getByTabID(selectedTab.id);
-                        if (reader) {
-                            // @ts-ignore itemID is not typed
-                            const item = Zotero.Items.get(reader.itemID);
-                            if (item) {
-                                console.log("[Beaver] Updating sources from reader item", item.isRegularItem());
-                                updateSourcesFromZoteroItems([item]);
-                                setReaderItemKey(item.key);
-                            }
-                        }
+                        updateSourcesFromReader(reader);
                     }
                 }
             }
