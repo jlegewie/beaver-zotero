@@ -329,12 +329,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     tabIndex={focusedIndex === index && !item.isGroupHeader ? 0 : -1}
                     className={`
                         ${item.isDivider ? 'border-t border-quinary my-1' : ''}
-                        ${item.isGroupHeader ? 'px-3 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
-                          `flex items-center gap-2 px-3 py-2 rounded-md transition user-select-none
+                        ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
+                          `flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                           ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-tertiary' : ''}`
                         }
                     `}
+                    style={!item.isDivider && !item.isGroupHeader ? { maxWidth: '100%', minWidth: 0 } : undefined}
                     onClick={(e) => {
                         e.stopPropagation(); // Prevent click from reaching parent elements
                         if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
@@ -362,17 +363,19 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 >
                     {item.isDivider ? null : item.isGroupHeader ? (
                         // Render group header
-                        <span>{item.label}</span>
+                        <span className="truncate">{item.label}</span>
                     ) : item.customContent ? (
                         // Render custom content if provided
-                        <>{item.customContent}</>
+                        <div className="w-full overflow-hidden">
+                            {item.customContent}
+                        </div>
                     ) : (
                         // Otherwise render default icon + label layout
-                        <span className="flex items-center gap-2">
+                        <span className="flex items-center gap-2 w-full min-w-0">
                             {item.icon && (
-                                <Icon icon={item.icon} size={14} className="font-color-secondary"/>
+                                <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                             )}
-                            <span className="flex-1 text-sm font-color-secondary">{item.label}</span>
+                            <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
                         </span>
                     )}
                 </div>
