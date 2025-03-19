@@ -276,6 +276,7 @@
 [id^="beaver-pane-"] .mx-2 { margin-left: 0.5rem; margin-right: 0.5rem; }
 [id^="beaver-pane-"] .mx-3 { margin-left: 0.75rem; margin-right: 0.75rem; }
 [id^="beaver-pane-"] .mx-auto { margin-left: auto; margin-right: auto; }
+[id^="beaver-pane-"] .mb-1 { margin-bottom: 0.15rem; }
 [id^="beaver-pane-"] .mb-2 { margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .mb-4 { margin-bottom: 1rem; }
 [id^="beaver-pane-"] .mr-015 { margin-right: 0.15rem; }
