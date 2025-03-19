@@ -255,6 +255,7 @@
 [id^="beaver-pane-"] .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
 [id^="beaver-pane-"] .px-4 { padding-left: 1rem; padding-right: 1rem; }
 [id^="beaver-pane-"] .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+[id^="beaver-pane-"] .py-15 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
 [id^="beaver-pane-"] .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 [id^="beaver-pane-"] .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
 [id^="beaver-pane-"] .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
@@ -1020,6 +1021,26 @@
     width: 1em;
     height: 1em;
     flex-shrink: 0;
+}
+
+/* Button: Thread menu */
+[id^="beaver-pane-"] .variant-thread-menu {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    padding: 0px;
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-thread-menu:hover {
+    color: var(--fill-primary);
 }
 
 /* Updated IconButton class - compatible with the Ghost variant */
