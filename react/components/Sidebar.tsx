@@ -26,9 +26,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     useEffect(() => {
         // Focus the input
         inputRef.current?.focus();
-
-        // Update sources based on Zotero selection
-        updateSourcesFromZoteroSelection();
     }, []);
     
     const handleScrollToBottom = () => {

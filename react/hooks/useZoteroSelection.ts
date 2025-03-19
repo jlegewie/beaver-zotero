@@ -2,6 +2,7 @@
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/input";
+import { updateSourcesFromZoteroSelectionAtom } from "../atoms/input";
 
 /**
 * Listens to changes in the Zotero item selection and updates
@@ -9,7 +10,11 @@ import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms
 */
 export function useZoteroSelection() {
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
+    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const lastSelectionKeys = useRef<string[]>([]);
+
+    // Update sources based on Zotero selection
+    updateSourcesFromZoteroSelection();
 
     useEffect(() => {
         // Handler called whenever the Zotero selection changes
