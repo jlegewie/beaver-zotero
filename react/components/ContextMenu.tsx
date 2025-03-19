@@ -97,8 +97,15 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (!isOpen) return;
         
-        // Prevent scroll on all elements when context menu is open
+        // Prevent scroll on all elements when context menu is open except for the menu itself
         const preventScroll = (e: Event) => {
+            // Check if the event originated from within the menu
+            if (menuRef.current && menuRef.current.contains(e.target as Node)) {
+                // Allow scrolling within the menu
+                return;
+            }
+            
+            // Prevent scroll on elements outside the menu
             e.preventDefault();
             e.stopPropagation();
         };
