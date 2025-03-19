@@ -8,6 +8,7 @@ import { threadSourceKeysAtom } from "./threads";
 */
 export const currentUserMessageAtom = atom<string>('');
 export const currentSourcesAtom = atom<InputSource[]>([]);
+export const readerItemKeyAtom = atom<string | null>(null);
 
 
 /**
