@@ -257,15 +257,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const menuElement = (
         <div
             ref={menuRef}
-            className={`bg-quaternary rounded-md p-1 overflow-y-auto scrollbar z-1000 shadow-md ${className}`}
+            className={`bg-quaternary border-quinary rounded-md p-1 overflow-y-auto scrollbar outline-none z-1000 shadow-md ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,
                 left: adjustedPosition.x,
-                border: '1px solid var(--fill-quinary)',
                 maxWidth: maxWidth || undefined,
-                maxHeight: maxHeight || '80vh',
-                outline: 'none'
+                maxHeight: maxHeight || '80vh'
             }}
             tabIndex={-1}
             role="menu"
