@@ -9,6 +9,7 @@ interface MenuButtonProps {
     menuItems: MenuItem[];
     variant?: string;
     maxWidth?: string;
+    maxHeight?: string;
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     className?: string;
     iconClassName?: string;
@@ -29,6 +30,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     menuItems,
     variant = 'surface',
     maxWidth = undefined,
+    maxHeight = undefined,
     icon,
     className = '',
     iconClassName = '',
@@ -88,6 +90,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
                 maxWidth={maxWidth}
+                maxHeight={maxHeight}
                 onClose={() => setIsMenuOpen(false)}
                 position={menuPosition}
                 useFixedPosition={true}

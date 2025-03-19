@@ -54,6 +54,8 @@ export interface ContextMenuProps {
     isOpen: boolean;
     /** Optional max width for the menu */
     maxWidth?: string;
+    /** Optional max height for the menu */
+    maxHeight?: string;
     /** Callback when menu should close */
     onClose: () => void;
     /** Position coordinates for menu placement */
@@ -80,6 +82,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     onClose, 
     position,
     maxWidth = undefined,
+    maxHeight = undefined,
     className = '',
     useFixedPosition = false,
     usePortal = false,
@@ -246,14 +249,14 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const menuElement = (
         <div
             ref={menuRef}
-            className={`bg-quaternary rounded-md p-1 overflow-y-auto z-1000 shadow-md ${className}`}
+            className={`bg-quaternary rounded-md p-1 overflow-y-auto scrollbar z-1000 shadow-md ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,
                 left: adjustedPosition.x,
-                maxHeight: '80vh',
                 border: '1px solid var(--fill-quinary)',
-                maxWidth: maxWidth || undefined
+                maxWidth: maxWidth || undefined,
+                maxHeight: maxHeight || '80vh'
             }}
             tabIndex={-1}
             role="menu"
