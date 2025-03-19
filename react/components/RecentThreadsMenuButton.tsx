@@ -1,4 +1,6 @@
 import React from 'react';
+// @ts-ignore no idea why this is needed
+import { useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';
@@ -14,6 +16,7 @@ import {
     isThisMonth
 } from '../utils/dateUtils';
 import Tooltip from './Tooltip';
+import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 const MAX_THREADS = 15;
 
@@ -63,6 +66,8 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const setThreadSources = useSetAtom(threadSourcesAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const threads = useAtomValue(recentThreadsAtom);
+    const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState<string>('');
 
     const handleLoadThread = async (threadId: string) => {
         try {
@@ -82,6 +87,22 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
         }
     };
 
+    const handleDeleteThread = (threadId: string) => {
+        // For now, just log the action
+        console.log('Delete thread:', threadId);
+    };
+
+    const handleStartRename = (threadId: string, currentName: string) => {
+        setEditingThreadId(threadId);
+        setEditingName(currentName || 'Unnamed conversation');
+    };
+
+    const handleRenameComplete = (threadId: string, newName: string) => {
+        // For now, just log the action
+        console.log('Rename thread:', threadId, 'New name:', newName);
+        setEditingThreadId(null);
+    };
+
     // Filter out current thread and limit to MAX_THREADS
     const filteredThreads = threads
         .filter(thread => thread.id !== currentThreadId)
@@ -90,7 +111,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     // Group threads by date
     const groupedThreads = groupThreadsByDate(filteredThreads);
     
-    // Create menu items with group headers
+    // Create menu items with group headers and action buttons
     const menuItems: MenuItem[] = [];
     
     // Add groups in order
@@ -106,19 +127,60 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             
             // Add threads in group
             groupThreads.forEach(thread => {
+                const threadName = thread.name || 'Unnamed conversation';
+                
                 menuItems.push({
-                    label: thread.name || 'Unnamed conversation',
+                    label: threadName,
                     onClick: () => handleLoadThread(thread.id),
                     customContent: (
-                        <div className="flex flex-col">
-                            <span className="truncate font-color-secondary">
-                                {thread.name || 'Unnamed conversation'}
-                            </span>
-                            {/* <span className="text-xs font-color-tertiary">
-                                {formatRelativeDate(new Date(thread.updatedAt))}
-                            </span> */}
+                        <div className="flex flex-col w-full">
+                            {editingThreadId === thread.id ? (
+                                // Edit mode
+                                <input
+                                    type="text"
+                                    value={editingName}
+                                    className="p-1 border rounded w-full text-sm"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => setEditingName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            handleRenameComplete(thread.id, editingName);
+                                        } else if (e.key === 'Escape') {
+                                            setEditingThreadId(null);
+                                        }
+                                    }}
+                                    onBlur={() => handleRenameComplete(thread.id, editingName)}
+                                    autoFocus
+                                />
+                            ) : (
+                                <span className="truncate font-color-secondary">
+                                    {threadName}
+                                </span>
+                            )}
                         </div>
-                    )
+                    ),
+                    actionButtons: [
+                        {
+                            icon: <ZoteroIcon icon={ZOTERO_ICONS.EDIT} size={12} />,
+                            onClick: (e) => {
+                                e.stopPropagation();
+                                handleStartRename(thread.id, threadName);
+                            },
+                            tooltip: "Rename thread",
+                            ariaLabel: "Rename thread",
+                            className: "scale-90 flex"
+                        },
+                        {
+                            icon: <ZoteroIcon icon={ZOTERO_ICONS.TRASH} size={12} />,
+                            onClick: (e) => {
+                                e.stopPropagation();
+                                handleDeleteThread(thread.id);
+                            },
+                            tooltip: "Delete thread",
+                            ariaLabel: "Delete thread", 
+                            className: "scale-90 flex"
+                        }
+                    ]
                 });
             });
         }
@@ -152,7 +214,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="Chat history"
-            maxWidth="240px"
+            width="150px"
             maxHeight="260px"
             showArrow={true}
         />
