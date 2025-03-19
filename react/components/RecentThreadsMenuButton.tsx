@@ -63,7 +63,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
-    const threads = useAtomValue(recentThreadsAtom);
+    const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
     const [allowBlur, setAllowBlur] = useState<boolean>(false);
@@ -89,7 +89,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const handleDeleteThread = async (threadId: string) => {
         await threadService.deleteThread(threadId);
         // Refresh the threads list
-        // setRecentThreads((prev) => prev.filter(thread => thread.id !== threadId));
+        setThreads((prev) => prev.filter(thread => thread.id !== threadId));
     };
 
     const handleStartRename = (threadId: string, currentName: string) => {
