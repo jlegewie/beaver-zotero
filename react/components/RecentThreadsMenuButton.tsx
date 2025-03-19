@@ -9,13 +9,11 @@ import { threadService } from '../../src/services/threadService';
 import { Thread } from '../types/messages';
 import { ClockIcon } from './icons';
 import { 
-    formatRelativeDate, 
     isToday,
     isYesterday,
     isThisWeek,
     isThisMonth
 } from '../utils/dateUtils';
-import Tooltip from './Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 
 const MAX_THREADS = 15;
@@ -68,6 +66,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const threads = useAtomValue(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
+    const [allowBlur, setAllowBlur] = useState<boolean>(false);
 
     const handleLoadThread = async (threadId: string) => {
         try {
@@ -87,20 +86,31 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
         }
     };
 
-    const handleDeleteThread = (threadId: string) => {
-        // For now, just log the action
-        console.log('Delete thread:', threadId);
+    const handleDeleteThread = async (threadId: string) => {
+        await threadService.deleteThread(threadId);
+        // Refresh the threads list
+        // setRecentThreads((prev) => prev.filter(thread => thread.id !== threadId));
     };
 
     const handleStartRename = (threadId: string, currentName: string) => {
         setEditingThreadId(threadId);
         setEditingName(currentName || 'Unnamed conversation');
+        setAllowBlur(true);
     };
 
-    const handleRenameComplete = (threadId: string, newName: string) => {
-        // For now, just log the action
-        console.log('Rename thread:', threadId, 'New name:', newName);
-        setEditingThreadId(null);
+    const handleRenameComplete = async (threadId: string, newName: string) => {
+        if (!threadId || !newName.trim()) {
+            setEditingThreadId(null);
+            return;
+        }
+
+        try {
+            await threadService.renameThread(threadId, newName);
+        } catch (error) {
+            console.error('Error renaming thread:', error);
+        } finally {
+            setEditingThreadId(null);
+        }
     };
 
     // Filter out current thread and limit to MAX_THREADS
@@ -139,17 +149,28 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
                                 <input
                                     type="text"
                                     value={editingName}
-                                    className="p-1 border rounded w-full text-sm"
-                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-0 rounded w-full bg-transparent font-color-secondary outline-none ring-0 shadow-none"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                    }}
                                     onChange={(e) => setEditingName(e.target.value)}
                                     onKeyDown={(e) => {
+                                        e.stopPropagation();
                                         if (e.key === 'Enter') {
+                                            e.preventDefault();
                                             handleRenameComplete(thread.id, editingName);
                                         } else if (e.key === 'Escape') {
+                                            e.preventDefault();
                                             setEditingThreadId(null);
                                         }
                                     }}
-                                    onBlur={() => handleRenameComplete(thread.id, editingName)}
+                                    onBlur={() => {
+                                        if (allowBlur) {
+                                            handleRenameComplete(thread.id, editingName);
+                                        }
+                                    }}
+                                    onFocus={() => setAllowBlur(true)}
                                     autoFocus
                                 />
                             ) : (
@@ -160,16 +181,22 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
                         </div>
                     ),
                     actionButtons: [
-                        {
-                            icon: <ZoteroIcon icon={ZOTERO_ICONS.EDIT} size={12} />,
-                            onClick: (e) => {
-                                e.stopPropagation();
-                                handleStartRename(thread.id, threadName);
-                            },
-                            tooltip: "Rename thread",
-                            ariaLabel: "Rename thread",
-                            className: "scale-90 flex"
-                        },
+                        // {
+                        //     icon: <ZoteroIcon icon={ZOTERO_ICONS.EDIT} size={12} />,
+                        //     onClick: (e) => {
+                        //         e.stopPropagation();
+                        //         e.preventDefault();
+                                
+                        //         if (editingThreadId === thread.id) {
+                        //             setAllowBlur(false);
+                        //         }
+                                
+                        //         handleStartRename(thread.id, threadName);
+                        //     },
+                        //     tooltip: "Rename thread",
+                        //     ariaLabel: "Rename thread",
+                        //     className: "scale-90 flex edit-button"
+                        // },
                         {
                             icon: <ZoteroIcon icon={ZOTERO_ICONS.TRASH} size={12} />,
                             onClick: (e) => {

@@ -320,7 +320,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Reset hovered index when menu opens/closes
         setHoveredIndex(-1);
-    }, [isOpen, menuItems]);
+    }, [isOpen]);
     
     if (!isOpen) return null;
     
