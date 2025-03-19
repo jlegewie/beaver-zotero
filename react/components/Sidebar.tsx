@@ -5,7 +5,6 @@ import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
 import { threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { previewedSourceAtom } from '../atoms/ui';
@@ -23,8 +22,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const [userScrolled, setUserScrolled] = useState(false);
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    
-    useZoteroSelection();
     
     useEffect(() => {
         // Focus the input
