@@ -212,38 +212,24 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             });
         }
     });
-    
-    // Add "Show All" at the end if there are threads
-    if (filteredThreads.length > 0) {
-        // If we ended with a divider, remove it
-        if (menuItems.length > 0 && menuItems[menuItems.length - 1].isDivider) {
-            menuItems.pop();
-        }
-        
-        // Add "Show All" button
-        menuItems.push({
-            label: 'Show all',
-            onClick: () => console.log('show all'),
-            customContent: (
-                <div className="font-color-primary">
-                    Show all
-                </div>
-            )
-        });
-    }
 
     return (
         <MenuButton
             menuItems={menuItems}
             variant="ghost"
-            disabled={threads.length === 0}
+            // disabled={threads.length === 0}
             icon={ClockIcon}
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="Chat history"
-            width="150px"
+            width="200px"
             maxHeight="260px"
             showArrow={true}
+            footer={
+                <button className="scale-85 variant-outline has-text mb-1">
+                    Show more
+                </button>
+            }
         />
     );
 };
