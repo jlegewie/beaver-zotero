@@ -211,6 +211,7 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                         <Button 
                             variant="ghost"
                             onClick={handleRemove}
+                            disabled={readerItemKey == source.itemKey}
                         >
                             <ZoteroIcon 
                                 icon={ZOTERO_ICONS.TRASH} 

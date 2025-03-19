@@ -48,8 +48,8 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
 
-        const getIconElement = (source: InputSource, isHovered: boolean, disabled: boolean) => {
-            if (isHovered) {
+        const getIconElement = () => {
+            if (isHovered && readerItemKey != source.itemKey) {
                 // return (<IconButton
                 //     icon={CancelIcon}
                 //     className="scale-80 m-0 p-0"
@@ -182,7 +182,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     ? <span className="source-button-icon"><Icon icon={PinIcon} className="icon-16" /></span>
                     : getIconElement(attachment)
                 } */}
-                {getIconElement(source, isHovered, disabled)}
+                {getIconElement()}
                 <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                     {displayName}
                 </span>
