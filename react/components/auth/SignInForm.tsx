@@ -39,7 +39,7 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="border-quinary rounded-md p-2 bg-quaternary focus:border-tertiary transition"
+                    className="border-quinary rounded-md p-2 bg-quaternary focus:border-tertiary transition outline-none"
                     placeholder="your.email@example.com"
                 />
             </div>
@@ -52,7 +52,7 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="border-quinary rounded-md p-2 bg-quaternary transition"
+                    className="border-quinary rounded-md p-2 bg-quaternary transition outline-none"
                     placeholder="••••••••"
                 />
             </div>
