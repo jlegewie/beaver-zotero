@@ -46,6 +46,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="User account and settings"
+            showArrow={true}
         />
     );
 };
