@@ -55,6 +55,9 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 y: rect.bottom + 5
             });
             setIsMenuOpen(true);
+            
+            // Remove focus from the button after opening the menu
+            buttonRef.current.blur();
         }
     };
 

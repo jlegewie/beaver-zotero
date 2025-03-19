@@ -264,7 +264,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 left: adjustedPosition.x,
                 border: '1px solid var(--fill-quinary)',
                 maxWidth: maxWidth || undefined,
-                maxHeight: maxHeight || '80vh'
+                maxHeight: maxHeight || '80vh',
+                outline: 'none'
             }}
             tabIndex={-1}
             role="menu"
