@@ -39,6 +39,21 @@ export interface MenuItem {
     isGroupHeader?: boolean;
     /** Whether this item is a divider */
     isDivider?: boolean;
+    /** Action buttons to display on hover (e.g., edit, delete) */
+    actionButtons?: {
+        /** Icon component for the button */
+        icon: ReactNode;
+        /** Callback function when the button is clicked */
+        onClick: (e: React.MouseEvent) => void;
+        /** Optional tooltip text */
+        tooltip?: string;
+        /** Optional className for the button */
+        className?: string;
+        /** Optional aria label */
+        ariaLabel?: string;
+    }[];
+    /** Function called when editing is complete (for rename functionality) */
+    onEditComplete?: (newName: string) => void;
 }
 
 /**
@@ -57,6 +72,8 @@ export interface ContextMenuProps {
     menuItems: MenuItem[];
     /** Controls menu visibility */
     isOpen: boolean;
+    /** Optional width for the menu */
+    width?: string;
     /** Optional max width for the menu */
     maxWidth?: string;
     /** Optional max height for the menu */
@@ -88,6 +105,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     isOpen, 
     onClose, 
     position,
+    width = undefined,
     maxWidth = undefined,
     maxHeight = undefined,
     className = '',
@@ -99,6 +117,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
+    const [activeActionsIndex, setActiveActionsIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [arrowPosition, setArrowPosition] = useState<string>('50%');
     const [placement, setPlacement] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
@@ -315,6 +334,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 top: adjustedPosition.y,
                 left: adjustedPosition.x,
                 maxWidth: maxWidth || undefined,
+                width: width || undefined,
                 maxHeight: maxHeight || '80vh'
             }}
             tabIndex={-1}
@@ -346,7 +366,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     onMouseEnter={() => {
                         if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
                             setHoveredIndex(index);
-                            setFocusedIndex(index); // Also update focus index for keyboard navigation
+                            setFocusedIndex(index);
+                            setActiveActionsIndex(index);
                         }
                     }}
                     onMouseLeave={() => {
@@ -366,8 +387,34 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         <span className="truncate">{item.label}</span>
                     ) : item.customContent ? (
                         // Render custom content if provided
-                        <div className="w-full overflow-hidden">
-                            {item.customContent}
+                        <div className="w-full relative flex flex-row">
+                            <div className="flex-1 overflow-hidden">
+                                {item.customContent}
+                            </div>
+                            
+                            {/* Action buttons - shown based on state */}
+                            {activeActionsIndex === index && item.actionButtons && item.actionButtons.length > 0 && (
+                                <div className={`flex items-center ml-1 gap-3 transition-opacity ${activeActionsIndex === index ? 'opacity-100' : 'opacity-0'}`}>
+                                    {item.actionButtons.map((btn, btnIndex) => (
+                                        <button
+                                            key={btnIndex}
+                                            className={`variant-thread-menu flex ${btn.className || ''}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                btn.onClick(e);
+                                                setActiveActionsIndex(index);
+                                            }}
+                                            onMouseEnter={() => {
+                                                setActiveActionsIndex(index);
+                                            }}
+                                            aria-label={btn.ariaLabel || 'Action'}
+                                            title={btn.tooltip}
+                                        >
+                                            {btn.icon}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         // Otherwise render default icon + label layout
