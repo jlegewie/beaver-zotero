@@ -1,6 +1,6 @@
-import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useState } from 'react';
+import React  from 'react';
+// @ts-ignore useEffect is defined in React
+import { useEffect, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';
@@ -15,8 +15,10 @@ import {
     isThisMonth
 } from '../utils/dateUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { supabase } from '../../src/services/supabaseClient';
+import { userAtom } from '../atoms/auth';
 
-const MAX_THREADS = 15;
+const MAX_THREADS = 10;
 
 interface RecentThreadsMenuButtonProps {
     className?: string;
@@ -60,6 +62,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     className = '',
     ariaLabel = 'Show chat history'
 }) => {
+    const user = useAtomValue(userAtom);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
@@ -67,6 +70,34 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
     const [allowBlur, setAllowBlur] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (!user) return;
+
+        const formatThread = (thread: any): Thread => ({
+            id: thread.id,
+            name: thread.name,
+            createdAt: thread.created_at,
+            updatedAt: thread.updated_at,
+        });
+
+        const fetchRecentThreads = async () => {
+            const { data, error } = await supabase
+                .from('threads')
+                .select('id, name, created_at, updated_at')
+                .eq('user_id', user.id)
+                .order('updated_at', { ascending: false })
+                .limit(MAX_THREADS);
+
+            if (error) {
+                console.error('Error fetching recent threads:', error);
+                return;
+            }
+
+            setThreads(data.map(formatThread));
+        };
+        fetchRecentThreads();
+    }, [setThreads, user]);
 
     const handleLoadThread = async (threadId: string) => {
         try {
