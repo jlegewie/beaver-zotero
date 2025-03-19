@@ -8,6 +8,7 @@ import IconButton from './IconButton';
 import Tooltip from './Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import RecentThreadsMenuButton from './RecentThreadsMenuButton';
+import UserAccountMenuButton from './UserAccountMenuButton';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -54,14 +55,10 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
             {isAuthenticated && (
                 <div className="flex gap-4">
                     <DatabaseStatusIndicator />
-                    <Tooltip content="User settings" showArrow singleLine>
-                        <IconButton
-                            icon={UserIcon}
-                            className="scale-14"
-                            onClick={() => console.log('User settings')}
-                            ariaLabel="User settings"
-                        />
-                    </Tooltip>
+                    <UserAccountMenuButton
+                        className="scale-14"
+                        ariaLabel="User settings"
+                    />
                 </div>
             )}
         </div>
