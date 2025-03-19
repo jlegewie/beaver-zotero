@@ -21,6 +21,8 @@ interface MenuButtonProps {
         x?: number;
         y?: number;
     };
+    /** Whether to show an arrow pointing to the button */
+    showArrow?: boolean;
 }
 
 /**
@@ -38,7 +40,8 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     ariaLabel,
     disabled = false,
     positionAdjustment,
-    tooltipContent
+    tooltipContent,
+    showArrow = false
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -58,6 +61,10 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
+            
+            // Force any active tooltip to close by triggering a mousedown event on document
+            const mainWindow = Zotero.getMainWindow();
+            mainWindow.document.dispatchEvent(new MouseEvent('click'));
         }
     };
 
@@ -83,7 +90,12 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     return (
         <>
             {tooltipContent ? (
-                <Tooltip content={tooltipContent} showArrow singleLine>
+                <Tooltip
+                    content={tooltipContent} 
+                    showArrow 
+                    singleLine 
+                    disabled={isMenuOpen}
+                >
                     {buttonElement}
                 </Tooltip>
             ) : (
@@ -98,6 +110,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 position={menuPosition}
                 useFixedPosition={true}
                 positionAdjustment={positionAdjustment}
+                showArrow={showArrow}
             />
         </>
     );

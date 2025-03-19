@@ -72,6 +72,8 @@ export interface ContextMenuProps {
         x?: number;
         y?: number;
     };
+    /** Whether to show an arrow pointing to the trigger element */
+    showArrow?: boolean;
 }
 
 /**
@@ -87,12 +89,15 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     className = '',
     useFixedPosition = false,
     usePortal = false,
-    positionAdjustment = { x: 0, y: 0 }
+    positionAdjustment = { x: 0, y: 0 },
+    showArrow = false
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
+    const [arrowPosition, setArrowPosition] = useState<string>('50%');
+    const [placement, setPlacement] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
     
     // Block scrolling when menu is open
     useEffect(() => {
@@ -145,25 +150,65 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         const menuWidth = menuRect.width;
         const menuHeight = menuRect.height;
         
-        // Calculate adjusted position to keep menu within viewport
-        let adjustedX = position.x + (positionAdjustment.x || 0);
-        let adjustedY = position.y + (positionAdjustment.y || 0);
+        // Original anchor position
+        const anchorX = position.x + (positionAdjustment.x || 0);
+        const anchorY = position.y + (positionAdjustment.y || 0);
+        
+        // Calculate adjusted position to keep menu within viewport with a margin of 8px
+        let adjustedX = anchorX;
+        let adjustedY = anchorY;
+        let newPlacement: 'top' | 'bottom' | 'left' | 'right' = 'bottom';
         
         // Check if menu would go off the right side
-        if (adjustedX + menuWidth > viewportWidth) {
-            adjustedX = Math.max(0, viewportWidth - menuWidth);
+        if (adjustedX + menuWidth > viewportWidth - 8) {
+            adjustedX = Math.max(8, viewportWidth - menuWidth - 8);
         }
         
-        // Check if menu would go off the bottom
-        if (adjustedY + menuHeight > viewportHeight) {
-            adjustedY = Math.max(0, viewportHeight - menuHeight);
+        // Check if menu would go off the left side
+        if (adjustedX < 8) {
+            adjustedX = 8;
+        }
+        
+        // Determine vertical placement
+        if (anchorY + menuHeight > viewportHeight - 8) {
+            // Not enough space below, try to place it above
+            if (anchorY - menuHeight > 8) {
+                // There's enough space above
+                adjustedY = anchorY - menuHeight;
+                newPlacement = 'top';
+            } else {
+                // Not enough space above either, just place it at the bottom with scroll
+                adjustedY = Math.max(8, viewportHeight - menuHeight - 8);
+                newPlacement = 'bottom';
+            }
+        } else {
+            // Default placement below the anchor
+            adjustedY = anchorY;
+            newPlacement = 'bottom';
+        }
+        
+        // Calculate arrow position (relative to menu left edge)
+        // The formula centers the arrow on the original click position
+        let arrowPos;
+        if (showArrow) {
+            // Calculate arrow position relative to the menu's left edge
+            // This centers the arrow on the original click position
+            arrowPos = anchorX - adjustedX;
+            
+            // Make sure arrow doesn't go outside of menu bounds
+            const arrowOffset = 12; // Give some margin from the edge
+            if (arrowPos < arrowOffset) arrowPos = arrowOffset;
+            if (arrowPos > menuWidth - arrowOffset) arrowPos = menuWidth - arrowOffset;
+            
+            setArrowPosition(`${arrowPos}px`);
+            setPlacement(newPlacement);
         }
         
         // Only update position if it's actually different to prevent infinite loops
         if (adjustedX !== adjustedPosition.x || adjustedY !== adjustedPosition.y) {
             setAdjustedPosition({ x: adjustedX, y: adjustedY });
         }
-    }, [isOpen, position, positionAdjustment, adjustedPosition]);
+    }, [isOpen, position, positionAdjustment, showArrow]);
     
     // Handle outside clicks
     useEffect(() => {
@@ -315,6 +360,21 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     )}
                 </div>
             ))}
+            
+            {/* Arrow pointing to the trigger element - moved here to be at the container level */}
+            {showArrow && (
+                <span 
+                    className={`tooltip-arrow tooltip-arrow-${placement} block`}
+                    style={{ 
+                        left: arrowPosition, 
+                        display: 'block',
+                        position: 'absolute',
+                        // Position the arrow based on placement
+                        ...(placement === 'top' ? { bottom: '-6px' } : { top: '-6px' }),
+                        zIndex: 1001 // Ensure arrow is above other content
+                    }}
+                />
+            )}
         </div>
     );
     

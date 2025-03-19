@@ -139,6 +139,13 @@ const Tooltip: React.FC<TooltipProps> = ({
         };
     }, [isOpen]);
     
+    // Close tooltip when disabled prop changes to true
+    useEffect(() => {
+        if (disabled && isOpen) {
+            setIsOpen(false);
+        }
+    }, [disabled]);
+    
     // Handle mouse enter/leave for the anchor element
     const handleMouseEnter = () => {
         if (disabled) return;
