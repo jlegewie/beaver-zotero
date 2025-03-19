@@ -64,6 +64,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     ariaLabel = 'Show chat history'
 }) => {
     const user = useAtomValue(userAtom);
+    const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
@@ -79,7 +80,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
 
     // Fetch initial threads
     useEffect(() => {
-        if (!user) return;
+        if (!user || !isMenuOpen) return;
         
         const fetchThreads = async () => {
             setIsLoading(true);
@@ -103,7 +104,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
         };
         
         fetchThreads();
-    }, [setThreads, user]);
+    }, [setThreads, user, isMenuOpen]);
 
     // Load more threads
     const loadMoreThreads = async () => {
@@ -287,6 +288,7 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
                     </button>
                 )
             }
+            toggleCallback={setIsMenuOpen}
         />
     );
 };

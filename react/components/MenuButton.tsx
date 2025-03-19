@@ -1,6 +1,6 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState, useRef, ReactNode } from 'react';
+import { useState, useRef, ReactNode, useEffect } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
 import Tooltip from './Tooltip';
@@ -26,6 +26,8 @@ interface MenuButtonProps {
     showArrow?: boolean;
     /** Optional custom footer content to render at the bottom of the menu */
     footer?: ReactNode;
+    /** Optional callback to toggle the menu */
+    toggleCallback?: (isOpen: boolean) => void;
 }
 
 /**
@@ -46,11 +48,18 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     positionAdjustment,
     tooltipContent,
     showArrow = false,
-    footer
+    footer,
+    toggleCallback,
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+    useEffect(() => {
+        if (toggleCallback) {
+            toggleCallback(isMenuOpen);
+        }
+    }, [isMenuOpen, toggleCallback]);
     
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
