@@ -2,6 +2,7 @@ import React from 'react';
 // @ts-ignore - not idea why
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import ReactDOM from 'react-dom';
+import { Icon } from './icons';
 
 /**
 * Menu item interface
@@ -306,12 +307,12 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         <>{item.customContent}</>
                     ) : (
                         // Otherwise render default icon + label layout
-                        <>
+                        <span className="flex items-center gap-2">
                             {item.icon && (
-                                <span className="flex-none flex items-center">{item.icon}</span>
+                                <Icon icon={item.icon} size={14} className="font-color-secondary"/>
                             )}
                             <span className="flex-1 text-sm font-color-secondary">{item.label}</span>
-                        </>
+                        </span>
                     )}
                 </div>
             ))}
