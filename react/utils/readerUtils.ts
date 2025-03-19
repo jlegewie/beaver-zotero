@@ -17,7 +17,9 @@ function getCurrentReader(): any | undefined {
  * @param reader - The reader instance.
  * @returns The current page number or null if the reader is not a PDF reader.
  */
-function getCurrentPage(reader: any): number | null {
+function getCurrentPage(reader?: any): number | null {
+    if (!reader) reader = getCurrentReader();
+    if (!reader) return null;
     if (reader.type !== 'pdf') {
         return null;
     }
