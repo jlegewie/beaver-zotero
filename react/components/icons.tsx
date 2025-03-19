@@ -20,3 +20,4 @@ export { default as AlertIcon } from './icons/AlertIcon';
 export { default as StopIcon } from './icons/StopIcon';
 export { default as DatabaseStatusIcon } from './icons/DatabaseStatusIcon';
 export { default as UserIcon } from './icons/UserIcon';
+export { default as BookmarkIcon } from './icons/BookmarkIcon';
