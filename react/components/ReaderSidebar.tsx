@@ -13,7 +13,7 @@ const ReaderSidebarContent = () => {
 
     useObservePaneCollapse("reader");
     // Recent threads subscription
-    useRecentThreads();
+    // useRecentThreads();
     // Update sources from reader item
     updateSourcesFromReader();
     // Render the sidebar

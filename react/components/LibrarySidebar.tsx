@@ -18,7 +18,7 @@ const LibrarySidebarContent = () => {
     useZoteroSelection();
     useObservePaneCollapse("library");
     // Recent threads subscription
-    useRecentThreads();
+    // useRecentThreads();
     // Render the sidebar
     return <Sidebar location="library" />;
 }
