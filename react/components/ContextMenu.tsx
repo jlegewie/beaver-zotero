@@ -35,6 +35,10 @@ export interface MenuItem {
      * ];
      */
     customContent?: ReactNode;
+    /** Whether this item is a group header */
+    isGroupHeader?: boolean;
+    /** Whether this item is a divider */
+    isDivider?: boolean;
 }
 
 /**
@@ -245,8 +249,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
                         let next = (prev + 1) % menuItems.length;
-                        // Skip disabled items
-                        while (menuItems[next].disabled && next !== prev) {
+                        // Skip disabled items, headers, and dividers
+                        while ((menuItems[next].disabled || menuItems[next].isGroupHeader || menuItems[next].isDivider) && next !== prev) {
                             next = (next + 1) % menuItems.length;
                         }
                         return next;
@@ -256,8 +260,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
                         let next = (prev - 1 + menuItems.length) % menuItems.length;
-                        // Skip disabled items
-                        while (menuItems[next].disabled && next !== prev) {
+                        // Skip disabled items, headers, and dividers
+                        while ((menuItems[next].disabled || menuItems[next].isGroupHeader || menuItems[next].isDivider) && next !== prev) {
                             next = (next - 1 + menuItems.length) % menuItems.length;
                         }
                         return next;
@@ -266,7 +270,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 case 'Enter':
                 case ' ':
                     e.preventDefault();
-                    if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled) {
+                    if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled && 
+                        !menuItems[focusedIndex].isGroupHeader && !menuItems[focusedIndex].isDivider) {
                         menuItems[focusedIndex].onClick();
                         onClose();
                     }
@@ -284,7 +289,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (isOpen && menuRef.current) {
             menuRef.current.focus();
-            const firstEnabled = menuItems.findIndex(item => !item.disabled);
+            const firstEnabled = menuItems.findIndex(item => 
+                !item.disabled && !item.isGroupHeader && !item.isDivider
+            );
             if (firstEnabled >= 0) {
                 setFocusedIndex(firstEnabled);
             }
@@ -318,22 +325,25 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             {menuItems.map((item, index) => (
                 <div
                     key={index}
-                    role="menuitem"
-                    tabIndex={focusedIndex === index ? 0 : -1}
+                    role={item.isGroupHeader ? 'presentation' : 'menuitem'}
+                    tabIndex={focusedIndex === index && !item.isGroupHeader ? 0 : -1}
                     className={`
-                        flex items-center gap-2 px-3 py-2 rounded-md transition user-select-none
-                        ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                        ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-tertiary' : ''}
+                        ${item.isDivider ? 'border-t border-quinary my-1' : ''}
+                        ${item.isGroupHeader ? 'px-3 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
+                          `flex items-center gap-2 px-3 py-2 rounded-md transition user-select-none
+                          ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-tertiary' : ''}`
+                        }
                     `}
                     onClick={(e) => {
                         e.stopPropagation(); // Prevent click from reaching parent elements
-                        if (!item.disabled) {
+                        if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
                             item.onClick();
                             onClose();
                         }
                     }}
                     onMouseEnter={() => {
-                        if (!item.disabled) {
+                        if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
                             setHoveredIndex(index);
                             setFocusedIndex(index); // Also update focus index for keyboard navigation
                         }
@@ -343,10 +353,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             setHoveredIndex(-1);
                         }
                     }}
-                    onFocus={() => setFocusedIndex(index)}
-                    aria-disabled={item.disabled}
+                    onFocus={() => {
+                        if (!item.isGroupHeader && !item.isDivider) {
+                            setFocusedIndex(index);
+                        }
+                    }}
+                    aria-disabled={item.disabled || item.isGroupHeader || item.isDivider}
                 >
-                    {item.customContent ? (
+                    {item.isDivider ? null : item.isGroupHeader ? (
+                        // Render group header
+                        <span>{item.label}</span>
+                    ) : item.customContent ? (
                         // Render custom content if provided
                         <>{item.customContent}</>
                     ) : (
