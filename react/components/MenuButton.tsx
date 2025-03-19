@@ -1,6 +1,6 @@
 import React from 'react';
 // @ts-ignore no idea why
-import { useState, useRef } from 'react';
+import { useState, useRef, ReactNode } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
 import Tooltip from './Tooltip';
@@ -24,6 +24,8 @@ interface MenuButtonProps {
     };
     /** Whether to show an arrow pointing to the button */
     showArrow?: boolean;
+    /** Optional custom footer content to render at the bottom of the menu */
+    footer?: ReactNode;
 }
 
 /**
@@ -43,7 +45,8 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     disabled = false,
     positionAdjustment,
     tooltipContent,
-    showArrow = false
+    showArrow = false,
+    footer
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -114,6 +117,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 positionAdjustment={positionAdjustment}
                 showArrow={showArrow}
                 width={width}
+                footer={footer}
             />
         </>
     );

@@ -95,6 +95,8 @@ export interface ContextMenuProps {
     };
     /** Whether to show an arrow pointing to the trigger element */
     showArrow?: boolean;
+    /** Optional custom footer content to render at the bottom of the menu */
+    footer?: ReactNode;
 }
 
 /**
@@ -112,7 +114,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useFixedPosition = false,
     usePortal = false,
     positionAdjustment = { x: 0, y: 0 },
-    showArrow = false
+    showArrow = false,
+    footer
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
@@ -352,7 +355,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
                           `flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                          ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-tertiary' : ''}`
+                          ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
                         }
                     `}
                     style={!item.isDivider && !item.isGroupHeader ? { maxWidth: '100%', minWidth: 0 } : undefined}
@@ -393,7 +396,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             </div>
                             
                             {/* Action buttons - shown based on state */}
-                            {activeActionsIndex === index && item.actionButtons && item.actionButtons.length > 0 && (
+                            {item.actionButtons && item.actionButtons.length > 0 && (
                                 <div className={`flex items-center ml-1 gap-3 transition-opacity ${activeActionsIndex === index ? 'opacity-100' : 'opacity-0'}`}>
                                     {item.actionButtons.map((btn, btnIndex) => (
                                         <button
@@ -427,6 +430,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     )}
                 </div>
             ))}
+            
+            {/* Custom footer section */}
+            {footer && (
+                <div className="mt-1">
+                    {footer}
+                </div>
+            )}
             
             {/* Arrow pointing to the trigger element - moved here to be at the container level */}
             {showArrow && (
