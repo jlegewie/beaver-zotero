@@ -1,12 +1,14 @@
-import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
+import { format, isToday, isYesterday, isThisWeek, isThisMonth } from 'date-fns';
+
+export { isToday, isYesterday, isThisWeek, isThisMonth };
 
 export function formatRelativeDate(date: Date) {
     if (isToday(date)) {
-        return `Today at ${format(date, 'h.mma')}`;
+        return `Today at ${format(date, 'h:mma')}`;
     } else if (isYesterday(date)) {
-        return `Yesterday at ${format(date, 'h.mma')}`;
+        return `Yesterday at ${format(date, 'h:mma')}`;
     } else if (isThisWeek(date)) {
-        return `${format(date, 'EEEE')} at ${format(date, 'h.mma')}`;
+        return `${format(date, 'EEEE')} at ${format(date, 'h:mma')}`;
     } else {
         return format(date, 'MMM d, yyyy');
     }
