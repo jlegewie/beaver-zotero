@@ -23,3 +23,4 @@ export { default as UserIcon } from './icons/UserIcon';
 export { default as BookmarkIcon } from './icons/BookmarkIcon';
 export { default as CheckmarkCircleIcon } from './icons/CheckmarkCircleIcon';
 export { default as CancelCircleIcon } from './icons/CancelCircleIcon';
+export { default as LogoutIcon } from './icons/LogoutIcon';
