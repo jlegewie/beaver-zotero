@@ -73,7 +73,8 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="Chat history"
-            maxWidth="280px"
+            maxWidth="240px"
+            maxHeight="260px"
         />
     );
 };
