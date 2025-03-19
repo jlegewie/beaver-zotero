@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
 import { threadSourceKeysAtom } from "./threads";
+import { getCurrentReader } from "../utils/readerUtils";
 
 /**
 * Current user message and sources
@@ -84,6 +85,23 @@ export const updateSourcesFromZoteroSelectionAtom = atom(
     async (get, set) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         await set(updateSourcesFromZoteroItemsAtom, items);
+    }
+);
+
+/**
+* Update sources based on Zotero reader item
+*/
+export const updateSourcesFromReaderAtom = atom(
+    null,
+    async (get, set, reader?: any) => {
+        if (!reader) reader = getCurrentReader();
+        if (!reader) return;
+        const item = Zotero.Items.get(reader.itemID);
+        if (item) {
+            console.log("[Beaver] Updating sources from reader item", item.isRegularItem());
+            await set(updateSourcesFromZoteroItemsAtom, [item]);
+            set(readerItemKeyAtom, item.key);
+        }
     }
 );
 
