@@ -55,11 +55,7 @@ const WelcomePage: React.FC = () => {
                 <Button variant="outline" className="scale-85 fit-content"> Edit </Button>
             </div>
             {prompts.map((prompt, index) => (
-                <Button
-                    key={index}
-                    variant="surface"
-                    className="welcome-page-button"
-                >
+                <Button key={index} variant="surface-light">
                     <span className="font-color-tertiary text-base">
                         {prompt.shortcut}
                     </span>
