@@ -9,7 +9,7 @@ import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import IconButton from './IconButton';
 import Button from './Button';
-import { getReaderContext } from '../utils/readerUtils';
+import { getAppState } from '../utils/appState';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -34,13 +34,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isStreaming || userMessage.length === 0) return;
 
         // Get context from reader if it exists
-        const context = getReaderContext();
+        const appState = getAppState();
 
         // Generate response
         generateResponse({
             content: userMessage,
             sources: currentSources,
-            readerContext: context,
+            appState,
         });
 
         console.log('Chat completion:', userMessage);

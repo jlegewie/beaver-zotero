@@ -2,12 +2,13 @@ import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
-import { createSourceFromAttachmentOrNote, createSourceFromItem, getChildItems, getZoteroItem, isSourceValid } from '../utils/sourceUtils';
+import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
 import { chatService } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
+import { AppState } from 'react/ui/types';
 
 const MODE = getPref('mode');
 
@@ -63,7 +64,7 @@ export const generateResponseAtom = atom(
     async (get, set, payload: {
         content: string;
         sources: InputSource[];
-        readerContext?: ReaderContext;
+        appState: AppState;
     }) => {
         // Get current messages
         const threadMessages = get(threadMessagesAtom);
@@ -85,16 +86,6 @@ export const generateResponseAtom = atom(
         
         // Update thread sources atom
         set(threadSourcesAtom, newThreadSources);
-
-        // Provide reader context sources contain current reader item
-        let context: ReaderContext | undefined;
-        if (payload.readerContext) {
-            context = payload.readerContext;
-            // const sourceKeys = newThreadSources.map((s) => s.itemKey);
-            // if (sourceKeys.includes(payload.readerContext.itemKey)) {
-            //     context = payload.readerContext;
-            // }
-        }
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
@@ -102,7 +93,7 @@ export const generateResponseAtom = atom(
         
         // Execute chat completion
         if (MODE === 'local') {
-            _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, context, set);
+            _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, undefined, set);
         } else {
             _processChatCompletionViaBackend(
                 get(currentThreadIdAtom),
@@ -110,7 +101,7 @@ export const generateResponseAtom = atom(
                 assistantMsg.id,    // the ID from createAssistantMessage
                 userMsg.content,
                 payloadSources.map((s) => `${s.libraryID}-${s.itemKey}`),
-                context,
+                payload.appState,
                 set
             );
         }
@@ -194,7 +185,7 @@ function _processChatCompletionViaBackend(
     assistantMessageId: string,
     content: string,
     sources: string[],
-    context: ReaderContext | undefined,
+    appState: AppState,
     set: any
 ) {
     chatService.requestChatCompletion(
@@ -204,7 +195,7 @@ function _processChatCompletionViaBackend(
             assistantMessageId,
             content,
             sources,
-            context
+            appState
         },
         {
             onThread: (newThreadId) => {
