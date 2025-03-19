@@ -8,6 +8,7 @@ import Tooltip from './Tooltip';
 interface MenuButtonProps {
     menuItems: MenuItem[];
     variant?: string;
+    width?: string;
     maxWidth?: string;
     maxHeight?: string;
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
@@ -31,6 +32,7 @@ interface MenuButtonProps {
 const MenuButton: React.FC<MenuButtonProps> = ({
     menuItems,
     variant = 'surface',
+    width = undefined,
     maxWidth = undefined,
     maxHeight = undefined,
     icon,
@@ -111,6 +113,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 useFixedPosition={true}
                 positionAdjustment={positionAdjustment}
                 showArrow={showArrow}
+                width={width}
             />
         </>
     );
