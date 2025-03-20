@@ -55,7 +55,7 @@ function extractItemData(item: Zotero.Item): ItemData {
         version: item.version,
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash(),
-        item_json: item.toJSON()
+        // item_json: item.toJSON()
     };
     
     return itemData;
@@ -79,7 +79,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         title: item.getField('title'),
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        item_json: item.toJSON(),
+        // item_json: item.toJSON(),
         // file table fields
         file: await extractFileData(item)
     };
