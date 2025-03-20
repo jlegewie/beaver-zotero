@@ -333,6 +333,11 @@
 [id^="beaver-pane-"] .transition { transition: all 0.2s ease-in-out; }
 [id^="beaver-pane-"] .transition-colors { transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out; }
 [id^="beaver-pane-"] .transition-opacity { transition: opacity 0.2s ease-in-out; }
+[id^="beaver-pane-"] .duration-300 { transition-duration: 0.3s; }
+[id^="beaver-pane-"] .duration-400 { transition-duration: 0.4s; }
+[id^="beaver-pane-"] .duration-500 { transition-duration: 0.5s; }
+[id^="beaver-pane-"] .duration-700 { transition-duration: 0.7s; }
+[id^="beaver-pane-"] .duration-1000 { transition-duration: 1s; }
 
 /* States */
 [id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
