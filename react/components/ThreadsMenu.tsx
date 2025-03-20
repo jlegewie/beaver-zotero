@@ -12,6 +12,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
 import { getDateGroup } from '../utils/dateUtils';
+import { userScrolledAtom } from '../atoms/ui';
 
 const MAX_THREADS = 10;
 
@@ -52,6 +53,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
+    const setUserScrolled = useSetAtom(userScrolledAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
@@ -121,6 +123,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
 
     const handleLoadThread = async (threadId: string) => {
         try {
+            setUserScrolled(false);
             // Set the current thread ID
             setCurrentThreadId(threadId);
 

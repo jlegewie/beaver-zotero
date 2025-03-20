@@ -4,10 +4,10 @@ import InputArea from "./InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
 import { threadMessagesAtom } from '../atoms/threads';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { previewedSourceAtom } from '../atoms/ui';
+import { previewedSourceAtom, userScrolledAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
@@ -19,7 +19,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
-    const [userScrolled, setUserScrolled] = useState(false);
+    const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     

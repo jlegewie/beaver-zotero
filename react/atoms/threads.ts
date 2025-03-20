@@ -4,6 +4,7 @@ import { ThreadSource, SourceCitation } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { userScrolledAtom } from "./ui";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -62,6 +63,7 @@ export const newThreadAtom = atom(
         set(currentUserMessageAtom, '');
         set(resetCurrentSourcesAtom);
         set(updateSourcesFromZoteroSelectionAtom);
+        set(userScrolledAtom, false);
     }
 );
 

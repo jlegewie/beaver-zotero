@@ -5,6 +5,11 @@ import { InputSource } from 'react/types/sources';
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 
+// UI behavior and elements
+export const userScrolledAtom = atom(false);
+
+
+
 // Sync status
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 export const syncStatusAtom = atom<SyncStatus>('idle');
