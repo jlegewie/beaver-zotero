@@ -51,7 +51,6 @@ export interface ItemData {
     date_modified?: string;
     version: number;
     deleted: boolean;
-    item_json?: any;
 }
 
 export interface AttachmentData {
@@ -59,11 +58,11 @@ export interface AttachmentData {
     library_id: number;
     zotero_key: string;
     parent_key: string | null;
+    is_primary: boolean | null;
     deleted: boolean;
     title: string;
     date_added: string;
     date_modified: string;
-    item_json: any;
     // file table data
     file: FileData | null;
 }

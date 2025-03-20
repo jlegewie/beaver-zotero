@@ -68,12 +68,23 @@ function extractItemData(item: Zotero.Item): ItemData {
  */
 async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData> {
 
+    // Is primary attachment
+    let is_primary = null;
+    if (item.parentItem) {
+        is_primary = false;
+        const bestAttachment = await item.parentItem.getBestAttachment();
+        if (bestAttachment) {
+            is_primary = bestAttachment.key === item.key;
+        }
+    }
+
     // Extract basic metadata
     const itemData: AttachmentData = {
         // attachments table fields
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
+        is_primary: is_primary,
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash() as boolean,
         title: item.getField('title'),
