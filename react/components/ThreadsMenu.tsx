@@ -8,14 +8,7 @@ import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { Thread } from '../types/messages';
 import { ClockIcon } from './icons';
-import { 
-    isToday,
-    isYesterday,
-    isThisWeek,
-    isThisMonth
-} from '../utils/dateUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { supabase } from '../../src/services/supabaseClient';
 import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
 import { getDateGroup } from '../utils/dateUtils';
