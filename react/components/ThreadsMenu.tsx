@@ -266,7 +266,8 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             maxHeight="260px"
             showArrow={true}
             footer={
-                hasMore && (
+                <>
+                {hasMore ? (
                     <button 
                         className="scale-85 variant-outline has-text mb-1 flex items-center justify-center"
                         onClick={loadMoreThreads}
@@ -278,7 +279,12 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                             "Show more"
                         )}
                     </button>
-                )
+                ) : (threads.filter(thread => thread.id !== currentThreadId).length === 0) ? (
+                    <div className="text-center font-color-tertiary p-2">
+                        No threads
+                    </div>
+                ) : null}
+                </>
             }
             toggleCallback={setIsMenuOpen}
         />
