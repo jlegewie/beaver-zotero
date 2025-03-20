@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import InputArea from "./InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
-import { threadMessagesAtom } from '../atoms/threads';
+import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -16,6 +16,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const threadId = useAtomValue(currentThreadIdAtom);
     const threadMessages = useAtomValue(threadMessagesAtom);
     const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -27,6 +28,12 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         // Focus the input
         inputRef.current?.focus();
     }, []);
+
+    useEffect(() => {
+        if (messagesContainerRef.current) {
+            scrollToBottom(messagesContainerRef, false);
+        }
+    }, [threadId]);
     
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
