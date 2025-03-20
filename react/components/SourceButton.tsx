@@ -13,6 +13,7 @@ import { CancelIcon } from './icons'
 // import Button from './Button'
 import { atom } from 'jotai'
 import IconButton from './IconButton'
+import MissingSourceButton from './MissingSourceButton'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 
@@ -43,7 +44,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
 
         // Get the Zotero item
         const item = getZoteroItem(source);
-        if (!item) return null;
+        if (!item) return <MissingSourceButton source={source} />;
         
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
