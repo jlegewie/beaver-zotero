@@ -24,7 +24,7 @@ export function getAppState(): AppState {
     return {
         view: 'library',
         reader_type: null,
-        library_id: items[0].libraryID,
+        library_id: items.length > 0 ? items[0].libraryID : null,
         item_keys: items.map((item) => item.key).slice(0, 4),
         selection: null,
         page: null,
