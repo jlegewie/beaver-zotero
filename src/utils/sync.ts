@@ -50,8 +50,8 @@ function extractItemData(item: Zotero.Item): ItemData {
         reference: Zotero.Beaver.citationService.formatBibliography(item),
         identifiers: extractIdentifiers(item),
         tags: item.getTags(),
-        date_added: item.dateAdded,
-        date_modified: item.dateModified,
+        date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
+        date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         version: item.version,
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash(),
@@ -77,8 +77,8 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash() as boolean,
         title: item.getField('title'),
-        date_added: item.dateAdded,
-        date_modified: item.dateModified,
+        date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
+        date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         item_json: item.toJSON(),
         // file table fields
         file: await extractFileData(item)
