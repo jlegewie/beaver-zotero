@@ -396,7 +396,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             </div>
                             
                             {/* Action buttons - shown based on state */}
-                            {item.actionButtons && item.actionButtons.length > 0 && (
+                            {activeActionsIndex === index && item.actionButtons && item.actionButtons.length > 0 && (
                                 <div className={`flex items-center ml-1 gap-3 transition-opacity ${activeActionsIndex === index ? 'opacity-100' : 'opacity-0'}`}>
                                     {item.actionButtons.map((btn, btnIndex) => (
                                         <button
