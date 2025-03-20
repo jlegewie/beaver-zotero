@@ -18,6 +18,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { supabase } from '../../src/services/supabaseClient';
 import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
+import { getDateGroup } from '../utils/dateUtils';
 
 const MAX_THREADS = 10;
 
@@ -38,19 +39,10 @@ const groupThreadsByDate = (threads: Thread[]) => {
         'Older': []
     };
     
+    // Group threads using the utility function
     threads.forEach(thread => {
-        const date = new Date(thread.updatedAt);
-        if (isToday(date)) {
-            groups['Today'].push(thread);
-        } else if (isYesterday(date)) {
-            groups['Yesterday'].push(thread);
-        } else if (isThisWeek(date)) {
-            groups['This Week'].push(thread);
-        } else if (isThisMonth(date)) {
-            groups['This Month'].push(thread);
-        } else {
-            groups['Older'].push(thread);
-        }
+        const group = getDateGroup(thread.updatedAt);
+        groups[group].push(thread);
     });
     
     return groups;
