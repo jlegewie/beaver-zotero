@@ -21,7 +21,7 @@ import Spinner from './icons/Spinner';
 
 const MAX_THREADS = 10;
 
-interface RecentThreadsMenuButtonProps {
+interface ThreadsMenuProps {
     className?: string;
     ariaLabel?: string;
 }
@@ -59,7 +59,7 @@ const groupThreadsByDate = (threads: Thread[]) => {
 /**
  * Button component that shows recent threads in a dropdown menu
  */
-const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({ 
+const ThreadsMenu: React.FC<ThreadsMenuProps> = ({ 
     className = '',
     ariaLabel = 'Show chat history'
 }) => {
@@ -293,4 +293,4 @@ const RecentThreadsMenuButton: React.FC<RecentThreadsMenuButtonProps> = ({
     );
 };
 
-export default RecentThreadsMenuButton; 
+export default ThreadsMenu; 

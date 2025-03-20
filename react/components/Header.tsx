@@ -7,7 +7,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
 import Tooltip from './Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import RecentThreadsMenuButton from './RecentThreadsMenuButton';
+import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 
 interface HeaderProps {
@@ -47,7 +47,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         disabled={threadMessages.length === 0}
                     />
                 </Tooltip>
-                <RecentThreadsMenuButton
+                <ThreadsMenu
                     className="scale-14"
                     ariaLabel="Show chat history"
                 />
