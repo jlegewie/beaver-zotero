@@ -374,7 +374,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         ))
                     ) : (
                         <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                            {noResultsText}
+                            {/* {noResultsText} */}
+                            {searchQuery.trim() ? "No results found" : "Start typing to search"}
                         </div>
                     )}
                     
