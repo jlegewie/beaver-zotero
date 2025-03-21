@@ -109,6 +109,8 @@ const AddSourcesMenu: React.FC<{
                 
                 if (!item) continue;
 
+                const title = item.getDisplayTitle();
+
                 // Create a source from the item
                 const source: InputSource = await createSourceFromItem(item, true);
 
@@ -120,7 +122,7 @@ const AddSourcesMenu: React.FC<{
                 
                 // Create the menu item
                 menuItems.push({
-                    label: getDisplayNameFromItem(item) + " " + result.title,
+                    label: getDisplayNameFromItem(item) + " " + title,
                     onClick: async () => await handleMenuItemClick(source, isValid),
                     // disabled: !isValid,
                     customContent: (
@@ -135,7 +137,7 @@ const AddSourcesMenu: React.FC<{
                                     {isInSources && <Icon icon={TickIcon} className="scale-12" />}
                                 </div>
                                 <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
-                                    {result.title}
+                                    {title}
                                 </span>
                             </div>
                         </div>
