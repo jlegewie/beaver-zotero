@@ -91,7 +91,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
         <button
             className={`
                 variant-${variant}
-                ${icon && !buttonLabel ? 'icon-only' : ''}
+                ${icon && !buttonLabel ? 'p-1' : ''}
                 ${className}`
             }
             ref={buttonRef}
