@@ -1,9 +1,9 @@
 import React from 'react';
 // @ts-ignore no types for react
-import { useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import SearchMenuButton from './SearchMenuButton';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
-import { searchService } from '../../src/services/searchService';
+import { ItemSearchResult, searchService } from '../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
 import { SearchMenuItem } from './SearchMenu';
@@ -15,6 +15,8 @@ import { InputSource } from 'react/types/sources';
 const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
+    const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
+    const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
 
     const getIconElement = (item: Zotero.Item) => {
         const iconName = item.getItemTypeIconName();
@@ -44,7 +46,8 @@ const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
     }
 
     // This function is called when the user types in the search field
-    const handleSearch = async (query: string): Promise<SearchMenuItem[]> => {
+    const handleSearch = async (query: string) => {
+        console.log("handleSearch", query);
         if (!query.trim()) return [];
         
         try {
@@ -52,7 +55,19 @@ const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
             
             // Search Zotero items via the API
             const results = await searchService.search(query);
-            
+            console.log(results);
+            // Update the search results
+            setSearchResults(results);
+        } catch (error) {
+            console.error('Error searching Zotero items:', error);
+            return [];
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const searchToMenuItems = async (results: ItemSearchResult[]) => {
             // Map the search results to menu items
             const menuItems: SearchMenuItem[] = [];
             
@@ -98,20 +113,16 @@ const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
                     ),
                 });
             }
-            return menuItems;
-        } catch (error) {
-            console.error('Error searching Zotero items:', error);
-            return [];
-        } finally {
-            setIsLoading(false);
+            setMenuItems(menuItems);
         }
-    };
+        searchToMenuItems(searchResults);
+    }, [searchResults, sources]);
 
     return (
         <SearchMenuButton
             variant="outline"
             className="scale-90"
-            menuItems={[]} // Initial empty menu items
+            menuItems={menuItems}
             onSearch={handleSearch}
             noResultsText="No results found"
             placeholder="Search Zotero Items"

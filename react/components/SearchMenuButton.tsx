@@ -26,7 +26,7 @@ interface SearchMenuButtonProps {
     /** Optional callback to toggle the menu */
     toggleCallback?: (isOpen: boolean) => void;
     /** Optional callback to search the menu */
-    onSearch: (query: string) => Promise<SearchMenuItem[]>;
+    onSearch: (query: string) => void;
     /** Optional text to display when no results are found */
     noResultsText: string;
     /** Optional placeholder text for the search input */
@@ -121,7 +121,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
                 buttonElement
             )}
             <SearchMenu
-                initialMenuItems={menuItems}
+                menuItems={menuItems}
                 isOpen={isMenuOpen}
                 maxWidth={maxWidth}
                 maxHeight={maxHeight}

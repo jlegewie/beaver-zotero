@@ -30,7 +30,7 @@ export interface MenuPosition {
 */
 export interface SearchMenuProps {
     /** Initial array of menu items */
-    initialMenuItems: SearchMenuItem[];
+    menuItems: SearchMenuItem[];
     /** Controls menu visibility */
     isOpen: boolean;
     /** Optional width for the menu */
@@ -55,7 +55,7 @@ export interface SearchMenuProps {
         y?: number;
     };
     /** Search function that returns filtered menu items based on input */
-    onSearch: (query: string) => Promise<SearchMenuItem[]>;
+    onSearch: (query: string) => void;
     /** Text to display when no results are found */
     noResultsText: string;
     /** Placeholder text for the search input */
@@ -66,7 +66,7 @@ export interface SearchMenuProps {
 * A search menu component with filterable items
 */
 const SearchMenu: React.FC<SearchMenuProps> = ({ 
-    initialMenuItems, 
+    menuItems, 
     isOpen, 
     onClose, 
     position,
@@ -88,7 +88,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
+    // const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
     
     // Modified reset effect
     // useEffect(() => {
@@ -293,23 +293,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         setSearchQuery(query);
         
         try {
-            if (query.trim()) {
-                const filteredItems = await onSearch(query);
-                // Only update if the current query still matches what we searched for
-                if (query === e.target.value) {
-                    setMenuItems(filteredItems);
-                    
-                    // Reset focus to first item if there are results
-                    if (filteredItems.length > 0) {
-                        setFocusedIndex(0);
-                    } else {
-                        setFocusedIndex(-1);
-                    }
-                }
-            } else {
-                // Show initial items if query is empty
-                setMenuItems(initialMenuItems);
-            }
+            if (query.trim()) await onSearch(query);
         } catch (error) {
             console.error('Error during search:', error);
         }
