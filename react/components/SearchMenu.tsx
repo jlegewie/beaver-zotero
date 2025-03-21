@@ -1,0 +1,440 @@
+import React from 'react';
+// @ts-ignore no types for react
+import { useEffect, useRef, useState, ReactNode } from 'react';
+import { Icon } from './icons';
+
+/**
+* Menu item interface for search menu
+*/
+export interface SearchMenuItem {
+    /** Label text for the menu item */
+    label: string;
+    /** Callback function when item is clicked */
+    onClick: () => void;
+    /** Optional icon element */
+    icon?: ReactNode;
+}
+
+/**
+* Position interface for menu placement
+*/
+export interface MenuPosition {
+    x: number;
+    y: number;
+}
+
+/**
+* Props for the SearchMenu component
+*/
+export interface SearchMenuProps {
+    /** Initial array of menu items */
+    initialMenuItems: SearchMenuItem[];
+    /** Controls menu visibility */
+    isOpen: boolean;
+    /** Optional width for the menu */
+    width?: string;
+    /** Optional max width for the menu */
+    maxWidth?: string;
+    /** Optional max height for the menu */
+    maxHeight?: string;
+    /** Callback when menu should close */
+    onClose: () => void;
+    /** Position coordinates for menu placement */
+    position: MenuPosition;
+    /** Optional CSS class name */
+    className?: string;
+    /** Whether to use fixed positioning instead of absolute */
+    verticalPosition: 'below' | 'above';
+    /** Whether to use fixed positioning instead of absolute */
+    useFixedPosition?: boolean;
+    /** Optional adjustments for the menu position */
+    positionAdjustment?: {
+        x?: number;
+        y?: number;
+    };
+    /** Search function that returns filtered menu items based on input */
+    onSearch: (query: string) => SearchMenuItem[];
+    /** Text to display when no results are found */
+    noResultsText: string;
+    /** Placeholder text for the search input */
+    placeholder: string;
+}
+
+/**
+* A search menu component with filterable items
+*/
+const SearchMenu: React.FC<SearchMenuProps> = ({ 
+    initialMenuItems, 
+    isOpen, 
+    onClose, 
+    position,
+    width = undefined,
+    maxWidth = undefined,
+    maxHeight = undefined,
+    className = '',
+    useFixedPosition = false,
+    positionAdjustment = { x: 0, y: 0 },
+    verticalPosition = 'below',
+    onSearch,
+    noResultsText,
+    placeholder
+}) => {
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+    const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
+    const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
+    const [searchQuery, setSearchQuery] = useState<string>('');
+    const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
+    
+    // Reset search when menu opens/closes
+    useEffect(() => {
+        if (isOpen) {
+            setSearchQuery('');
+            setMenuItems(initialMenuItems);
+        }
+    }, [isOpen, initialMenuItems]);
+    
+    // Block scrolling when menu is open
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        // Prevent scroll on all elements when menu is open except for the menu itself
+        const preventScroll = (e: Event) => {
+            // Check if the event originated from within the menu
+            if (menuRef.current && menuRef.current.contains(e.target as Node)) {
+                // Allow scrolling within the menu
+                return;
+            }
+            
+            // Prevent scroll on elements outside the menu
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        
+        // Get all scrollable containers
+        const messagesArea = Zotero.getMainWindow().document.getElementById('beaver-messages');
+        if (messagesArea) {
+            messagesArea.addEventListener('wheel', preventScroll, { passive: false });
+            messagesArea.addEventListener('touchmove', preventScroll, { passive: false });
+        }
+        
+        // Also prevent on document for safety
+        Zotero.getMainWindow().document.addEventListener('wheel', preventScroll, { capture: true, passive: false });
+        Zotero.getMainWindow().document.addEventListener('touchmove', preventScroll, { capture: true, passive: false });
+        
+        return () => {
+            if (messagesArea) {
+                messagesArea.removeEventListener('wheel', preventScroll);
+                messagesArea.removeEventListener('touchmove', preventScroll);
+            }
+            Zotero.getMainWindow().document.removeEventListener('wheel', preventScroll, { capture: true });
+            Zotero.getMainWindow().document.removeEventListener('touchmove', preventScroll, { capture: true });
+        };
+    }, [isOpen]);
+    
+    // Calculate adjusted position when menu opens
+    useEffect(() => {
+        if (!isOpen || !menuRef.current) return;
+        
+        // Get viewport dimensions
+        const viewportWidth = Zotero.getMainWindow().innerWidth;
+        const viewportHeight = Zotero.getMainWindow().innerHeight;
+        
+        // Get menu dimensions
+        const menuRect = menuRef.current.getBoundingClientRect();
+        const menuWidth = menuRect.width;
+        const menuHeight = menuRect.height;
+        
+        // Original anchor position
+        const anchorX = position.x + (positionAdjustment.x || 0);
+        const anchorY = position.y + (positionAdjustment.y || 0);
+        
+        // Calculate adjusted position to keep menu within viewport with a margin of 8px
+        let adjustedX = anchorX;
+        let adjustedY = anchorY;
+        
+        // Check if menu would go off the right side
+        if (adjustedX + menuWidth > viewportWidth - 8) {
+            adjustedX = Math.max(8, viewportWidth - menuWidth - 8);
+        }
+        
+        // Check if menu would go off the left side
+        if (adjustedX < 8) {
+            adjustedX = 8;
+        }
+        
+        // Add gap to prevent menu from covering the anchor
+        const gap = 8;
+        
+        // Vertical placement
+        if (verticalPosition === 'above') {
+            // Place menu above the anchor with a gap
+            adjustedY = anchorY - menuHeight;
+        } else {
+            // Place menu below the anchor with a gap
+            adjustedY = anchorY + gap;
+        }
+        
+        // Only update position if it's actually different to prevent infinite loops
+        if (adjustedX !== adjustedPosition.x || adjustedY !== adjustedPosition.y) {
+            setAdjustedPosition({ x: adjustedX, y: adjustedY });
+        }
+    }, [isOpen, position, positionAdjustment, verticalPosition]);
+    
+    // Handle outside clicks
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        const handleClickOutside = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+        
+        Zotero.getMainWindow().document.addEventListener('mousedown', handleClickOutside);
+        Zotero.getMainWindow().document.addEventListener('keydown', handleEscape);
+        
+        return () => {
+            Zotero.getMainWindow().document.removeEventListener('mousedown', handleClickOutside);
+            Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
+        };
+    }, [isOpen, onClose]);
+    
+    // Handle keyboard navigation
+    useEffect(() => {
+        if (!isOpen || menuItems.length === 0) return;
+        
+        const handleKeyNav = (e: KeyboardEvent) => {
+            // Only handle navigation keys if not coming from the input field
+            if (e.target === inputRef.current) {
+                // For input field, only handle arrow keys and enter
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+                    e.preventDefault();
+                } else {
+                    // Let other keystrokes pass to input for typing
+                    return;
+                }
+            }
+            
+            switch (e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        const next = (prev + 1) % menuItems.length;
+                        return next;
+                    });
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        const next = (prev - 1 + menuItems.length) % menuItems.length;
+                        return next;
+                    });
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (focusedIndex >= 0 && focusedIndex < menuItems.length) {
+                        menuItems[focusedIndex].onClick();
+                        onClose();
+                    }
+                    break;
+                default:
+                    break;
+            }
+        };
+        
+        Zotero.getMainWindow().document.addEventListener('keydown', handleKeyNav);
+        return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyNav);
+    }, [isOpen, menuItems, focusedIndex, onClose]);
+    
+    // Set initial focus
+    useEffect(() => {
+        if (isOpen) {
+            // Focus the input
+            inputRef.current?.focus();
+
+            // If we have items, highlight first or last depending on direction
+            if (menuItems.length > 0) {
+            if (verticalPosition === 'above') {
+                // highlight the item that ends up at the bottom (the last in normal order)
+                setFocusedIndex(menuItems.length - 1);
+            } else {
+                setFocusedIndex(0);
+            }
+            } else {
+            setFocusedIndex(-1);
+            }
+        } else {
+            setFocusedIndex(-1);
+            setHoveredIndex(-1);
+        }
+    }, [isOpen, menuItems, verticalPosition]);
+
+    
+    // Handle search input
+    const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const query = e.target.value;
+        setSearchQuery(query);
+        const filteredItems = onSearch(query);
+        setMenuItems(filteredItems);
+        
+        // Reset focus to first item if there are results
+        if (filteredItems.length > 0) {
+            setFocusedIndex(0);
+        } else {
+            setFocusedIndex(-1);
+        }
+    };
+    
+    if (!isOpen) return null;
+    
+    return (
+        <div
+            ref={menuRef}
+            className={`bg-quaternary border-quinary rounded-md p-1 overflow-y-auto overflow-x-hidden scrollbar outline-none z-1000 shadow-md ${className}`}
+            style={{
+                position: useFixedPosition ? 'fixed' : 'absolute',
+                top: adjustedPosition.y,
+                left: adjustedPosition.x,
+                maxWidth: maxWidth || undefined,
+                width: width || undefined,
+                maxHeight: maxHeight || '80vh'
+                // boxSizing: 'border-box',
+            }}
+            tabIndex={-1}
+            role="menu"
+            aria-orientation="vertical"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks from propagating
+        >
+            {/* Render menu items and search input based on vertical position */}
+            {verticalPosition === 'above' ? (
+                <>
+                    {/* Menu items first when positioned above */}
+                    {menuItems.length > 0 ? (
+                        menuItems.reverse().map((item: SearchMenuItem, index: number) => (
+                            <div
+                                key={index}
+                                role="menuitem"
+                                tabIndex={focusedIndex === index ? 0 : -1}
+                                className={`
+                                    flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
+                                `}
+                                style={{ maxWidth: '100%', minWidth: 0 }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    item.onClick();
+                                    onClose();
+                                }}
+                                onMouseEnter={() => {
+                                    setHoveredIndex(index);
+                                    setFocusedIndex(index);
+                                }}
+                                onMouseLeave={() => {
+                                    if (hoveredIndex === index) {
+                                        setHoveredIndex(-1);
+                                    }
+                                }}
+                                onFocus={() => {
+                                    setFocusedIndex(index);
+                                }}
+                            >
+                                <span className="flex items-center gap-2 w-full min-w-0">
+                                    {item.icon && (
+                                        <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                    )}
+                                    <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                                </span>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="px-2 py-1 text-sm font-color-tertiary text-center">
+                            {noResultsText}
+                        </div>
+                    )}
+                    
+                    {/* Search input at the bottom when positioned above */}
+                    <div>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={searchQuery}
+                            onChange={handleSearchInput}
+                            placeholder={placeholder}
+                            className="w-full bg-quaternary font-color-secondary text-sm px-1 outline-none chat-input"
+                            aria-label="Search"
+                        />
+                    </div>
+                </>
+            ) : (
+                <>
+                    {/* Search input at the top when positioned below */}
+                    <div>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={searchQuery}
+                            onChange={handleSearchInput}
+                            placeholder={placeholder}
+                            className="w-full bg-quaternary font-color-secondary text-sm p-1 outline-none chat-input"
+                            aria-label="Search"
+                        />
+                    </div>
+                    
+                    {/* Menu items */}
+                    {menuItems.length > 0 ? (
+                        menuItems.map((item: SearchMenuItem, index: number) => (
+                            <div
+                                key={index}
+                                role="menuitem"
+                                tabIndex={focusedIndex === index ? 0 : -1}
+                                className={`
+                                    flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
+                                `}
+                                style={{ maxWidth: '100%', minWidth: 0 }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    item.onClick();
+                                    onClose();
+                                }}
+                                onMouseEnter={() => {
+                                    setHoveredIndex(index);
+                                    setFocusedIndex(index);
+                                }}
+                                onMouseLeave={() => {
+                                    if (hoveredIndex === index) {
+                                        setHoveredIndex(-1);
+                                    }
+                                }}
+                                onFocus={() => {
+                                    setFocusedIndex(index);
+                                }}
+                            >
+                                <span className="flex items-center gap-2 w-full min-w-0">
+                                    {item.icon && (
+                                        <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                    )}
+                                    <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                                </span>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="px-2 py-1 text-sm font-color-tertiary text-center">
+                            {noResultsText}
+                        </div>
+                    )}
+                </>
+            )}
+        </div>
+    );
+};
+
+export default SearchMenu; 
