@@ -1,5 +1,5 @@
 // @ts-ignore no idea
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
@@ -10,6 +10,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import Button from './button';
 import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
+import { MenuPosition } from './SearchMenu';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -26,6 +27,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
+    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -104,6 +107,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     }}
                     isMenuOpen={isSourcesMenuOpen}
                     onOpen={() => setIsSourcesMenuOpen(true)}
+                    menuPosition={menuPosition}
+                    setMenuPosition={setMenuPosition}
                 />
                 {/* <IconButton
                     icon={PlusSignIcon}
@@ -142,7 +147,19 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <textarea
                         ref={inputRef}
                         value={userMessage}
-                        onChange={(e) => setUserMessage(e.target.value)}
+                        // onChange={(e) => setUserMessage(e.target.value)}
+                        onChange={(e) => {
+                            if (e.target.value.endsWith('@')) {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setMenuPosition({ 
+                                    x: rect.left,
+                                    y: rect.top - 5
+                                })
+                                setIsSourcesMenuOpen(true);
+                            } else {
+                                setUserMessage(e.target.value);
+                            }
+                        }}
                         onInput={(e) => {
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;

@@ -15,13 +15,14 @@ const AddSourcesMenu: React.FC<{
     showText: boolean,
     onClose: () => void,
     onOpen: () => void,
-    isMenuOpen: boolean
-}> = ({ showText, onClose, onOpen, isMenuOpen }) => {
+    isMenuOpen: boolean,
+    menuPosition: MenuPosition,
+    setMenuPosition: (position: MenuPosition) => void
+}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
-    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
     const getIconElement = (item: Zotero.Item) => {
@@ -80,7 +81,7 @@ const AddSourcesMenu: React.FC<{
             const rect = buttonRef.current.getBoundingClientRect();
             setMenuPosition({ 
                 x: rect.left,
-                y: rect.bottom + 5
+                y: rect.top - 5
             });
             onOpen();
             
