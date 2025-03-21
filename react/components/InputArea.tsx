@@ -25,6 +25,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const threadSourceCount = useAtomValue(threadSourceCountAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
+    const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -97,7 +98,12 @@ const InputArea: React.FC<InputAreaProps> = ({
             <div className="flex flex-wrap gap-3 mb-2">
                 <AddSourcesMenu
                     showText={currentSources.length == 0 && threadSourceCount == 0}
-                    onClose={() => inputRef.current?.focus()}
+                    onClose={() => {
+                        inputRef.current?.focus();
+                        setIsSourcesMenuOpen(false);
+                    }}
+                    isMenuOpen={isSourcesMenuOpen}
+                    onOpen={() => setIsSourcesMenuOpen(true)}
                 />
                 {/* <IconButton
                     icon={PlusSignIcon}

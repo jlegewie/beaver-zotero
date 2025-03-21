@@ -12,8 +12,12 @@ import { useAtom } from 'jotai';
 import { InputSource } from 'react/types/sources';
 
 
-const AddSourcesMenu: React.FC<{showText: boolean, onClose: () => void}> = ({ showText, onClose }) => {
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
+const AddSourcesMenu: React.FC<{
+    showText: boolean,
+    onClose: () => void,
+    onOpen: () => void,
+    isMenuOpen: boolean
+}> = ({ showText, onClose, onOpen, isMenuOpen }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -125,11 +129,8 @@ const AddSourcesMenu: React.FC<{showText: boolean, onClose: () => void}> = ({ sh
             // className="scale-90"
             menuItems={menuItems}
             onSearch={handleSearch}
-            onClose={() => {
-                setIsMenuOpen(false);
-                onClose();
-            }}
-            onOpen={() => setIsMenuOpen(true)}
+            onClose={onClose}
+            onOpen={onOpen}
             noResultsText="No results found"
             placeholder="Search Zotero Items"
             icon={PlusSignIcon}
