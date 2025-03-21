@@ -215,6 +215,11 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     useEffect(() => {
         if (!isOpen || menuItems.length === 0) return;
         
+        // Compute display order items based on verticalPosition inside the effect
+        const displayOrderMenuItems = verticalPosition === 'above' 
+            ? [...menuItems].reverse() 
+            : menuItems;
+        
         const handleKeyNav = (e: KeyboardEvent) => {
             // Only handle navigation keys if not coming from the input field
             if (e.target === inputRef.current) {
@@ -231,21 +236,21 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 case 'ArrowDown':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        const next = (prev + 1) % menuItems.length;
+                        const next = (prev + 1) % displayOrderMenuItems.length;
                         return next;
                     });
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        const next = (prev - 1 + menuItems.length) % menuItems.length;
+                        const next = (prev - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
                         return next;
                     });
                     break;
                 case 'Enter':
                     e.preventDefault();
-                    if (focusedIndex >= 0 && focusedIndex < menuItems.length) {
-                        menuItems[focusedIndex].onClick();
+                    if (focusedIndex >= 0 && focusedIndex < displayOrderMenuItems.length) {
+                        displayOrderMenuItems[focusedIndex].onClick();
                         onClose();
                     }
                     break;
@@ -256,7 +261,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         Zotero.getMainWindow().document.addEventListener('keydown', handleKeyNav);
         return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose]);
+    }, [isOpen, menuItems, focusedIndex, onClose, verticalPosition]);
     
     // Set initial focus
     useEffect(() => {
@@ -312,6 +317,11 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     
     if (!isOpen) return null;
     
+    // Compute display order items based on verticalPosition for rendering
+    const displayOrderMenuItems = verticalPosition === 'above' 
+        ? [...menuItems].reverse() 
+        : menuItems;
+
     return (
         <div
             ref={menuRef}
@@ -334,8 +344,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             {verticalPosition === 'above' ? (
                 <>
                     {/* Menu items first when positioned above */}
-                    {menuItems.length > 0 ? (
-                        menuItems.slice().reverse().map((item: SearchMenuItem, index: number) => (
+                    {displayOrderMenuItems.length > 0 ? (
+                        displayOrderMenuItems.map((item: SearchMenuItem, index: number) => (
                             <div
                                 key={index}
                                 role="menuitem"
@@ -410,8 +420,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     </div>
                     
                     {/* Menu items */}
-                    {menuItems.length > 0 ? (
-                        menuItems.map((item: SearchMenuItem, index: number) => (
+                    {displayOrderMenuItems.length > 0 ? (
+                        displayOrderMenuItems.map((item: SearchMenuItem, index: number) => (
                             <div
                                 key={index}
                                 role="menuitem"
