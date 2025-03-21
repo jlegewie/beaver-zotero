@@ -1,12 +1,11 @@
 import React from 'react';
 // @ts-ignore no types for react
-import { useState, useEffect } from 'react';
-import SearchMenuButton from './SearchMenuButton';
+import { useState, useEffect, useRef } from 'react';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
 import { ItemSearchResult, searchService } from '../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
-import { SearchMenuItem } from './SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { currentSourcesAtom } from '../atoms/input';
 import { useAtom } from 'jotai';
 import { InputSource } from 'react/types/sources';
@@ -22,6 +21,8 @@ const AddSourcesMenu: React.FC<{
     const [sources, setSources] = useAtom(currentSourcesAtom);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
+    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
 
     const getIconElement = (item: Zotero.Item) => {
         const iconName = item.getItemTypeIconName();
@@ -68,6 +69,27 @@ const AddSourcesMenu: React.FC<{
             return [];
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleButtonClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        // Get button position
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setMenuPosition({ 
+                x: rect.left,
+                y: rect.bottom + 5
+            });
+            onOpen();
+            
+            // Remove focus from the button after opening the menu
+            buttonRef.current.blur();
+            
+            // Force any active tooltip to close by triggering a mousedown event on document
+            const mainWindow = Zotero.getMainWindow();
+            mainWindow.document.dispatchEvent(new MouseEvent('click'));
         }
     };
 
@@ -124,22 +146,36 @@ const AddSourcesMenu: React.FC<{
     }, [searchResults, sources]);
 
     return (
-        <SearchMenuButton
-            variant="outline"
-            // className="scale-90"
-            menuItems={menuItems}
-            onSearch={handleSearch}
-            onClose={onClose}
-            onOpen={onOpen}
-            noResultsText="No results found"
-            placeholder="Search Zotero Items"
-            icon={PlusSignIcon}
-            buttonLabel={showText ? "Add Sources" : undefined}
-            verticalPosition="above"
-            width="250px"
-            isMenuOpen={isMenuOpen}
-            closeOnSelect={true}
-        />
+        <>
+            <button
+                className={`
+                    variant-outline
+                    ${showText ? 'p-1' : ''}
+                `}
+                style={{ paddingRight: '4px', paddingLeft: '4px' }}
+                ref={buttonRef}
+                onClick={handleButtonClick}
+                aria-label="Add Sources"
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+            >
+                <Icon icon={PlusSignIcon} className="scale-12" />
+                {showText && <span>Add Sources</span>}
+            </button>
+            <SearchMenu
+                menuItems={menuItems}
+                isOpen={isMenuOpen}
+                onClose={onClose}
+                position={menuPosition}
+                useFixedPosition={true}
+                verticalPosition="above"
+                width="250px"
+                onSearch={handleSearch}
+                noResultsText="No results found"
+                placeholder="Search Zotero Items"
+                closeOnSelect={true}
+            />
+        </>
     );
 };
 
