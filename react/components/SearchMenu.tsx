@@ -60,6 +60,8 @@ export interface SearchMenuProps {
     noResultsText: string;
     /** Placeholder text for the search input */
     placeholder: string;
+    /** Whether to close the menu when an item is selected */
+    closeOnSelect?: boolean;
 }
 
 /**
@@ -79,7 +81,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     verticalPosition = 'below',
     onSearch,
     noResultsText,
-    placeholder
+    placeholder,
+    closeOnSelect = true
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
@@ -251,7 +254,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     e.preventDefault();
                     if (focusedIndex >= 0 && focusedIndex < displayOrderMenuItems.length) {
                         displayOrderMenuItems[focusedIndex].onClick();
-                        onClose();
+                        if(closeOnSelect) onClose();
                     }
                     break;
                 default:
@@ -261,7 +264,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         Zotero.getMainWindow().document.addEventListener('keydown', handleKeyNav);
         return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose, verticalPosition]);
+    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition]);
     
     // Set initial focus
     useEffect(() => {
@@ -342,7 +345,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     item.onClick();
-                                    onClose();
+                                    if(closeOnSelect) onClose();
                                 }}
                                 onMouseEnter={() => {
                                     setHoveredIndex(index);

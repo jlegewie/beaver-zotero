@@ -8,7 +8,8 @@ import Tooltip from './Tooltip';
 interface SearchMenuButtonProps {
     menuItems: SearchMenuItem[];
     isMenuOpen: boolean;
-    setIsMenuOpen: (isOpen: boolean) => void;
+    onClose: () => void;
+    onOpen: () => void;
     variant?: string;
     width?: string;
     maxWidth?: string;
@@ -31,6 +32,8 @@ interface SearchMenuButtonProps {
     noResultsText: string;
     /** Optional placeholder text for the search input */
     placeholder: string;
+    /** Whether to close the menu when an item is selected */
+    closeOnSelect?: boolean;
 }
 
 /**
@@ -55,7 +58,9 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
     noResultsText,
     placeholder,
     isMenuOpen,
-    setIsMenuOpen,
+    onClose,
+    onOpen,
+    closeOnSelect = true
 }) => {
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -70,7 +75,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
                 x: rect.left,
                 y: verticalPosition === 'above' ? rect.top - 5 : rect.bottom + 5
             });
-            setIsMenuOpen(true);
+            onOpen();
             
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
@@ -119,7 +124,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
                 isOpen={isMenuOpen}
                 maxWidth={maxWidth}
                 maxHeight={maxHeight}
-                onClose={() => setIsMenuOpen(false)}
+                onClose={onClose}
                 position={menuPosition}
                 useFixedPosition={true}
                 verticalPosition={verticalPosition}
@@ -128,6 +133,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
                 onSearch={onSearch}
                 noResultsText={noResultsText}
                 placeholder={placeholder}
+                closeOnSelect={closeOnSelect}
             />
         </>
     );
