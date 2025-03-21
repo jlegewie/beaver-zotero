@@ -4,11 +4,12 @@ import { useState, useCallback } from 'react';
 import SearchMenuButton from './SearchMenuButton';
 import { PlusSignIcon, CSSItemTypeIcon } from './icons';
 import { searchService } from '../../src/services/searchService';
-import { getDisplayNameFromItem } from '../utils/sourceUtils';
+import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
 import { SearchMenuItem } from './SearchMenu';
 import { currentSourcesAtom } from '../atoms/input';
 import { useAtom } from 'jotai';
+import { InputSource } from 'react/types/sources';
 
 const AddSourcesMenu: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
@@ -24,9 +25,8 @@ const AddSourcesMenu: React.FC = () => {
         return iconElement
     }
 
-    const handleMenuItemClick = async (item: Zotero.Item) => {
-        // Create a source from the item
-        const source = await createSourceFromItem(item, true);
+    const handleMenuItemClick = async (source: InputSource, isValid: boolean) => {
+        if (!isValid) return;
         // Add source directly to the sources atom
         const currentSources = [...sources];
         // Check if source already exists
@@ -60,18 +60,27 @@ const AddSourcesMenu: React.FC = () => {
                 );
                 
                 if (!item) continue;
+
+                // Create a source from the item
+                const source: InputSource = await createSourceFromItem(item, true);
+
+                // Determine item status
+                const isValid = await isSourceValid(source);
                 
                 // Create the menu item
                 menuItems.push({
                     label: getDisplayNameFromItem(item) + " " + result.title,
-                    onClick: async () => await handleMenuItemClick(item),
+                    onClick: async () => await handleMenuItemClick(source, isValid),
+                    // disabled: !isValid,
                     customContent: (
-                        <div className="flex flex-row gap-2 items-start min-w-0">
+                        <div className={`flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
                             {getIconElement(item)}
                             {/* <span className="truncate font-color-secondary"> */}
                             <div className="flex flex-col gap-2 min-w-0">
-                                <span className="truncate font-color-secondary">{getDisplayNameFromItem(item)}</span>
-                                <span className="truncate text-sm font-color-tertiary min-w-0">
+                                <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
+                                    {getDisplayNameFromItem(item)}
+                                </span>
+                                <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                                     {result.title}
                                 </span>
                             </div>
