@@ -13,6 +13,7 @@ import { InputSource } from 'react/types/sources';
 
 
 const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -130,6 +131,8 @@ const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
             buttonLabel={showText ? "Add Sources" : undefined}
             verticalPosition="above"
             width="250px"
+            isMenuOpen={isMenuOpen}
+            setIsMenuOpen={setIsMenuOpen}
         />
     );
 };

@@ -7,6 +7,8 @@ import Tooltip from './Tooltip';
 
 interface SearchMenuButtonProps {
     menuItems: SearchMenuItem[];
+    isMenuOpen: boolean;
+    setIsMenuOpen: (isOpen: boolean) => void;
     variant?: string;
     width?: string;
     maxWidth?: string;
@@ -23,8 +25,6 @@ interface SearchMenuButtonProps {
         x?: number;
         y?: number;
     };
-    /** Optional callback to toggle the menu */
-    toggleCallback?: (isOpen: boolean) => void;
     /** Optional callback to search the menu */
     onSearch: (query: string) => void;
     /** Optional text to display when no results are found */
@@ -54,17 +54,11 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
     onSearch,
     noResultsText,
     placeholder,
-    toggleCallback,
+    isMenuOpen,
+    setIsMenuOpen,
 }) => {
-    const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const buttonRef = useRef<HTMLButtonElement | null>(null);
-
-    useEffect(() => {
-        if (toggleCallback) {
-            toggleCallback(isMenuOpen);
-        }
-    }, [isMenuOpen, toggleCallback]);
     
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
