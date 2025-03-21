@@ -21,6 +21,7 @@ const AddSourcesMenu: React.FC<{
 }> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
+    const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -175,6 +176,8 @@ const AddSourcesMenu: React.FC<{
                 noResultsText="No results found"
                 placeholder="Search Zotero Items"
                 closeOnSelect={true}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
             />
         </>
     );

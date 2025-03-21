@@ -33,6 +33,10 @@ export interface SearchMenuProps {
     menuItems: SearchMenuItem[];
     /** Controls menu visibility */
     isOpen: boolean;
+    /** Search query */
+    searchQuery: string;
+    /** Set search query */
+    setSearchQuery: (query: string) => void;
     /** Optional width for the menu */
     width?: string;
     /** Optional max width for the menu */
@@ -82,7 +86,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     onSearch,
     noResultsText,
     placeholder,
-    closeOnSelect = true
+    closeOnSelect = true,
+    searchQuery,
+    setSearchQuery
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
@@ -90,7 +96,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
-    const [searchQuery, setSearchQuery] = useState<string>('');
     // const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
     
     // Modified reset effect
