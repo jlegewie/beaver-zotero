@@ -149,7 +149,7 @@ const AddSourcesMenu: React.FC<{
                             <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
                                 {getDisplayNameFromItem(item)}
                             </span>
-                            {isInSources && <Icon icon={TickIcon} className="scale-12" />}
+                            {isInSources && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                         </div>
                         <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                             {title}
