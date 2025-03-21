@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no types for react
 import { useState, useCallback } from 'react';
 import SearchMenuButton from './SearchMenuButton';
-import { PlusSignIcon, CSSItemTypeIcon } from './icons';
+import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
 import { searchService } from '../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
@@ -11,7 +11,8 @@ import { currentSourcesAtom } from '../atoms/input';
 import { useAtom } from 'jotai';
 import { InputSource } from 'react/types/sources';
 
-const AddSourcesMenu: React.FC = () => {
+
+const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
 
@@ -27,15 +28,18 @@ const AddSourcesMenu: React.FC = () => {
 
     const handleMenuItemClick = async (source: InputSource, isValid: boolean) => {
         if (!isValid) return;
-        // Add source directly to the sources atom
-        const currentSources = [...sources];
         // Check if source already exists
-        const exists = currentSources.some(
+        const exists = sources.some(
             (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
         );
         if (!exists) {
-            currentSources.push(source);
-            setSources(currentSources);
+            // Add source to sources atom
+            setSources((prevSources) => [...prevSources, source]);
+        } else {
+            // Remove source from sources atom
+            setSources((prevSources) => prevSources.filter(
+                (res) => res.libraryID !== source.libraryID || res.itemKey !== source.itemKey
+            ));
         }
     }
 
@@ -66,6 +70,9 @@ const AddSourcesMenu: React.FC = () => {
 
                 // Determine item status
                 const isValid = await isSourceValid(source);
+                const isInSources = sources.some(
+                    (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
+                );
                 
                 // Create the menu item
                 menuItems.push({
@@ -76,10 +83,13 @@ const AddSourcesMenu: React.FC = () => {
                         <div className={`flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
                             {getIconElement(item)}
                             {/* <span className="truncate font-color-secondary"> */}
-                            <div className="flex flex-col gap-2 min-w-0">
-                                <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
-                                    {getDisplayNameFromItem(item)}
-                                </span>
+                            <div className="flex flex-col gap-2 min-w-0 font-color-secondary">
+                                <div className="flex flex-row justify-between min-w-0">
+                                    <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
+                                        {getDisplayNameFromItem(item)}
+                                    </span>
+                                    {isInSources && <Icon icon={TickIcon} className="scale-12" />}
+                                </div>
                                 <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                                     {result.title}
                                 </span>
