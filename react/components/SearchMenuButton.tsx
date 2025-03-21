@@ -26,7 +26,7 @@ interface SearchMenuButtonProps {
     /** Optional callback to toggle the menu */
     toggleCallback?: (isOpen: boolean) => void;
     /** Optional callback to search the menu */
-    onSearch: (query: string) => SearchMenuItem[];
+    onSearch: (query: string) => Promise<SearchMenuItem[]>;
     /** Optional text to display when no results are found */
     noResultsText: string;
     /** Optional placeholder text for the search input */
