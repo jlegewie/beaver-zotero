@@ -121,12 +121,13 @@ const AddSourcesMenu: React.FC<{showText: boolean}> = ({ showText }) => {
     return (
         <SearchMenuButton
             variant="outline"
-            className="scale-90"
+            // className="scale-90"
             menuItems={menuItems}
             onSearch={handleSearch}
             noResultsText="No results found"
             placeholder="Search Zotero Items"
             icon={PlusSignIcon}
+            buttonLabel={showText ? "Add Sources" : undefined}
             verticalPosition="above"
             width="250px"
         />

@@ -102,7 +102,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
             disabled={disabled}
         >
             {icon && <Icon icon={icon} className={iconClassName} />}
-            {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
+            {buttonLabel && <span>{buttonLabel}</span>}
         </button>
     );
 

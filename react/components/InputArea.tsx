@@ -7,8 +7,8 @@ import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/
 import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import IconButton from './IconButton';
-import Button from './Button';
+import Button from './button';
+import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
 
 interface InputAreaProps {
@@ -95,6 +95,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Message sources */}
             <div className="flex flex-wrap gap-3 mb-2">
+                <AddSourcesMenu showText={currentSources.length == 0 && threadSourceCount == 0}/>
                 {/* <IconButton
                     icon={PlusSignIcon}
                     onClick={handleAddSources}
@@ -115,16 +116,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                         />
                         {threadSourceCount}
                     </button>
-                )}
-                {currentSources.length == 0 && threadSourceCount == 0 && (
-                    <Button
-                        variant="outline"
-                        icon={PlusSignIcon}
-                        disabled={true}
-                        title="Select in Library to Add"
-                    >
-                        Add Sources
-                    </Button>
                 )}
 
                 {currentSources.map((source, index) => (
