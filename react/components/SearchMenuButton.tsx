@@ -93,7 +93,7 @@ const SearchMenuButton: React.FC<SearchMenuButtonProps> = ({
                 ${icon && !buttonLabel ? 'p-1' : ''}
                 ${className}`
             }
-            style={icon && !buttonLabel ? { paddingRight: '4px', paddingLeft: '4px' } : {}}
+            style={{ paddingRight: '4px', paddingLeft: '4px' }}
             ref={buttonRef}
             onClick={handleButtonClick}
             aria-label={ariaLabel || buttonLabel}
