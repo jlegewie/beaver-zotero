@@ -95,7 +95,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Message sources */}
             <div className="flex flex-wrap gap-3 mb-2">
-                <AddSourcesMenu showText={currentSources.length == 0 && threadSourceCount == 0}/>
+                <AddSourcesMenu
+                    showText={currentSources.length == 0 && threadSourceCount == 0}
+                    onClose={() => inputRef.current?.focus()}
+                />
                 {/* <IconButton
                     icon={PlusSignIcon}
                     onClick={handleAddSources}
