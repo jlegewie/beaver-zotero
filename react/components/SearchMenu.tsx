@@ -13,6 +13,8 @@ export interface SearchMenuItem {
     onClick: () => void;
     /** Optional icon element */
     icon?: ReactNode;
+    /** Optional custom content to render instead of the default label and icon. */
+    customContent?: ReactNode;
 }
 
 /**
@@ -361,12 +363,16 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                     setFocusedIndex(index);
                                 }}
                             >
-                                <span className="flex items-center gap-2 w-full min-w-0">
-                                    {item.icon && (
-                                        <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
-                                    )}
-                                    <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
-                                </span>
+                                {item.customContent ? (
+                                    item.customContent
+                                ) : (
+                                    <span className="flex items-center gap-2 w-full min-w-0">
+                                        {item.icon && (
+                                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                        )}
+                                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                                    </span>
+                                )}
                             </div>
                         ))
                     ) : (
@@ -433,12 +439,16 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                     setFocusedIndex(index);
                                 }}
                             >
-                                <span className="flex items-center gap-2 w-full min-w-0">
-                                    {item.icon && (
-                                        <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
-                                    )}
-                                    <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
-                                </span>
+                                {item.customContent ? (
+                                    item.customContent
+                                ) : (
+                                    <span className="flex items-center gap-2 w-full min-w-0">
+                                        {item.icon && (
+                                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                        )}
+                                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                                    </span>
+                                )}
                             </div>
                         ))
                     ) : (
