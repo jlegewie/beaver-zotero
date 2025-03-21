@@ -365,6 +365,8 @@
 [id^="beaver-pane-"] .overflow-y-auto { overflow-y: auto; }
 [id^="beaver-pane-"] .overflow-x-auto { overflow-x: auto; }
 [id^="beaver-pane-"] .overflow-hidden { overflow: hidden; }
+[id^="beaver-pane-"] .overflow-x-hidden { overflow-x: hidden; }
+[id^="beaver-pane-"] .overflow-y-hidden { overflow-y: hidden; }
 [id^="beaver-pane-"] .text-ellipsis { text-overflow: ellipsis; }
 
 /* Opacity */
