@@ -14,6 +14,31 @@ const AddSourcesMenu: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [sources, setSources] = useAtom(currentSourcesAtom);
 
+    const getIconElement = (item: Zotero.Item) => {
+        const iconName = item.getItemTypeIconName();
+        const iconElement = iconName ? (
+            <span className="scale-80">
+                <CSSItemTypeIcon itemType={iconName} />
+            </span>
+        ) : null
+        return iconElement
+    }
+
+    const handleMenuItemClick = async (item: Zotero.Item) => {
+        // Create a source from the item
+        const source = await createSourceFromItem(item, true);
+        // Add source directly to the sources atom
+        const currentSources = [...sources];
+        // Check if source already exists
+        const exists = currentSources.some(
+            (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
+        );
+        if (!exists) {
+            currentSources.push(source);
+            setSources(currentSources);
+        }
+    }
+
     // This function is called when the user types in the search field
     const handleSearch = async (query: string): Promise<SearchMenuItem[]> => {
         if (!query.trim()) return [];
@@ -36,35 +61,10 @@ const AddSourcesMenu: React.FC = () => {
                 
                 if (!item) continue;
                 
-                // Get the icon name and create the icon element
-                const iconName = item.getItemTypeIconName();
-
-                const getIconElement = (item: Zotero.Item) => {
-                    const iconName = item.getItemTypeIconName();
-                    const iconElement = iconName ? (
-                        <span className="scale-80">
-                            <CSSItemTypeIcon itemType={iconName} />
-                        </span>
-                    ) : null
-                    return iconElement
-                }
-                
+                // Create the menu item
                 menuItems.push({
                     label: getDisplayNameFromItem(item) + " " + result.title,
-                    onClick: async () => {
-                        // Create a source from the item
-                        const source = await createSourceFromItem(item, true);
-                        // Add source directly to the sources atom
-                        const currentSources = [...sources];
-                        // Check if source already exists
-                        const exists = currentSources.some(
-                            (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
-                        );
-                        if (!exists) {
-                            currentSources.push(source);
-                            setSources(currentSources);
-                        }
-                    },
+                    onClick: async () => await handleMenuItemClick(item),
                     customContent: (
                         <div className="flex flex-row gap-2 items-start min-w-0">
                             {getIconElement(item)}
