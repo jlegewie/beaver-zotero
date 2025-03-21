@@ -35,20 +35,38 @@ const AddSourcesMenu: React.FC = () => {
                 
                 // Get the icon name and create the icon element
                 const iconName = item.getItemTypeIconName();
+
+                const getIconElement = (item: Zotero.Item) => {
+                    const iconName = item.getItemTypeIconName();
+                    const iconElement = iconName ? (
+                        <span className="scale-80">
+                            <CSSItemTypeIcon itemType={iconName} />
+                        </span>
+                    ) : null
+                    return iconElement
+                }
                 
                 menuItems.push({
-                    label: getDisplayNameFromItem(item),
+                    label: getDisplayNameFromItem(item) + " " + result.title,
                     onClick: async () => {
                         // Create a source from the item and use it
                         const source = await createSourceFromItem(item);
                         // Here you would typically add this source to your state
                         console.log('Selected item:', source);
                     },
-                    // icon: iconName ? (
-                    //     <span className="scale-80">
-                    //         <CSSItemTypeIcon itemType={iconName} />
-                    //     </span>
-                    // ) : undefined
+                    customContent: (
+                        <div className="flex flex-row gap-2 items-start min-w-0">
+                            {getIconElement(item)}
+                            {/* <span className="truncate font-color-secondary"> */}
+                            <div className="flex flex-col gap-2 min-w-0">
+                                <span className="truncate font-color-secondary">{getDisplayNameFromItem(item)}</span>
+                                <span className="truncate text-sm font-color-tertiary min-w-0">
+                                    {result.title}
+                                </span>
+                            </div>
+                            {/* </span> */}
+                        </div>
+                    ),
                 });
             }
             return menuItems;
@@ -70,6 +88,7 @@ const AddSourcesMenu: React.FC = () => {
             placeholder="Search Zotero Items"
             icon={PlusSignIcon}
             verticalPosition="above"
+            width="250px"
         />
     );
 };
