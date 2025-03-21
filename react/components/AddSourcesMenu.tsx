@@ -50,7 +50,6 @@ const AddSourcesMenu: React.FC<{
 
     // This function is called when the user types in the search field
     const handleSearch = async (query: string) => {
-        console.log("handleSearch", query);
         if (!query.trim()) return [];
         
         try {
