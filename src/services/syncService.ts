@@ -43,6 +43,7 @@ export interface ItemData {
     title?: string;
     authors?: any;
     year?: number;
+    publication?: string;
     abstract?: string;
     reference?: string;
     identifiers?: any;

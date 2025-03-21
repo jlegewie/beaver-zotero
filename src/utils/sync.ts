@@ -45,6 +45,7 @@ function extractItemData(item: Zotero.Item): ItemData {
         title: item.getField('title'),
         authors: extractPrimaryCreators(item),
         year: extractYear(item),
+        publication: item.getField('publicationTitle'),
         abstract: item.getField('abstractNote'),
         // @ts-ignore Beaver exists
         reference: Zotero.Beaver.citationService.formatBibliography(item),
