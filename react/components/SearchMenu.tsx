@@ -53,7 +53,7 @@ export interface SearchMenuProps {
         y?: number;
     };
     /** Search function that returns filtered menu items based on input */
-    onSearch: (query: string) => SearchMenuItem[];
+    onSearch: (query: string) => Promise<SearchMenuItem[]>;
     /** Text to display when no results are found */
     noResultsText: string;
     /** Placeholder text for the search input */
@@ -81,19 +81,21 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const wasOpen = useRef(false);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
     
-    // Reset search when menu opens/closes
-    useEffect(() => {
-        if (isOpen) {
-            setSearchQuery('');
-            setMenuItems(initialMenuItems);
-        }
-    }, [isOpen, initialMenuItems]);
+    // Modified reset effect
+    // useEffect(() => {
+    //     if (!wasOpen.current && isOpen) {
+    //         setSearchQuery('');
+    //         setMenuItems(initialMenuItems);
+    //     }
+    //     wasOpen.current = isOpen;
+    // }, [isOpen, initialMenuItems]);
     
     // Block scrolling when menu is open
     useEffect(() => {
@@ -278,18 +280,31 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     }, [isOpen, menuItems, verticalPosition]);
 
     
-    // Handle search input
-    const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Modified search input handler
+    const handleSearchInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const query = e.target.value;
         setSearchQuery(query);
-        const filteredItems = onSearch(query);
-        setMenuItems(filteredItems);
         
-        // Reset focus to first item if there are results
-        if (filteredItems.length > 0) {
-            setFocusedIndex(0);
-        } else {
-            setFocusedIndex(-1);
+        try {
+            if (query.trim()) {
+                const filteredItems = await onSearch(query);
+                // Only update if the current query still matches what we searched for
+                if (query === e.target.value) {
+                    setMenuItems(filteredItems);
+                    
+                    // Reset focus to first item if there are results
+                    if (filteredItems.length > 0) {
+                        setFocusedIndex(0);
+                    } else {
+                        setFocusedIndex(-1);
+                    }
+                }
+            } else {
+                // Show initial items if query is empty
+                setMenuItems(initialMenuItems);
+            }
+        } catch (error) {
+            console.error('Error during search:', error);
         }
     };
     
@@ -318,7 +333,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 <>
                     {/* Menu items first when positioned above */}
                     {menuItems.length > 0 ? (
-                        menuItems.reverse().map((item: SearchMenuItem, index: number) => (
+                        menuItems.slice().reverse().map((item: SearchMenuItem, index: number) => (
                             <div
                                 key={index}
                                 role="menuitem"
