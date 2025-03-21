@@ -7,9 +7,12 @@ import { searchService } from '../../src/services/searchService';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
 import { SearchMenuItem } from './SearchMenu';
+import { currentSourcesAtom } from '../atoms/input';
+import { useAtom } from 'jotai';
 
 const AddSourcesMenu: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
+    const [sources, setSources] = useAtom(currentSourcesAtom);
 
     // This function is called when the user types in the search field
     const handleSearch = async (query: string): Promise<SearchMenuItem[]> => {
@@ -49,10 +52,18 @@ const AddSourcesMenu: React.FC = () => {
                 menuItems.push({
                     label: getDisplayNameFromItem(item) + " " + result.title,
                     onClick: async () => {
-                        // Create a source from the item and use it
-                        const source = await createSourceFromItem(item);
-                        // Here you would typically add this source to your state
-                        console.log('Selected item:', source);
+                        // Create a source from the item
+                        const source = await createSourceFromItem(item, true);
+                        // Add source directly to the sources atom
+                        const currentSources = [...sources];
+                        // Check if source already exists
+                        const exists = currentSources.some(
+                            (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
+                        );
+                        if (!exists) {
+                            currentSources.push(source);
+                            setSources(currentSources);
+                        }
                     },
                     customContent: (
                         <div className="flex flex-row gap-2 items-start min-w-0">
@@ -64,7 +75,6 @@ const AddSourcesMenu: React.FC = () => {
                                     {result.title}
                                 </span>
                             </div>
-                            {/* </span> */}
                         </div>
                     ),
                 });
