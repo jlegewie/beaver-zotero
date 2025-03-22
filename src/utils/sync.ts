@@ -53,7 +53,6 @@ function extractItemData(item: Zotero.Item): ItemData {
         tags: item.getTags(),
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        version: item.version,
         // @ts-ignore isInTrash exists
         deleted: item.isInTrash(),
         // item_json: item.toJSON()

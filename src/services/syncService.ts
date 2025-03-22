@@ -50,7 +50,6 @@ export interface ItemData {
     tags?: any[];
     date_added?: string;
     date_modified?: string;
-    version: number;
     deleted: boolean;
 }
 
