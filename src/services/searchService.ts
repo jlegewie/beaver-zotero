@@ -3,19 +3,16 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
-    id: string;                    // itemUUID
+    id: string;    // itemUUID
     library_id: number;
     zotero_key: string;
     item_type: string;
     deleted: boolean;
     title?: string;
-    authors?: Array<Record<string, any>>;  // List of dict
     year?: number;
-    publication?: string;
     reference?: string;
-    date_added?: string;           // datetime
-    date_modified?: string;        // datetime
     rank?: number;
+    similarity?: number;
 }
 
 // Type for search params to keep track of the various query parameters
