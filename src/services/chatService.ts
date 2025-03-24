@@ -2,23 +2,16 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { AppState } from 'react/ui/types';
 
-export interface SSERequestParams {
-    threadId: string | null;            // If continuing an existing thread, else null
-    userMessageId: string;              // The UUID from the frontend
-    assistantMessageId: string;         // The in-progress assistant UUID
-    content: string;                    // The user's input text
-    sources: string[];                  // The sources to include in the request
-    appState: AppState;                 // Current app state
-}
 
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
 interface ChatCompletionRequestBody {
-    thread_id: string | null;
-    user_message_id: string;
-    assistant_message_id: string;
-    content: string;
-    sources: string[];
-    app_state: AppState;
+    thread_id: string | null;       // If continuing an existing thread, else null
+    user_message_id: string;       // The UUID from the frontend
+    assistant_message_id: string;  // The in-progress assistant UUID
+    content: string;               // The user's input text
+    sources: string[];             // The sources to include in the request
+    app_state: AppState;           // Current app state
+    is_library_search: boolean;    // Whether this is a library search
 }
 
 export interface SSECallbacks {
@@ -59,21 +52,10 @@ export class ChatService extends ApiService {
      *  data: {"detail":"..."}
      */
     async requestChatCompletion(
-        params: SSERequestParams,
+        requestBody: ChatCompletionRequestBody,
         callbacks: SSECallbacks
     ): Promise<void> {
-        const { threadId, userMessageId, assistantMessageId, content, sources, appState } = params;
         const { onThread, onToken, onDone, onError } = callbacks;
-
-        // Construct the request body
-        const body: ChatCompletionRequestBody = {
-            thread_id: threadId,
-            user_message_id: userMessageId,
-            assistant_message_id: assistantMessageId,
-            content,
-            sources,
-            app_state: appState
-        };
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -138,7 +120,7 @@ export class ChatService extends ApiService {
 
                 // Fire off the request
                 Zotero.HTTP.request('POST', endpoint, {
-                    body: JSON.stringify(body),
+                    body: JSON.stringify(requestBody),
                     headers,
                     requestObserver,
                     timeout: 0 // indefinite streaming

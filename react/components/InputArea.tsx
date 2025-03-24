@@ -31,7 +31,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
 
     const handleSubmit = async (
-        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
+        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
+        isLibrarySearch: boolean = false
     ) => {
         e.preventDefault();
         
@@ -44,7 +45,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         generateResponse({
             content: userMessage,
             sources: currentSources,
-            appState,
+            appState: appState,
+            isLibrarySearch: isCommandPressed || isLibrarySearch
         });
 
         console.log('Chat completion:', userMessage);
@@ -52,10 +54,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleStop = () => {
         console.log('Stopping chat completion');
-    };
-
-    const handleLibrarySearch = () => {
-        console.log('Chat completion with library search:', userMessage);
     };
 
     const handleAddSources = async () => {
@@ -171,11 +169,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Submit on Enter (without Shift)
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
-                                if (isCommandPressed && !isStreaming && userMessage.length > 0) {
-                                    handleLibrarySearch();
-                                } else if (!isStreaming && userMessage.length > 0) {
-                                    handleSubmit(e as any);
-                                }
+                                handleSubmit(e as any);
                             }
                         }}
                         onKeyUp={handleKeyUp}
@@ -192,7 +186,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
                             // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                             className="mr-1"
-                            onClick={handleLibrarySearch}
+                            onClick={(e) => handleSubmit(e as any, true)}
                             disabled={isStreaming || userMessage.length === 0}
                         >
                             Library Search

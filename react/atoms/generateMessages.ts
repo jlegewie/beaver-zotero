@@ -65,6 +65,7 @@ export const generateResponseAtom = atom(
         content: string;
         sources: InputSource[];
         appState: AppState;
+        isLibrarySearch: boolean;
     }) => {
         // Get current messages
         const threadMessages = get(threadMessagesAtom);
@@ -102,6 +103,7 @@ export const generateResponseAtom = atom(
                 userMsg.content,
                 payloadSources.map((s) => `${s.libraryID}-${s.itemKey}`),
                 payload.appState,
+                payload.isLibrarySearch,
                 set
             );
         }
@@ -186,16 +188,18 @@ function _processChatCompletionViaBackend(
     content: string,
     sources: string[],
     appState: AppState,
+    isLibrarySearch: boolean,
     set: any
 ) {
     chatService.requestChatCompletion(
         {
-            threadId: currentThreadId,
-            userMessageId,
-            assistantMessageId,
-            content,
-            sources,
-            appState
+            thread_id: currentThreadId,
+            user_message_id: userMessageId,
+            assistant_message_id: assistantMessageId,
+            content: content,
+            sources: sources,
+            app_state: appState,
+            is_library_search: isLibrarySearch
         },
         {
             onThread: (newThreadId) => {
