@@ -13,6 +13,8 @@ import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
 import { getDateGroup } from '../utils/dateUtils';
 import { userScrolledAtom } from '../atoms/ui';
+import { currentSourcesAtom } from '../atoms/input';
+import { currentUserMessageAtom } from '../atoms/input';
 
 const MAX_THREADS = 10;
 
@@ -53,6 +55,8 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
+    const setCurrentSources = useSetAtom(currentSourcesAtom);
+    const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
@@ -128,13 +132,15 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setCurrentThreadId(threadId);
 
             // Use the thread service to fetch messages
-            const messages = await threadService.getThreadMessages(threadId);
+            const { messages, sources } = await threadService.getThreadMessages(threadId);
             
-            // Update the messages state
+            // Update the thread messages and sources state
             setThreadMessages(messages);
+            setThreadSources(sources);
             
             // Clear sources for now
-            setThreadSources([]);
+            setCurrentSources([]);
+            setCurrentUserMessage('');
         } catch (error) {
             console.error('Error loading thread:', error);
         }

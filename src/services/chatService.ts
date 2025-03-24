@@ -3,15 +3,21 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { AppState } from 'react/ui/types';
 
 
+// Interface for attachments in the request body (matching 'MessageAttachment' in backend)
+export interface MessageAttachment {
+    library_id: number;
+    zotero_key: string;
+}
+
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
 interface ChatCompletionRequestBody {
-    thread_id: string | null;       // If continuing an existing thread, else null
-    user_message_id: string;       // The UUID from the frontend
-    assistant_message_id: string;  // The in-progress assistant UUID
-    content: string;               // The user's input text
-    sources: string[];             // The sources to include in the request
-    app_state: AppState;           // Current app state
-    is_library_search: boolean;    // Whether this is a library search
+    thread_id: string | null;           // If continuing an existing thread, else null
+    user_message_id: string;            // The UUID from the frontend
+    assistant_message_id: string;       // The in-progress assistant UUID
+    content: string;                    // The user's input text
+    attachments: MessageAttachment[];   // The attachments to include in the request
+    app_state: AppState;                // Current app state
+    is_library_search: boolean;         // Whether this is a library search
 }
 
 export interface SSECallbacks {

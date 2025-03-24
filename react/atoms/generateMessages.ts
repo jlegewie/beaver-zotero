@@ -6,7 +6,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { chatService } from '../../src/services/chatService';
+import { chatService, MessageAttachment } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 import { AppState } from 'react/ui/types';
 
@@ -101,7 +101,10 @@ export const generateResponseAtom = atom(
                 userMsg.id,         // the ID from createUserMessage
                 assistantMsg.id,    // the ID from createAssistantMessage
                 userMsg.content,
-                payloadSources.map((s) => `${s.libraryID}-${s.itemKey}`),
+                payloadSources.map((s) => ({
+                    library_id: s.libraryID,
+                    zotero_key: s.itemKey
+                } as MessageAttachment)),
                 payload.appState,
                 payload.isLibrarySearch,
                 set
@@ -186,7 +189,7 @@ function _processChatCompletionViaBackend(
     userMessageId: string,
     assistantMessageId: string,
     content: string,
-    sources: string[],
+    attachments: MessageAttachment[],
     appState: AppState,
     isLibrarySearch: boolean,
     set: any
@@ -197,7 +200,7 @@ function _processChatCompletionViaBackend(
             user_message_id: userMessageId,
             assistant_message_id: assistantMessageId,
             content: content,
-            sources: sources,
+            attachments: attachments,
             app_state: appState,
             is_library_search: isLibrarySearch
         },

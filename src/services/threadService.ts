@@ -1,6 +1,10 @@
+import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../../react/types/messages';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { MessageAttachment } from './chatService';
+import { AppState } from 'react/ui/types';
+import { ThreadSource } from 'react/types/sources';
 
 // Types that match the backend models
 export interface Thread {
@@ -10,13 +14,26 @@ export interface Thread {
     updated_at: string;
 }
 
+interface ToolCall {
+    id: string;
+    type: "function";
+    function: Record<string, any>;
+}
+
+// Based on backend MessageModel
 export interface ThreadMessage {
     id: string;
+    user_id: string | null;
     thread_id: string;
-    created_at: string;
     role: string;
+    tool_call_id: string | null;
     content: string;
+    attachments: MessageAttachment[] | null;
+    tool_calls: ToolCall[] | null;
+    app_state: AppState | null;
     status: string;
+    created_at: string | null;
+    metadata: Record<string, any> | null;
     error: string | null;
 }
 
@@ -60,17 +77,39 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread
      * @returns Promise with an array of messages
      */
-    async getThreadMessages(threadId: string): Promise<ChatMessage[]> {
+    async getThreadMessages(threadId: string): Promise<{ messages: ChatMessage[], sources: ThreadSource[] }> {
         const messages = await this.get<ThreadMessage[]>(`/threads/${threadId}/messages`);
         
         // Convert backend ThreadMessage to frontend ChatMessage format
-        return messages.map(message => ({
+        const chatMessages = messages.map(message => ({
             id: message.id,
             role: message.role as 'user' | 'assistant' | 'system',
             content: message.content,
             status: message.status as 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error',
             errorType: message.error || undefined
         }));
+
+        const sources: ThreadSource[] = [];
+        
+        for (const message of messages) {
+            for (const attachment of message.attachments || []) {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
+                if (!item) continue;
+                sources.push({
+                    id: uuidv4(),
+                    type: item.isNote() ? "note" : "attachment",
+                    messageId: message.id,
+                    libraryID: attachment.library_id,
+                    itemKey: attachment.zotero_key,
+                    parentKey: item.parentKey || null,
+                    timestamp: Date.now(),
+                    pinned: false,
+                    childItemKeys: [],
+                } as ThreadSource);
+            }
+        }
+
+        return { messages: chatMessages, sources: sources };
     }
 
     /**
