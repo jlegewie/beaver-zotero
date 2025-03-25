@@ -254,6 +254,7 @@
 [id^="beaver-pane-"] .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
 [id^="beaver-pane-"] .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
 [id^="beaver-pane-"] .px-4 { padding-left: 1rem; padding-right: 1rem; }
+[id^="beaver-pane-"] .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
 [id^="beaver-pane-"] .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
 [id^="beaver-pane-"] .py-15 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
 [id^="beaver-pane-"] .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
@@ -353,6 +354,7 @@
 [id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
 [id^="beaver-pane-"] .scale-85 { transform: scale(0.85); }
 [id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
+[id^="beaver-pane-"] .scale-105 { transform: scale(1.05); }
 [id^="beaver-pane-"] .scale-11 { transform: scale(1.1); }
 [id^="beaver-pane-"] .scale-12 { transform: scale(1.2); }
 [id^="beaver-pane-"] .scale-13 { transform: scale(1.3); }
@@ -1109,7 +1111,7 @@
     /* Prevents hover effects */
 }
 
-[id^="beaver-pane-"] .variant-outline.disabled-but-styled:disabled {
+[id^="beaver-pane-"] .variant-outline.scale-11d-but-styled:disabled {
     cursor: not-allowed;
     color: var(--fill-secondary);
     border-color: var(--fill-quarternary);
