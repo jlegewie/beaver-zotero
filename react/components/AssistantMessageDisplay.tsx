@@ -12,7 +12,7 @@ import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
-import Button from './Button';
+import Button from './button';
 import CitedSourcesList from './CitedSourcesList';
 import { InputSource, SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
