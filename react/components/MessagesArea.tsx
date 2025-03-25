@@ -4,6 +4,7 @@ import UserMessageDisplay from "./UserMessageDisplay"
 import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import { scrollToBottom } from "../utils/scrollToBottom";
 import { ChatMessage } from "../types/messages";
+import ToolMessageDisplay from "./ToolMessageDisplay";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
@@ -54,16 +55,22 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             >
                 {messages.map((message, index) => (
                     <div key={index} className="px-3">
+                        {/* User message */}
                         {message.role === 'user' && (
                             <UserMessageDisplay
                                 message={message}
                             />
                         )}
-                        {message.role === 'assistant' && (
+                        {/* Assistant message without tool calls */}
+                        {message.role === 'assistant' && (!message.tool_calls || message.tool_calls.length === 0) && (
                             <AssistantMessageDisplay
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
                             />
+                        )}
+                        {/* Assistant message with tool calls */}
+                        {message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0 && (
+                            <ToolMessageDisplay message={message} />
                         )}
                     </div>
                 ))}
