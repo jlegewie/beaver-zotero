@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom } from './threads';
+import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
@@ -215,6 +215,21 @@ function _processChatCompletionViaBackend(
                     id: assistantMessageId,
                     chunk: partial
                 });
+            },
+            onToolcall: (data) => {
+                const toolcallMessage = data.message;
+                if (!toolcallMessage) return;
+
+                const message: ChatMessage = {
+                    id: toolcallMessage.id,
+                    role: toolcallMessage.role,
+                    content: toolcallMessage.content,
+                    status: toolcallMessage.status,
+                    tool_calls: toolcallMessage.tool_calls,
+                };
+
+                set(addOrUpdateMessageAtom, {message});
+
             },
             onDone: () => {
                 // Mark the assistant as completed

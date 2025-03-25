@@ -23,6 +23,7 @@ interface ChatCompletionRequestBody {
 export interface SSECallbacks {
     onThread: (threadId: string) => void;
     onToken: (token: string) => void;
+    onToolcall: (data: any) => void;
     onDone: () => void;
     onError: (errorType: string) => void;
 }
@@ -61,7 +62,7 @@ export class ChatService extends ApiService {
         requestBody: ChatCompletionRequestBody,
         callbacks: SSECallbacks
     ): Promise<void> {
-        const { onThread, onToken, onDone, onError } = callbacks;
+        const { onThread, onToken, onToolcall, onDone, onError } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -96,6 +97,7 @@ export class ChatService extends ApiService {
                                 this.parseAndHandleEvent(rawEvent, {
                                     onThread,
                                     onToken,
+                                    onToolcall,
                                     onDone: () => {
                                         doneReceived = true;
                                         onDone();
@@ -155,11 +157,13 @@ export class ChatService extends ApiService {
         {
             onThread,
             onToken,
+            onToolcall,
             onDone,
             onError
         }: {
             onThread: (threadId: string) => void;
             onToken: (token: string) => void;
+            onToolcall: (data: any) => void;
             onDone: () => void;
             onError: (errorType: string) => void;
         }
@@ -204,6 +208,16 @@ export class ChatService extends ApiService {
                 // e.g. data: {"content": "some partial text"}
                 if (parsedData?.content) {
                     onToken(parsedData.content);
+                }
+                break;
+            case 'toolcall':
+                // e.g.
+                //  data: {"id": "...", "function": "search", "status": "start"}
+                //  data: {"id": "...", "function": "search", "status": "results", "results": [...]}
+                //  data: {"id": "...", "function": "search", "status": "complete"}
+                //  data: {"id": "...", "function": "search", "status": "error", "error": "..."}
+                if (parsedData?.id) {
+                    onToolcall(parsedData);
                 }
                 break;
             case 'done':

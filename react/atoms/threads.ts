@@ -94,6 +94,20 @@ export const setMessageStatusAtom = atom(
     }
 );
 
+export const addOrUpdateMessageAtom = atom(
+    null,
+    (get, set, { message }: { message: ChatMessage }) => {
+        const existingMessage = get(threadMessagesAtom).find(m => m.id === message.id);
+        if (existingMessage) {
+            set(threadMessagesAtom, get(threadMessagesAtom).map(m =>
+                m.id === message.id ? { ...message } : m
+            ));
+        } else {
+            set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
+        }
+    }
+);
+
 export const rollbackChatToMessageIdAtom = atom(
     null,
     (get, set, messageId: string) => {

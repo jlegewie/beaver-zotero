@@ -13,6 +13,7 @@ export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
+    tool_calls?: Record<string, any>[];
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
     errorType?: string;
 }

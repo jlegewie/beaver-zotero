@@ -85,6 +85,7 @@ export class ThreadService extends ApiService {
             id: message.id,
             role: message.role as 'user' | 'assistant' | 'system',
             content: message.content,
+            tool_calls: message.tool_calls || [],
             status: message.status as 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error',
             errorType: message.error || undefined
         }));
