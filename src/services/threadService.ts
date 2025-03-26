@@ -2,9 +2,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../../react/types/messages';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageAttachment } from './chatService';
-import { AppState } from '../../react/types/chat/api';
 import { ThreadSource } from '../../react/types/sources';
+import { MessageModel } from '../../react/types/chat/api';
+import { toMessageUI } from '../../react/types/chat/converters';
 
 // Types that match the backend models
 export interface Thread {
@@ -14,29 +14,7 @@ export interface Thread {
     updated_at: string;
 }
 
-interface ToolCall {
-    id: string;
-    type: "function";
-    function: Record<string, any>;
-}
-
 // Based on backend MessageModel
-export interface ThreadMessage {
-    id: string;
-    user_id: string | null;
-    thread_id: string;
-    role: string;
-    tool_call_id: string | null;
-    content: string;
-    attachments: MessageAttachment[] | null;
-    tool_calls: ToolCall[] | null;
-    app_state: AppState | null;
-    status: string;
-    created_at: string | null;
-    metadata: Record<string, any> | null;
-    error: string | null;
-}
-
 export interface PaginatedThreadsResponse {
     data: Thread[];
     next_cursor: string | null;
@@ -78,17 +56,10 @@ export class ThreadService extends ApiService {
      * @returns Promise with an array of messages
      */
     async getThreadMessages(threadId: string): Promise<{ messages: ChatMessage[], sources: ThreadSource[] }> {
-        const messages = await this.get<ThreadMessage[]>(`/threads/${threadId}/messages`);
+        const messages = await this.get<MessageModel[]>(`/threads/${threadId}/messages`);
         
-        // Convert backend ThreadMessage to frontend ChatMessage format
-        const chatMessages = messages.map(message => ({
-            id: message.id,
-            role: message.role as 'user' | 'assistant' | 'system',
-            content: message.content,
-            tool_calls: message.tool_calls || [],
-            status: message.status as 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error',
-            errorType: message.error || undefined
-        }));
+        // Convert backend MessageModel to frontend ChatMessage format
+        const chatMessages = messages.map(toMessageUI);
 
         const sources: ThreadSource[] = [];
         
