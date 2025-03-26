@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { ToolCall } from './chat/api';
 
 // Thread types
 export interface Thread {
@@ -13,7 +14,7 @@ export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
-    tool_calls?: Record<string, any>[];
+    tool_calls?: ToolCall[];
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
     errorType?: string;
 }
