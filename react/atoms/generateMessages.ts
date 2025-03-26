@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
+import { MessageModel, AppState } from 'react/types/chat/api';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -8,7 +9,7 @@ import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
 import { chatService, MessageAttachment } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
-import { AppState } from 'react/ui/types';
+import { toMessageUI } from '../types/chat/converters';
 
 const MODE = getPref('mode');
 
@@ -216,18 +217,10 @@ function _processChatCompletionViaBackend(
                     chunk: partial
                 });
             },
-            onToolcall: (data) => {
-                const toolcallMessage = data.message;
-                if (!toolcallMessage) return;
+            onToolcall: (data: MessageModel) => {
+                if (!data) return;
 
-                const message: ChatMessage = {
-                    id: toolcallMessage.id,
-                    role: toolcallMessage.role,
-                    content: toolcallMessage.content,
-                    status: toolcallMessage.status,
-                    tool_calls: toolcallMessage.tool_calls,
-                };
-
+                const message = toMessageUI(data);
                 set(addOrUpdateMessageAtom, {message});
 
             },

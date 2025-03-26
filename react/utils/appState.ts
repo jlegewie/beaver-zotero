@@ -1,4 +1,4 @@
-import { AppState } from "../ui/types";
+import { AppState } from "../types/chat/api";
 import { getCurrentReader, getCurrentItem, getCurrentPage, getSelectedText } from "./readerUtils";
 
 /**

@@ -1,7 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { AppState } from 'react/ui/types';
-
+import { MessageModel, AppState } from 'react/types/chat/api';
 
 // Interface for attachments in the request body (matching 'MessageAttachment' in backend)
 export interface MessageAttachment {
@@ -163,7 +162,7 @@ export class ChatService extends ApiService {
         }: {
             onThread: (threadId: string) => void;
             onToken: (token: string) => void;
-            onToolcall: (data: any) => void;
+            onToolcall: (data: MessageModel) => void;
             onDone: () => void;
             onError: (errorType: string) => void;
         }
@@ -216,8 +215,9 @@ export class ChatService extends ApiService {
                 //  data: {"id": "...", "function": "search", "status": "results", "results": [...]}
                 //  data: {"id": "...", "function": "search", "status": "complete"}
                 //  data: {"id": "...", "function": "search", "status": "error", "error": "..."}
-                if (parsedData?.id) {
-                    onToolcall(parsedData);
+                if (parsedData?.message) {
+                    const message = JSON.parse(parsedData.message) as MessageModel;
+                    onToolcall(message);
                 }
                 break;
             case 'done':

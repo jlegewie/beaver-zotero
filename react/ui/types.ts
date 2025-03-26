@@ -20,12 +20,3 @@ export interface UIState {
     isLibraryTab: boolean;
     collapseState: CollapseState;
 }
-
-export type AppState = {
-    view: 'library' | 'reader';
-    reader_type: string | null;
-    library_id: number | null;
-    item_keys: string[];
-    selection: string | null;
-    page: number | null;
-}

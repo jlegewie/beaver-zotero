@@ -3,8 +3,8 @@ import { ChatMessage } from '../../react/types/messages';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageAttachment } from './chatService';
-import { AppState } from 'react/ui/types';
-import { ThreadSource } from 'react/types/sources';
+import { AppState } from '../../react/types/chat/api';
+import { ThreadSource } from '../../react/types/sources';
 
 // Types that match the backend models
 export interface Thread {
