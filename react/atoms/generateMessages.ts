@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
 import { MessageModel, AppState } from 'react/types/chat/api';
-import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom } from './threads';
+import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom, addToolCallSourcesToThreadSourcesAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
@@ -217,12 +217,16 @@ function _processChatCompletionViaBackend(
                     chunk: partial
                 });
             },
-            onToolcall: (data: MessageModel) => {
+            onToolcall: async (data: MessageModel) => {
                 if (!data) return;
 
                 const message = toMessageUI(data);
+                // Add the message to the thread
                 set(addOrUpdateMessageAtom, {message, beforeId: assistantMessageId});
-
+                // Add the tool call sources to the thread sources
+                if (message.status === 'completed') {
+                    set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
+                }
             },
             onDone: () => {
                 // Mark the assistant as completed

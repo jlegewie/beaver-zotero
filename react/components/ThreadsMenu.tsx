@@ -2,7 +2,7 @@ import React  from 'react';
 // @ts-ignore useEffect is defined in React
 import { useEffect, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom } from '../atoms/threads';
+import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
@@ -58,6 +58,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const setCurrentSources = useSetAtom(currentSourcesAtom);
     const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
+    const addToolCallSourcesToThreadSources = useSetAtom(addToolCallSourcesToThreadSourcesAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
@@ -137,6 +138,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             // Update the thread messages and sources state
             setThreadMessages(messages);
             setThreadSources(sources);
+            addToolCallSourcesToThreadSources({messages: messages});
             
             // Clear sources for now
             setCurrentSources([]);
