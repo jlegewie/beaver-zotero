@@ -54,7 +54,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                 ref={ref}
             >
                 {messages.map((message, index) => (
-                    <div key={index} className="px-3">
+                    <div key={index} className={`${message.role === 'user' ? 'px-3' : 'px-4'}`}>
                         {/* User message */}
                         {message.role === 'user' && (
                             <UserMessageDisplay

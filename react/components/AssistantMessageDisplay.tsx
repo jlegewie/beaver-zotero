@@ -149,7 +149,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 </div>
             }
             <div 
-                className="px-2 user-select-text"
+                className="user-select-text"
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
@@ -176,7 +176,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                             onClick={toggleSources}
                             // rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
                             icon={sourcesVisible ? ArrowDownIcon : ArrowRightIcon}
-                            iconClassName="mr-0"
+                            iconClassName="mr-0 scale-12"
                             // className="text-sm"
                         >
                             <span style={{ marginLeft: '-3px' }}>
