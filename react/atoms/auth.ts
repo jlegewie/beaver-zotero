@@ -29,14 +29,17 @@ export const initializeSessionAtom = atom(
         const { data } = await supabase.auth.getSession();
         set(sessionAtom, data.session);
 
+        console.log('auth: initializeSessionAtom', data);
         // Set up listener for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+            console.log('auth: state changed', event);
             set(sessionAtom, newSession);
             set(userAtom, newSession?.user ? { id: newSession.user.id, email: newSession.user.email, last_sign_in_at: newSession.user.last_sign_in_at } : null);
         });
 
         // Return cleanup function
         return () => {
+            console.log('auth: unsubscribing from auth state changes');
             subscription.unsubscribe();
         };
     }
