@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Icon, RepeatIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon } from './icons';
+import { Icon, RepeatIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
 import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
@@ -21,11 +21,13 @@ import CopyButton from './CopyButton';
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
     isLastMessage: boolean;
+    toolCallInProgress: boolean;
 }
 
 const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     message,
-    isLastMessage
+    isLastMessage,
+    toolCallInProgress
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
@@ -131,15 +133,27 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
+            {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
+                <div className="py-1">
+                    <Button
+                        variant="ghost"
+                        className="text-base scale-105 disabled-but-styled"
+                        iconClassName="scale-12"
+                        icon={Spinner}
+                        disabled={true}
+                    >
+                        <span style={{ marginLeft: '-2px' }}>
+                            Generating...
+                        </span>
+                    </Button>
+                </div>
+            }
             <div 
                 className="px-2 user-select-text"
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
                 <MarkdownRenderer className="markdown" content={message.content} />
-                {message.status === 'in_progress' && message.content == '' && 
-                    <Spinner />
-                }
                 {message.status === 'error' &&
                     <div className="font-color-red py-3 flex flex-row gap-2">
                         <Icon icon={AlertIcon} className="mt-1"/>
@@ -151,19 +165,24 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
                 className={`
-                    flex flex-row items-center pt-2 mr-4 ml-3
+                    flex flex-row items-center pt-2 mr-4 ml-1
                     ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
                     ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
                 <div className="flex-1">
                     {citedSources.length > 0 && (
                         <Button
-                            variant="outline"
+                            variant="ghost"
                             onClick={toggleSources}
-                            rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
-                            className="text-sm"
+                            // rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
+                            icon={sourcesVisible ? ArrowDownIcon : ArrowRightIcon}
+                            iconClassName="mr-0"
+                            // className="text-sm"
                         >
-                            {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
+                            <span style={{ marginLeft: '-3px' }}>
+                                {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
+                                {/* Sources ({citedSources.length}) */}
+                            </span>
                         </Button>
                     )}
                 </div>

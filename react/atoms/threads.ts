@@ -96,14 +96,30 @@ export const setMessageStatusAtom = atom(
 
 export const addOrUpdateMessageAtom = atom(
     null,
-    (get, set, { message }: { message: ChatMessage }) => {
+    (get, set, { message, beforeId }: { message: ChatMessage; beforeId?: string }) => {
         const existingMessage = get(threadMessagesAtom).find(m => m.id === message.id);
         if (existingMessage) {
             set(threadMessagesAtom, get(threadMessagesAtom).map(m =>
                 m.id === message.id ? { ...message } : m
             ));
         } else {
-            set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
+            if (beforeId) {
+                const currentMessages = get(threadMessagesAtom);
+                const insertIndex = currentMessages.findIndex(m => m.id === beforeId);
+                
+                if (insertIndex !== -1) {
+                    // Insert before the specified message
+                    set(threadMessagesAtom, [
+                        ...currentMessages.slice(0, insertIndex),
+                        message,
+                        ...currentMessages.slice(insertIndex)
+                    ]);
+                } else {
+                    set(threadMessagesAtom, [...currentMessages, message]);
+                }
+            } else {
+                set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
+            }
         }
     }
 );

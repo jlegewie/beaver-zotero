@@ -66,6 +66,11 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             <AssistantMessageDisplay
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
+                                toolCallInProgress={
+                                    messages
+                                        .filter(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0)
+                                        .some(m => m.status == "in_progress")
+                                }
                             />
                         )}
                         {/* Assistant message with tool calls */}

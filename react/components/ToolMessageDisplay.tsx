@@ -3,9 +3,7 @@ import React from 'react';
 import { useState, useEffect } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon } from './icons';
-import { isStreamingAtom } from '../atoms/threads';
-import { useAtomValue } from 'jotai';
+import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, LibraryIcon } from './icons';
 import Button from './button';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
@@ -16,7 +14,6 @@ interface ToolMessageDisplayProps {
 const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
     message
 }) => {
-    const isStreaming = useAtomValue(isStreamingAtom);
     const [resultsVisible, setResultsVisible] = useState(false);
     const [loadingDots, setLoadingDots] = useState(1);
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
@@ -97,7 +94,7 @@ const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
             <Button
                 variant="ghost"
                 onClick={toggleResults}
-                className={`text-base scale-105 ${message.status === 'in_progress' || message.status === 'error' || message.status === 'completed' && numResults === 0 ? 'opacity-50' : ''}`}
+                className={`text-base scale-105 ${message.status === 'in_progress' || message.status === 'error' || message.status === 'completed' && numResults === 0 ? 'disabled-but-styled' : ''}`}
                 iconClassName="scale-12"
                 icon={getIcon()}
                 disabled={

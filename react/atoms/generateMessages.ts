@@ -221,7 +221,7 @@ function _processChatCompletionViaBackend(
                 if (!data) return;
 
                 const message = toMessageUI(data);
-                set(addOrUpdateMessageAtom, {message});
+                set(addOrUpdateMessageAtom, {message, beforeId: assistantMessageId});
 
             },
             onDone: () => {
