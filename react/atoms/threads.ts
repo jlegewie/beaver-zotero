@@ -1,10 +1,11 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage, Thread } from "../types/messages";
-import { ThreadSource, SourceCitation } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem } from "../utils/sourceUtils";
+import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
+import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { userScrolledAtom } from "./ui";
+import { getResultAttachments } from "../types/chat/converters";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -91,6 +92,27 @@ export const setMessageStatusAtom = atom(
         set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
             message.id === id ? { ...message, status, ...(errorType && { errorType }) } : message
         ));
+    }
+);
+
+export const addToolCallSourcesToThreadSourcesAtom = atom(
+    null,
+    async (get, set, { messages }: { messages: ChatMessage[] }) => {
+        const sources: ThreadSource[] = [];
+        for (const message of messages) {
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                const attachments = message.tool_calls.flatMap(getResultAttachments);
+                if (attachments.length > 0) {
+                    const items = await Promise.all(attachments.map(async (att) => await Zotero.Items.getByLibraryAndKeyAsync(att!.library_id, att!.zotero_key)));
+                    const messageSources = await Promise.all(items
+                        .filter(item => item && (item.isNote() || item.isAttachment()))
+                        .map(async (item) => await createSourceFromItem(item as Zotero.Item))
+                    );
+                    sources.push(...messageSources as ThreadSource[]);
+                }
+            }
+        }
+        set(threadSourcesAtom, (prevSources: ThreadSource[]) => [...prevSources, ...sources]);
     }
 );
 
