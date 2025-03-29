@@ -10,6 +10,7 @@ import { ReaderContext } from '../utils/readerUtils';
 import { chatService, MessageAttachment } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
+import { getAppState } from '../utils/appState';
 
 const MODE = getPref('mode');
 
@@ -116,35 +117,68 @@ export const generateResponseAtom = atom(
     }
 );
 
+function findLastUserMessageIndexBefore(messages: ChatMessage[], beforeIndex: number) {
+    if (messages[beforeIndex]?.role === 'user') {
+        return beforeIndex;
+    }
+    for (let i = beforeIndex - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
 export const regenerateFromMessageAtom = atom(
     null,
-    async (get, set, messageId: string) => {
-        // Get current messages
+    async (get, set, assistantMessageId: string) => {
+        // Get current messages and sources
         const threadMessages = get(threadMessagesAtom);
         const threadSources = get(threadSourcesAtom);
+        const currentThreadId = get(currentThreadIdAtom);
+        if (!currentThreadId) return null;
 
-        // Find the index of the message to continue from
-        const messageIndex = threadMessages.findIndex(m => m.id === messageId);
+        // Find the index of the last user message
+        const messageIndex = threadMessages.findIndex(m => m.id === assistantMessageId);
         if (messageIndex < 0) return null; // Message not found
+        const lastUserMessageIndex = findLastUserMessageIndexBefore(threadMessages, messageIndex);
+        const userMessageId = threadMessages[lastUserMessageIndex].id;
+        if (lastUserMessageIndex < 0) return null;
         
-        // Truncate messages to the specified message
-        const truncatedMessages = threadMessages.slice(0, messageIndex);
-        const messageIds = truncatedMessages.map(m => m.id);
+        // Truncate messages
+        const truncatedMessages = threadMessages.slice(0, lastUserMessageIndex + 1);
         
-        // Create a new assistant message
+        // New assistant message
         const assistantMsg = createAssistantMessage();
+
         // Add the assistant message to the new messages
         const newMessages = [...truncatedMessages, assistantMsg];
-        
+
         // Update messages atom
         set(threadMessagesAtom, newMessages);
 
-        // Remove sources for messages after the specified message
+        // Update sources
+        // TODO: tool calls sources missing (and app state??)
+        const messageIds = truncatedMessages.map(m => m.id);
         const newThreadSources = threadSources.filter(r => r.messageId && messageIds.includes(r.messageId));
         set(threadSourcesAtom, newThreadSources);
         
         // Execute chat completion
-        _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, undefined, set);
+        if (MODE === 'local') {
+            console.error('Local mode not supported for regenerateFromMessage');
+        } else {
+            _processChatCompletionViaBackend(
+                currentThreadId,
+                userMessageId,      // existing user message ID
+                assistantMsg.id,    // new assistant message ID
+                "",                 // content remains unchanged
+                [],                 // sources remain unchanged
+                getAppState(),      // current app state
+                false,              // isLibrarySearch remains unchanged
+                set
+            );
+        }
         
         return assistantMsg.id;
     }

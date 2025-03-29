@@ -14,7 +14,7 @@ import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './button';
 import CitedSourcesList from './CitedSourcesList';
-import { InputSource, SourceCitation } from '../types/sources';
+import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
 
@@ -61,8 +61,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         setSourcesVisible((prev: boolean) => !prev);
     };
 
-    const handleRepeat = () => {
-        regenerateFromMessage(message.id);
+    const handleRepeat = async () => {
+        await regenerateFromMessage(message.id);
     }
 
     const handleCopy = async () => {
