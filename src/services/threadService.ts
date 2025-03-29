@@ -5,6 +5,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ThreadSource } from '../../react/types/sources';
 import { MessageModel } from '../../react/types/chat/api';
 import { toMessageUI } from '../../react/types/chat/converters';
+import { createSourceFromItem } from '../../react/utils/sourceUtils';
 
 // Types that match the backend models
 export interface Thread {
@@ -68,15 +69,8 @@ export class ThreadService extends ApiService {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
                 if (!item) continue;
                 sources.push({
-                    id: uuidv4(),
-                    type: item.isNote() ? "note" : "attachment",
+                    ...(await createSourceFromItem(item)),
                     messageId: message.id,
-                    libraryID: attachment.library_id,
-                    itemKey: attachment.zotero_key,
-                    parentKey: item.parentKey || null,
-                    timestamp: Date.now(),
-                    pinned: false,
-                    childItemKeys: [],
                 } as ThreadSource);
             }
         }
@@ -126,6 +120,37 @@ export class ThreadService extends ApiService {
     async createThread(name?: string): Promise<Thread> {
         const payload = { name: name || null };
         return this.post<Thread>('/threads', payload);
+    }
+
+    /**
+     * Resets a thread by deleting the specified message and all subsequent messages
+     * @param threadId The ID of the thread
+     * @param messageId The ID of the message to reset from
+     * @returns Promise with the remaining messages and extracted sources
+     */
+    async resetThreadFromMessage(
+        threadId: string,
+        messageId: string
+    ): Promise<{ messages: ChatMessage[], sources: ThreadSource[] }> {
+        const messages = await this.post<MessageModel[]>(`/threads/${threadId}/reset-from-message/${messageId}`, {});
+        
+        // Convert backend MessageModel to frontend ChatMessage format
+        const chatMessages = messages.map(toMessageUI);
+
+        const sources: ThreadSource[] = [];
+        
+        for (const message of messages) {
+            for (const attachment of message.attachments || []) {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
+                if (!item) continue;
+                sources.push({
+                    ...(await createSourceFromItem(item)),
+                    messageId: message.id,
+                } as ThreadSource);
+            }
+        }
+
+        return { messages: chatMessages, sources: sources };
     }
 }
 
