@@ -3,8 +3,8 @@ import { ChatMessage, createAssistantMessage, Thread } from "../types/messages";
 import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
-import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
-import { userScrolledAtom } from "./ui";
+import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { isLibraryTabAtom, userScrolledAtom } from "./ui";
 import { getResultAttachments } from "../types/chat/converters";
 
 // Thread messages and sources
@@ -57,13 +57,19 @@ export const recentThreadsAtom = atom<Thread[]>([]);
 // Setter atoms
 export const newThreadAtom = atom(
     null,
-    async (_, set) => {
+    async (get, set) => {
+        const isLibraryTab = get(isLibraryTabAtom);
         set(currentThreadIdAtom, null);
         set(threadMessagesAtom, []);
         set(threadSourcesAtom, []);
         set(currentUserMessageAtom, '');
         set(resetCurrentSourcesAtom);
-        set(updateSourcesFromZoteroSelectionAtom);
+        // READER VIEW
+        if (!isLibraryTab) {
+            set(updateSourcesFromZoteroSelectionAtom);
+        } else {
+            set(updateSourcesFromReaderAtom);
+        }
         set(userScrolledAtom, false);
     }
 );
