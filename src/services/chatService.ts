@@ -126,10 +126,7 @@ export class ChatService extends ApiService {
                                 reject(xhr.status);
                                 return;
                             }
-                            // If success but we never got an explicit "done"
-                            if (!doneReceived) {
-                                onDone();
-                            }
+                            // onDone();
                             resolve();
                         }
                     };
