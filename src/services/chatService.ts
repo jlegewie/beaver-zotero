@@ -8,6 +8,16 @@ export interface MessageAttachment {
     zotero_key: string;
 }
 
+export interface ToolRequest {
+    function: "library_search";
+    parameters: Record<string, any>;
+}
+
+export const library_search_tool_request: ToolRequest = {
+    function: "library_search",
+    parameters: {}
+}
+
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
 interface ChatCompletionRequestBody {
     thread_id: string | null;           // If continuing an existing thread, else null
@@ -16,7 +26,7 @@ interface ChatCompletionRequestBody {
     content: string;                    // The user's input text
     attachments: MessageAttachment[];   // The attachments to include in the request
     app_state: AppState;                // Current app state
-    is_library_search: boolean;         // Whether this is a library search
+    tool_request: ToolRequest | null;   // User tool request, if any
 }
 
 export interface SSECallbacks {

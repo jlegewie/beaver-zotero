@@ -7,7 +7,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { chatService, MessageAttachment } from '../../src/services/chatService';
+import { chatService, library_search_tool_request, MessageAttachment } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';
@@ -237,7 +237,7 @@ function _processChatCompletionViaBackend(
             content: content,
             attachments: attachments,
             app_state: appState,
-            is_library_search: isLibrarySearch
+            tool_request: isLibrarySearch ? library_search_tool_request : null
         },
         {
             onThread: (newThreadId) => {
