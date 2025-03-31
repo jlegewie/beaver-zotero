@@ -10,12 +10,12 @@ const COLORS = {
 }
 
 type DatabaseStatusIndicatorProps = React.SVGProps<SVGSVGElement> & {
-    dotColor?: string;
+    dotColor?: "red" | "green" | "yellow" | string;
     fading?: boolean;
     fadeDuration?: number; // in milliseconds
 };
 
-const DatabaseStatusIndicator: React.FC<DatabaseStatusIndicatorProps> = ({
+const DatabaseStatusIcon: React.FC<DatabaseStatusIndicatorProps> = ({
     dotColor = "green",
     fading = true,
     fadeDuration = 1000,
@@ -71,4 +71,4 @@ const DatabaseStatusIndicator: React.FC<DatabaseStatusIndicatorProps> = ({
     );
 };
 
-export default DatabaseStatusIndicator;
+export default DatabaseStatusIcon;

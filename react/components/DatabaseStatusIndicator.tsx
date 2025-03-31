@@ -1,98 +1,159 @@
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import React from "react";
 // @ts-ignore no idea why this is needed
 import { useEffect, useState } from "react";
-import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, syncingFilesAtom } from "../atoms/ui";
+import { 
+    syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
+    fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
+    syncingAtom, syncErrorAtom
+} from "../atoms/ui";
 import Tooltip from "./Tooltip";
 import { syncZoteroDatabase } from '../../src/utils/sync';
 import IconButton from "./IconButton";
 import { DatabaseStatusIcon } from "./icons";
-import { syncingDatabaseAtom } from "../../react/atoms/ui";
 import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner } from "./icons";
 
-const COLORS = {
-    red: "#db2c3a",
-    green: "#39bf68",
-    yellow: "#faa700",
-}
+// Possible icon states
+type IconState = {
+    color: "green" | "yellow" | "red";
+    fading: boolean;
+};
 
 const DatabaseStatusIndicator: React.FC = () => {
-    const syncingDatabase = useAtomValue(syncingDatabaseAtom);
-    const syncingFiles = useAtomValue(syncingFilesAtom);
+    // Database sync atoms
     const syncStatus = useAtomValue(syncStatusAtom);
     const syncTotal = useAtomValue(syncTotalAtom);
     const syncCurrent = useAtomValue(syncCurrentAtom);
     
-    let dotColor = "green";
-    let fading = false;
-    if(syncStatus === "idle") {
-        dotColor = "green";
-        fading = false;
-    } else if(syncStatus === "in_progress") {
-        dotColor = "green";
-        fading = true;
-    } else if(syncStatus === "completed") {
-        dotColor = "green";
-        fading = false;
-    } else if(syncStatus === "failed") {
-        dotColor = "red";
-        fading = false;
-    }
-
-    fading = syncingDatabase || syncingFiles;
+    // File upload atoms
+    const fileStatus = useAtomValue(fileUploadStatusAtom);
+    const fileTotal = useAtomValue(fileUploadTotalAtom);
+    const fileCurrent = useAtomValue(fileUploadCurrentAtom);
     
-    const color = dotColor in COLORS ? COLORS[dotColor as keyof typeof COLORS] : dotColor;
+    // Combined atoms
+    const isSyncing = useAtomValue(syncingAtom);
+    const hasError = useAtomValue(syncErrorAtom);
     
-    // Create a wrapper component that passes the props to DatabaseStatusIcon
-    const IconWithProps = (props: React.SVGProps<SVGSVGElement>) => (
-        <DatabaseStatusIcon 
-            dotColor={dotColor} 
-            fading={fading} 
-            fadeDuration={1000} 
-            {...props} 
-        />
-    );
+    // Set sync status atom (to trigger syncs)
+    const setSyncStatus = useSetAtom(syncStatusAtom);
+    // setSyncStatus('failed');
 
+    // Determine the icon state based on current sync status
+    const getIconState = (): IconState => {
+        // Error state takes precedence
+        if (hasError) {
+            return { color: "red", fading: false };
+        }
+        
+        // Check if initial sync (large operation) is in progress
+        const isInitialSync = syncStatus === 'in_progress' && syncTotal > 50;
+        const isLargeFileUpload = fileStatus === 'in_progress' && fileTotal > 20;
+        
+        if (isInitialSync || isLargeFileUpload) {
+            return { color: "yellow", fading: true };
+        }
+        
+        // Check if incremental sync or small file upload is in progress
+        if (isSyncing) {
+            return { color: "green", fading: true };
+        }
+        
+        // All good, no ongoing operations
+        return { color: "green", fading: false };
+    };
+    
+    // Get current icon state
+    const iconState = getIconState();
+    
+    // Calculate progress percentages
+    const dbProgress = syncTotal > 0 ? Math.round((syncCurrent / syncTotal) * 100) : 0;
+    const fileProgress = fileTotal > 0 ? Math.round((fileCurrent / fileTotal) * 100) : 0;
+    
+    // Handle manual sync button click
+    const handleSyncClick = () => {
+        syncZoteroDatabase();
+    };
+    
+    // Create the tooltip content
     const customContent = (
-        <div className="flex flex-col gap-3 p-0">
+        <div className="flex flex-col gap-3 p-0 max-w-xs">
             <div className="card flex flex-col gap-3 items-start">
-                <div className="flex flex-row justify-between items-center gap-3">
-                    {syncingDatabase ? (
-                        <Spinner />
-                        
+                <div className="flex flex-row justify-between items-center w-full">
+                    <div className="flex items-center gap-3">
+                        {syncStatus === 'in_progress' ? (
+                            <Spinner size={14} />
+                        ) : syncStatus === 'failed' ? (
+                            <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />
+                        ) : (
+                            <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />
+                        )}
+                        <span className="font-color-secondary text-base">
+                            Zotero Database Sync
+                        </span>
+                    </div>
+                    
+                    {/* {syncStatus !== 'in_progress' && (
+                        <IconButton
+                            icon={Spinner}
+                            onClick={handleSyncClick}
+                            className="scale-10 ml-auto"
+                            ariaLabel="Sync database"
+                            title="Run database sync"
+                        />
+                    )} */}
+                </div>
+                
+                <span className="font-color-tertiary text-sm">
+                    {syncStatus === 'idle' ? 'Ready' : 
+                     syncStatus === 'in_progress' ? `Syncing... ${dbProgress}%` :
+                     syncStatus === 'completed' ? 'Sync completed' : 
+                     'Sync failed'}
+                </span>
+            </div>
+            
+            <div className="card flex flex-col gap-3 items-start">
+                <div className="flex flex-row items-center gap-3">
+                    {fileStatus === 'in_progress' ? (
+                        <Spinner size={14} />
+                    ) : fileStatus === 'failed' ? (
+                        <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />
                     ) : (
                         <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />
                     )}
                     <span className="font-color-secondary text-base">
-                        Zotero Database Sync
-                    </span>
-                </div>
-                <span className="font-color-tertiary text-base">
-                    Uploading...
-                </span>
-            </div>
-            <div className="card flex flex-col gap-3 items-start">
-                <div className="flex flex-row items-center gap-3">
-                    <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />
-                    <span className="font-color-secondary text-base">
                         File Uploads
                     </span>
                 </div>
-                <span className="font-color-tertiary text-base">
-                    Uploading...
+                
+                <span className="font-color-tertiary text-sm">
+                    {fileStatus === 'idle' ? 'No uploads in progress' : 
+                     fileStatus === 'in_progress' ? `Uploading... ${fileProgress}% (${fileCurrent}/${fileTotal})` :
+                     fileStatus === 'completed' ? 'All uploads completed' : 
+                     'Upload failed'}
                 </span>
             </div>
         </div>
     );
     
     return (
-        <Tooltip content="Database status" showArrow singleLine customContent={customContent}>
+        <Tooltip 
+            content="Sync Status" 
+            showArrow 
+            singleLine 
+            customContent={customContent}
+        >
             <IconButton
-                icon={IconWithProps}
-                onClick={() => syncZoteroDatabase()}
+                icon={(props) => (
+                    <DatabaseStatusIcon
+                        dotColor={iconState.color}
+                        fading={iconState.fading}
+                        fadeDuration={1000}
+                        {...props}
+                    />
+                )}
+                onClick={handleSyncClick}
                 className="scale-14"
-                ariaLabel="Database status"
-                // disabled={threadMessages.length === 0}
+                ariaLabel="Sync status"
             />
         </Tooltip>
     );
