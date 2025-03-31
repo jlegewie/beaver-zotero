@@ -10,26 +10,12 @@ import { calculateObjectHash } from './hash';
 export type ItemFilterFunction = (item: Zotero.Item) => boolean;
 
 /**
- * Default filter function that accepts all regular items
+ * Filter function for syncing items
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const defaultItemFilter: ItemFilterFunction = (item) => {
-    return item.isRegularItem();
-};
-
 export const itemFilter: ItemFilterFunction = (item) => {
     return item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
-};
-
-/**
- * PDF attachment filter function
- * Only sync PDF attachments
- * @param item Zotero item
- * @returns true if the item is a PDF attachment
- */
-export const pdfAttachmentFilter: ItemFilterFunction = (item) => {
-    return item.isPDFAttachment();
 };
 
 /**
