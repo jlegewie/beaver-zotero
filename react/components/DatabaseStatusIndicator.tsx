@@ -162,6 +162,7 @@ const DatabaseStatusIndicator: React.FC = () => {
             showArrow 
             singleLine 
             customContent={customContent}
+            stayOpenOnAnchorClick={true}
         >
             <IconButton
                 icon={(props) => (
