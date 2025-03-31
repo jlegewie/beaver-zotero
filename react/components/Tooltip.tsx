@@ -29,6 +29,8 @@ export interface TooltipProps {
     allowHtml?: boolean;
     /** Custom content to render instead of the default content */
     customContent?: ReactNode;
+    /** Whether the tooltip should stay open when clicking the anchor element */
+    stayOpenOnAnchorClick?: boolean;
 }
 
 /**
@@ -46,6 +48,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     width,
     allowHtml = false,
     customContent,
+    stayOpenOnAnchorClick = false,
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
     const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
@@ -57,6 +60,9 @@ const Tooltip: React.FC<TooltipProps> = ({
     
     const anchorRef = useRef<HTMLDivElement | null>(null);
     const tooltipRef = useRef<HTMLDivElement | null>(null);
+    
+    // Add a ref to track if the click occurred on the anchor
+    const anchorClicked = useRef<boolean>(false);
     
     // Calculate tooltip position
     const calculatePosition = () => {
@@ -128,7 +134,14 @@ const Tooltip: React.FC<TooltipProps> = ({
         mainWindow.addEventListener('scroll', handleScroll, true);
         
         // Handle click events to close the tooltip
-        const handleClick = () => setIsOpen(false);
+        const handleClick = (e: MouseEvent) => {
+            // If stayOpenOnAnchorClick is true and the click was on the anchor, don't close
+            if (stayOpenOnAnchorClick && anchorClicked.current) {
+                anchorClicked.current = false;
+                return;
+            }
+            setIsOpen(false);
+        };
         mainWindow.addEventListener('click', handleClick);
         
         return () => {
@@ -137,7 +150,7 @@ const Tooltip: React.FC<TooltipProps> = ({
             mainWindow.removeEventListener('scroll', handleScroll, true);
             mainWindow.removeEventListener('click', handleClick);
         };
-    }, [isOpen]);
+    }, [isOpen, stayOpenOnAnchorClick]);
     
     // Close tooltip when disabled prop changes to true
     useEffect(() => {
@@ -158,12 +171,18 @@ const Tooltip: React.FC<TooltipProps> = ({
         setIsOpen(false);
     };
     
+    // Add a click handler to mark when anchor is clicked
+    const handleAnchorClick = () => {
+        anchorClicked.current = true;
+    };
+    
     // Wrap children to add mouse event handlers
     const wrappedChildren = (
         <span 
             ref={anchorRef}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
+            onClick={handleAnchorClick}
             style={{ display: 'inline-block' }}
         >
             {children}
