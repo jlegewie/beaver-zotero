@@ -13,7 +13,7 @@ import SourcePreviewAttachment from './previews/SourcePreviewAttachment';
 import { getCurrentPage } from '../utils/readerUtils';
 import { getZoteroItem } from '../utils/sourceUtils';
 import { previewCloseTimeoutAtom } from './SourceButton';
-import Button from './Button';
+import Button from './button';
 import IconButton from './IconButton';
 
 interface SourcePreviewProps {
