@@ -14,7 +14,7 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const itemFilter: ItemFilterFunction = (item) => {
+export const syncingItemFilter: ItemFilterFunction = (item) => {
     return item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
 };
 
@@ -353,7 +353,7 @@ export async function syncItemsToBackend(
  */
 export async function performInitialSync(
     libraryID: number,
-    filterFunction: ItemFilterFunction = itemFilter,
+    filterFunction: ItemFilterFunction = syncingItemFilter,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 50
@@ -401,7 +401,7 @@ export async function performInitialSync(
 export async function performPeriodicSync(
     libraryID: number,
     lastSyncDate: string,
-    filterFunction: ItemFilterFunction = itemFilter,
+    filterFunction: ItemFilterFunction = syncingItemFilter,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 20
@@ -444,7 +444,7 @@ export async function performPeriodicSync(
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
-    filterFunction: ItemFilterFunction = itemFilter,
+    filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void

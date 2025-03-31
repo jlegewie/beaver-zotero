@@ -1,6 +1,6 @@
 // @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
-import { syncZoteroDatabase, syncItemsToBackend, itemFilter, ItemFilterFunction } from "../../src/utils/sync";
+import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
@@ -30,7 +30,7 @@ interface CollectedEvents {
  * @param filterFunction Optional function to filter which items to sync
  * @param debounceMs Debounce time in milliseconds (default: 2000ms)
  */
-export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, debounceMs: number = DEBOUNCE_MS) {
+export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFilter, debounceMs: number = DEBOUNCE_MS) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const setSyncTotal = useSetAtom(syncTotalAtom);
