@@ -1,7 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import React from "react";
 // @ts-ignore no idea why this is needed
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { 
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
     fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
@@ -156,6 +156,19 @@ const DatabaseStatusIndicator: React.FC = () => {
     
     const [isHovering, setIsHovering] = useState(false);
     
+    // Memoize the icon component to prevent recreation on each render
+    const memoizedIcon = useMemo(() => {
+        return (props: React.SVGProps<SVGSVGElement>) => (
+            <DatabaseStatusIcon
+                dotColor={iconState.color}
+                fading={iconState.fading}
+                fadeDuration={1000}
+                hover={isHovering}
+                {...props}
+            />
+        );
+    }, [iconState.color, iconState.fading, isHovering]);
+    
     return (
         <Tooltip 
             content="Sync Status" 
@@ -165,15 +178,7 @@ const DatabaseStatusIndicator: React.FC = () => {
             stayOpenOnAnchorClick={true}
         >
             <IconButton
-                icon={(props) => (
-                    <DatabaseStatusIcon
-                        dotColor={iconState.color}
-                        fading={iconState.fading}
-                        fadeDuration={1000}
-                        hover={isHovering}
-                        {...props}
-                    />
-                )}
+                icon={memoizedIcon}
                 onClick={handleSyncClick}
                 className="scale-14"
                 ariaLabel="Sync status"
