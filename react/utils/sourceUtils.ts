@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
+import { syncingItemFilter } from '../../src/utils/sync';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -193,25 +194,23 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 /**
 * Source method: Check if a source is valid
 */
-export const isValidRegularItem = async (source: InputSource, item: Zotero.Item): Promise<boolean> => {
-    if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
-    return true;
-}
-
-export const isValidAttachment = async (att: Zotero.Item): Promise<boolean> => {
-    if (!att.isAttachment()) return false;
-    const exists = await att.fileExists();
-    const mimeType = att.attachmentContentType;
-    return exists && isValidMimeType(mimeType);
+export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
+    if (!syncingItemFilter(item)) return false;
+    if (item.isNote()) return true;
+    if (item.isAttachment()) {
+        return await item.fileExists();
+    }
+    if (item.isRegularItem()) {
+        if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
+        return true;
+    }
+    return false;
 }
 
 export async function isSourceValid(source: InputSource): Promise<boolean> {
         const item = getZoteroItem(source);
         if (!item) return false;
-        if (item.isNote()) return true;
-        if (item.isAttachment()) return await isValidAttachment(item);
-        if (item.isRegularItem()) return await isValidRegularItem(source as InputSource, item);
-        return false;
+        return await isValidZoteroItem(item);
 }
 
 export function revealSource(source: InputSource) {
