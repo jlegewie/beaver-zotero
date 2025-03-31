@@ -167,7 +167,7 @@ export class BeaverUIFactory {
                 
                 // Check cache first
                 if (addon.data._itemStatuses.has(item.id)) {
-                    ztoolkit.log(`Returning status for item ${item.id}: ${addon.data._itemStatuses.get(item.id)}`);
+                    // ztoolkit.log(`Returning status for item ${item.id}: ${addon.data._itemStatuses.get(item.id)}`);
                     return addon.data._itemStatuses.get(item.id) || '';
                 }
                 // Set initial loading state
