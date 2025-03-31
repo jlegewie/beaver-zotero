@@ -101,7 +101,7 @@ const DatabaseStatusIndicator: React.FC = () => {
     
     // Create the tooltip content
     const customContent = (
-        <div className="flex flex-col gap-3 p-0 max-w-xs">
+        <div className="flex flex-col gap-3 px-0 py-1 max-w-xs">
             <div className="card flex flex-col gap-3 items-start">
                 <div className="flex flex-row justify-between items-center w-full">
                     <div className="flex items-center gap-3">
