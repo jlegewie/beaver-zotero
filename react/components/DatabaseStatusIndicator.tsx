@@ -154,6 +154,8 @@ const DatabaseStatusIndicator: React.FC = () => {
         </div>
     );
     
+    const [isHovering, setIsHovering] = useState(false);
+    
     return (
         <Tooltip 
             content="Sync Status" 
@@ -167,12 +169,15 @@ const DatabaseStatusIndicator: React.FC = () => {
                         dotColor={iconState.color}
                         fading={iconState.fading}
                         fadeDuration={1000}
+                        hover={isHovering}
                         {...props}
                     />
                 )}
                 onClick={handleSyncClick}
                 className="scale-14"
                 ariaLabel="Sync status"
+                onMouseEnter={() => setIsHovering(true)}
+                onMouseLeave={() => setIsHovering(false)}
             />
         </Tooltip>
     );
