@@ -273,6 +273,10 @@ function _processChatCompletionViaBackend(
                     status: 'error',
                     errorType
                 });
+            },
+            onWarning: (type, data) => {
+                console.log(type)
+                console.log(data)
             }
         }
     );

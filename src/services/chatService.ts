@@ -35,6 +35,7 @@ export interface SSECallbacks {
     onToolcall: (data: any) => void;
     onDone: () => void;
     onError: (errorType: string) => void;
+    onWarning: (type: string, data: any) => void;
 }
 
 /**
@@ -71,7 +72,7 @@ export class ChatService extends ApiService {
         requestBody: ChatCompletionRequestBody,
         callbacks: SSECallbacks
     ): Promise<void> {
-        const { onThread, onToken, onToolcall, onDone, onError } = callbacks;
+        const { onThread, onToken, onToolcall, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -111,7 +112,8 @@ export class ChatService extends ApiService {
                                         doneReceived = true;
                                         onDone();
                                     },
-                                    onError
+                                    onError,
+                                    onWarning
                                 });
                             }
                         }
@@ -165,13 +167,15 @@ export class ChatService extends ApiService {
             onToken,
             onToolcall,
             onDone,
-            onError
+            onError,
+            onWarning
         }: {
             onThread: (threadId: string) => void;
             onToken: (token: string) => void;
             onToolcall: (data: MessageModel) => void;
             onDone: () => void;
             onError: (errorType: string) => void;
+            onWarning: (type: string, data: any) => void;
         }
     ): void {
         let eventName = 'message';
@@ -234,6 +238,11 @@ export class ChatService extends ApiService {
             case 'error':
                 // e.g. data: {"detail": "..."}
                 onError('server_error');
+                break;
+            case 'warning':
+                if (parsedData?.type && parsedData?.data) {
+                    onWarning(parsedData.type, parsedData.data);
+                }
                 break;
             default:
                 // console.log('Unknown SSE event:', eventName, parsedData);
