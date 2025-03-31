@@ -22,6 +22,10 @@ interface IconButtonProps {
     loading?: boolean;
     /** Optional title attribute for tooltips */
     title?: string;
+    /** Mouse enter event handler */
+    onMouseEnter?: () => void;
+    /** Mouse leave event handler */
+    onMouseLeave?: () => void;
 }
 
 /**
@@ -36,7 +40,9 @@ const IconButton: React.FC<IconButtonProps> = ({
     ariaLabel,
     disabled = false,
     loading = false,
-    title
+    title,
+    onMouseEnter,
+    onMouseLeave
 }) => {
     // Use the existing icon-button class for ghost variant for compatibility
     // Use the variant-{type} classes for the other variants
@@ -53,6 +59,8 @@ const IconButton: React.FC<IconButtonProps> = ({
             disabled={disabled || loading}
             title={title}
             type="button"
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
         >
             <Icon icon={icon} className={iconClassName} />
             {loading && <span className="spinner">●</span>}
