@@ -8,13 +8,34 @@ export const isLibraryTabAtom = atom(false);
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 
-
-
-// Sync status
+// Database sync status
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 export const syncStatusAtom = atom<SyncStatus>('idle');
 export const syncTotalAtom = atom<number>(0);
 export const syncCurrentAtom = atom<number>(0);
+
+// File upload status
+export const fileUploadStatusAtom = atom<SyncStatus>('idle');
+export const fileUploadTotalAtom = atom<number>(0); 
+export const fileUploadCurrentAtom = atom<number>(0);
+
+// Derived atoms for combined status
+export const syncingAtom = atom(
+    (get) => {
+        const dbStatus = get(syncStatusAtom);
+        const fileStatus = get(fileUploadStatusAtom);
+        return dbStatus === 'in_progress' || fileStatus === 'in_progress';
+    }
+);
+
+export const syncErrorAtom = atom(
+    (get) => {
+        const dbStatus = get(syncStatusAtom);
+        const fileStatus = get(fileUploadStatusAtom);
+        return dbStatus === 'failed' || fileStatus === 'failed';
+    }
+);
+
 
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);
