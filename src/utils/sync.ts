@@ -217,7 +217,7 @@ export async function syncItemsToBackend(
     
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
-        console.log(`[Beaver Sync] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`);
+        Zotero.debug(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`, 4);
         
         // Transform Zotero items to our format
         const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
@@ -236,7 +236,7 @@ export async function syncItemsToBackend(
             syncId = batchResult.sync_id;
             if (batchResult.sync_status === 'failed') {
                 onStatusChange?.('failed');
-                console.error(`[Beaver Sync] Batch failed. Failed keys: ${batchResult.failed_keys}`);
+                Zotero.debug(`Beaver Sync: Batch failed. Failed keys: ${batchResult.failed_keys}`, 1);
                 break;
             }
             
@@ -260,8 +260,9 @@ export async function syncItemsToBackend(
                     onProgress(totalItems, totalItems);
                 }
             }
-        } catch (error) {
-            console.error(`[Beaver Sync] Error processing batch:`, error);
+        } catch (error: any) {
+            Zotero.debug(`Beaver Sync: Error processing batch: ${error.message}`, 1);
+            Zotero.logError(error);
             onStatusChange?.('failed');
             break;
         }
@@ -292,7 +293,7 @@ export async function performInitialSync(
 ): Promise<any> {
     try {
         const libraryName = Zotero.Libraries.getName(libraryID);
-        console.log(`[Beaver Sync] Starting initial sync for library ${libraryID} (${libraryName})`);
+        Zotero.debug(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
         
         // 1. Get all items from the library
         const syncDate = Zotero.Date.dateToSQL(new Date(), true);
@@ -302,18 +303,19 @@ export async function performInitialSync(
         const itemsToSync = allItems.filter(filterFunction);
         const totalItems = itemsToSync.length;
         
-        console.log(`[Beaver Sync] Found ${totalItems} items to sync from library "${libraryName}"`);
+        Zotero.debug(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
         
         if (totalItems === 0) {
-            console.log('[Beaver Sync] No items to sync, skipping sync operation');
+            Zotero.debug('Beaver Sync: No items to sync, skipping sync operation', 3);
             return { status: 'completed', message: 'No items to sync' };
         }
         
         // 3. Process items in batches using the new function
         await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
         
-    } catch (error) {
-        console.error('[Beaver Sync Error] Error during initial sync:', error);
+    } catch (error: any) {
+        Zotero.debug('Beaver Sync Error: Error during initial sync: ' + error.message, 1);
+        Zotero.logError(error);
         throw error;
     }
 }
@@ -339,7 +341,7 @@ export async function performPeriodicSync(
 ) {
     try {
         const libraryName = Zotero.Libraries.getName(libraryID);
-        console.log(`[Beaver Sync] Starting periodic sync from ${lastSyncDate} for library ${libraryID} (${libraryName})`);
+        Zotero.debug(`Beaver Sync: Starting periodic sync from ${lastSyncDate} for library ${libraryID} (${libraryName})`, 2);
         
         // 1. Get all items modified since last sync
         const modifiedItems = await getModifiedItemsSince(libraryID, lastSyncDate);
@@ -348,19 +350,20 @@ export async function performPeriodicSync(
         const itemsToSync = modifiedItems.filter(filterFunction);
         const totalItems = itemsToSync.length;
         
-        console.log(`[Beaver Sync] Found ${totalItems} modified items to sync since ${lastSyncDate} from library "${libraryName}"`);
+        Zotero.debug(`Beaver Sync: Found ${totalItems} modified items to sync since ${lastSyncDate} from library "${libraryName}"`, 3);
         
         if (totalItems === 0) {
             onStatusChange?.('completed');
-            console.log('[Beaver Sync] No items to sync, skipping sync operation');
+            Zotero.debug('Beaver Sync: No items to sync, skipping sync operation', 3);
             return { status: 'completed', message: 'No items to sync' };
         }
         
         // 3. Process items in batches
         await syncItemsToBackend(libraryID, itemsToSync, 'verification', onStatusChange, onProgress, batchSize);
         
-    } catch (error) {
-        console.error('[Beaver Sync Error] Error during periodic sync:', error);
+    } catch (error: any) {
+        Zotero.debug('Beaver Sync Error: Error during periodic sync: ' + error.message, 1);
+        Zotero.logError(error);
         throw error;
     }
 }
@@ -386,7 +389,7 @@ export async function syncZoteroDatabase(
         const libraryName = library.name;
         
         try {
-            console.log(`[Beaver Sync] Syncing library ${libraryID} (${libraryName})`);
+            Zotero.debug(`Beaver Sync: Syncing library ${libraryID} (${libraryName})`, 3);
             
             // Get the last sync date for this library
             const response = await syncService.getLastSyncDate(libraryID);
@@ -399,13 +402,14 @@ export async function syncZoteroDatabase(
                 await performPeriodicSync(libraryID, lastSyncDate, filterFunction, onStatusChange, onProgress, batchSize);
             }
             
-        } catch (error) {
-            console.error(`[Beaver Sync Error] Error syncing library ${libraryID} (${libraryName}):`, error);
+        } catch (error: any) {
+            Zotero.debug(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
+            Zotero.logError(error);
             // Continue with next library even if one fails
         }
     }
     
-    console.log('[Beaver Sync] Sync completed for all libraries');
+    Zotero.debug('Beaver Sync: Sync completed for all libraries', 2);
 }
 
 /**

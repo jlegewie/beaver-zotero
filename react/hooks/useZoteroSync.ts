@@ -80,7 +80,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
             
             // Sync each library's items separately
             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
-                console.log(`[Beaver] Syncing ${libraryItems.length} changed items from library ${libraryID}`);
+                Zotero.debug(`Beaver: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
                 await syncItemsToBackend(libraryID, libraryItems, 'incremental', 
                     (status) => setSyncStatus(status), 
                     (processed, total) => {
@@ -88,8 +88,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
                         setSyncCurrent(processed);
                     });
             }
-        } catch (error) {
-            console.error("[Beaver] Error syncing modified items:", error);
+        } catch (error: any) {
+            Zotero.debug(`Beaver: Error syncing modified items: ${error.message}`, 1);
+            Zotero.logError(error);
         }
     };
 
@@ -112,11 +113,12 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
             
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
-                console.log(`[Beaver] Deleting ${keys.length} items from library ${libraryID}`);
+                Zotero.debug(`Beaver: Deleting ${keys.length} items from library ${libraryID}`, 3);
                 await syncService.deleteItems(libraryID, keys);
             }
-        } catch (error) {
-            console.error("[Beaver] Error handling deleted items:", error);
+        } catch (error: any) {
+            Zotero.debug(`Beaver: Error handling deleted items: ${error.message}`, 1);
+            Zotero.logError(error);
         }
     };
 
@@ -158,7 +160,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
             // Process each library's fulltext requests
             for (const request of requestsByLibrary.values()) {
                 if (request.attachment_keys.length > 0) {
-                    console.log(`[Beaver] Adding ${request.attachment_keys.length} upload tasks to the upload queue for library ${request.library_id}`);
+                    Zotero.debug(`Beaver: Adding ${request.attachment_keys.length} upload tasks to the upload queue for library ${request.library_id}`, 3);
                     await queueService.addItemsFromAttachmentKeys(request);
                 }
             }
@@ -167,8 +169,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
             if (Array.from(requestsByLibrary.values()).some(req => req.attachment_keys.length > 0)) {
                 fileUploader.start();
             }
-        } catch (error) {
-            console.error("[Beaver] Error handling index event:", error);
+        } catch (error: any) {
+            Zotero.debug(`Beaver: Error handling index event: ${error.message}`, 1);
+            Zotero.logError(error);
         }
     };
 
@@ -176,8 +179,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
      * Process all collected events and reset the collection
      */
     const processEvents = async () => {
-        console.log(`[Beaver] Processing collected events after ${debounceMs}ms of inactivity`);
-        console.log(`[Beaver] Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete, ${eventsRef.current.index.size} index`);
+        Zotero.debug(`Beaver: Processing collected events after ${debounceMs}ms of inactivity`, 3);
+        Zotero.debug(`Beaver: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete, ${eventsRef.current.index.size} index`, 3);
         
         // Process each type of event
         await processAddModifyEvents();
@@ -193,7 +196,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
 
     useEffect(() => {
         if (!isAuthenticated) return;
-        console.log("[Beaver] Setting up Zotero sync");
+        Zotero.debug("Beaver: Setting up Zotero sync", 3);
         
         // Initialize atoms to completed state instead of idle
         setSyncStatus('completed');
@@ -289,7 +292,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         
         // Cleanup function
         return () => {
-            console.log("[Beaver] Cleaning up Zotero sync");
+            Zotero.debug("Beaver: Cleaning up Zotero sync", 3);
             if (observerRef.current) {
                 Zotero.Notifier.unregisterObserver(observerRef.current);
                 observerRef.current = null;
