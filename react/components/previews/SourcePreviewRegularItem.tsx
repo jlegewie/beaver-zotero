@@ -3,7 +3,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { updateSourceChildItemKeysAtom } from '../../atoms/input';
-import { isValidAttachment } from '../../utils/sourceUtils';
+import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
@@ -18,8 +18,9 @@ interface SourcePreviewRegularItemProps {
 
 const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ source, item }) => {
     const updateSourceChildItemKeys = useSetAtom(updateSourceChildItemKeysAtom);
-    const [attachments, setAttachments] = useState<Zotero.Item[]>([]);
-    const [notes, setNotes] = useState<Zotero.Item[]>([]);
+    const [children, setChildren] = useState<Zotero.Item[]>([]);
+    const [attachmentNumber, setAttachmentNumber] = useState<number>(0);
+    const [noteNumber, setNoteNumber] = useState<number>(0);
     const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
     const threadSourceKeys = useAtomValue(threadSourceKeysAtom);
 
@@ -28,27 +29,25 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
         let isMounted = true;
         
         const fetchAttachmentsAndNotes = async () => {
-            // Get attachments
-            const attIds = item.getAttachments();
-            const atts = attIds.map(id => Zotero.Items.get(id));
-            if (isMounted) setAttachments(atts);
+            // Get children (attachments and notes)
+            setAttachmentNumber(item.getAttachments().length);
+            setNoteNumber(item.getNotes().length);
+            const childrenIds = [...item.getAttachments(), ...item.getNotes()];
+            const children = childrenIds.map(id => Zotero.Items.get(id));
+            if (isMounted) setChildren(children);
 
             // Check which attachments are valid
             const validityMap: {[id: number]: boolean} = {};
-            for (const att of atts) {
+            for (const child of children) {
                 try {
-                    const isValid = att.isNote() ? true : await isValidAttachment(att);
-                    validityMap[att.id] = isValid;
+                    const isValid = await isValidZoteroItem(child);
+                    validityMap[child.id] = isValid;
                 } catch (e) {
-                    validityMap[att.id] = false;
+                    validityMap[child.id] = false;
                 }
             }
             if (isMounted) setValidItemIds(validityMap);
 
-            // Get notes
-            const noteIds = item.getNotes();
-            const noteItems = noteIds.map(id => Zotero.Items.get(id));
-            if (isMounted) setNotes(noteItems);
         };
 
         fetchAttachmentsAndNotes();
@@ -90,7 +89,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
                         color="--accent-green"
                         className="mr-2"
                     />
-                    <span>{attachments.length} Attachment{attachments.length !== 1 ? 's' : ''}</span>
+                    <span>{attachmentNumber} Attachment{attachmentNumber !== 1 ? 's' : ''}</span>
                     
                     <span className="mx-1"></span>
                     
@@ -100,56 +99,37 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
                         color="--accent-yellow"
                         className="mr-2"
                     />
-                    <span>{notes.length} Note{notes.length !== 1 ? 's' : ''}</span>
+                    <span>{noteNumber} Note{noteNumber !== 1 ? 's' : ''}</span>
                 </div>
                 
                 <div className="ml-6 space-y-1">
                     {/* Attachments List */}
-                    {attachments.map((att: Zotero.Item) => (
+                    {children.map((child: Zotero.Item) => (
                         <div 
-                            key={`att-${att.id}`}
-                            className={validItemIds[att.id]
-                                ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${threadSourceKeys.includes(att.key) ? 'opacity-60 cursor-not-allowed' : ''}`
+                            key={`att-${child.id}`}
+                            className={validItemIds[child.id]
+                                ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${threadSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
                                 : `flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
                             }
-                            onClick={() => validItemIds[att.id] && !threadSourceKeys.includes(att.key) ? handleToggleItem(att.key) : null}
+                            onClick={() => validItemIds[child.id] && !threadSourceKeys.includes(child.key) ? handleToggleItem(child.key) : null}
                         >
                             <input 
                                 type="checkbox" 
                                 className="mr-2"
-                                checked={isItemSelected(att.key)}
+                                checked={isItemSelected(child.key)}
                                 onChange={() => {}} // React requires this for controlled components
-                                disabled={!validItemIds[att.id] || threadSourceKeys.includes(att.key)}
+                                disabled={!validItemIds[child.id] || threadSourceKeys.includes(child.key)}
                             />
                             
                             <span className="mr-1 fit-content">
-                                <CSSItemTypeIcon className="scale-85" itemType={att.getItemTypeIconName()} />
+                                <CSSItemTypeIcon className="scale-85" itemType={child.getItemTypeIconName()} />
                             </span>
-                            {truncateText(att.getDisplayTitle(), 32)}
-                        </div>
-                    ))}
-                    
-                    {/* Notes List */}
-                    {notes.map((note: Zotero.Item) => (
-                        <div 
-                            key={`note-${note.id}`} 
-                            className={`flex p-2 items-center attachment-item font-color-secondary ${threadSourceKeys.includes(note.key) ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-                            onClick={() => !threadSourceKeys.includes(note.key) ? handleToggleItem(note.key) : null}
-                        >
-                            <input 
-                                type="checkbox" 
-                                className="mr-2" 
-                                checked={isItemSelected(note.key)}
-                                onChange={() => {}} // React requires this for controlled components
-                                disabled={threadSourceKeys.includes(note.key)}
-                            />
-                            <span className="mr-1 scale-90"><CSSItemTypeIcon itemType={note.getItemTypeIconName()} /></span>
-                            {truncateText(note.getNoteTitle(), 32)}
+                            {truncateText(child.getDisplayTitle(), 32)}
                         </div>
                     ))}
                     
                     {/* Show message if no attachments or notes */}
-                    {attachments.length === 0 && notes.length === 0 && (
+                    {attachmentNumber === 0 && noteNumber === 0 && (
                         <div className="text-gray-400 italic">No attachments or notes</div>
                     )}
                 </div>
