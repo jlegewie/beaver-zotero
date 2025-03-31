@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { 
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
     fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
-    syncingAtom, syncErrorAtom
+    syncingAtom, syncErrorAtom, SyncStatus
 } from "../atoms/ui";
 import Tooltip from "./Tooltip";
 import { syncZoteroDatabase } from '../../src/utils/sync';
@@ -65,9 +65,32 @@ const DatabaseStatusIndicator: React.FC = () => {
     // Get current icon state
     const iconState = getIconState();
     
-    // Calculate progress percentages
-    const dbProgress = syncTotal > 0 ? Math.round((syncCurrent / syncTotal) * 100) : 0;
-    const fileProgress = fileTotal > 0 ? Math.round((fileCurrent / fileTotal) * 100) : 0;
+    // Calculate progress percentages with safety checks
+    const calculateProgress = (current: number, total: number): number => {
+        if (total <= 0) return 0;
+        if (current <= 0) return 0;
+        // Cap at 100% to prevent display issues
+        return Math.min(Math.round((current / total) * 100), 100);
+    };
+    
+    const dbProgress = calculateProgress(syncCurrent, syncTotal);
+    const fileProgress = calculateProgress(fileCurrent, fileTotal);
+    
+    // Progress display text with proper formatting
+    const getProgressText = (status: SyncStatus, progress: number, current: number, total: number): string => {
+        if (status === 'idle') return 'Ready';
+        if (status === 'completed') return 'Sync completed';
+        if (status === 'failed') return 'Sync failed';
+        
+        // Format the progress display for in_progress state
+        if (total > 0) {
+            return `Syncing... ${progress}% (${current}/${total})`;
+        }
+        return 'Syncing...';
+    };
+    
+    const dbProgressText = getProgressText(syncStatus, dbProgress, syncCurrent, syncTotal);
+    const fileProgressText = getProgressText(fileStatus, fileProgress, fileCurrent, fileTotal);
     
     // Handle manual sync button click
     const handleSyncClick = () => {
@@ -104,10 +127,7 @@ const DatabaseStatusIndicator: React.FC = () => {
                 </div>
                 
                 <span className="font-color-tertiary text-sm">
-                    {syncStatus === 'idle' ? 'Ready' : 
-                     syncStatus === 'in_progress' ? `Syncing... ${dbProgress}%` :
-                     syncStatus === 'completed' ? 'Sync completed' : 
-                     'Sync failed'}
+                    {dbProgressText}
                 </span>
             </div>
             
@@ -126,10 +146,7 @@ const DatabaseStatusIndicator: React.FC = () => {
                 </div>
                 
                 <span className="font-color-tertiary text-sm">
-                    {fileStatus === 'idle' ? 'No uploads in progress' : 
-                     fileStatus === 'in_progress' ? `Uploading... ${fileProgress}% (${fileCurrent}/${fileTotal})` :
-                     fileStatus === 'completed' ? 'All uploads completed' : 
-                     'Upload failed'}
+                    {fileProgressText}
                 </span>
             </div>
         </div>

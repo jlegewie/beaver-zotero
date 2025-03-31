@@ -203,21 +203,47 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         setFileUploadTotal(0);
         setFileUploadCurrent(0);
         
-        // Set up file uploader status callback
+        // Set up file uploader with stable progress updates
         fileUploader.setStatusCallback((info: UploadProgressInfo) => {
-            setFileUploadStatus(info.status);
-            setFileUploadCurrent(info.current);
-            setFileUploadTotal(info.total);
+            // Only update if the values actually changed
+            // This helps prevent flickering values
+            setFileUploadStatus(prevStatus => {
+                // Always update if status changed
+                if (prevStatus !== info.status) return info.status;
+                return prevStatus;
+            });
+            
+            // Update current count only if it's greater than previous
+            setFileUploadCurrent(prevCurrent => {
+                if (info.current > prevCurrent) return info.current;
+                return prevCurrent;
+            });
+            
+            // Update total only if it's greater than previous
+            setFileUploadTotal(prevTotal => {
+                if (info.total > prevTotal) return info.total;
+                return prevTotal;
+            });
         });
         
-        // Perform initial sync on mount
+        // Perform initial sync on mount with stable progress updates
         const onStatusChange = (status: SyncStatus) => {
             setSyncStatus(status);
         }
+        
         const onProgress = (processed: number, total: number) => {
-            setSyncTotal(total);
-            setSyncCurrent(processed);
+            // Only update if values actually changed
+            setSyncTotal(prevTotal => {
+                if (total > prevTotal) return total;
+                return prevTotal;
+            });
+            
+            setSyncCurrent(prevCurrent => {
+                if (processed > prevCurrent) return processed;
+                return prevCurrent;
+            });
         }
+        
         syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
         
         // Create the notification observer with debouncing

@@ -75,6 +75,38 @@ export class FileUploader {
         }
     }
 
+    // Track progress locally to avoid flashing zeroes
+    private localProgress = {
+        completed: 0,
+        total: 0
+    };
+    
+    /**
+     * Updates status with stable progress tracking that won't reset to zero
+     */
+    private reportProgress(status: QueueStatus): void {
+        // Update our high water mark for total items
+        if (status.total > this.localProgress.total) {
+            this.localProgress.total = status.total;
+        }
+        
+        // Calculate completed count from server status
+        const serverCompleted = status.completed + status.failed;
+        
+        // Only increase the completed count, never decrease it
+        // This prevents progress from going backward
+        if (serverCompleted > this.localProgress.completed) {
+            this.localProgress.completed = serverCompleted;
+        }
+        
+        // Report progress using our stable local tracking
+        this.reportStatus(
+            'in_progress', 
+            this.localProgress.completed, 
+            this.localProgress.total
+        );
+    }
+
     /**
      * Starts the file uploader if it's not already running.
      * Initializes a concurrency queue and continuously processes queue items 
@@ -130,6 +162,12 @@ export class FileUploader {
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
+        // Reset progress tracking at the start of a queue run
+        this.localProgress = {
+            completed: 0,
+            total: 0
+        };
+        
         let consecutiveErrors = 0;
         const MAX_CONSECUTIVE_ERRORS = 5;
         let backoffTime = 1000; // Start with 1 second backoff
@@ -150,12 +188,13 @@ export class FileUploader {
                 const status = response.status;
                 console.log(`[Beaver File Uploader] Popped ${items.length} items from the queue. Status: ${JSON.stringify(status)}`);
 
-                // Update progress immediately after popping items
-                this.updateProgress(status);
+                // Update progress with the received status
+                this.reportProgress(status);
 
-                // If no items returned or pending is zero, exit the loop
+                // If no items and no pending/in-progress items, we're done
                 if (items.length === 0 && status.pending === 0 && status.in_progress === 0) {
-                    this.reportStatus('completed', status.completed + status.failed, status.total);
+                    // Set final completed status with our tracked total
+                    this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
                     break;
                 }
 
@@ -266,9 +305,8 @@ export class FileUploader {
                         }
                     }
                     
-                    // Mark upload as completed on the server
-                    await queueService.completeUpload(item);
-                    console.log(`[Beaver File Uploader] Successfully uploaded file for attachment ${item.attachment_key}`);
+                    // Use our new completion method
+                    await this.markUploadCompleted(item);
                     uploadSuccess = true;
                 } catch (uploadError: unknown) {
                     if (
@@ -329,18 +367,24 @@ export class FileUploader {
         }
     }
 
-    /**
-     * Updates the internal status cache and triggers the optional callbacks
-     */
-    private updateProgress(status: QueueStatus): void {
-        this.lastStatus = status;
-        
-        // Calculate completion stats
-        const completedCount = status.completed + status.failed;
-        const total = status.total;
-        
-        // Report progress
-        this.reportStatus('in_progress', completedCount, total);
+    // When marking an upload as completed, also update our progress
+    private async markUploadCompleted(item: UploadQueueItem): Promise<void> {
+        try {
+            await queueService.completeUpload(item);
+            console.log(`[Beaver File Uploader] Successfully uploaded file for attachment ${item.attachment_key}`);
+            
+            // Increment our local completed count immediately
+            // This provides immediate feedback without waiting for the next server poll
+            this.localProgress.completed++;
+            this.reportStatus(
+                'in_progress', 
+                this.localProgress.completed, 
+                this.localProgress.total
+            );
+            
+        } catch (error) {
+            console.error(`[Beaver File Uploader] Error marking upload as completed:`, error);
+        }
     }
 }
 

@@ -211,7 +211,10 @@ export async function syncItemsToBackend(
     let syncId = undefined;
     let processedCount = 0;
     
+    // Set initial progress
+    if (onProgress) onProgress(0, totalItems);
     onStatusChange?.('in_progress');
+    
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
         console.log(`[Beaver Sync] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`);
@@ -225,24 +228,45 @@ export async function syncItemsToBackend(
         const createLog = i === 0;
         const closeLog = i + batchSize >= items.length;
 
-        // Send batch to backend
-        const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
-
-        // Process batch result
-        syncId = batchResult.sync_id;
-        if (batchResult.sync_status === 'failed') {
+        try {
+            // Send batch to backend
+            const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
+    
+            // Process batch result
+            syncId = batchResult.sync_id;
+            if (batchResult.sync_status === 'failed') {
+                onStatusChange?.('failed');
+                console.error(`[Beaver Sync] Batch failed. Failed keys: ${batchResult.failed_keys}`);
+                break;
+            }
+            
+            // Update processed count with actual success count
+            const newProcessed = processedCount + batchResult.success;
+            
+            // Only report progress if the processed count actually increased
+            // This prevents the progress from temporarily resetting
+            if (newProcessed > processedCount) {
+                processedCount = newProcessed;
+                if (onProgress) {
+                    onProgress(processedCount, totalItems);
+                }
+            }
+            
+            // If this is the last batch and successful
+            if (closeLog && batchResult.sync_status === 'completed') {
+                onStatusChange?.('completed');
+                // Report 100% completion at the end for consistency
+                if (onProgress) {
+                    onProgress(totalItems, totalItems);
+                }
+            }
+        } catch (error) {
+            console.error(`[Beaver Sync] Error processing batch:`, error);
             onStatusChange?.('failed');
-            console.error(`[Beaver Sync] Batch failed. Failed keys: ${batchResult.failed_keys}`);
             break;
         }
-        if (batchResult.sync_status === 'completed') onStatusChange?.('completed');
-
-        // Progress update
-        processedCount += batchResult.success;
-        if (onProgress) {
-            onProgress(processedCount, totalItems);
-        }   
     }
+    
     // Start file uploader if there are attachments to upload
     if (attachmentCount > 0) {
         fileUploader.start();
