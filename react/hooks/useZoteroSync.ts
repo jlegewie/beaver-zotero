@@ -4,9 +4,9 @@ import { syncZoteroDatabase, syncItemsToBackend, itemFilter, ItemFilterFunction 
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, SyncStatus } from "../atoms/ui";
+import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom, SyncStatus } from "../atoms/ui";
 import { queueService, AddUploadQueueFromAttachmentRequest } from "../../src/services/queueService";
-import { fileUploader } from "../../src/services/FileUploader";
+import { fileUploader, UploadProgressInfo } from "../../src/services/FileUploader";
 
 const DEBOUNCE_MS = 2000;
 
@@ -35,6 +35,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const setSyncTotal = useSetAtom(syncTotalAtom);
     const setSyncCurrent = useSetAtom(syncCurrentAtom);
+    const setFileUploadStatus = useSetAtom(fileUploadStatusAtom);
+    const setFileUploadTotal = useSetAtom(fileUploadTotalAtom);
+    const setFileUploadCurrent = useSetAtom(fileUploadCurrentAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
@@ -191,6 +194,21 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
     useEffect(() => {
         if (!isAuthenticated) return;
         console.log("[Beaver] Setting up Zotero sync");
+        
+        // Initialize atoms to idle state
+        setSyncStatus('idle');
+        setSyncTotal(0);
+        setSyncCurrent(0);
+        setFileUploadStatus('idle');
+        setFileUploadTotal(0);
+        setFileUploadCurrent(0);
+        
+        // Set up file uploader status callback
+        fileUploader.setStatusCallback((info: UploadProgressInfo) => {
+            setFileUploadStatus(info.status);
+            setFileUploadCurrent(info.current);
+            setFileUploadTotal(info.total);
+        });
         
         // Perform initial sync on mount
         const onStatusChange = (status: SyncStatus) => {

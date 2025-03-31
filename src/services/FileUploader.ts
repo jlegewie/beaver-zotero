@@ -8,6 +8,14 @@
 
 import PQueue from 'p-queue';
 import { queueService, UploadQueueItem, PopQueueResponse, QueueStatus } from "./queueService";
+import { SyncStatus } from 'react/atoms/ui';
+
+
+export interface UploadProgressInfo {
+  status: SyncStatus;
+  current: number;
+  total: number;
+}
 
 /**
  * Manages file uploads from a server-side queue of pending uploads.
@@ -30,15 +38,41 @@ export class FileUploader {
     };
 
     /**
-     * Optional callback to report ongoing progress in the format (completedCount, totalCount).
+     * Callback for upload status and progress updates
      */
-    private onProgressCallback?: (completed: number, total: number) => void;
+    private statusCallback?: (info: UploadProgressInfo) => void;
 
     /**
-     * Sets a callback for upload progress notifications.
+     * Legacy progress callback for backward compatibility
+     */
+    private progressCallback?: (completed: number, total: number) => void;
+
+    /**
+     * Sets a comprehensive callback for status and progress updates
+     */
+    public setStatusCallback(callback: (info: UploadProgressInfo) => void): void {
+        this.statusCallback = callback;
+    }
+
+    /**
+     * Sets a callback for upload progress notifications (legacy method)
      */
     public setProgressCallback(callback: (completed: number, total: number) => void): void {
-        this.onProgressCallback = callback;
+        this.progressCallback = callback;
+    }
+
+    /**
+     * Updates status and progress through callbacks
+     */
+    private reportStatus(status: SyncStatus, current: number = 0, total: number = 0): void {
+        if (this.statusCallback) {
+            this.statusCallback({ status, current, total });
+        }
+        
+        // For backward compatibility
+        if (this.progressCallback && status === 'in_progress') {
+            this.progressCallback(current, total);
+        }
     }
 
     /**
@@ -54,6 +88,9 @@ export class FileUploader {
         this.isRunning = true;
         console.log('[Beaver File Uploader] Starting file uploader');
 
+        // Report starting status
+        this.reportStatus('in_progress', 0, 0);
+
         // Initialize the p-queue with desired concurrency
         this.uploadQueue = new PQueue({ concurrency: this.MAX_CONCURRENT });
 
@@ -61,6 +98,7 @@ export class FileUploader {
         this.runQueue()
             .catch(error => {
                 console.error('[Beaver File Uploader] Error in runQueue:', error);
+                this.reportStatus('failed');
             });
     }
 
@@ -79,8 +117,11 @@ export class FileUploader {
         // Wait for all queued tasks to finish, if any
         try {
             await this.uploadQueue.onIdle();
+            // Update status to completed if we stopped cleanly
+            this.reportStatus('completed');
         } catch (error) {
             console.error('[Beaver File Uploader] Error while waiting for queue to idle:', error);
+            this.reportStatus('failed');
         }
     }
 
@@ -113,7 +154,10 @@ export class FileUploader {
                 this.updateProgress(status);
 
                 // If no items returned or pending is zero, exit the loop
-                if (items.length === 0) break;
+                if (items.length === 0 && status.pending === 0 && status.in_progress === 0) {
+                    this.reportStatus('completed', status.completed + status.failed, status.total);
+                    break;
+                }
 
                 // Reset error counter on successful queue pop
                 consecutiveErrors = 0;
@@ -128,6 +172,9 @@ export class FileUploader {
                 await this.uploadQueue.onIdle();
             } catch (error) {
                 console.error('[Beaver File Uploader] runQueue encountered an error:', error);
+                
+                // Report error status
+                this.reportStatus('failed');
                 
                 // Increment consecutive error counter
                 consecutiveErrors++;
@@ -283,15 +330,17 @@ export class FileUploader {
     }
 
     /**
-     * Updates the internal status cache and triggers the optional onProgress callback.
-     * This is called once after each pop or at intervals, as needed.
+     * Updates the internal status cache and triggers the optional callbacks
      */
     private updateProgress(status: QueueStatus): void {
         this.lastStatus = status;
-        if (this.onProgressCallback) {
-            const completedCount = status.completed + status.failed;
-            this.onProgressCallback(completedCount, status.total);
-        }
+        
+        // Calculate completion stats
+        const completedCount = status.completed + status.failed;
+        const total = status.total;
+        
+        // Report progress
+        this.reportStatus('in_progress', completedCount, total);
     }
 }
 
