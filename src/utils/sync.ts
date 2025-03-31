@@ -14,7 +14,7 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item) => {
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
     return item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
 };
 
