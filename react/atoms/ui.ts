@@ -10,6 +10,10 @@ export const userScrolledAtom = atom(false);
 
 // Database sync status
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
+// 'idle' - Initial state, no sync has been attempted
+// 'in_progress' - Active sync operation
+// 'completed' - Sync finished successfully
+// 'failed' - Sync operation failed
 export const syncStatusAtom = atom<SyncStatus>('idle');
 export const syncTotalAtom = atom<number>(0);
 export const syncCurrentAtom = atom<number>(0);

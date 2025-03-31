@@ -150,7 +150,7 @@ export class FileUploader {
         try {
             await this.uploadQueue.onIdle();
             // Update status to completed if we stopped cleanly
-            this.reportStatus('completed');
+            this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
         } catch (error) {
             console.error('[Beaver File Uploader] Error while waiting for queue to idle:', error);
             this.reportStatus('failed');

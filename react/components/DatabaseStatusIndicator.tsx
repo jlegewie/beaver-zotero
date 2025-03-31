@@ -58,7 +58,7 @@ const DatabaseStatusIndicator: React.FC = () => {
             return { color: "green", fading: true };
         }
         
-        // All good, no ongoing operations
+        // All good, no ongoing operations (both 'idle' and 'completed' render the same)
         return { color: "green", fading: false };
     };
     
@@ -78,8 +78,10 @@ const DatabaseStatusIndicator: React.FC = () => {
     
     // Progress display text with proper formatting
     const getProgressText = (status: SyncStatus, progress: number, current: number, total: number): string => {
-        if (status === 'idle') return 'Ready';
-        if (status === 'completed') return 'Sync completed';
+        // Combine 'idle' and 'completed' statuses for display purposes
+        if (status === 'idle' || status === 'completed') {
+            return 'Sync completed';
+        }
         if (status === 'failed') return 'Sync failed';
         
         // Format the progress display for in_progress state

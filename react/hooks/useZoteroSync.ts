@@ -195,11 +195,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         if (!isAuthenticated) return;
         console.log("[Beaver] Setting up Zotero sync");
         
-        // Initialize atoms to idle state
-        setSyncStatus('idle');
+        // Initialize atoms to completed state instead of idle
+        setSyncStatus('completed');
         setSyncTotal(0);
         setSyncCurrent(0);
-        setFileUploadStatus('idle');
+        setFileUploadStatus('completed');
         setFileUploadTotal(0);
         setFileUploadCurrent(0);
         
