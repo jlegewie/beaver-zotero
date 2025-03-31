@@ -58,6 +58,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         const itemIds = Array.from(eventsRef.current.addModify);
         if (itemIds.length === 0) return;
         
+        // Reset progress counters at the start of this operation
+        setSyncStatus('in_progress');
+        setSyncTotal(0);
+        setSyncCurrent(0);
+        
         try {
             // Get the items from Zotero
             const items = await Zotero.Items.getAsync(itemIds as number[]);
@@ -208,25 +213,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         
         // Set up file uploader with stable progress updates
         fileUploader.setStatusCallback((info: UploadProgressInfo) => {
-            // Only update if the values actually changed
-            // This helps prevent flickering values
-            setFileUploadStatus(prevStatus => {
-                // Always update if status changed
-                if (prevStatus !== info.status) return info.status;
-                return prevStatus;
-            });
-            
-            // Update current count only if it's greater than previous
-            setFileUploadCurrent(prevCurrent => {
-                if (info.current > prevCurrent) return info.current;
-                return prevCurrent;
-            });
-            
-            // Update total only if it's greater than previous
-            setFileUploadTotal(prevTotal => {
-                if (info.total > prevTotal) return info.total;
-                return prevTotal;
-            });
+            // Always update the values directly without checking previous state
+            setFileUploadStatus(info.status);
+            setFileUploadCurrent(info.current);
+            setFileUploadTotal(info.total);
         });
         
         // Perform initial sync on mount with stable progress updates
@@ -235,17 +225,15 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = itemFilter, d
         }
         
         const onProgress = (processed: number, total: number) => {
-            // Only update if values actually changed
-            setSyncTotal(prevTotal => {
-                if (total > prevTotal) return total;
-                return prevTotal;
-            });
-            
-            setSyncCurrent(prevCurrent => {
-                if (processed > prevCurrent) return processed;
-                return prevCurrent;
-            });
+            // Always update with the actual values
+            setSyncTotal(total);
+            setSyncCurrent(processed);
         }
+        
+        // Reset progress counters before starting the initial sync
+        setSyncStatus('in_progress');
+        setSyncTotal(0);
+        setSyncCurrent(0);
         
         syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
         
