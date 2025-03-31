@@ -1,6 +1,7 @@
-import { syncService, ItemData, AttachmentData, FileData } from '../services/syncService';
+import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
 import { SyncStatus } from 'react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
+import { calculateObjectHash } from './hash';
 
 
 /**
@@ -32,13 +33,13 @@ export const pdfAttachmentFilter: ItemFilterFunction = (item) => {
 };
 
 /**
- * Extracts relevant data from a Zotero item for syncing
+ * Extracts relevant data from a Zotero item for syncing, including a metadata hash.
  * @param item Zotero item
- * @returns ItemData object for syncing
+ * @returns Promise resolving to ItemData object for syncing
  */
-function extractItemData(item: Zotero.Item): ItemData {
-    // Extract basic metadata
-    const itemData: ItemData = {
+async function extractItemData(item: Zotero.Item): Promise<ItemData> {
+    // 1. Extract fields intended for hashing
+    const hashedFields: ItemDataHashedFields = {
         zotero_key: item.key,
         library_id: item.libraryID,
         item_type: item.itemType,
@@ -48,92 +49,148 @@ function extractItemData(item: Zotero.Item): ItemData {
         publication: item.getField('publicationTitle'),
         abstract: item.getField('abstractNote'),
         // @ts-ignore Beaver exists
-        reference: Zotero.Beaver.citationService.formatBibliography(item),
+        reference: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
         identifiers: extractIdentifiers(item),
         tags: item.getTags(),
+        // @ts-ignore - Add proper types later
+        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+    };
+
+    // 2. Calculate hash from the extracted hashed fields
+    const metadataHash = await calculateObjectHash(hashedFields);
+
+    // 3. Construct final ItemData object
+    const itemData: ItemData = {
+        ...hashedFields,
+        // Add non-hashed fields
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        // @ts-ignore isInTrash exists
-        deleted: item.isInTrash(),
-        // item_json: item.toJSON()
+        // Add the calculated hash
+        item_metadata_hash: metadataHash,
     };
-    
+
     return itemData;
 }
 
 /**
- * Extracts relevant data from a Zotero item for syncing
+ * Extracts file metadata from a Zotero attachment item.
+ * @param item Zotero attachment item
+ * @returns Promise resolving to FileData object or null.
+ */
+async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
+    if (!item.isAttachment() || !(await item.fileExists())) return null;
+
+    try {
+        const fileName = item.attachmentFilename;
+        const hash = await item.attachmentHash; // File content hash
+        const size = await Zotero.Attachments.getTotalFileSize(item);
+        const mimeType = item.attachmentContentType || 'application/octet-stream';
+
+        // Fulltext indexed status (handle potential errors/missing functions)
+        let fulltextIndexed = false;
+        let fulltextLastModified: number | null = null;
+        // @ts-ignore - Add runtime checks or proper types later
+        if (Zotero.FullText && typeof Zotero.FullText.canIndex === 'function' && Zotero.FullText.canIndex(item)) {
+            // @ts-ignore - Add runtime checks or proper types later
+            if (typeof Zotero.FullText.isFullyIndexed === 'function') {
+                // @ts-ignore - Add runtime checks or proper types later
+                fulltextIndexed = await Zotero.FullText.isFullyIndexed(item);
+            }
+            if (fulltextIndexed) {
+                // @ts-ignore - Add runtime checks or proper types later
+                if (typeof Zotero.FullText.getItemCacheFile === 'function') {
+                    // @ts-ignore - Add runtime checks or proper types later
+                    const cacheFile = Zotero.FullText.getItemCacheFile(item);
+                    if (cacheFile?.path && typeof IOUtils?.stat === 'function') {
+                        try {
+                            const fileInfo = await IOUtils.stat(cacheFile.path);
+                            fulltextLastModified = fileInfo.lastModified || null;
+                        } catch (statError) {
+                             Zotero.debug(`Beaver Sync: Could not stat fulltext cache file for ${item.key}: ${statError}`, 2)
+                        }
+                    }
+                }
+            }
+        }
+
+
+        return {
+            name: fileName || '',
+            hash: hash || '', // File content hash
+            size: size || 0,
+            mime_type: mimeType || '',
+            fulltext_indexed: fulltextIndexed,
+            fulltext_last_modified: fulltextLastModified
+        };
+    } catch (error: any) {
+         Zotero.debug(`Beaver Sync: Error extracting file data for ${item.key}: ${error.message}`, 1);
+         Zotero.logError(error);
+         return null; // Return null if extraction fails
+    }
+}
+
+/**
+ * Extracts relevant data from a Zotero attachment item for syncing, including a metadata hash.
+ * Keeps the 'file' property nested in the final output.
  * @param item Zotero item
- * @returns ItemData object for syncing
+ * @returns Promise resolving to AttachmentData object for syncing
  */
 async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData> {
+    // 1. Extract File Data (can be null)
+    const fileData: FileData | null = await extractFileData(item);
 
-    // Is primary attachment
+    // 2. Determine 'is_primary' status
     let is_primary = null;
     if (item.parentItem) {
         is_primary = false;
-        const bestAttachment = await item.parentItem.getBestAttachment();
-        if (bestAttachment) {
-            is_primary = bestAttachment.key === item.key;
+        try {
+            const bestAttachment = await item.parentItem.getBestAttachment();
+            is_primary = !!bestAttachment && bestAttachment.key === item.key;
+        } catch (error) {
+            Zotero.debug(`Beaver Sync: Error getting best attachment for parent of ${item.key}`, 2);
         }
     }
 
-    // Extract basic metadata
-    const itemData: AttachmentData = {
-        // attachments table fields
+    // 3. Prepare the object containing only fields for hashing
+    const hashedFields: AttachmentDataHashedFields = {
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
         is_primary: is_primary,
-        // @ts-ignore isInTrash exists
-        deleted: item.isInTrash() as boolean,
+        // @ts-ignore - Add runtime check or proper types later
+        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
-        date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        // item_json: item.toJSON(),
-        // file table fields
-        file: await extractFileData(item)
+        // Include relevant file fields (or nulls if fileData is null)
+        file_content_hash: fileData?.hash ?? null,
+        file_size: fileData?.size ?? null,
+        file_mime_type: fileData?.mime_type ?? null,
+        file_name: fileData?.name ?? null,
+        file_fulltext_indexed: fileData?.fulltext_indexed ?? null,
+        file_fulltext_last_modified: fileData?.fulltext_last_modified ?? null,
     };
-    
-    return itemData;
-}
 
-/**
- * Extracts file metadata from a Zotero attachment item
- * @param item Zotero attachment item
- * @returns Promise with file metadata
- */
-async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
-    // if (!item.isFileAttachment()) return {}
-    if (!item.isAttachment()) return null;
-    if (!(await item.fileExists())) return null;
+    // 4. Calculate hash from the prepared hashed fields object
+    const metadataHash = await calculateObjectHash(hashedFields);
 
-    // File metadata
-    const fileName = item.attachmentFilename;
-    const hash = await item.attachmentHash;
-    const size = await Zotero.Attachments.getTotalFileSize(item);
-    const mimeType = item.attachmentContentType || 'application/octet-stream';
+    // 5. Construct final AttachmentData object
+    const attachmentData: AttachmentData = {
+        // Include base fields (redundant with hashedFields but clearer)
+        library_id: hashedFields.library_id,
+        zotero_key: hashedFields.zotero_key,
+        parent_key: hashedFields.parent_key,
+        is_primary: hashedFields.is_primary,
+        deleted: hashedFields.deleted,
+        title: hashedFields.title,
+        // Add non-hashed fields
+        date_added: new Date(item.dateAdded + 'Z').toISOString(),
+        date_modified: new Date(item.dateModified + 'Z').toISOString(),
+        // Include the nested file data object
+        file: fileData,
+        // Add the calculated hash
+        attachment_metadata_hash: metadataHash,
+    };
 
-    // Fulltext indexed
-    // @ts-ignore FullText exists
-    const fulltextIndexed = Zotero.FullText.canIndex(item) && await Zotero.FullText.isFullyIndexed(item);
-    let fulltextLastModified = null;
-    if(fulltextIndexed) {
-        // @ts-ignore Zotero.FullText exists
-        const cacheFile = Zotero.FullText.getItemCacheFile(item);
-        const fileInfo = await IOUtils.stat(cacheFile.path);
-        fulltextLastModified = fileInfo.lastModified;
-    }
-
-    // Return file data
-    return {
-        name: fileName || '',
-        hash: hash || '',
-        size: size || 0,
-        mime_type: mimeType || '',
-        fulltext_indexed: fulltextIndexed,
-        fulltext_last_modified: fulltextLastModified
-    } as FileData;
+    return attachmentData;
 }
 
 /**
@@ -220,7 +277,7 @@ export async function syncItemsToBackend(
         Zotero.debug(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`, 4);
         
         // Transform Zotero items to our format
-        const itemsData = batch.filter(item => item.isRegularItem()).map(extractItemData);
+        const itemsData = await Promise.all(batch.filter(item => item.isRegularItem()).map(extractItemData));
         const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData));
         attachmentCount += attachmentsData.length;
 
@@ -259,7 +316,8 @@ export async function syncItemsToBackend(
             syncId = batchResult.sync_id;
             if (batchResult.sync_status === 'failed') {
                 onStatusChange?.('failed');
-                Zotero.debug(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`, 1);
+                const error = new Error(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`);
+                Zotero.logError(error);
                 break;
             }
             

@@ -36,7 +36,10 @@ export interface SyncCompleteResponse {
     status: string;
 }
 
-export interface ItemData {
+// --- Item Types ---
+
+/** Fields included in the Item metadata hash calculation. */
+export interface ItemDataHashedFields {
     zotero_key: string;
     item_type: string;
     library_id: number;
@@ -48,9 +51,45 @@ export interface ItemData {
     reference?: string;
     identifiers?: any;
     tags?: any[];
+    deleted: boolean;
+}
+
+/** Full Item data */
+export interface ItemData extends ItemDataHashedFields {
     date_added?: string;
     date_modified?: string;
+    // Hash of the fields defined in ItemDataHashedFields
+    item_metadata_hash: string;
+}
+
+// --- Attachment & File Types ---
+
+export interface FileData {
+    name: string;
+    hash: string;
+    size: number;
+    mime_type: string;
+    storage_path?: string;
+    fulltext_indexed: boolean;
+    fulltext_last_modified: number | null;
+}
+
+/** Fields included in the Attachment metadata hash calculation. */
+export interface AttachmentDataHashedFields {
+    // Attachment fields
+    library_id: number;
+    zotero_key: string;
+    parent_key: string | null;
+    is_primary: boolean | null;
     deleted: boolean;
+    title: string;
+    // Relevant File fields (flattened, handling null file case)
+    file_content_hash: string | null; // Renamed for clarity vs attachment hash
+    file_size: number | null;
+    file_mime_type: string | null;
+    file_name: string | null;
+    file_fulltext_indexed: boolean | null;
+    file_fulltext_last_modified: number | null;
 }
 
 export interface AttachmentData {
@@ -65,16 +104,7 @@ export interface AttachmentData {
     date_modified: string;
     // file table data
     file: FileData | null;
-}
-
-export interface FileData {
-    name: string;
-    hash: string;
-    size: number;
-    mime_type: string;
-    storage_path?: string;
-    fulltext_indexed: boolean;
-    fulltext_last_modified: number | null;
+    attachment_metadata_hash: string; // Hash of the fields defined in AttachmentDataHashedFields
 }
 
 export interface LastSyncDateResponse {
