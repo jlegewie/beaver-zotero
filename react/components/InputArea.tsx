@@ -108,12 +108,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     menuPosition={menuPosition}
                     setMenuPosition={setMenuPosition}
                 />
-                {/* <IconButton
-                    icon={PlusSignIcon}
-                    onClick={handleAddSources}
-                    className="scale-11"
-                    ariaLabel="Add sources"
-                /> */}
                 {threadSourceCount > 0 && (
                     <button
                         className="sources-info"
