@@ -230,13 +230,36 @@ export async function syncItemsToBackend(
 
         try {
             // Send batch to backend
-            const batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
+            let attempts = 0;
+            const maxAttempts = 3;
+            let batchResult = null;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
+                    break; // Success, exit retry loop
+                } catch (retryError) {
+                    attempts++;
+                    if (attempts >= maxAttempts) {
+                        throw retryError; // Rethrow if max attempts reached
+                    }
+                    
+                    // Wait before retrying (exponential backoff)
+                    const delay = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
+                    Zotero.debug(`Beaver Sync: Batch processing attempt ${attempts}/${maxAttempts} failed, retrying in ${delay}ms...`, 2);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
     
             // Process batch result
+            if (!batchResult) {
+                throw new Error("Failed to process batch after multiple attempts");
+            }
+            
             syncId = batchResult.sync_id;
             if (batchResult.sync_status === 'failed') {
                 onStatusChange?.('failed');
-                Zotero.debug(`Beaver Sync: Batch failed. Failed keys: ${batchResult.failed_keys}`, 1);
+                Zotero.debug(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`, 1);
                 break;
             }
             
