@@ -77,22 +77,22 @@ const DatabaseStatusIndicator: React.FC = () => {
     const fileProgress = calculateProgress(fileCurrent, fileTotal);
     
     // Progress display text with proper formatting
-    const getProgressText = (status: SyncStatus, progress: number, current: number, total: number): string => {
+    const getProgressText = (status: SyncStatus, progress: number, current: number, total: number, type: 'database' | 'file'): string => {
         // Combine 'idle' and 'completed' statuses for display purposes
         if (status === 'idle' || status === 'completed') {
-            return 'Sync completed';
+            return type === 'database' ? 'Sync completed' : 'Uploads completed';
         }
-        if (status === 'failed') return 'Sync failed';
+        if (status === 'failed') return type === 'database' ? 'Sync failed' : 'Uploads failed';
         
         // Format the progress display for in_progress state
         if (total > 0) {
-            return `Syncing... ${progress}% (${current}/${total})`;
+            return type === 'database' ? `Syncing... ${progress}% (${current}/${total})` : `Uploading... ${progress}% (${current}/${total})`;
         }
-        return 'Syncing...';
+        return type === 'database' ? 'Syncing...' : 'Uploading...';
     };
     
-    const dbProgressText = getProgressText(syncStatus, dbProgress, syncCurrent, syncTotal);
-    const fileProgressText = getProgressText(fileStatus, fileProgress, fileCurrent, fileTotal);
+    const dbProgressText = getProgressText(syncStatus, dbProgress, syncCurrent, syncTotal, 'database');
+    const fileProgressText = getProgressText(fileStatus, fileProgress, fileCurrent, fileTotal, 'file');
     
     // Handle manual sync button click
     const handleSyncClick = () => {
