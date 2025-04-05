@@ -23,7 +23,6 @@ export interface UploadQueueItem {
     file_id: string;
     library_id: number;
     attachment_key: string;
-    type: 'attachment' | 'fulltext';
     storage_path: string;
     upload_url: string;
     status: 'pending' | 'in_progress' | 'completed' | 'failed';
@@ -36,7 +35,6 @@ export interface UploadQueueItem {
 export interface AddUploadQueueFromAttachmentRequest {
     library_id: number;
     attachment_keys: string[];
-    type: 'attachment' | 'fulltext';
 }
 
 /**

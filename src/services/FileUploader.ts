@@ -244,7 +244,7 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueItem): Promise<void> {
         try {
-            Zotero.debug(`Beaver File Uploader: Uploading ${item.type} file for ${item.attachment_key}`, 3);
+            Zotero.debug(`Beaver File Uploader: Uploading file for ${item.attachment_key}`, 3);
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.attachment_key);
@@ -255,15 +255,9 @@ export class FileUploader {
             }
 
             let filePath: string | null = null;
-            if (item.type === 'attachment') {
-                filePath = await attachment.getFilePathAsync() || null;
-            } else if (item.type === 'fulltext') {
-                // @ts-ignore FullText exists
-                const cacheFile = Zotero.FullText.getItemCacheFile(attachment);
-                filePath = cacheFile.path;
-            }
+            filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
-                Zotero.debug(`Beaver File Uploader: File path for ${item.type} not found for attachment: ${item.attachment_key}`, 1);
+                Zotero.debug(`Beaver File Uploader: File path not found for attachment: ${item.attachment_key}`, 1);
                 await this.handlePermanentFailure(item, "File path not found");
                 return;
             }
@@ -280,7 +274,7 @@ export class FileUploader {
             }
             
             // const mimeType = Zotero.MIME.getMIMETypeFromFile(filePath);
-            const mimeType = item.type === 'attachment' ? attachment.attachmentContentType : 'text/plain';
+            const mimeType = attachment.attachmentContentType;
             const blob = new Blob([fileArrayBuffer], { type: mimeType });
 
             // Perform the file upload with retry for network issues

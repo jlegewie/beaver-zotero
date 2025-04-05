@@ -69,9 +69,8 @@ export interface FileData {
     hash: string;
     size: number;
     mime_type: string;
+    content?: string;
     storage_path?: string;
-    fulltext_indexed: boolean;
-    fulltext_last_modified: number | null;
 }
 
 /** Fields included in the Attachment metadata hash calculation. */
@@ -88,8 +87,6 @@ export interface AttachmentDataHashedFields {
     file_size: number | null;
     file_mime_type: string | null;
     file_name: string | null;
-    file_fulltext_indexed: boolean | null;
-    file_fulltext_last_modified: number | null;
 }
 
 export interface AttachmentData {

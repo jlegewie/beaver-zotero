@@ -72,41 +72,11 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
         const size = await Zotero.Attachments.getTotalFileSize(item);
         const mimeType = item.attachmentContentType || 'application/octet-stream';
 
-        // Fulltext indexed status (handle potential errors/missing functions)
-        let fulltextIndexed = false;
-        let fulltextLastModified: number | null = null;
-        // @ts-ignore - Add runtime checks or proper types later
-        if (Zotero.FullText && typeof Zotero.FullText.canIndex === 'function' && Zotero.FullText.canIndex(item)) {
-            // @ts-ignore - Add runtime checks or proper types later
-            if (typeof Zotero.FullText.isFullyIndexed === 'function') {
-                // @ts-ignore - Add runtime checks or proper types later
-                fulltextIndexed = await Zotero.FullText.isFullyIndexed(item);
-            }
-            if (fulltextIndexed) {
-                // @ts-ignore - Add runtime checks or proper types later
-                if (typeof Zotero.FullText.getItemCacheFile === 'function') {
-                    // @ts-ignore - Add runtime checks or proper types later
-                    const cacheFile = Zotero.FullText.getItemCacheFile(item);
-                    if (cacheFile?.path && typeof IOUtils?.stat === 'function') {
-                        try {
-                            const fileInfo = await IOUtils.stat(cacheFile.path);
-                            fulltextLastModified = fileInfo.lastModified || null;
-                        } catch (statError) {
-                             Zotero.debug(`Beaver Sync: Could not stat fulltext cache file for ${item.key}: ${statError}`, 2)
-                        }
-                    }
-                }
-            }
-        }
-
-
         return {
             name: fileName || '',
             hash: hash || '', // File content hash
             size: size || 0,
-            mime_type: mimeType || '',
-            fulltext_indexed: fulltextIndexed,
-            fulltext_last_modified: fulltextLastModified
+            mime_type: mimeType || ''
         };
     } catch (error: any) {
          Zotero.debug(`Beaver Sync: Error extracting file data for ${item.key}: ${error.message}`, 1);
@@ -151,8 +121,6 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         file_size: fileData?.size ?? null,
         file_mime_type: fileData?.mime_type ?? null,
         file_name: fileData?.name ?? null,
-        file_fulltext_indexed: fileData?.fulltext_indexed ?? null,
-        file_fulltext_last_modified: fileData?.fulltext_last_modified ?? null,
     };
 
     // 4. Calculate hash from the prepared hashed fields object
