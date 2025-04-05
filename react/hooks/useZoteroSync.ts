@@ -16,7 +16,6 @@ const DEBOUNCE_MS = 2000;
 interface CollectedEvents {
     addModify: Set<number>; // Item IDs for add/modify events
     delete: Map<number, { libraryID: number, key: string }>; // ID to {libraryID, key} mapping for delete events
-    index: Set<number>; // Item IDs for index events
     timer: number | null; // Timer ID for debounce
     timestamp: number; // Last event timestamp
 }
@@ -46,7 +45,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const eventsRef = useRef<CollectedEvents>({
         addModify: new Set(),
         delete: new Map(),
-        index: new Set(),
         timer: null,
         timestamp: 0
     });
@@ -128,74 +126,19 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     };
 
     /**
-     * Process collected index events
-     */
-    const processIndexEvents = async () => {
-        const itemIds = Array.from(eventsRef.current.index);
-        if (itemIds.length === 0) return;
-        
-        try {
-            // Get the items from Zotero
-            const items = await Zotero.Items.getAsync(itemIds as number[]);
-            if (items.length === 0) return;
-            
-            // Create library-specific requests for fulltext items
-            const requestsByLibrary = new Map<number, AddUploadQueueFromAttachmentRequest>();
-            
-            // Group items by library
-            for (const item of items) {
-                const libraryID = item.libraryID;
-                
-                // @ts-ignore FullText exists
-                if (!Zotero.FullText.canIndex(item) || !(await Zotero.FullText.isFullyIndexed(item))) {
-                    continue;
-                }
-                
-                if (!requestsByLibrary.has(libraryID)) {
-                    requestsByLibrary.set(libraryID, {
-                        library_id: libraryID,
-                        attachment_keys: [],
-                        type: 'fulltext'
-                    });
-                }
-                
-                requestsByLibrary.get(libraryID)?.attachment_keys.push(item.key);
-            }
-            
-            // Process each library's fulltext requests
-            for (const request of requestsByLibrary.values()) {
-                if (request.attachment_keys.length > 0) {
-                    Zotero.debug(`Beaver: Adding ${request.attachment_keys.length} upload tasks to the upload queue for library ${request.library_id}`, 3);
-                    await queueService.addItemsFromAttachmentKeys(request);
-                }
-            }
-            
-            // Start the uploader if we have any items to process
-            if (Array.from(requestsByLibrary.values()).some(req => req.attachment_keys.length > 0)) {
-                fileUploader.start();
-            }
-        } catch (error: any) {
-            Zotero.debug(`Beaver: Error handling index event: ${error.message}`, 1);
-            Zotero.logError(error);
-        }
-    };
-
-    /**
      * Process all collected events and reset the collection
      */
     const processEvents = async () => {
         Zotero.debug(`Beaver: Processing collected events after ${debounceMs}ms of inactivity`, 3);
-        Zotero.debug(`Beaver: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete, ${eventsRef.current.index.size} index`, 3);
+        Zotero.debug(`Beaver: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete`, 3);
         
         // Process each type of event
         await processAddModifyEvents();
         await processDeleteEvents();
-        await processIndexEvents();
         
         // Reset collections
         eventsRef.current.addModify.clear();
         eventsRef.current.delete.clear();
-        eventsRef.current.index.clear();
         eventsRef.current.timer = null;
     };
 
@@ -257,9 +200,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 }
                             }
                         });
-                    } else if (event === 'index') {
-                        // Collect index events
-                        ids.forEach(id => eventsRef.current.index.add(id));
                     }
                     
                     // Clear existing timer and set a new one
@@ -295,8 +235,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Process any remaining events before unmounting
             if (
                 eventsRef.current.addModify.size > 0 || 
-                eventsRef.current.delete.size > 0 || 
-                eventsRef.current.index.size > 0
+                eventsRef.current.delete.size > 0
             ) {
                 processEvents();
             }
