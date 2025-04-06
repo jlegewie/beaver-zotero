@@ -7,7 +7,7 @@ import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { Thread } from '../types/messages';
-import { ClockIcon } from './icons';
+import { ChattingIcon } from './icons';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
@@ -262,7 +262,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         <MenuButton
             menuItems={menuItems}
             variant="ghost"
-            icon={ClockIcon}
+            icon={ChattingIcon}
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="Chat history"
