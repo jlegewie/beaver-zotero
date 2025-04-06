@@ -48,6 +48,7 @@ export const useFileStatus = (): void => {
 
         // Initial fetch of the user's file status
         const fetchInitialStatus = async () => {
+            Zotero.debug(`useFileStatus: Fetching initial file status for user: ${user.id}`);
             const { data, error } = await supabase
                 .from('files_status')
                 .select('*')
@@ -83,11 +84,13 @@ export const useFileStatus = (): void => {
                     filter: `user_id=eq.${user.id}` // Filter events for this user only
                 },
                 (payload) => {
-                    Zotero.debug(`useFileStatus: Received event: ${payload.eventType}`);
+                    Zotero.debug(`useFileStatus: Received event: ${payload.eventType}`); 
                     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                        Zotero.debug(`useFileStatus: Updated data: ${JSON.stringify(payload.new)}`);
                         setFileStatus(formatStatus(payload.new));
                     } else if (payload.eventType === 'DELETE') {
                         // Record deleted, likely should not happen but handle defensively
+                        Zotero.debug(`useFileStatus: Record deleted`);
                         setFileStatus(null);
                     }
                 }
@@ -95,8 +98,10 @@ export const useFileStatus = (): void => {
             .subscribe((status, err) => {
                 if (err) {
                     console.error(`useFileStatus: realtime subscription error:`, err);
+                    Zotero.debug(`useFileStatus: realtime subscription error: ${JSON.stringify(err)}`);
                 } else {
                     Zotero.debug(`useFileStatus: realtime subscription status: ${status}`);
+                    console.log(`useFileStatus: realtime subscription status: ${status}`);
                 }
             });
 
