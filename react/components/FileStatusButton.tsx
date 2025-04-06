@@ -52,11 +52,9 @@ const FileStatusButton: React.FC<{ className?: string }> = ({ className = '' }) 
         return null; 
     }
 
-    const pendingCount = fileStatus.upload_pending;
-    const queuedCount = fileStatus.md_queued + fileStatus.docling_queued;
-    const processingCount = fileStatus.md_processing + fileStatus.docling_processing;
-    const completedCount = fileStatus.md_converted + fileStatus.md_chunked + fileStatus.md_embedded + fileStatus.docling_converted + fileStatus.docling_chunked + fileStatus.docling_embedded;
-    const failedCount = fileStatus.md_failed + fileStatus.docling_failed;
+    const processingCount = fileStatus.upload_pending + fileStatus.md_queued + fileStatus.md_processing;
+    const completedCount = fileStatus.md_converted + fileStatus.md_chunked + fileStatus.md_embedded;
+    const failedCount = fileStatus.md_failed;
 
     // Basic animation: changes border color briefly
     // Consider using 'animate-flash' or adjust Tailwind config for more complex animations
@@ -72,9 +70,9 @@ const FileStatusButton: React.FC<{ className?: string }> = ({ className = '' }) 
                 ariaLabel="File processing status"
                 title="File Processing Status (Uploading, Queued, Processing, Completed, Failed)"
             >
-                <StatusItem icon={UploadCircleIcon} count={pendingCount} iconClassName="scale-11 text-blue-500" />
-                <StatusItem icon={ClockIcon} count={queuedCount} iconClassName="scale-11 text-yellow-500" />
-                <StatusItem icon={SyncIcon} count={processingCount} iconClassName="scale-11 text-purple-500 animate-spin animation-duration-2000" />
+                {/* <StatusItem icon={UploadCircleIcon} count={pendingCount} iconClassName="scale-11 text-blue-500" /> */}
+                {/* <StatusItem icon={ClockIcon} count={queuedCount} iconClassName="scale-11 text-yellow-500" /> */}
+                <StatusItem icon={SyncIcon} count={processingCount} iconClassName="scale-125 mt-1 text-purple-500 animate-spin animation-duration-2000" />
                 <StatusItem icon={CheckmarkCircleIcon} count={completedCount} iconClassName="scale-11 text-green-500" />
                 <StatusItem icon={CancelCircleIcon} count={failedCount} iconClassName="scale-11 text-red-500" />
             </Button>
