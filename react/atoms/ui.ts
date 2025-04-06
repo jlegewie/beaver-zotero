@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import { currentSourcesAtom } from './input';
 import { InputSource } from 'react/types/sources';
+import { FileStatus } from '../types/fileStatus';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -40,6 +41,8 @@ export const syncErrorAtom = atom(
     }
 );
 
+// File processing status summary
+export const fileStatusAtom = atom<FileStatus | null>(null);
 
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);
