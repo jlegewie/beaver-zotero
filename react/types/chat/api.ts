@@ -13,6 +13,10 @@ export interface ToolCall {
     response?: Record<string, any> | null;
 }
 
+/**
+ * Represents an attachment in a message.
+ * Mirrors the MessageAttachment Pydantic model in the backend.
+ */
 export interface MessageAttachment {
     library_id: number;
     zotero_key: string;

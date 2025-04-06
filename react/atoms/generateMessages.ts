@@ -1,13 +1,13 @@
 import { atom } from 'jotai';
 import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
-import { MessageModel, AppState } from 'react/types/chat/api';
+import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom, addToolCallSourcesToThreadSourcesAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { chatService, library_search_tool_request, MessageAttachment } from '../../src/services/chatService';
+import { chatService, library_search_tool_request } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';

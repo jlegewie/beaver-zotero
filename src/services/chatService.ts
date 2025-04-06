@@ -1,12 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel, AppState } from 'react/types/chat/api';
-
-// Interface for attachments in the request body (matching 'MessageAttachment' in backend)
-export interface MessageAttachment {
-    library_id: number;
-    zotero_key: string;
-}
+import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
 
 export interface ToolRequest {
     function: "library_search";
