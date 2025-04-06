@@ -25,4 +25,6 @@ export { default as CheckmarkCircleIcon } from './icons/CheckmarkCircleIcon';
 export { default as CancelCircleIcon } from './icons/CancelCircleIcon';
 export { default as LogoutIcon } from './icons/LogoutIcon';
 export { default as LibraryIcon } from './icons/LibraryIcon';
+export { default as UploadCircleIcon } from './icons/UploadCircleIcon';
 export { default as ChattingIcon } from './icons/ChattingIcon';
+export { default as SyncIcon } from './icons/SyncIcon';
