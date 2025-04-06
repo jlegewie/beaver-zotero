@@ -356,7 +356,9 @@
 [id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
 [id^="beaver-pane-"] .scale-105 { transform: scale(1.05); }
 [id^="beaver-pane-"] .scale-11 { transform: scale(1.1); }
+[id^="beaver-pane-"] .scale-115 { transform: scale(1.15); }
 [id^="beaver-pane-"] .scale-12 { transform: scale(1.2); }
+[id^="beaver-pane-"] .scale-125 { transform: scale(1.25); }
 [id^="beaver-pane-"] .scale-13 { transform: scale(1.3); }
 [id^="beaver-pane-"] .scale-14 { transform: scale(1.4); }
 [id^="beaver-pane-"] .scale-15 { transform: scale(1.5); }
@@ -1232,4 +1234,22 @@
 
 [id^="beaver-pane-"] .appearance-none {
     appearance: none;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+[id^="beaver-pane-"] .animate-spin {
+    animation: spin 1.2s linear infinite;
+}
+
+/* Flash animations for status updates */
+[id^="beaver-pane-"] .beaver-flash-border {
+    border-color: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .beaver-flash-bg {
+    background-color: var(--accent-blue10);
 }
