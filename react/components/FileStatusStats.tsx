@@ -1,9 +1,11 @@
 import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useState, useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import { fileStatusAtom } from '../atoms/ui';
-import { Icon, InformationCircleIcon } from './icons';
+import { useAtomValue, useAtom } from 'jotai';
+import { fileStatusAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
+import { Icon, InformationCircleIcon, Spinner } from './icons';
+import Tooltip from './Tooltip';
+import { attachmentsService } from '../../src/services/attachmentsService';
 
 function formatCount(count: number): string {
     if (count >= 10000) {
@@ -59,6 +61,75 @@ const Stat: React.FC<{
 };
 
 /**
+ * Tooltip content component for displaying processing error codes.
+ */
+const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ failedCount }) => {
+    const [errorCodeStats, setErrorCodeStats] = useAtom(errorCodeStatsAtom);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [errorCodeLastFetched, setErrorCodeLastFetched] = useAtom(errorCodeLastFetchedAtom);
+
+    useEffect(() => {
+        const shouldFetch = failedCount > 0 && 
+                            (errorCodeStats === null || !errorCodeLastFetched || failedCount !== errorCodeLastFetched);
+
+        console.log("FailedProcessingTooltipContent", shouldFetch);
+
+        if (shouldFetch) {
+            setIsLoading(true);
+            setError(null);
+            attachmentsService.getErrorCodeStats('md')
+                .then(stats => {
+                    setErrorCodeStats(stats);
+                    setErrorCodeLastFetched(failedCount);
+                })
+                .catch(err => {
+                    console.error("Failed to fetch error code stats:", err);
+                    setError("Could not load details.");
+                    // Optionally clear stats if fetch fails
+                    // setErrorCodeStats(null); 
+                })
+                .finally(() => {
+                    setIsLoading(false);
+                });
+        } else if (failedCount === 0 && errorCodeStats !== null) {
+            // Reset stats if failed count goes to 0
+            setErrorCodeStats(null);
+            setErrorCodeLastFetched(null);
+        }
+    }, [failedCount, errorCodeStats, setErrorCodeStats, setErrorCodeLastFetched]); // Re-run effect if count or stats atom changes
+
+    if (isLoading) {
+        return (
+            <div className="flex justify-center items-center p-2">
+                <Spinner size={16} />
+            </div>
+        );
+    }
+
+    if (error) {
+         return <div className="p-2 text-sm font-color-secondary">{error}</div>;
+    }
+
+    if (!errorCodeStats || Object.keys(errorCodeStats).length === 0) {
+        return <div className="p-2 text-sm font-color-secondary">No specific error details available.</div>;
+    }
+
+    // Display error codes and counts
+    return (
+        <div className="flex flex-col gap-1 p-2">
+             <div className="text-sm font-color-secondary mb-1 font-medium">Processing Errors:</div>
+            {Object.entries(errorCodeStats).map(([code, count]) => (
+                <div key={code} className="flex justify-between items-center text-xs">
+                    <span className="font-color-tertiary mr-4">{code}:</span>
+                    <span className="font-color-secondary font-mono">{count}</span>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+/**
  * Button component displaying aggregated file processing status.
  */
 const FileStatusStats: React.FC<{
@@ -86,6 +157,8 @@ const FileStatusStats: React.FC<{
         return null; 
     }
 
+    const failedProcessingCount = fileStatus.md_failed;
+
     return (
         <div className="flex flex-col gap-4">
             <div className="flex flex-row items-end">
@@ -105,7 +178,17 @@ const FileStatusStats: React.FC<{
                     {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
                     <Stat label="Active" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/>
                     <Stat label="Done" count={fileStatus.md_embedded}/>
-                    <Stat label="Failed" count={fileStatus.md_failed} isFailed={true} info={true}/>
+                    {/* Wrap the failed Stat component with Tooltip */}
+                    <Tooltip 
+                        content="Processing error codes"
+                        customContent={<FailedProcessingTooltipContent failedCount={failedProcessingCount} />}
+                        showArrow={true}
+                        disabled={failedProcessingCount === 0}
+                    >
+                        <div>
+                             <Stat label="Failed" count={failedProcessingCount} isFailed={true} info={true}/>
+                        </div>
+                    </Tooltip>
                 </div>
             </div>
         </div>
