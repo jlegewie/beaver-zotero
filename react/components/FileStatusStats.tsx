@@ -1,10 +1,6 @@
 import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useState, useEffect, useRef } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { fileStatusAtom } from '../atoms/ui';
-import Button from './button';
-import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
 import { Icon } from './icons';
 
 interface StatusItemProps {
