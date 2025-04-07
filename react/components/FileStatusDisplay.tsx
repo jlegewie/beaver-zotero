@@ -18,7 +18,7 @@ interface StatusItemProps {
 
 function formatCount(count: number): string {
     if (count >= 1000) {
-        return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
     }
     return count.toString();
 }
@@ -91,7 +91,7 @@ const FileStatusDisplay: React.FC<{
             onClick={() => setShowFileStatus(!showFileStatus)}
         >
             {/* <div className="flex flex-row gap-2"> */}
-            <div className="flex flex-row gap-2">
+            <div className="flex flex-row gap-4">
                 <StatusItem icon={SyncIcon} count={processingCount} iconClassName={syncIconClassName} />
                 <StatusItem icon={CheckmarkCircleIcon} count={completedCount} iconClassName="scale-115 text-green-500" />
                 <StatusItem icon={CancelCircleIcon} count={failedCount} iconClassName="scale-115 text-red-500" />
