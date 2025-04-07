@@ -133,20 +133,6 @@ const FileStatusStats: React.FC<{
 
     const fileStatus = useAtomValue(fileStatusAtom);
 
-    // const processingCount = fileStatus.upload_pending + fileStatus.md_queued + fileStatus.md_processing;
-    // const completedCount = fileStatus.md_converted + fileStatus.md_chunked + fileStatus.md_embedded;
-    // const failedCount = fileStatus.md_failed + fileStatus.upload_failed;
-
-    // Define animation classes. Ensure 'beaver-flash-border' and 'beaver-flash-bg' 
-    // are defined in your CSS (e.g., addon/content/styles/beaver.css) 
-    // to create the desired visual effect (e.g., temporary border/background color change).
-    // const baseClasses = 'transition-colors duration-300 ease-in';
-    // const flashClasses = 'beaver-flash-border beaver-flash-bg';
-    // const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
-
-    // Conditionally apply 'animate-spin' to SyncIcon
-    // const syncIconClassName = `scale-125 text-purple-500 ${processingCount > 0 ? 'animate-spin' : ''}`;
-
     // Maybe render a loading state?
     if (!fileStatus) {
         return null; 
