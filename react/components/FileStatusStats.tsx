@@ -60,6 +60,23 @@ const Stat: React.FC<{
     );
 };
 
+const errorMapping = {
+    "encrypted": "File is encrypted",
+    "no_text_layer": "Requires OCR",
+    "insufficient_text": "Unknown error",
+    "file_missing": "Unknown error",
+    "download_failed": "Unknown error",
+    "preprocessing_failed": "Unknown error",
+    "conversion_failed": "Unknown error",
+    "opening_failed": "Unknown error",
+    "upload_failed": "Unknown error",
+    "chunk_failed": "Unknown error",
+    "db_update_failed": "Unknown error",
+    "task_parsing_failed": "Unknown error",
+    "max_retries": "Unknown error",
+    "unexpected_error": "Unknown error"
+};
+
 /**
  * Tooltip content component for displaying processing error codes.
  */
@@ -70,7 +87,7 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
     const [errorCodeLastFetched, setErrorCodeLastFetched] = useAtom(errorCodeLastFetchedAtom);
 
     useEffect(() => {
-        const shouldFetch = failedCount > 0 && 
+        const shouldFetch = failedCount > 0 &&
                             (errorCodeStats === null || !errorCodeLastFetched || failedCount !== errorCodeLastFetched);
 
         if (shouldFetch) {
@@ -85,7 +102,7 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
                     console.error("Failed to fetch error code stats:", err);
                     setError("Could not load details.");
                     // Optionally clear stats if fetch fails
-                    // setErrorCodeStats(null); 
+                    // setErrorCodeStats(null);
                 })
                 .finally(() => {
                     setIsLoading(false);
@@ -97,24 +114,34 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
         }
     }, [failedCount, errorCodeStats, setErrorCodeStats, setErrorCodeLastFetched]); // Re-run effect if count or stats atom changes
 
+
+    // Aggregate error codes based on errorMapping
+    const aggregatedStats: Record<string, number> = {};
+    if (errorCodeStats) {
+        for (const [code, count] of Object.entries(errorCodeStats)) {
+            const message = errorMapping[code as keyof typeof errorMapping] || "Unexpected error";
+            aggregatedStats[message] = (aggregatedStats[message] || 0) + count;
+        }
+    }
+
     // Display error codes and counts
     return (
         <div className="flex flex-col gap-1">
-            <div className="text-sm font-color-secondary mb-1 font-base whitespace-nowrap">Processing Errors</div>
+            <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Processing Errors</div>
             {isLoading &&
-                <div className="text-base font-color-secondary mb-1 font-base items-center flex flex-row">
+                <div className="text-base font-color-secondary mb-1 items-center flex flex-row">
                     <div className="mt-1"><Spinner size={14}/></div>
                     <div className="ml-2 font-color-tertiary">Loading...</div>
                 </div>
             }
-            {!isLoading && error && <div className="text-base font-color-secondary mb-1 font-base">{error}</div>}
+            {!isLoading && error && <div className="text-base font-color-secondary mb-1">{error}</div>}
             {!isLoading && !error && (
-                (!errorCodeStats || Object.keys(errorCodeStats).length === 0) ? (
+                (!errorCodeStats || Object.keys(aggregatedStats).length === 0) ? (
                     <div className="text-base font-color-secondary">No specific error details available.</div>
                 ) : (
-                    Object.entries(errorCodeStats).map(([code, count]) => (
-                        <div key={code} className="flex justify-between items-center text-xs">
-                            <span className="font-color-tertiary mr-4">{code}:</span>
+                    Object.entries(aggregatedStats).map(([message, count]) => (
+                        <div key={message} className="flex justify-between items-center text-base whitespace-nowrap">
+                            <span className="font-color-tertiary mr-4">{message}:</span>
                             <span className="font-color-secondary font-mono">{count}</span>
                         </div>
                     ))
