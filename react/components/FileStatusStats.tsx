@@ -11,30 +11,6 @@ interface StatusItemProps {
     iconClassName?: string;
 }
 
-const StatusItem: React.FC<StatusItemProps> = ({ icon, label, count, className = '', iconClassName = '' }) => {
-    // Format count to always take at least 2 characters, padding with a non-breaking space
-    const formattedCount = String(count).padStart(2, '\u00A0');
-
-    return (
-        // <span className={`flex items-center gap-1 ${className}`}>
-        //     <Icon icon={icon} className={`${iconClassName}`} />
-        //     <span className="text-lg">{formattedCount}</span>
-        // </span>
-        <div className="surface-light flex flex-row items-center gap-3 ml-2">
-            <div className="font-color-tertiary">
-                <Icon icon={icon} className="scale-12 mt-1" />
-            </div>
-            <div className="font-color-secondary text-base">
-                {label}
-            </div>
-            <div className="flex-1" />
-            <div className="font-color-secondary text-base">
-                {formattedCount}
-            </div>
-        </div>
-    );
-};
-
 function formatCount(count: number): string {
     if (count >= 10000) {
         return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -111,10 +87,6 @@ const FileStatusStats: React.FC<{
                 </div>
             </div>
         </>
-        /* <StatusItem icon={UploadCircleIcon} label="File Uploads" count={fileStatus?.upload_completed || 0}/>
-        <StatusItem icon={ClockIcon} label="Processing Pending" count={fileStatus?.upload_pending || 0}/>
-        <StatusItem icon={CheckmarkCircleIcon} label="Completed" count={fileStatus?.upload_pending || 0}/>
-        <StatusItem icon={CancelCircleIcon} label="Failed" count={fileStatus?.upload_failed || 0}/> */
     );
 };
 
