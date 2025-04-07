@@ -31,6 +31,8 @@ export interface TooltipProps {
     customContent?: ReactNode;
     /** Whether the tooltip should stay open when clicking the anchor element */
     stayOpenOnAnchorClick?: boolean;
+    /** Optional preferred placement ('top' or 'bottom') */
+    placement?: 'top' | 'bottom';
 }
 
 /**
@@ -49,12 +51,13 @@ const Tooltip: React.FC<TooltipProps> = ({
     allowHtml = false,
     customContent,
     stayOpenOnAnchorClick = false,
+    placement: preferredPlacement,
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
     const [position, setPosition] = useState<{ x: number; y: number; placement: 'top' | 'bottom' }>({ 
         x: 0, 
         y: 0, 
-        placement: 'bottom' 
+        placement: preferredPlacement || 'bottom'
     });
     const [arrowPosition, setArrowPosition] = useState<string>('50%');
     
@@ -79,15 +82,18 @@ const Tooltip: React.FC<TooltipProps> = ({
         const spaceBelow = mainWindow.innerHeight - anchorRect.bottom;
         const spaceAbove = anchorRect.top;
         
-        let placement: 'top' | 'bottom' = 'bottom';
+        let placement: 'top' | 'bottom' = preferredPlacement || 'bottom';
         let posY = anchorRect.bottom + 10;
         
         // If not enough space below, place it above
-        if (spaceBelow < tooltipRect.height + 12 && spaceAbove > tooltipRect.height + 12) {
+        if (
+            (preferredPlacement && preferredPlacement === 'top') ||
+            (spaceBelow < tooltipRect.height + 12 && spaceAbove > tooltipRect.height + 12)
+        ) {
             placement = 'top';
             posY = anchorRect.top - tooltipRect.height - 12;
         }
-        
+                
         // Base position is at the anchor's center
         let posX = centerX;
         
