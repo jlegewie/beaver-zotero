@@ -8,7 +8,6 @@ import { FileStatus } from '../types/fileStatus';
 import { useFileStatus } from '../hooks/useFileStatus';
 import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
 import { Icon } from './icons';
-import Tooltip from "./Tooltip";
 
 interface StatusItemProps {
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
@@ -17,9 +16,17 @@ interface StatusItemProps {
     iconClassName?: string;
 }
 
+function formatCount(count: number): string {
+    if (count >= 1000) {
+        return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    }
+    return count.toString();
+}
+
+
 const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className = '', iconClassName = '' }) => {
     // Format count to always take at least 2 characters, padding with a non-breaking space
-    const formattedCount = String(count).padStart(2, '\u00A0'); 
+    const formattedCount = formatCount(count);
 
     return (
         <span className={`flex items-center gap-1 ${className}`}>
@@ -32,7 +39,12 @@ const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className = '', ic
 /**
  * Button component displaying aggregated file processing status.
  */
-const FileStatusDisplay: React.FC<{ className?: string }> = ({ className = '' }) => {
+const FileStatusDisplay: React.FC<{
+    className?: string,
+    showFileStatus: boolean,
+    setShowFileStatus: (showFileStatus: boolean) => void
+}> = ({ className = '', showFileStatus = false, setShowFileStatus = () => {} }) => {
+
     const [fileStatus] = useAtom(fileStatusAtom);
     const [isAnimating, setIsAnimating] = useState(false);
     const prevStatusRef = useRef<FileStatus | null>(null);
@@ -70,12 +82,13 @@ const FileStatusDisplay: React.FC<{ className?: string }> = ({ className = '' })
     // Conditionally apply 'animate-spin' to SyncIcon
     const syncIconClassName = `scale-125 text-purple-500 ${processingCount > 0 ? 'animate-spin' : ''}`;
 
-    return (      
+    return (
         <Button
             variant="ghost"
             className={`flex fit-content items-center ${animationClass} ${className}`}
             ariaLabel="File processing status"
-            title="File Processing Status (Uploading/Queued/Processing, Completed, Failed)"
+            title="File Processing Status"
+            onClick={() => setShowFileStatus(!showFileStatus)}
         >
             {/* <div className="flex flex-row gap-2"> */}
             <div className="flex flex-row gap-2">
