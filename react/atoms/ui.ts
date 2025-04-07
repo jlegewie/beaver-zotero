@@ -43,6 +43,8 @@ export const syncErrorAtom = atom(
 
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
+export const errorCodeStatsAtom = atom<Record<string, number> | null>(null);
+export const errorCodeLastFetchedAtom = atom<number | null>(null);
 
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);
