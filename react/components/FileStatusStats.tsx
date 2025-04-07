@@ -21,8 +21,9 @@ const Stat: React.FC<{
     label: string,
     count: number,
     isFailed?: boolean,
-    info?: boolean
-}> = ({ label, count, isFailed = false, info = false }) => {
+    info?: boolean,
+    isLoading?: boolean,
+}> = ({ label, count, isFailed = false, info = false, isLoading = false }) => {
     const formattedCount = formatCount(count);
     const prevCountRef = useRef<number>();
     const [isAnimating, setIsAnimating] = useState(false);
@@ -54,7 +55,7 @@ const Stat: React.FC<{
                 {info && <Icon icon={InformationCircleIcon} className="scale-85 mb-1 -mr-2" />}
             </div>
             <div className={`${baseClasses} ${animationClass}`}>
-                {formattedCount}
+                {isLoading ? <Spinner size={14} /> : formattedCount}
             </div>
         </div>
     );
@@ -159,33 +160,28 @@ const FileStatusStats: React.FC<{
 }> = ({ className = '' }) => {
 
     const fileStatus = useAtomValue(fileStatusAtom);
-
-    // Maybe render a loading state?
-    if (!fileStatus) {
-        return null; 
-    }
-
-    const failedProcessingCount = fileStatus.md_failed;
-
+    const failedProcessingCount = fileStatus?.md_failed || 0;
+    const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
+    
     return (
         <div className="flex flex-col gap-4">
             <div className="flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Uploads</div>
                 <div className="flex-1" />
                 <div className="flex flex-row gap-5">
-                    <Stat label="Pending" count={fileStatus.upload_pending}/>
-                    <Stat label="Done" count={fileStatus.upload_completed}/>
-                    <Stat label="Failed" count={fileStatus.upload_failed} isFailed={true} />
+                    <Stat label="Pending" count={fileStatus?.upload_pending || 0} isLoading={!fileStatus}/>
+                    <Stat label="Done" count={fileStatus?.upload_completed || 0} isLoading={!fileStatus}/>
+                    <Stat label="Failed" count={fileStatus?.upload_failed || 0} isFailed={true} isLoading={!fileStatus} />
                 </div>
             </div>
             <div className="flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Processing</div>
                 <div className="flex-1" />
                 <div className="flex flex-row gap-5">
-                    <Stat label="Pending" count={fileStatus.md_queued}/>
+                    <Stat label="Pending" count={fileStatus?.md_queued || 0} isLoading={!fileStatus} />
                     {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
-                    <Stat label="Active" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/>
-                    <Stat label="Done" count={fileStatus.md_embedded}/>
+                    <Stat label="Active" count={activeProcessingCount} isLoading={!fileStatus}/>
+                    <Stat label="Done" count={fileStatus?.md_embedded || 0} isLoading={!fileStatus}/>
                     {/* Tooltip with detailed error codes */}
                     <Tooltip 
                         content="Processing error codes"
@@ -195,7 +191,7 @@ const FileStatusStats: React.FC<{
                         placement="top"
                     >
                         <div>
-                             <Stat label="Failed" count={failedProcessingCount} isFailed={true} info={true}/>
+                             <Stat label="Failed" count={failedProcessingCount} isFailed={true} info={true} isLoading={!fileStatus}/>
                         </div>
                     </Tooltip>
                 </div>
