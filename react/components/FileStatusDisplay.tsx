@@ -5,7 +5,6 @@ import { useAtom } from 'jotai';
 import { fileStatusAtom } from '../atoms/ui';
 import Button from './button';
 import { FileStatus } from '../types/fileStatus';
-import { useFileStatus } from '../hooks/useFileStatus';
 import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
 import { Icon } from './icons';
 
@@ -48,8 +47,6 @@ const FileStatusDisplay: React.FC<{
     const [fileStatus] = useAtom(fileStatusAtom);
     const [isAnimating, setIsAnimating] = useState(false);
     const prevStatusRef = useRef<FileStatus | null>(null);
-
-    useFileStatus();
 
     useEffect(() => {
         // Trigger animation only on updates, not initial load
