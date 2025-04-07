@@ -46,6 +46,52 @@ export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<Record<string, number> | null>(null);
 export const errorCodeLastFetchedAtom = atom<number | null>(null);
 
+export const fileStatusStatsAtom = atom(
+    (get) => {
+        const fileStatus = get(fileStatusAtom);
+        
+        // Total files
+        const totalFiles = fileStatus?.total_files || 0;
+        const completedFiles = fileStatus?.md_embedded || 0;
+        
+        // Upload stats
+        const uploadPendingCount = fileStatus?.upload_pending || 0;
+        const uploadCompletedCount = fileStatus?.upload_completed || 0;
+        const uploadFailedCount = fileStatus?.upload_failed || 0;
+
+        // Processing stats
+        const failedProcessingCount = fileStatus?.md_failed || 0;
+        const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
+        const queuedProcessingCount = fileStatus?.md_queued || 0;
+
+        // combined stats
+        const failedCount = uploadFailedCount + failedProcessingCount;
+        const activeCount = uploadPendingCount + activeProcessingCount;
+        
+        // Progress
+        const progress = totalFiles > 0
+                ? (completedFiles / (totalFiles - failedProcessingCount - (fileStatus?.upload_failed || 0))) * 100
+                : 0;
+
+        return {
+            fileStatusAvailable: fileStatus !== null,
+            totalFiles,
+            completedFiles,
+            failedProcessingCount,
+            activeProcessingCount,
+            progress,
+            failedCount,
+            activeCount,
+            uploadPendingCount,
+            queuedProcessingCount,
+            uploadCompletedCount,
+            uploadFailedCount,
+        };
+    }
+);
+
+
+
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);
 export const previewedSourceAtom = atom(
