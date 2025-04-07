@@ -2,9 +2,8 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
-import { fileStatusAtom } from '../atoms/ui';
+import { fileStatusStatsAtom } from '../atoms/ui';
 import Button from './button';
-import { FileStatus } from '../types/fileStatus';
 import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
 import { Icon } from './icons';
 
@@ -44,30 +43,26 @@ const FileStatusDisplay: React.FC<{
     setShowFileStatus: (showFileStatus: boolean) => void
 }> = ({ className = '', showFileStatus = false, setShowFileStatus = () => {} }) => {
 
-    const [fileStatus] = useAtom(fileStatusAtom);
+    const [fileStats] = useAtom(fileStatusStatsAtom);
     const [isAnimating, setIsAnimating] = useState(false);
-    const prevStatusRef = useRef<FileStatus | null>(null);
+    const prevStatusRef = useRef<any>(null);
 
     useEffect(() => {
         // Trigger animation only on updates, not initial load
-        if (prevStatusRef.current && fileStatus && JSON.stringify(prevStatusRef.current) !== JSON.stringify(fileStatus)) {
+        if (prevStatusRef.current && fileStats && JSON.stringify(prevStatusRef.current) !== JSON.stringify(fileStats)) {
             setIsAnimating(true);
             // Adjust timer duration as needed, should match animation duration
             const timer = setTimeout(() => setIsAnimating(false), 400); 
             return () => clearTimeout(timer);
         }
         // Store current status for next comparison
-        prevStatusRef.current = fileStatus;
-    }, [fileStatus]);
+        prevStatusRef.current = fileStats;
+    }, [fileStats]);
 
-    if (!fileStatus) {
+    if (!fileStats.fileStatusAvailable) {
         // Optionally render a loading state or null
         return null; 
     }
-
-    const processingCount = fileStatus.upload_pending + fileStatus.md_queued + fileStatus.md_processing;
-    const completedCount = fileStatus.md_converted + fileStatus.md_chunked + fileStatus.md_embedded;
-    const failedCount = fileStatus.md_failed + fileStatus.upload_failed;
 
     // Define animation classes. Ensure 'beaver-flash-border' and 'beaver-flash-bg' 
     // are defined in your CSS (e.g., addon/content/styles/beaver.css) 
@@ -77,7 +72,7 @@ const FileStatusDisplay: React.FC<{
     const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
 
     // Conditionally apply 'animate-spin' to SyncIcon
-    const syncIconClassName = `scale-125 text-purple-500 ${processingCount > 0 ? 'animate-spin' : ''}`;
+    const syncIconClassName = `scale-125 text-purple-500 ${fileStats.activeCount > 0 ? 'animate-spin' : ''}`;
 
     return (
         <Button
@@ -89,9 +84,9 @@ const FileStatusDisplay: React.FC<{
         >
             {/* <div className="flex flex-row gap-2"> */}
             <div className="flex flex-row gap-4">
-                <StatusItem icon={SyncIcon} count={processingCount} iconClassName={syncIconClassName} />
-                <StatusItem icon={CheckmarkCircleIcon} count={completedCount} iconClassName="scale-115 text-green-500" />
-                <StatusItem icon={CancelCircleIcon} count={failedCount} iconClassName="scale-115 text-red-500" />
+                <StatusItem icon={SyncIcon} count={fileStats.activeCount} iconClassName={syncIconClassName} />
+                <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} iconClassName="scale-115 text-green-500" />
+                <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} iconClassName="scale-115 text-red-500" />
             </div>
         </Button>
     );
