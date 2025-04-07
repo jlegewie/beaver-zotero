@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useState, useEffect, useRef } from 'react';
 import { useAtomValue, useAtom } from 'jotai';
-import { fileStatusAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
+import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
 import { Icon, InformationCircleIcon, Spinner } from './icons';
 import Tooltip from './Tooltip';
 import { attachmentsService } from '../../src/services/attachmentsService';
@@ -163,16 +163,7 @@ const FileStatusStats: React.FC<{
     className?: string,
 }> = ({ className = '' }) => {
 
-    const fileStatus = useAtomValue(fileStatusAtom);
-    const failedProcessingCount = fileStatus?.md_failed || 0;
-    const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
-
-    // Calculate progress percentage
-    const totalFiles = fileStatus?.total_files || 0;
-    const completedFiles = fileStatus?.md_embedded || 0;
-    const progress = totalFiles > 0
-        ? (completedFiles / (totalFiles - failedProcessingCount - (fileStatus?.upload_failed || 0))) * 100
-        : 0;
+    const fileStats = useAtomValue(fileStatusStatsAtom);
 
     return (
         <div className="flex flex-col gap-4">
@@ -185,12 +176,12 @@ const FileStatusStats: React.FC<{
                     <div className="flex flex-col gap-1 items-end w-full">
                         <div className="font-color-tertiary text-sm">
                             {/* {formatCount(completedFiles) + " / " + formatCount(totalFiles) + " completed"} */}
-                            {progress < 100 ? formatPercentage(progress) + " completed" : formatCount(completedFiles) + " completed"}
+                            {fileStats.progress < 100 ? formatPercentage(fileStats.progress) + " completed" : formatCount(fileStats.completedFiles) + " completed"}
                         </div>
                         <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mb-1" style={{ height: '8px' }}>
                             <div
                                 className="h-full bg-primary rounded-sm transition-width duration-500 ease-in-out"
-                                style={{ width: `${progress}%` }}
+                                style={{ width: `${fileStats.progress}%` }}
                             />
                         </div>
                     </div>
@@ -202,9 +193,9 @@ const FileStatusStats: React.FC<{
                 <div className="font-color-secondary text-lg">Uploads</div>
                 <div className="flex-1" />
                 <div className="flex flex-row gap-5">
-                    <Stat label="Pending" count={fileStatus?.upload_pending || 0} isLoading={!fileStatus}/>
-                    <Stat label="Done" count={fileStatus?.upload_completed || 0} isLoading={!fileStatus}/>
-                    <Stat label="Failed" count={fileStatus?.upload_failed || 0} isFailed={true} isLoading={!fileStatus} />
+                    <Stat label="Pending" count={fileStats.uploadPendingCount} isLoading={!fileStats}/>
+                    <Stat label="Done" count={fileStats.uploadCompletedCount} isLoading={!fileStats}/>
+                    <Stat label="Failed" count={fileStats.uploadFailedCount} isFailed={true} isLoading={!fileStats} />
                 </div>
             </div>
 
@@ -213,20 +204,20 @@ const FileStatusStats: React.FC<{
                 <div className="font-color-secondary text-lg">Processing</div>
                 <div className="flex-1" />
                 <div className="flex flex-row gap-5">
-                    <Stat label="Pending" count={fileStatus?.md_queued || 0} isLoading={!fileStatus} />
-                    {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
-                    <Stat label="Active" count={activeProcessingCount} isLoading={!fileStatus}/>
-                    <Stat label="Done" count={fileStatus?.md_embedded || 0} isLoading={!fileStatus}/>
+                    <Stat label="Pending" count={fileStats.queuedProcessingCount} isLoading={!fileStats} />
+                    {/* <Stat label="Processing" count={fileStats.md_processing + fileStats.md_chunked + fileStats.md_converted}/> */}
+                    <Stat label="Active" count={fileStats.activeProcessingCount} isLoading={!fileStats}/>
+                    <Stat label="Done" count={fileStats.completedFiles} isLoading={!fileStats}/>
                     {/* Tooltip with detailed error codes */}
                     <Tooltip 
                         content="Processing error codes"
-                        customContent={<FailedProcessingTooltipContent failedCount={failedProcessingCount} />}
+                        customContent={<FailedProcessingTooltipContent failedCount={fileStats.failedProcessingCount} />}
                         showArrow={true}
-                        disabled={failedProcessingCount === 0}
+                        disabled={fileStats.failedProcessingCount === 0}
                         placement="top"
                     >
                         <div>
-                             <Stat label="Failed" count={failedProcessingCount} isFailed={true} info={true} isLoading={!fileStatus}/>
+                             <Stat label="Failed" count={fileStats.failedProcessingCount} isFailed={true} info={true} isLoading={!fileStats}/>
                         </div>
                     </Tooltip>
                 </div>
