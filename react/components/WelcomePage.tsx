@@ -1,6 +1,11 @@
-// @ts-ignore no idea
 import React from "react";
-import Button from "./Button";
+// @ts-ignore no idea
+import { useState } from "react";
+import Button from "./button";
+import FileStatusStats from "./FileStatusStats";
+import FileStatusDisplay from "./FileStatusDisplay";
+import { ArrowDownIcon, ArrowRightIcon } from './icons';
+import { useFileStatus } from '../hooks/useFileStatus';
 
 type Prompt = {
     title: string;
@@ -9,6 +14,10 @@ type Prompt = {
 }
 
 const WelcomePage: React.FC = () => {
+    const [showFileStatus, setShowFileStatus] = useState(true);
+
+    // Realtime listening for file status updates
+    useFileStatus();
 
     const prompts: Prompt[] = [
         {
@@ -64,7 +73,25 @@ const WelcomePage: React.FC = () => {
                     </span>
                 </Button>
             ))}
+            <div className="flex flex-row justify-between items-center mt-4">
+                <Button
+                    variant="ghost"
+                    onClick={() => setShowFileStatus(!showFileStatus)}
+                    rightIcon={showFileStatus ? ArrowDownIcon : ArrowRightIcon}
+                    iconClassName="mr-0 scale-14"
+                >
+                    <span className="font-semibold text-lg mb-1 font-color-primary" style={{ marginLeft: '-3px' }}>
+                        File Status
+                    </span>
+                </Button>
+                {!showFileStatus && (
+                    <FileStatusDisplay showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
+                )}
+            </div>
             
+            {showFileStatus && (
+                <FileStatusStats />
+            )}
         </div>
     );
 };
