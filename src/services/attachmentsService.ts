@@ -74,6 +74,15 @@ export class AttachmentsService extends ApiService {
     async getAttachmentStatus(libraryId: number, zoteroKey: string): Promise<AttachmentStatusResponse> {
         return this.get<AttachmentStatusResponse>(`/attachments/status/${libraryId}/${zoteroKey}`);
     }
+
+    /**
+     * Fetches the statistics for error codes encountered during processing.
+     * @param type The type of processing ('md' or 'docling') to get stats for.
+     * @returns Promise resolving to an object mapping error codes to their counts.
+     */
+    async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<Record<string, number>> {
+        return this.get<Record<string, number>>(`/attachments/error-code-stats/${type}`);
+    }
 }
 
 // Export attachmentsService instance
