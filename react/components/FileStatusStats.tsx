@@ -3,14 +3,6 @@ import { useAtomValue } from 'jotai';
 import { fileStatusAtom } from '../atoms/ui';
 import { Icon } from './icons';
 
-interface StatusItemProps {
-    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-    label: string;
-    count: number;
-    className?: string;
-    iconClassName?: string;
-}
-
 function formatCount(count: number): string {
     if (count >= 10000) {
         return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
