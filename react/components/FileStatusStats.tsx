@@ -73,8 +73,6 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
         const shouldFetch = failedCount > 0 && 
                             (errorCodeStats === null || !errorCodeLastFetched || failedCount !== errorCodeLastFetched);
 
-        console.log("FailedProcessingTooltipContent", shouldFetch);
-
         if (shouldFetch) {
             setIsLoading(true);
             setError(null);
@@ -99,32 +97,29 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
         }
     }, [failedCount, errorCodeStats, setErrorCodeStats, setErrorCodeLastFetched]); // Re-run effect if count or stats atom changes
 
-    if (isLoading) {
-        return (
-            <div className="flex justify-center items-center p-2">
-                <Spinner size={16} />
-            </div>
-        );
-    }
-
-    if (error) {
-         return <div className="p-2 text-sm font-color-secondary">{error}</div>;
-    }
-
-    if (!errorCodeStats || Object.keys(errorCodeStats).length === 0) {
-        return <div className="p-2 text-sm font-color-secondary">No specific error details available.</div>;
-    }
-
     // Display error codes and counts
     return (
-        <div className="flex flex-col gap-1 p-2">
-             <div className="text-sm font-color-secondary mb-1 font-medium">Processing Errors:</div>
-            {Object.entries(errorCodeStats).map(([code, count]) => (
-                <div key={code} className="flex justify-between items-center text-xs">
-                    <span className="font-color-tertiary mr-4">{code}:</span>
-                    <span className="font-color-secondary font-mono">{count}</span>
+        <div className="flex flex-col gap-1">
+            <div className="text-sm font-color-secondary mb-1 font-base whitespace-nowrap">Processing Errors</div>
+            {isLoading &&
+                <div className="text-base font-color-secondary mb-1 font-base items-center flex flex-row">
+                    <div className="mt-1"><Spinner size={14}/></div>
+                    <div className="ml-2 font-color-tertiary">Loading...</div>
                 </div>
-            ))}
+            }
+            {!isLoading && error && <div className="text-base font-color-secondary mb-1 font-base">{error}</div>}
+            {!isLoading && !error && (
+                (!errorCodeStats || Object.keys(errorCodeStats).length === 0) ? (
+                    <div className="text-base font-color-secondary">No specific error details available.</div>
+                ) : (
+                    Object.entries(errorCodeStats).map(([code, count]) => (
+                        <div key={code} className="flex justify-between items-center text-xs">
+                            <span className="font-color-tertiary mr-4">{code}:</span>
+                            <span className="font-color-secondary font-mono">{count}</span>
+                        </div>
+                    ))
+                )
+            )}
         </div>
     );
 };
@@ -178,12 +173,13 @@ const FileStatusStats: React.FC<{
                     {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
                     <Stat label="Active" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/>
                     <Stat label="Done" count={fileStatus.md_embedded}/>
-                    {/* Wrap the failed Stat component with Tooltip */}
+                    {/* Tooltip with detailed error codes */}
                     <Tooltip 
                         content="Processing error codes"
                         customContent={<FailedProcessingTooltipContent failedCount={failedProcessingCount} />}
                         showArrow={true}
                         disabled={failedProcessingCount === 0}
+                        placement="top"
                     >
                         <div>
                              <Stat label="Failed" count={failedProcessingCount} isFailed={true} info={true}/>
