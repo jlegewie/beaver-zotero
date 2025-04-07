@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { fileStatusAtom } from '../atoms/ui';
-import { Icon } from './icons';
+import { Icon, InformationCircleIcon } from './icons';
 
 function formatCount(count: number): string {
     if (count >= 10000) {
@@ -15,7 +15,12 @@ function formatCount(count: number): string {
     }
 }
 
-const Stat: React.FC<{ label: string, count: number, isFailed?: boolean }> = ({ label, count, isFailed = false }) => {
+const Stat: React.FC<{
+    label: string,
+    count: number,
+    isFailed?: boolean,
+    info?: boolean
+}> = ({ label, count, isFailed = false, info = false }) => {
     const formattedCount = formatCount(count);
     const prevCountRef = useRef<number>();
     const [isAnimating, setIsAnimating] = useState(false);
@@ -44,6 +49,7 @@ const Stat: React.FC<{ label: string, count: number, isFailed?: boolean }> = ({ 
         <div className="flex flex-col gap-05 items-end">
             <div className="font-color-tertiary text-sm">
                 {label}
+                {info && <Icon icon={InformationCircleIcon} className="scale-85 mb-1 -mr-2" />}
             </div>
             <div className={`${baseClasses} ${animationClass}`}>
                 {formattedCount}
@@ -81,7 +87,7 @@ const FileStatusStats: React.FC<{
     }
 
     return (
-        <>
+        <div className="flex flex-col gap-4">
             <div className="flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Uploads</div>
                 <div className="flex-1" />
@@ -99,10 +105,10 @@ const FileStatusStats: React.FC<{
                     {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
                     <Stat label="Active" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/>
                     <Stat label="Done" count={fileStatus.md_embedded}/>
-                    <Stat label="Failed" count={fileStatus.md_failed} isFailed={true} />
+                    <Stat label="Failed" count={fileStatus.md_failed} isFailed={true} info={true}/>
                 </div>
             </div>
-        </>
+        </div>
     );
 };
 
