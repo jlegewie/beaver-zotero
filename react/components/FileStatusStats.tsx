@@ -17,6 +17,10 @@ function formatCount(count: number): string {
     }
 }
 
+function formatPercentage(percentage: number): string {
+    return percentage.toFixed(0).replace(/\.0$/, '') + '%';
+}
+
 const Stat: React.FC<{
     label: string,
     count: number,
@@ -162,9 +166,38 @@ const FileStatusStats: React.FC<{
     const fileStatus = useAtomValue(fileStatusAtom);
     const failedProcessingCount = fileStatus?.md_failed || 0;
     const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
-    
+
+    // Calculate progress percentage
+    const totalFiles = fileStatus?.total_files || 0;
+    const completedFiles = fileStatus?.md_embedded || 0;
+    const progress = totalFiles > 0
+        ? (completedFiles / (totalFiles - failedProcessingCount - (fileStatus?.upload_failed || 0))) * 100
+        : 0;
+
     return (
         <div className="flex flex-col gap-4">
+
+            {/* Overall progress */}
+            <div className="flex flex-row items-end">
+                <div className="font-color-secondary text-lg">Overall</div>
+                <div className="flex-1" />
+                <div className="flex flex-row" style={{ width: 'calc(100% - 140px)', maxWidth: '300px' }}>
+                    <div className="flex flex-col gap-1 items-end w-full">
+                        <div className="font-color-tertiary text-sm">
+                            {/* {formatCount(completedFiles) + " / " + formatCount(totalFiles) + " completed"} */}
+                            {progress < 100 ? formatPercentage(progress) + " completed" : formatCount(completedFiles) + " completed"}
+                        </div>
+                        <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mb-1" style={{ height: '8px' }}>
+                            <div
+                                className="h-full bg-primary rounded-sm transition-width duration-500 ease-in-out"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Upload stats */}
             <div className="flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Uploads</div>
                 <div className="flex-1" />
@@ -174,6 +207,8 @@ const FileStatusStats: React.FC<{
                     <Stat label="Failed" count={fileStatus?.upload_failed || 0} isFailed={true} isLoading={!fileStatus} />
                 </div>
             </div>
+
+            {/* File processing stats */}
             <div className="flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Processing</div>
                 <div className="flex-1" />
