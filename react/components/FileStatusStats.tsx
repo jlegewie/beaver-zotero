@@ -76,6 +76,7 @@ const errorMapping = {
     "opening_failed": "Unknown error",
     "upload_failed": "Unknown error",
     "chunk_failed": "Unknown error",
+    "embedding_failed": "Unknown error",
     "db_update_failed": "Unknown error",
     "task_parsing_failed": "Unknown error",
     "max_retries": "Unknown error",
