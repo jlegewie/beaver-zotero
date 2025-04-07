@@ -1,4 +1,6 @@
 import React from 'react';
+// @ts-ignore no idea why this is needed
+import { useState, useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { fileStatusAtom } from '../atoms/ui';
 import { Icon } from './icons';
@@ -13,15 +15,37 @@ function formatCount(count: number): string {
     }
 }
 
-const Stat: React.FC<{ label: string, count: number }> = ({ label, count }) => {
+const Stat: React.FC<{ label: string, count: number, isFailed?: boolean }> = ({ label, count, isFailed = false }) => {
     const formattedCount = formatCount(count);
+    const prevCountRef = useRef<number>();
+    const [isAnimating, setIsAnimating] = useState(false);
+
+    useEffect(() => {
+        // Trigger animation only on updates, not initial load
+        if (prevCountRef.current !== undefined && count !== prevCountRef.current) {
+            setIsAnimating(true);
+            // Duration should ideally match CSS transition duration + a little extra
+            const timer = setTimeout(() => setIsAnimating(false), 500); 
+            // Cleanup timer on component unmount or before next effect run
+            return () => clearTimeout(timer);
+        }
+        // Update previous count ref *after* checking, for the next render
+        prevCountRef.current = count;
+    }, [count]); // Rerun effect only if count changes
+
+    // Base classes including transition
+    const baseClasses = "font-color-secondary text-xl transition-colors duration-400 ease-in-out";
+    // Animation class based on state and type
+    const animationClass = isAnimating
+        ? (isFailed ? 'beaver-flash-text-failed' : 'beaver-flash-text-normal')
+        : '';
 
     return (
         <div className="flex flex-col gap-05 items-end">
             <div className="font-color-tertiary text-sm">
                 {label}
             </div>
-            <div className="font-color-secondary text-xl">
+            <div className={`${baseClasses} ${animationClass}`}>
                 {formattedCount}
             </div>
         </div>
@@ -64,7 +88,7 @@ const FileStatusStats: React.FC<{
                 <div className="flex flex-row gap-5">
                     <Stat label="Pending" count={fileStatus.upload_pending}/>
                     <Stat label="Done" count={fileStatus.upload_completed}/>
-                    <Stat label="Failed" count={fileStatus.upload_failed}/>
+                    <Stat label="Failed" count={fileStatus.upload_failed} isFailed={true} />
                 </div>
             </div>
             <div className="flex flex-row items-end">
@@ -75,7 +99,7 @@ const FileStatusStats: React.FC<{
                     {/* <Stat label="Processing" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/> */}
                     <Stat label="Active" count={fileStatus.md_processing + fileStatus.md_chunked + fileStatus.md_converted}/>
                     <Stat label="Done" count={fileStatus.md_embedded}/>
-                    <Stat label="Failed" count={fileStatus.md_failed}/>
+                    <Stat label="Failed" count={fileStatus.md_failed} isFailed={true} />
                 </div>
             </div>
         </>

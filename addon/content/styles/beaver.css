@@ -345,6 +345,9 @@
 [id^="beaver-pane-"] .duration-500 { transition-duration: 0.5s; }
 [id^="beaver-pane-"] .duration-700 { transition-duration: 0.7s; }
 [id^="beaver-pane-"] .duration-1000 { transition-duration: 1s; }
+[id^="beaver-pane-"] .ease-in-out { transition-timing-function: ease-in-out; }
+[id^="beaver-pane-"] .ease-in { transition-timing-function: ease-in; }
+[id^="beaver-pane-"] .ease-out { transition-timing-function: ease-out; }
 
 /* States */
 [id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
@@ -1258,4 +1261,15 @@
 
 [id^="beaver-pane-"] .beaver-flash-bg {
     background-color: var(--accent-blue10);
+}
+
+/* Flash animation for Stat component text */
+[id^="beaver-pane-"] .beaver-flash-text-normal {
+    /* Use !important to override base color during animation */
+    color: var(--accent-blue) !important; 
+}
+
+[id^="beaver-pane-"] .beaver-flash-text-failed {
+    /* Use !important to override base color during animation */
+    color: var(--tag-red) !important; 
 }
