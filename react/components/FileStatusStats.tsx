@@ -31,18 +31,32 @@ const Stat: React.FC<{
     const formattedCount = formatCount(count);
     const prevCountRef = useRef<number>();
     const [isAnimating, setIsAnimating] = useState(false);
+    const timerRef = useRef<NodeJS.Timeout>();
 
     useEffect(() => {
         // Trigger animation only on updates, not initial load
         if (prevCountRef.current !== undefined && count !== prevCountRef.current) {
+            // Clear any existing timer
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+            
             setIsAnimating(true);
-            // Duration should ideally match CSS transition duration + a little extra
-            const timer = setTimeout(() => setIsAnimating(false), 500); 
-            // Cleanup timer on component unmount or before next effect run
-            return () => clearTimeout(timer);
+            // Store the timer reference
+            timerRef.current = setTimeout(() => {
+                setIsAnimating(false);
+                timerRef.current = undefined;
+            }, 500);
         }
         // Update previous count ref *after* checking, for the next render
         prevCountRef.current = count;
+
+        // Cleanup on unmount
+        return () => {
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+        };
     }, [count]); // Rerun effect only if count changes
 
     // Base classes including transition
