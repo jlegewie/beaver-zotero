@@ -3,12 +3,12 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
 
 export interface ToolRequest {
-    function: "library_search";
+    function: "hybrid_search" | "related_items_search";
     parameters: Record<string, any>;
 }
 
-export const library_search_tool_request: ToolRequest = {
-    function: "library_search",
+export const search_tool_request: ToolRequest = {
+    function: "hybrid_search",
     parameters: {}
 }
 
