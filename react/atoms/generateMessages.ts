@@ -7,7 +7,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
-import { chatService, search_tool_request } from '../../src/services/chatService';
+import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';
@@ -229,16 +229,19 @@ function _processChatCompletionViaBackend(
     isLibrarySearch: boolean,
     set: any
 ) {
+    const payload = {
+        thread_id: currentThreadId,
+        user_message_id: userMessageId,
+        assistant_message_id: assistantMessageId,
+        content: content,
+        attachments: attachments,
+        tool_request: isLibrarySearch ? search_tool_request : null
+    } as ChatCompletionRequestBody;
+    if (appState.view == "reader") {
+        payload.app_state = appState;
+    }
     chatService.requestChatCompletion(
-        {
-            thread_id: currentThreadId,
-            user_message_id: userMessageId,
-            assistant_message_id: assistantMessageId,
-            content: content,
-            attachments: attachments,
-            app_state: appState,
-            tool_request: isLibrarySearch ? search_tool_request : null
-        },
+        payload,
         {
             onThread: (newThreadId) => {
                 console.log('Current thread ID:', newThreadId);

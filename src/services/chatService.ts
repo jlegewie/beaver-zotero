@@ -13,7 +13,7 @@ export const search_tool_request: ToolRequest = {
 }
 
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
-interface ChatCompletionRequestBody {
+export interface ChatCompletionRequestBody {
     thread_id: string | null;           // If continuing an existing thread, else null
     user_message_id: string;            // The UUID from the frontend
     assistant_message_id: string;       // The in-progress assistant UUID
