@@ -1,33 +1,72 @@
 <linkset>
-  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+    <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
-<groupbox
-  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });"
->
-  <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
-  <checkbox
-    id="zotero-prefpane-__addonRef__-enable"
-    preference="enable"
-    data-l10n-id="pref-enable"
-  />
-  <hbox>
-    <html:label
-      for="zotero-prefpane-__addonRef__-input"
-      data-l10n-id="pref-input"
-    ></html:label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-input"
-      preference="input"
-    ></html:input>
-  </hbox>
-  <hbox class="virtualized-table-container" flex="1" height="300px">
-    <html:div id="__addonRef__-table-container" />
-  </hbox>
+<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });">
+    <!-- <label> -->
+        <html:h2 data-l10n-id="pref-section-account-heading"></html:h2>
+    <!-- </label> -->
+    <html:p data-l10n-id="pref-section-account-text"></html:p>
+
+
+    <label>
+        <html:h2 data-l10n-id="pref-section-keys-heading"></html:h2>
+    </label>
+    <html:p data-l10n-id="pref-section-keys-text"></html:p>
+
+    <vbox>
+        <label data-l10n-id="pref-section-keys-google" style="display: flex; align-items: center"></label>
+        <html:input
+            type="password"
+            id="zotero-prefpane-__addonRef__-GOOGLE_API_KEY"
+            preference="extensions.zotero.__addonRef__.GOOGLE_API_KEY"
+        ></html:input>
+    </vbox>
+
+    <vbox>
+        <label data-l10n-id="pref-section-keys-anthropic" style="display: flex; align-items: center"></label>
+        <html:input
+            type="password"
+            id="zotero-prefpane-__addonRef__-ANTHROPIC_API_KEY"
+            preference="extensions.zotero.__addonRef__.ANTHROPIC_API_KEY"
+        ></html:input>
+    </vbox>
+
+    <vbox>
+        <label data-l10n-id="pref-section-keys-openai" style="display: flex; align-items: center"></label>
+        <html:input
+            type="password"
+            id="zotero-prefpane-__addonRef__-OPENAI_API_KEY"
+            preference="extensions.zotero.__addonRef__.OPENAI_API_KEY"
+        ></html:input>
+    </vbox>
+
+
+
+
+
+    <checkbox
+        id="zotero-prefpane-__addonRef__-enable"
+        preference="enable"
+        data-l10n-id="pref-enable"
+    />
+    <hbox>
+        <html:label
+            for="zotero-prefpane-__addonRef__-input"
+            data-l10n-id="pref-input"
+        ></html:label>
+        <html:input
+            type="text"
+            id="zotero-prefpane-__addonRef__-input"
+            preference="input"
+        ></html:input>
+    </hbox>
+    <hbox class="virtualized-table-container" flex="1" height="300px">
+        <html:div id="__addonRef__-table-container" />
+    </hbox>
 </groupbox>
 <vbox>
-  <html:label
-    data-l10n-id="pref-help"
-    data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
-  ></html:label>
+    <html:label
+        data-l10n-id="pref-help"
+        data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
+    ></html:label>
 </vbox>
