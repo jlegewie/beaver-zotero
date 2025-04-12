@@ -117,7 +117,7 @@ const WelcomePage: React.FC = () => {
     };
 
     const prompts: QuickPrompt[] = getQuickPromptPreferences();
-    const shortcutKey = Zotero.isMac ? '⌘' : '⌃';
+    const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 
     return (
         <div 
