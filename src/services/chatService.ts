@@ -18,6 +18,7 @@ export interface ChatCompletionRequestBody {
     user_message_id: string;            // The UUID from the frontend
     assistant_message_id: string;       // The in-progress assistant UUID
     content: string;                    // The user's input text
+    custom_instructions?: string;        // Custom instructions for the assistant
     attachments: MessageAttachment[];   // The attachments to include in the request
     app_state: AppState;                // Current app state
     tool_request: ToolRequest | null;   // User tool request, if any

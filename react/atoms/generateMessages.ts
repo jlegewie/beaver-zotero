@@ -235,7 +235,8 @@ function _processChatCompletionViaBackend(
         assistant_message_id: assistantMessageId,
         content: content,
         attachments: attachments,
-        tool_request: isLibrarySearch ? search_tool_request : null
+        tool_request: isLibrarySearch ? search_tool_request : null,
+        custom_instructions: getPref('customInstructions') || undefined
     } as ChatCompletionRequestBody;
     if (appState.view == "reader") {
         payload.app_state = appState;
