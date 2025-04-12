@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { UserIcon, LogoutIcon, LinkIcon } from './icons';
+import { UserIcon, LogoutIcon, LinkIcon, CancelIcon } from './icons';
 import IconButton from "./IconButton";
 import Button from "./button";
 import { supabase } from "../../src/services/supabaseClient";
@@ -172,7 +172,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 };
 
 // --- Main Preference Page Component ---
-const PreferencePage: React.FC = () => {
+const PreferencePage: React.FC<{ togglePreferencePage: () => void }> = ({ togglePreferencePage }) => {
     const [user] = useAtom(userAtom);
 
     // --- State for Preferences ---
@@ -216,9 +216,12 @@ const PreferencePage: React.FC = () => {
             id="beaver-preferences"
             className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-2 scrollbar min-w-0 p-4"
         >
-            <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
-                Settings
-            </h1>
+            <div className="flex flex-row items-center gap-4 justify-between">
+                <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
+                    Settings
+                </h1>
+                <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage()} className="mt-1">Close</Button>
+            </div>
             {/* --- Account Section --- */}
             <SectionHeader>Account</SectionHeader>
             {user ? (
