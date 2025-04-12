@@ -24,7 +24,8 @@ const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 );
 
 // --- Quick Prompt Type and Initial State ---
-type QuickPrompt = {
+export type QuickPrompt = {
+    index?: number;
     title: string;
     text: string;
     librarySearch: boolean;
