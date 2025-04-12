@@ -12,7 +12,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { userAtom } from '../atoms/auth';
 import Spinner from './icons/Spinner';
 import { getDateGroup } from '../utils/dateUtils';
-import { userScrolledAtom } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import { currentSourcesAtom } from '../atoms/input';
 import { currentUserMessageAtom } from '../atoms/input';
 
@@ -59,6 +59,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
     const addToolCallSourcesToThreadSources = useSetAtom(addToolCallSourcesToThreadSourcesAtom);
+    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
@@ -131,6 +132,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setUserScrolled(false);
             // Set the current thread ID
             setCurrentThreadId(threadId);
+            setIsPreferencePageVisible(false);
 
             // Use the thread service to fetch messages
             const { messages, sources } = await threadService.getThreadMessages(threadId);

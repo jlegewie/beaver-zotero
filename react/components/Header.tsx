@@ -9,6 +9,7 @@ import Tooltip from './Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
+import { isPreferencePageVisibleAtom } from '../atoms/ui';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -18,7 +19,8 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    
+    const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
+
     const handleNewThread = async () => {
         await newThread();
     }
@@ -44,7 +46,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         onClick={handleNewThread}
                         className="scale-14"
                         ariaLabel="New thread"
-                        disabled={threadMessages.length === 0}
+                        disabled={threadMessages.length === 0 && !isPreferencePageVisible}
                     />
                 </Tooltip>
                 <ThreadsMenu

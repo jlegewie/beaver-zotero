@@ -4,7 +4,7 @@ import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
-import { isLibraryTabAtom, userScrolledAtom } from "./ui";
+import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachments } from "../types/chat/converters";
 
 // Thread messages and sources
@@ -64,6 +64,7 @@ export const newThreadAtom = atom(
         set(threadSourcesAtom, []);
         set(currentUserMessageAtom, '');
         set(resetCurrentSourcesAtom);
+        set(isPreferencePageVisibleAtom, false);
         // READER VIEW
         if (!isLibraryTab) {
             set(updateSourcesFromZoteroSelectionAtom);
