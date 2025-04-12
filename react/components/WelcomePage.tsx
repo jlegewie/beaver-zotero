@@ -7,9 +7,13 @@ import FileStatusDisplay from "./FileStatusDisplay";
 import { ArrowDownIcon, ArrowRightIcon } from './icons';
 import { useFileStatus } from '../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { getPref } from '../../src/utils/prefs';
 import { QuickPrompt } from "./PreferencePage";
+import { getAppState } from "../utils/appState";
+import { isStreamingAtom } from '../atoms/threads';
+import { generateResponseAtom } from '../atoms/generateMessages';
+import { currentSourcesAtom } from "../atoms/input";
 
 const getQuickPromptPreferences = (): QuickPrompt[] => {
     const quickPrompts: QuickPrompt[] = [];
@@ -85,9 +89,32 @@ type Prompt = {
 const WelcomePage: React.FC = () => {
     const [showFileStatus, setShowFileStatus] = useState(true);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    const isStreaming = useAtomValue(isStreamingAtom);
+    const currentSources = useAtomValue(currentSourcesAtom);
+    const generateResponse = useSetAtom(generateResponseAtom);
 
     // Realtime listening for file status updates
     useFileStatus();
+
+    const handleQuickPrompt = async (
+        prompt: QuickPrompt
+    ) => {
+        if (isStreaming || prompt.text.length === 0) return;
+        if (prompt.requiresAttachment && currentSources.length === 0) return;
+
+        // Get context from reader if it exists
+        const appState = getAppState();
+
+        // Generate response
+        generateResponse({
+            content: prompt.text,
+            sources: currentSources,
+            appState: appState,
+            isLibrarySearch: prompt.librarySearch
+        });
+
+        console.log('Chat completion:', prompt.text);
+    };
 
     const prompts: QuickPrompt[] = getQuickPromptPreferences();
     const shortcutKey = Zotero.isMac ? '⌘' : '⌃';
@@ -104,11 +131,16 @@ const WelcomePage: React.FC = () => {
                 <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
             </div>
             {prompts.map((prompt, index) => (
-                <Button key={index} variant="surface-light">
-                    <span className="font-color-tertiary text-base">
+                <Button
+                    key={index}
+                    variant="surface-light"
+                    onClick={() => handleQuickPrompt(prompt)}
+                    disabled={prompt.requiresAttachment && currentSources.length === 0}
+                >
+                    <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                         {`${shortcutKey}${prompt.index}`}
                     </span>
-                    <span className="font-color-secondary text-base">
+                    <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
                         {prompt.title}
                     </span>
                 </Button>
