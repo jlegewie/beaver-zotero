@@ -126,25 +126,29 @@ const WelcomePage: React.FC = () => {
         >
             {/* <div className="flex-1"/> */}
             <div style={{height: "10%"}}/>
-            <div className="flex flex-row justify-between items-center">
-                <div className="font-semibold text-lg mb-1">Quick Prompts</div>
-                <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
-            </div>
-            {prompts.map((prompt, index) => (
-                <Button
-                    key={index}
-                    variant="surface-light"
-                    onClick={() => handleQuickPrompt(prompt)}
-                    disabled={prompt.requiresAttachment && currentSources.length === 0}
-                >
-                    <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
-                        {`${shortcutKey}${prompt.index}`}
-                    </span>
-                    <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
-                        {prompt.title}
-                    </span>
-                </Button>
-            ))}
+            {prompts.length > 0 && (
+                <>
+                <div className="flex flex-row justify-between items-center">
+                    <div className="font-semibold text-lg mb-1">Quick Prompts</div>
+                    <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
+                </div>
+                {prompts.map((prompt, index) => (
+                    <Button
+                        key={index}
+                        variant="surface-light"
+                        onClick={() => handleQuickPrompt(prompt)}
+                        disabled={prompt.requiresAttachment && currentSources.length === 0}
+                    >
+                        <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                            {`${shortcutKey}${prompt.index}`}
+                        </span>
+                        <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                            {prompt.title}
+                        </span>
+                    </Button>
+                ))}
+                </>
+            )}
             <div className="flex flex-row justify-between items-center mt-4">
                 <Button
                     variant="ghost"
