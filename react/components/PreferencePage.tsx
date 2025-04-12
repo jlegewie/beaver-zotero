@@ -118,7 +118,7 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                 <label className="text-sm font-color-secondary">Title</label>
                 <input
                     type="text"
-                    value={prompt.title}
+                    value={title}
                     onChange={handleTitleChange}
                     onBlur={handleTitleBlur}
                     placeholder={`Enter title for ⌘${index + 1}...`}
