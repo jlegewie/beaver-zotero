@@ -12,11 +12,31 @@ declare namespace _ZoteroTypes {
       "voyageApiKey": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
+      "anthropicApiKey": string;
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
       "keyboardShortcut": string;
       "mode": string;
+      "customInstructions": string;
+      "quickPrompt1_text": string;
+      "quickPrompt1_librarySearch": boolean;
+      "quickPrompt1_requiresAttachment": boolean;
+      "quickPrompt2_text": string;
+      "quickPrompt2_librarySearch": boolean;
+      "quickPrompt2_requiresAttachment": boolean;
+      "quickPrompt3_text": string;
+      "quickPrompt3_librarySearch": boolean;
+      "quickPrompt3_requiresAttachment": boolean;
+      "quickPrompt4_text": string;
+      "quickPrompt4_librarySearch": boolean;
+      "quickPrompt4_requiresAttachment": boolean;
+      "quickPrompt5_text": string;
+      "quickPrompt5_librarySearch": boolean;
+      "quickPrompt5_requiresAttachment": boolean;
+      "quickPrompt6_text": string;
+      "quickPrompt6_librarySearch": boolean;
+      "quickPrompt6_requiresAttachment": boolean;
     };
   }
 }
