@@ -61,35 +61,33 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
     const [title, setTitle] = useState(prompt.title);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        setText(event.target.value);
-    };
+        const newValue = event.target.value;
+        setText(newValue);
 
-    const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        setTitle(event.target.value);
-    };
-
-    const handleTitleBlur = () => {
-        if (title !== prompt.title) {
-            const updated = { ...prompt, title };
-            onChange(index, updated);
-            const idx = index + 1;
-            if (idx >= 1 && idx <= 6) {
-                const pref = `quickPrompt${idx}_title`;
-                // @ts-ignore correct pref key
-                setPref(pref, title);
-            }
-        }
-    };
-
-    const handleTextBlur = () => {
-        if (text !== prompt.text) {
-            const updated = { ...prompt, text };
+        if (newValue !== prompt.text) {
+            const updated = { ...prompt, text: newValue };
             onChange(index, updated);
             const idx = index + 1;
             if (idx >= 1 && idx <= 6) {
                 const pref = `quickPrompt${idx}_text`;
                 // @ts-ignore correct pref key
-                setPref(pref, text);
+                setPref(pref, newValue);
+            }
+        }
+    };
+
+    const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = event.target.value;
+        setTitle(newValue);
+
+        if (newValue !== prompt.title) {
+            const updated = { ...prompt, title: newValue };
+            onChange(index, updated);
+            const idx = index + 1;
+            if (idx >= 1 && idx <= 6) {
+                const pref = `quickPrompt${idx}_title`;
+                // @ts-ignore correct pref key
+                setPref(pref, newValue);
             }
         }
     };
@@ -120,7 +118,6 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                     type="text"
                     value={title}
                     onChange={handleTitleChange}
-                    onBlur={handleTitleBlur}
                     placeholder={`Enter title for ⌘${index + 1}...`}
                     className="flex-1 p-1 m-0 border text-sm rounded-sm border-quinary bg-senary focus:border-tertiary outline-none"
                 />
@@ -128,7 +125,6 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
             <textarea
                 value={text}
                 onChange={handleTextChange}
-                onBlur={handleTextBlur}
                 placeholder={`Enter prompt text for ⌘${index + 1}...`}
                 rows={2}
                 className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
@@ -163,9 +159,9 @@ interface ApiKeyInputProps {
     linkUrl?: string;  // Optional URL for the link button
     value: string;
     onChange: (value: string) => void;
-    onBlur: () => void;
     placeholder?: string;
     className?: string;
+    savePref: () => void;
 }
 
 const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
@@ -174,10 +170,15 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     linkUrl,
     value,
     onChange,
-    onBlur,
     placeholder = "Enter your API Key",
-    className = ""
+    className = "",
+    savePref
 }) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        onChange(e.target.value);
+        savePref();
+    };
+
     return (
         <div className={`flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
             <div className="flex flex-row items-start gap-1 flex-1 w-full">
@@ -197,8 +198,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     id={id}
                     type="password"
                     value={value}
-                    onChange={(e) => onChange(e.target.value)}
-                    onBlur={onBlur}
+                    onChange={handleChange}
                     placeholder={placeholder}
                     className="flex-1 p-1 m-0 border text-sm rounded-sm border-quinary bg-senary focus:border-tertiary outline-none"
                 />
@@ -219,10 +219,8 @@ const PreferencePage: React.FC = () => {
     const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
 
-    // --- Save Preferences onBlur ---
-    // const handlePrefBlur = <K extends PrefKey>(key: K, value: Zotero.PluginPrefsSchemaMap[K]) => {
-    const handlePrefBlur = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
-        // Only save if the value actually changed from the stored pref
+    // --- Save Preferences ---
+    const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
         if (value !== getPref(key)) {
             setPref(key, value);
             console.log(`Saved pref ${key}`);
@@ -230,8 +228,9 @@ const PreferencePage: React.FC = () => {
     };
 
     const handleCustomInstructionsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        // TODO: Add word limit check if needed visually
-        setCustomInstructions(event.target.value);
+        const newValue = event.target.value;
+        setCustomInstructions(newValue);
+        handlePrefSave('customInstructions', newValue);
     };
 
     // --- Quick Prompt Change Handler ---
@@ -241,7 +240,7 @@ const PreferencePage: React.FC = () => {
             newPrompts[index] = updatedPrompt;
             return newPrompts;
         });
-        // Note: Individual pref saving is handled within QuickPromptSettings component
+        // Note: Individual pref saving is handled within QuickPromptSettings component's onBlur/onChange
     }, []);
 
     const handleLogout = () => {
@@ -299,7 +298,7 @@ const PreferencePage: React.FC = () => {
                     label="Google API Key"
                     value={geminiKey}
                     onChange={setGeminiKey}
-                    onBlur={() => handlePrefBlur('googleGenerativeAiApiKey', geminiKey)}
+                    savePref={() => handlePrefSave('googleGenerativeAiApiKey', geminiKey)}
                     placeholder="Enter your Google AI Studio API Key"
                     linkUrl="https://aistudio.google.com/app/apikey"
                 />
@@ -308,7 +307,7 @@ const PreferencePage: React.FC = () => {
                     label="OpenAI API Key"
                     value={openaiKey}
                     onChange={setOpenaiKey}
-                    onBlur={() => handlePrefBlur('openAiApiKey', openaiKey)}
+                    savePref={() => handlePrefSave('openAiApiKey', openaiKey)}
                     placeholder="Enter your OpenAI API Key"
                     linkUrl="https://platform.openai.com/api-keys"
                 />
@@ -317,7 +316,7 @@ const PreferencePage: React.FC = () => {
                     label="Anthropic API Key"
                     value={anthropicKey}
                     onChange={setAnthropicKey}
-                    onBlur={() => handlePrefBlur('anthropicApiKey', anthropicKey)}
+                    savePref={() => handlePrefSave('anthropicApiKey', anthropicKey)}
                     placeholder="Enter your Anthropic API Key"
                     linkUrl="https://console.anthropic.com/settings/keys"
                 />
@@ -331,7 +330,6 @@ const PreferencePage: React.FC = () => {
             <textarea
                 value={customInstructions}
                 onChange={handleCustomInstructionsChange}
-                onBlur={() => handlePrefBlur('customInstructions', customInstructions)}
                 placeholder="Enter custom instructions here..."
                 rows={5}
                 className="p-2 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
