@@ -329,7 +329,7 @@
 [id^="beaver-pane-"] .font-color-primary { color: var(--fill-primary); }
 [id^="beaver-pane-"] .font-color-secondary { color: var(--fill-secondary); }
 [id^="beaver-pane-"] .font-color-tertiary { color: var(--fill-tertiary); }
-[id^="beaver-pane-"] .font-color-quaternary { color: var(--fill-quaternary); }
+[id^="beaver-pane-"] .font-color-quarternary { color: var(--fill-quarternary); }
 [id^="beaver-pane-"] .font-color-quinary { color: var(--fill-quinary); }
 [id^="beaver-pane-"] .font-color-senary { color: var(--fill-senary); }
 [id^="beaver-pane-"] .font-color-red { color: var(--tag-red); opacity: 0.8; }
