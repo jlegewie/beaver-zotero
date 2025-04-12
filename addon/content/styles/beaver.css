@@ -1008,7 +1008,7 @@
 }
 
 [id^="beaver-pane-"] .variant-ghost:hover {
-    /* color: var(--fill-primary); */
+    color: var(--fill-primary);
     background-color: var(--fill-senary);
 }
 
@@ -1040,6 +1040,57 @@
 }
 
 [id^="beaver-pane-"] .variant-ghost svg {
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary:hover {
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary:disabled {
+    cursor: not-allowed;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary:disabled:hover {
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary.loading {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary .spinner {
+    color: currentColor;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary.has-loading-text .spinner {
+    margin-left: 0.5rem;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary.icon-only {
+    padding: 2px;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .variant-ghost-secondary svg {
     width: 1em;
     height: 1em;
     flex-shrink: 0;

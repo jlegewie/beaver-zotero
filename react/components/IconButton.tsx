@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from './icons';
 
-type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
+type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary';
 
 interface IconButtonProps {
     /** Icon to display */
