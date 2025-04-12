@@ -25,7 +25,6 @@ type QuickPrompt = {
     text: string;
     librarySearch: boolean;
     requiresAttachment: boolean;
-    requiresReader: boolean;
 };
 
 function getInitialQuickPrompts(): QuickPrompt[] {
@@ -38,8 +37,6 @@ function getInitialQuickPrompts(): QuickPrompt[] {
             librarySearch: getPref(`quickPrompt${i}_librarySearch`) ?? false,
             // @ts-ignore correct type
             requiresAttachment: getPref(`quickPrompt${i}_requiresAttachment`) ?? false,
-            // @ts-ignore correct type
-            requiresReader: getPref(`quickPrompt${i}_requiresReader`) ?? false,
         });
     }
     return prompts;
