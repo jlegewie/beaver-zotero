@@ -11,6 +11,7 @@ import { previewedSourceAtom, userScrolledAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
+import PreferencePage from './PreferencePage';
 import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { isAuthenticatedAtom } from '../atoms/auth';
 
@@ -23,7 +24,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    
+    const [showPreferencePage, setShowPreferencePage] = useState(false);
+
     useEffect(() => {
         // Focus the input
         inputRef.current?.focus();
@@ -42,12 +44,26 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         }
     };
 
+    const togglePreferencePage = () => {
+        setShowPreferencePage(!showPreferencePage);
+    }
+
     {/* Login page */}
     if (!isAuthenticated) {
         return (
             <div className="sidebar-container h-full flex flex-col min-w-0">
-                <Header />
+                <Header togglePreferencePage={togglePreferencePage} />
                 <LoginPage />
+            </div>
+        );
+    }
+
+    {/* Preference page */}
+    if (showPreferencePage) {
+        return (
+            <div className="sidebar-container h-full flex flex-col min-w-0">
+                <Header togglePreferencePage={togglePreferencePage} />
+                <PreferencePage togglePreferencePage={togglePreferencePage} />
             </div>
         );
     }
@@ -57,7 +73,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         <div className="sidebar-container h-full flex flex-col min-w-0">
             
             {/* Header */}
-            <Header />
+            <Header togglePreferencePage={togglePreferencePage} />
 
             {/* Messages area (scrollable) */}
             {threadMessages.length > 0 ? (
@@ -68,7 +84,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     ref={messagesContainerRef}
                 />
             ) : (
-                <WelcomePage />
+                <WelcomePage togglePreferencePage={togglePreferencePage} />
             )}
 
             {/* Prompt area (footer) with floating elements */}

@@ -13,7 +13,7 @@ type Prompt = {
     shortcut: string;
 }
 
-const WelcomePage: React.FC = () => {
+const WelcomePage: React.FC<{ togglePreferencePage: () => void }> = ({ togglePreferencePage }) => {
     const [showFileStatus, setShowFileStatus] = useState(true);
 
     // Realtime listening for file status updates
@@ -61,7 +61,7 @@ const WelcomePage: React.FC = () => {
             <div style={{height: "10%"}}/>
             <div className="flex flex-row justify-between items-center">
                 <div className="font-semibold text-lg mb-1">Quick Prompts</div>
-                <Button variant="outline" className="scale-85 fit-content"> Edit </Button>
+                <Button variant="outline" className="scale-85 fit-content" onClick={togglePreferencePage}> Edit </Button>
             </div>
             {prompts.map((prompt, index) => (
                 <Button key={index} variant="surface-light">

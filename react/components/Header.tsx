@@ -12,9 +12,10 @@ import UserAccountMenuButton from './UserAccountMenuButton';
 
 interface HeaderProps {
     onClose?: () => void;
+    togglePreferencePage: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onClose }) => {
+const Header: React.FC<HeaderProps> = ({ onClose, togglePreferencePage }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -58,6 +59,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
+                        togglePreferencePage={togglePreferencePage}
                     />
                 </div>
             )}
