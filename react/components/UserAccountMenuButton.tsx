@@ -3,9 +3,10 @@ import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon } from './icons';
 import { supabase } from '../../src/services/supabaseClient';
+import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import { useSetAtom } from 'jotai';
 
 interface UserAccountMenuButtonProps {
-    togglePreferencePage: () => void;
     className?: string;
     ariaLabel?: string;
 }
@@ -14,16 +15,16 @@ interface UserAccountMenuButtonProps {
  * Button component that shows user account menu in a dropdown menu
  */
 const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({ 
-    togglePreferencePage,
     className = '',
     ariaLabel = 'User Account Menu',
 }) => {
+    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
 
     // Create menu items from threads
     const menuItems: MenuItem[] = [
         {
             label: "Settings",
-            onClick: () => togglePreferencePage(),
+            onClick: () => togglePreferencePage((prev) => !prev),
             icon: SettingsIcon,
         },
         {

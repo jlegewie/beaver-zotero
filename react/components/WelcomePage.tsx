@@ -6,6 +6,8 @@ import FileStatusStats from "./FileStatusStats";
 import FileStatusDisplay from "./FileStatusDisplay";
 import { ArrowDownIcon, ArrowRightIcon } from './icons';
 import { useFileStatus } from '../hooks/useFileStatus';
+import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import { useSetAtom } from 'jotai';
 
 type Prompt = {
     title: string;
@@ -13,8 +15,9 @@ type Prompt = {
     shortcut: string;
 }
 
-const WelcomePage: React.FC<{ togglePreferencePage: () => void }> = ({ togglePreferencePage }) => {
+const WelcomePage: React.FC = () => {
     const [showFileStatus, setShowFileStatus] = useState(true);
+    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
 
     // Realtime listening for file status updates
     useFileStatus();
@@ -61,7 +64,7 @@ const WelcomePage: React.FC<{ togglePreferencePage: () => void }> = ({ togglePre
             <div style={{height: "10%"}}/>
             <div className="flex flex-row justify-between items-center">
                 <div className="font-semibold text-lg mb-1">Quick Prompts</div>
-                <Button variant="outline" className="scale-85 fit-content" onClick={togglePreferencePage}> Edit </Button>
+                <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
             </div>
             {prompts.map((prompt, index) => (
                 <Button key={index} variant="surface-light">

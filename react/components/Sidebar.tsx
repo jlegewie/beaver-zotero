@@ -7,7 +7,7 @@ import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { previewedSourceAtom, userScrolledAtom } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, previewedSourceAtom, userScrolledAtom } from '../atoms/ui';
 import SourcePreview from './SourcePreview';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
@@ -24,7 +24,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const [showPreferencePage, setShowPreferencePage] = useState(false);
+    const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
 
     useEffect(() => {
         // Focus the input
@@ -44,26 +44,22 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         }
     };
 
-    const togglePreferencePage = () => {
-        setShowPreferencePage(!showPreferencePage);
-    }
-
     {/* Login page */}
     if (!isAuthenticated) {
         return (
             <div className="sidebar-container h-full flex flex-col min-w-0">
-                <Header togglePreferencePage={togglePreferencePage} />
+                <Header />
                 <LoginPage />
             </div>
         );
     }
 
     {/* Preference page */}
-    if (showPreferencePage) {
+    if (isPreferencePageVisible) {
         return (
             <div className="sidebar-container h-full flex flex-col min-w-0">
-                <Header togglePreferencePage={togglePreferencePage} />
-                <PreferencePage togglePreferencePage={togglePreferencePage} />
+                <Header />
+                <PreferencePage />
             </div>
         );
     }
@@ -73,7 +69,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         <div className="sidebar-container h-full flex flex-col min-w-0">
             
             {/* Header */}
-            <Header togglePreferencePage={togglePreferencePage} />
+            <Header />
 
             {/* Messages area (scrollable) */}
             {threadMessages.length > 0 ? (
@@ -84,7 +80,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     ref={messagesContainerRef}
                 />
             ) : (
-                <WelcomePage togglePreferencePage={togglePreferencePage} />
+                <WelcomePage />
             )}
 
             {/* Prompt area (footer) with floating elements */}

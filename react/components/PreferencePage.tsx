@@ -8,6 +8,9 @@ import { UserIcon, LogoutIcon, LinkIcon, CancelIcon } from './icons';
 import IconButton from "./IconButton";
 import Button from "./button";
 import { supabase } from "../../src/services/supabaseClient";
+import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import { useSetAtom } from 'jotai';
+
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
 // Helper function for preference keys (adjust type as needed for your prefs)
@@ -172,7 +175,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 };
 
 // --- Main Preference Page Component ---
-const PreferencePage: React.FC<{ togglePreferencePage: () => void }> = ({ togglePreferencePage }) => {
+const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
 
     // --- State for Preferences ---
@@ -181,6 +184,7 @@ const PreferencePage: React.FC<{ togglePreferencePage: () => void }> = ({ toggle
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
+    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
 
     // --- Save Preferences onBlur ---
     // const handlePrefBlur = <K extends PrefKey>(key: K, value: Zotero.PluginPrefsSchemaMap[K]) => {
@@ -220,7 +224,7 @@ const PreferencePage: React.FC<{ togglePreferencePage: () => void }> = ({ toggle
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
                 </h1>
-                <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage()} className="mt-1">Close</Button>
+                <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button>
             </div>
             {/* --- Account Section --- */}
             <SectionHeader>Account</SectionHeader>

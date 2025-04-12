@@ -5,6 +5,7 @@ import { FileStatus } from '../types/fileStatus';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
+export const isPreferencePageVisibleAtom = atom(false);
 
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
