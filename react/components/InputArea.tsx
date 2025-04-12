@@ -7,6 +7,7 @@ import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/
 import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { getPref } from '../../src/utils/prefs';
 import Button from './button';
 import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
@@ -35,21 +36,28 @@ const InputArea: React.FC<InputAreaProps> = ({
         isLibrarySearch: boolean = false
     ) => {
         e.preventDefault();
-        
-        if (isStreaming || userMessage.length === 0) return;
+        chatCompletion(userMessage, isCommandPressed || isLibrarySearch);
+    };
+    
+
+    const chatCompletion = async (
+        query: string,
+        isLibrarySearch: boolean = false
+    ) => {
+        if (isStreaming || query.length === 0) return;
 
         // Get context from reader if it exists
         const appState = getAppState();
 
         // Generate response
         generateResponse({
-            content: userMessage,
+            content: query,
             sources: currentSources,
             appState: appState,
-            isLibrarySearch: isCommandPressed || isLibrarySearch
+            isLibrarySearch: isLibrarySearch
         });
 
-        console.log('Chat completion:', userMessage);
+        console.log('Chat completion:', query);
     };
 
     const handleStop = () => {
@@ -70,7 +78,26 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             newThread();
         }
+
+        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for quick prompt
+        for (let i = 1 as 1 | 2 | 3 | 4 | 5 | 6; i <= 6; i++) {
+            if (e.key === i.toString() &&  ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
+                e.preventDefault();
+                handleQuickPrompt(i);
+            }
+        }
     };
+
+    const handleQuickPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6) => {
+        const quickPrompt = getPref(`quickPrompt${i}_text`);
+        const requiresAttachment = getPref(`quickPrompt${i}_requiresAttachment`);
+        console.log('Quick prompt:', i, quickPrompt, requiresAttachment, currentSources.length);
+        if (quickPrompt && (!requiresAttachment || currentSources.length > 0)) {
+            console.log('Quick prompt test:', i);
+            const librarySearch = getPref(`quickPrompt${i}_librarySearch`);
+            chatCompletion(quickPrompt, librarySearch);
+        }
+    }
 
     const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Meta') {
