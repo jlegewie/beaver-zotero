@@ -140,7 +140,7 @@ const WelcomePage: React.FC = () => {
                     <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                         {`${shortcutKey}${prompt.index}`}
                     </span>
-                    <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                    <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
                         {prompt.title}
                     </span>
                 </Button>
