@@ -25,6 +25,7 @@ const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
 // --- Quick Prompt Type and Initial State ---
 type QuickPrompt = {
+    title: string;
     text: string;
     librarySearch: boolean;
     requiresAttachment: boolean;
@@ -34,6 +35,8 @@ function getInitialQuickPrompts(): QuickPrompt[] {
     const prompts: QuickPrompt[] = [];
     for (let i = 1; i <= 6; i++) {
         prompts.push({
+            // @ts-ignore correct type
+            title: getPref(`quickPrompt${i}_title`) ?? '',
             // @ts-ignore correct type
             text: getPref(`quickPrompt${i}_text`) ?? '',
             // @ts-ignore correct type
@@ -54,9 +57,27 @@ interface QuickPromptSettingsProps {
 
 const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt, onChange }) => {
     const [text, setText] = useState(prompt.text);
+    const [title, setTitle] = useState(prompt.title);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setText(event.target.value);
+    };
+
+    const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        setTitle(event.target.value);
+    };
+
+    const handleTitleBlur = () => {
+        if (title !== prompt.title) {
+            const updated = { ...prompt, title };
+            onChange(index, updated);
+            const idx = index + 1;
+            if (idx >= 1 && idx <= 6) {
+                const pref = `quickPrompt${idx}_title`;
+                // @ts-ignore correct pref key
+                setPref(pref, title);
+            }
+        }
     };
 
     const handleTextBlur = () => {
@@ -65,8 +86,8 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
             onChange(index, updated);
             const idx = index + 1;
             if (idx >= 1 && idx <= 6) {
-                // const pref = `quickPrompt${idx}_text`;
-                const pref = `quickPrompt1_text`;
+                const pref = `quickPrompt${idx}_text`;
+                // @ts-ignore correct pref key
                 setPref(pref, text);
             }
         }
@@ -92,13 +113,24 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                 </label>
                 <label className="font-semibold text-sm font-color-secondary">⌘{index + 1}</label>
             </div>
+            <div className="flex flex-row gap-2 items-center">
+                <label className="text-sm font-color-secondary">Title</label>
+                <input
+                    type="text"
+                    value={prompt.title}
+                    onChange={handleTitleChange}
+                    onBlur={handleTitleBlur}
+                    placeholder={`Enter title for ⌘${index + 1}...`}
+                    className="flex-1 p-1 m-0 border text-sm rounded-sm border-quinary bg-senary focus:border-tertiary outline-none"
+                />
+            </div>
             <textarea
                 value={text}
                 onChange={handleTextChange}
                 onBlur={handleTextBlur}
                 placeholder={`Enter prompt text for ⌘${index + 1}...`}
                 rows={2}
-                className="w-full p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
+                className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
             />
             <div className="flex flex-row gap-4 items-center">
                 <label className={`flex items-center gap-05 text-sm ${prompt.librarySearch ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
