@@ -9,32 +9,31 @@ import IconButton from './IconButton';
 
 // Get appropriate error message based on the error type
 const getErrorMessage = (errorType: string) => {
-    
     switch (errorType) {
-        // Error types based on error codes\
+        // Error types based on error codes
         case 'service_unavailable':
-            return "The AI service is currently unavailable. Please try again later.";
+            return "AI service down. Please try again later.";
         case 'rate_limit':
-            return "Rate limit exceeded. Please try again later.";
+            return "Usage limit reached. Please try again later.";
         case 'auth':
-            return "Authentication error. Please check your API key.";
+            return "Login failed. Please try again later.";
         case 'invalid_request':
-            return "Invalid API request. The API key may be incorrect.";
+            return "Request rejected. Please try again later.";
         case 'network':
-            return "Network connection error. Please check your internet connection.";
+            return "Connection lost. Please check your internet.";
         case 'bad_request':
-            return "The request to the AI service was invalid.";
+            return "Request format error. Please try again.";
         // Error types yielded by the backend
         case 'temporary_service_error':
-            return "The AI service encountered an error. Please try again later.";
+            return "AI service hiccup. Please try again later.";
         case 'internal_server_error':
-            return "The AI service encountered an error. Please try again later.";
+            return "AI service problem. Please try again later.";
         case 'app_key_limit_exceeded':
-            return "You have exceeded your monthly chat limit. Consider adding your own API key in settings.";
+            return "Monthly chat limit reached. Add your own API key in settings.";
         case 'server_error':
-            return "The AI service encountered an error. Please try again later.";
+            return "AI service error. Please try again later.";
         default:
-            return "Error completing the response. Please try again.";
+            return "Response failed. Please try again.";
     }
 };
 
@@ -66,19 +65,20 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
     );
 };
 
+
 const getWarning = (type: string) => {
-    switch (type) {
-        case 'user_key_failed_unexpected':
-            return "Your API key failed because of an unexpected error. Please check your API key in settings. Using our application key as a fallback.";
-        case 'user_key_rate_limit_exceeded':
-            return "Your API key failed because of a rate limit. Please check your API key in settings. Using our application key as a fallback.";
-        case 'user_key_failed':
-            return "Unable to authenticate with your API key. Please confirm it is correct. Using our application key as a fallback.";
-        case 'missing_attachments':
-            return "Unable to process attachment XXX. Please check the attachment and try again.";
-        default:
-            return "Unexpected error using your API key. Using our application key as a fallback.";
-    }
+  switch (type) {
+    case 'user_key_failed_unexpected':
+      return "Unexpected error with your API key. Switched to app's backup key and default model.";
+    case 'user_key_rate_limit_exceeded':
+      return "Your API key hit its usage limit. Switched to app's backup key and default model.";
+    case 'user_key_failed':
+      return "Your API key didn't work. Please check it's correct. Using app's backup key and default model.";
+    case 'missing_attachments':
+      return "Error processing attachment. Removed from this conversation.";
+    default:
+      return "Problem with your API key. Using app's backup key and default model.";
+  }
 };
 
 export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> = ({ messageId, warning }) => {
