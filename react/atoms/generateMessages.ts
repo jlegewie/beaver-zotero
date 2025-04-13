@@ -236,7 +236,8 @@ function _processChatCompletionViaBackend(
         content: content,
         attachments: attachments,
         tool_request: isLibrarySearch ? search_tool_request : null,
-        custom_instructions: getPref('customInstructions') || undefined
+        custom_instructions: getPref('customInstructions') || undefined,
+        user_api_key: getPref('googleGenerativeAiApiKey') || undefined
     } as ChatCompletionRequestBody;
     if (appState.view == "reader") {
         payload.app_state = appState;
