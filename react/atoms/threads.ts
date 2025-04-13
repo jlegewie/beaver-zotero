@@ -114,6 +114,23 @@ export const setMessageStatusAtom = atom(
     }
 );
 
+export const addWarningToMessageAtom = atom(
+    null,
+    (get, set, { id, warning }: { id: string; warning: Warning }) => {
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
+            message.id === id ? { ...message, warnings: [...(message.warnings || []), warning] } : message
+        ));
+    }
+);
+
+export const removeWarningFromMessageAtom = atom(
+    null,
+    (get, set, { id, warningId }: { id: string; warningId: string }) => {
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
+            message.id === id ? { ...message, warnings: message.warnings?.filter(w => w.id !== warningId) } : message
+        ));
+    }
+);
 export const addToolCallSourcesToThreadSourcesAtom = atom(
     null,
     async (get, set, { messages }: { messages: ChatMessage[] }) => {
