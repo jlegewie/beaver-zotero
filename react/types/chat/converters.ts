@@ -3,13 +3,20 @@ import { ChatMessage } from '../messages';
 
 // export function toMessageUI(message: Message): MessageUI {
 export function toMessageUI(message: MessageModel): ChatMessage {
-    return {
+    const chatMessage: ChatMessage = {
         id: message.id,
         role: message.role,
         content: message.content || '',
         status: message.status,
         tool_calls: message.tool_calls,
     } as ChatMessage;
+    if (message.error) {
+        const errorParts = message.error.split(':');
+        if (errorParts.length > 0) {
+            chatMessage.errorType = errorParts[0];
+        }
+    }
+    return chatMessage;
 }
 
 function isMessageAttachment(obj: any): obj is MessageAttachment {
