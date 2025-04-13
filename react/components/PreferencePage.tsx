@@ -192,6 +192,9 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         const newValue = e.target.value;
         setCurrentValue(newValue);
         onChange(newValue);
+        if (newValue === '') {
+            savePref(newValue);
+        }
         if (verificationStatus !== 'idle') {
             setVerificationStatus('idle');
             setVerificationError(null);
@@ -282,11 +285,6 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     {buttonText}
                 </Button>
             </div>
-            {/* {verificationStatus === 'error' && verificationError && (
-                <p className="text-xs text-red-600 mt-0.5">
-                    Error: {verificationError}
-                </p>
-            )} */}
         </div>
     );
 };
