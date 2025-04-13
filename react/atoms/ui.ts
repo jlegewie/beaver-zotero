@@ -2,7 +2,6 @@ import { atom } from 'jotai';
 import { currentSourcesAtom } from './input';
 import { InputSource } from 'react/types/sources';
 import { FileStatus } from '../types/fileStatus';
-import { Warning } from '../types/messages';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -91,9 +90,6 @@ export const fileStatusStatsAtom = atom(
         };
     }
 );
-
-// Warning messages
-export const warningMessagesAtom = atom<Warning[]>([]);
 
 // Source preview
 export const previewedSourceIdAtom = atom<string | null>(null);

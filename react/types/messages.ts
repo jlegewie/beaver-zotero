@@ -2,13 +2,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { MessageAttachment, ToolCall } from './chat/api';
 
 // Warning messages
+export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments";
 export interface Warning {
-    messageId: string;
-    text: string;
-    type: string;
-    showSettingsButton: boolean;
+    type: WarningType;
     attachments?: MessageAttachment[];
 }
+
 
 // Thread types
 export interface Thread {
@@ -26,6 +25,7 @@ export interface ChatMessage {
     tool_calls?: ToolCall[];
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
     errorType?: string;
+    warnings?: Warning[];
 }
 
 // Factory functions for creating messages

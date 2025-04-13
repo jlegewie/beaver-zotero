@@ -11,7 +11,6 @@ import { chatService, search_tool_request, ChatCompletionRequestBody } from '../
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';
-import { warningMessagesAtom } from './ui';
 
 const MODE = getPref('mode');
 
@@ -211,11 +210,7 @@ function _processChatCompletion(
         (error: Error) => {
             // @ts-ignore - Custom error properties
             const errorType = error.errorType || 'unknown';
-            set(setMessageStatusAtom, { 
-                id: assistantMsgId, 
-                status: 'error', 
-                errorType 
-            });
+            set(setMessageStatusAtom, { id: assistantMsgId, status: 'error', errorType });
         }
     );
 }
@@ -281,14 +276,16 @@ function _processChatCompletionViaBackend(
                 });
             },
             onWarning: (type: string, data: any) => {
+                // Warning
+                const warning = {type: type } as Warning;
+                if (data && data.attachments) {
+                    warning.attachments = data.attachments as MessageAttachment[];
+                }
                 // Add the warning message for the assistant message
-                const warningMessage = {
-                    messageId: assistantMessageId,
-                    text: 'TEST123',
-                    type: type,
-                    showSettingsButton: true
-                } as Warning;
-                set(warningMessagesAtom, (prev: Warning[]) => [...prev, warningMessage]);
+                set(setMessageStatusAtom, {
+                    id: assistantMessageId,
+                    warnings: [warning]
+                });
                 console.log(type)
                 console.log(data)
             }

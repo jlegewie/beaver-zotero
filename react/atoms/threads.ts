@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ChatMessage, createAssistantMessage, Thread } from "../types/messages";
+import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/messages";
 import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
@@ -95,9 +95,21 @@ export const streamToMessageAtom = atom(
 
 export const setMessageStatusAtom = atom(
     null,
-    (get, set, { id, status, errorType }: { id: string; status: ChatMessage['status']; errorType?: string }) => {
+    (get, set, { id, status, errorType, warnings }: { id: string; status?: ChatMessage['status']; errorType?: string; warnings?: Warning[] }) => {
         set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
-            message.id === id ? { ...message, status, ...(errorType && { errorType }) } : message
+            message.id === id
+                ? {
+                    ...message,
+                    ...(status && { status }),
+                    ...(errorType && { errorType }),
+                    ...(warnings && { 
+                        warnings: [
+                            ...(message.warnings || []), // Spread existing warnings or empty array if undefined
+                            ...warnings                  // Spread new warnings
+                        ]
+                    })
+                }
+                : message
         ));
     }
 );

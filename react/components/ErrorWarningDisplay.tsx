@@ -78,13 +78,13 @@ export const WarningDisplay: React.FC<{ message: Warning }> = ({ message }) => {
             <div className="font-color-yellow px-2 py-3 flex flex-row gap-4 items-center">
                 <Icon icon={AlertIcon} className="scale-12"/>
                 <span>{getWarning(message.type)}</span>
-                {message.showSettingsButton &&
+                {/* {message.showSettingsButton &&
                     <div className="flex flex-1 flex-row">
                         <IconButton variant="outline" icon={KeyIcon} onClick={() => {
                             setIsPreferencePageVisible(true);
                         }} />
                     </div>
-                }
+                } */}
             </div>
         </div>
     );

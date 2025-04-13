@@ -23,14 +23,12 @@ interface AssistantMessageDisplayProps {
     message: ChatMessage;
     isLastMessage: boolean;
     toolCallInProgress: boolean;
-    warningMessages: Warning[];
 }
 
 const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     message,
     isLastMessage,
     toolCallInProgress,
-    warningMessages
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
@@ -112,8 +110,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
-            {warningMessages.map((warningMessage, index) => (
-                <WarningDisplay key={index} message={warningMessage} />
+            {message.warnings?.map((warning, index) => (
+                <WarningDisplay key={index} message={warning} />
             ))}
             {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
                 <div className="py-1">

@@ -5,8 +5,6 @@ import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import { scrollToBottom } from "../utils/scrollToBottom";
 import { ChatMessage } from "../types/messages";
 import ToolMessageDisplay from "./ToolMessageDisplay";
-import { warningMessagesAtom } from "../atoms/ui";
-import { useAtomValue } from "jotai";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
@@ -20,7 +18,6 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         ref: React.ForwardedRef<HTMLDivElement>
     ) {
         const lastScrollTopRef = useRef(0);
-        const warningMessages = useAtomValue(warningMessagesAtom);
 
         // Scroll to bottom when messages change
         useEffect(() => {
@@ -68,7 +65,6 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                         {message.role === 'assistant' && (!message.tool_calls || message.tool_calls.length === 0) && (
                             <AssistantMessageDisplay
                                 message={message}
-                                warningMessages={warningMessages.filter(m => m.messageId === message.id)}
                                 isLastMessage={index === messages.length - 1}
                                 toolCallInProgress={
                                     messages
