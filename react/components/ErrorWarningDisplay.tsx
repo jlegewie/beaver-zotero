@@ -4,6 +4,7 @@ import { Icon, AlertIcon, SettingsIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import { removeWarningFromMessageAtom } from '../atoms/threads';
 import IconButton from './IconButton';
 
 // Get appropriate error message based on the error type
@@ -40,22 +41,27 @@ const getErrorMessage = (errorType: string) => {
 export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
+    const showSettingsButton = errorType === 'app_key_limit_exceeded';
+    
     return (
-        <div className="flex flex-col gap-0">
-            <div className="font-color-red px-2 py-3 flex flex-row gap-4 items-center">
-                <Icon icon={AlertIcon} className="scale-13"/>
-                <span>{getErrorMessage(errorType)}</span>
-            </div>
-            {errorType === 'app_key_limit_exceeded' &&
-                <div className="flex flex-1 flex-row" style={{ marginLeft: '32px' }}>
-                    {/* <div className="flex-1"></div> */}
-                    <Button variant="outline" icon={SettingsIcon} onClick={() => {
-                        setIsPreferencePageVisible(true);
-                    }}>
-                        Settings
-                    </Button>
+        <div className="flex flex-col gap-0 rounded-md border-quinary mb-3" style={{ borderColor: 'var(--tag-red-tertiary)' }}>
+            <div className="font-color-red p-3 flex flex-row gap-3 items-start">
+                <Icon icon={AlertIcon} className="scale-12 mt-1"/>
+                <div className="flex flex-col gap-2">
+                    <div className="flex flex-row gap-4 items-center">
+                        <div>Error</div>
+                        <div className="flex-1"/>
+                        {showSettingsButton &&
+                            <Button variant="outline" className="scale-90" rightIcon={KeyIcon} onClick={() => {
+                                setIsPreferencePageVisible(true);
+                            }}>
+                                API Key
+                            </Button>
+                        }
+                    </div>
+                    <div className="text-sm">{getErrorMessage(errorType)}</div>
                 </div>
-            }
+            </div>
         </div>
     );
 };
@@ -75,21 +81,21 @@ const getWarning = (type: string) => {
     }
 };
 
-export const WarningDisplay: React.FC<{ message: Warning }> = ({ message }) => {
+export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> = ({ messageId, warning }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
-
-    const showSettingsIcon = message.type === 'user_key_failed_unexpected' || message.type === 'user_key_rate_limit_exceeded' || message.type === 'user_key_failed';
+    const removeWarningFromMessage = useSetAtom(removeWarningFromMessageAtom);
+    const showSettingsIcon = warning.type === 'user_key_failed_unexpected' || warning.type === 'user_key_rate_limit_exceeded' || warning.type === 'user_key_failed';
     
     return (
-        <div className="flex flex-col gap-0 rounded-md border-quinary" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
+        <div className="flex flex-col gap-0 rounded-md border-quinary mb-4" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
             <div className="font-color-yellow p-3 flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
                 <div className="flex flex-col gap-2">
-                    <div className="flex flex-row gap-4 items-center">
+                    <div className="flex flex-row gap-2 items-center">
                         <div>Warning</div>
                         <div className="flex-1"/>
                         {showSettingsIcon &&
-                            <Button variant="outline" rightIcon={KeyIcon} onClick={() => {
+                            <Button variant="outline" className="scale-90" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
                                 API Key
@@ -98,13 +104,13 @@ export const WarningDisplay: React.FC<{ message: Warning }> = ({ message }) => {
                         <IconButton
                             variant="outline"
                             icon={CancelIcon}
-                            className="mr-1"
+                            className="mr-1 scale-90"
                             onClick={() => {
-                                
+                                removeWarningFromMessage({ id: messageId, warningId: warning.id });                                
                             }}
                         />
                     </div>
-                    <div className="text-sm">{getWarning(message.type)}</div>
+                    <div className="text-sm">{getWarning(warning.type)}</div>
                 </div>
             </div>
             

@@ -110,8 +110,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
-            {message.warnings?.map((warning, index) => (
-                <WarningDisplay key={index} message={warning} />
+            {message.warnings?.map((warning) => (
+                <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
             ))}
             {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
                 <div className="py-1">
