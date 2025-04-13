@@ -108,7 +108,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             case 'internal_server_error':
                 return "The AI service encountered an error. Please try again later.";
             case 'app_key_limit_exceeded':
-                return "You have exceeded your monthly chat limit. Consider adding your own API in settings.";
+                return "You have exceeded your monthly chat limit. Consider adding your own API key in settings.";
             case 'server_error':
                 return "The AI service encountered an error. Please try again later.";
             default:
