@@ -161,7 +161,7 @@ interface ApiKeyInputProps {
     onChange: (value: string) => void;
     placeholder?: string;
     className?: string;
-    savePref: () => void;
+    savePref: (value: string) => void;
 }
 
 const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
@@ -175,8 +175,9 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     savePref
 }) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        onChange(e.target.value);
-        savePref();
+        const newValue = e.target.value;
+        onChange(newValue);
+        savePref(newValue);
     };
 
     return (
@@ -298,7 +299,7 @@ const PreferencePage: React.FC = () => {
                     label="Google API Key"
                     value={geminiKey}
                     onChange={setGeminiKey}
-                    savePref={() => handlePrefSave('googleGenerativeAiApiKey', geminiKey)}
+                    savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
                     placeholder="Enter your Google AI Studio API Key"
                     linkUrl="https://aistudio.google.com/app/apikey"
                 />
@@ -307,7 +308,7 @@ const PreferencePage: React.FC = () => {
                     label="OpenAI API Key"
                     value={openaiKey}
                     onChange={setOpenaiKey}
-                    savePref={() => handlePrefSave('openAiApiKey', openaiKey)}
+                    savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
                     placeholder="Enter your OpenAI API Key"
                     linkUrl="https://platform.openai.com/api-keys"
                 />
@@ -316,7 +317,7 @@ const PreferencePage: React.FC = () => {
                     label="Anthropic API Key"
                     value={anthropicKey}
                     onChange={setAnthropicKey}
-                    savePref={() => handlePrefSave('anthropicApiKey', anthropicKey)}
+                    savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
                     placeholder="Enter your Anthropic API Key"
                     linkUrl="https://console.anthropic.com/settings/keys"
                 />
