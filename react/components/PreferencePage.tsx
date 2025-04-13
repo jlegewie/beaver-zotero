@@ -1,15 +1,16 @@
 import React from "react";
 // @ts-ignore no idea
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { UserIcon, LogoutIcon, LinkIcon, CancelIcon } from './icons';
+import { UserIcon, LogoutIcon, LinkIcon, CancelIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon } from './icons';
 import IconButton from "./IconButton";
 import Button from "./button";
 import { supabase } from "../../src/services/supabaseClient";
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
+import { chatService, ProviderType, ErrorType } from '../../src/services/chatService';
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -156,7 +157,8 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
 interface ApiKeyInputProps {
     id: string;
     label: string;
-    linkUrl?: string;  // Optional URL for the link button
+    provider: ProviderType;
+    linkUrl?: string;
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
@@ -167,6 +169,7 @@ interface ApiKeyInputProps {
 const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     id,
     label,
+    provider,
     linkUrl,
     value,
     onChange,
@@ -174,11 +177,76 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     className = "",
     savePref
 }) => {
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
+    const [currentValue, setCurrentValue] = useState(value);
+
+    useEffect(() => {
+        setCurrentValue(value);
+        setVerificationStatus('idle');
+        setVerificationError(null);
+    }, [value]);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newValue = e.target.value;
+        setCurrentValue(newValue);
         onChange(newValue);
-        savePref(newValue);
+        if (verificationStatus !== 'idle') {
+            setVerificationStatus('idle');
+            setVerificationError(null);
+        }
     };
+
+    const handleVerify = async () => {
+        setIsVerifying(true);
+        setVerificationStatus('idle');
+        setVerificationError(null);
+
+        try {
+            const result = await chatService.verifyApiKey(provider, currentValue);
+            if (result.valid) {
+                setVerificationStatus('success');
+                savePref(currentValue);
+                console.log(`API Key for ${provider} verified and saved.`);
+            } else {
+                setVerificationStatus('error');
+                setVerificationError(result.error_type || 'UnexpectedError');
+                console.error(`API Key verification failed for ${provider}: ${result.error_type}`);
+            }
+        } catch (error) {
+            console.error("Error during API key verification:", error);
+            setVerificationStatus('error');
+            setVerificationError('UnexpectedError');
+        } finally {
+            setIsVerifying(false);
+        }
+    };
+
+    const getButtonContent = () => {
+        if (isVerifying) {
+            return { text: 'Verify', icon: Spinner };
+        }
+        switch (verificationStatus) {
+            case 'success':
+                return { text: 'Verified', icon: TickIcon };
+            case 'error':
+                // let errorText = 'Verification Failed';
+                // if (verificationError === 'AuthenticationError') errorText = 'Invalid Key';
+                // else if (verificationError === 'RateLimitError') errorText = 'Rate Limited';
+                // else if (verificationError === 'PermissionDeniedError') errorText = 'Permission Denied';
+                // else if (verificationError === 'UnexpectedError') errorText = 'Verification Failed';
+                return { text: "Failed", icon: AlertIcon };
+            case 'idle':
+            default:
+                return { text: 'Verify', icon: ArrowRightIcon };
+        }
+    };
+
+    const { text: buttonText, icon: buttonIcon } = getButtonContent();
+    const inputBorderColor = verificationStatus === 'error' ? 'border-error' : 'border-quinary';
+    // const buttonVariant = verificationStatus === 'error' ? 'danger' : 'outline';
+    const buttonVariant = 'outline';
 
     return (
         <div className={`flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
@@ -198,12 +266,27 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 <input
                     id={id}
                     type="password"
-                    value={value}
+                    value={currentValue}
                     onChange={handleChange}
                     placeholder={placeholder}
-                    className="flex-1 p-1 m-0 border text-sm rounded-sm border-quinary bg-senary focus:border-tertiary outline-none"
+                    className={`flex-1 p-1 m-0 border text-sm rounded-sm ${inputBorderColor} bg-senary focus:border-tertiary outline-none`}
+                    aria-invalid={verificationStatus === 'error'}
                 />
+                <Button
+                    variant={buttonVariant}
+                    style={{ padding: "3px 6px" }}
+                    rightIcon={buttonIcon}
+                    onClick={handleVerify}
+                    disabled={isVerifying || !currentValue}
+                >
+                    {buttonText}
+                </Button>
             </div>
+            {/* {verificationStatus === 'error' && verificationError && (
+                <p className="text-xs text-red-600 mt-0.5">
+                    Error: {verificationError}
+                </p>
+            )} */}
         </div>
     );
 };
@@ -297,6 +380,7 @@ const PreferencePage: React.FC = () => {
                 <ApiKeyInput
                     id="gemini-key"
                     label="Google API Key"
+                    provider="google"
                     value={geminiKey}
                     onChange={setGeminiKey}
                     savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
@@ -306,6 +390,7 @@ const PreferencePage: React.FC = () => {
                 <ApiKeyInput
                     id="openai-key"
                     label="OpenAI API Key"
+                    provider="openai"
                     value={openaiKey}
                     onChange={setOpenaiKey}
                     savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
@@ -315,6 +400,7 @@ const PreferencePage: React.FC = () => {
                 <ApiKeyInput
                     id="anthropic-key"
                     label="Anthropic API Key"
+                    provider="anthropic"
                     value={anthropicKey}
                     onChange={setAnthropicKey}
                     savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
