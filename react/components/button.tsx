@@ -19,6 +19,8 @@ interface ButtonProps {
     className?: string;
     /** Additional class names for the icon */
     iconClassName?: string;
+    /** Additional style for the button */
+    style?: React.CSSProperties;
     /** Accessible label for the button */
     ariaLabel?: string;
     /** Whether the button is disabled */
@@ -44,6 +46,7 @@ const Button: React.FC<ButtonProps> = ({
     onClick,
     className = '',
     iconClassName = '',
+    style,
     ariaLabel,
     disabled = false,
     loading = false,
@@ -72,6 +75,7 @@ const Button: React.FC<ButtonProps> = ({
             disabled={disabled || loading}
             title={title}
             type={type}
+            style={style}
         >
             {icon && <Icon icon={icon} className={iconClassName} />}
             {children}
