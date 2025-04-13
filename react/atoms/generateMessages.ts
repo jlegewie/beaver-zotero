@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/messages';
 import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom, addToolCallSourcesToThreadSourcesAtom } from './threads';
@@ -277,7 +278,7 @@ function _processChatCompletionViaBackend(
             },
             onWarning: (type: string, data: any) => {
                 // Warning
-                const warning = {type: type } as Warning;
+                const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
                     warning.attachments = data.attachments as MessageAttachment[];
                 }
