@@ -424,6 +424,7 @@
 /* Borders */
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
+[id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-secondary); }
 
 /* Shadows */
 [id^="beaver-pane-"] .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }
