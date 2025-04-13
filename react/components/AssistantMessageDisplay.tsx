@@ -34,6 +34,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const sourceCitations = useAtomValue(sourceCitationsAtom);
+    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -88,6 +89,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         const errorType = message.errorType || 'unknown';
         
         switch (errorType) {
+            // Error types based on error codes\
             case 'service_unavailable':
                 return "The AI service is currently unavailable. Please try again later.";
             case 'rate_limit':
@@ -100,6 +102,13 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 return "Network connection error. Please check your internet connection.";
             case 'bad_request':
                 return "The request to the AI service was invalid.";
+            // Error types yielded by the backend
+            case 'temporary_service_error':
+                return "The AI service encountered an error. Please try again later.";
+            case 'internal_server_error':
+                return "The AI service encountered an error. Please try again later.";
+            case 'app_key_limit_exceeded':
+                return "You have exceeded your monthly chat limit. Consider adding your own API in settings.";
             case 'server_error':
                 return "The AI service encountered an error. Please try again later.";
             default:
