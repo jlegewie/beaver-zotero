@@ -1,6 +1,6 @@
 import React from 'react';
 import { Warning } from '../types/messages';
-import { Icon, AlertIcon, SettingsIcon, KeyIcon } from './icons';
+import { Icon, AlertIcon, SettingsIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
@@ -81,20 +81,28 @@ export const WarningDisplay: React.FC<{ message: Warning }> = ({ message }) => {
     const showSettingsIcon = message.type === 'user_key_failed_unexpected' || message.type === 'user_key_rate_limit_exceeded' || message.type === 'user_key_failed';
     
     return (
-        <div className="flex flex-col gap-0">
-            <div className="font-color-yellow px-2 py-3 flex flex-row gap-4 items-start">
+        <div className="flex flex-col gap-0 rounded-md border-quinary" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
+            <div className="font-color-yellow p-3 flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
                 <div className="flex flex-col gap-2">
-                    <div className="flex flex-row gap-1 items-center">
+                    <div className="flex flex-row gap-4 items-center">
                         <div>Warning</div>
                         <div className="flex-1"/>
                         {showSettingsIcon &&
-                            <Button variant="outline" rightIcon={KeyIcon} className="mr-4" onClick={() => {
+                            <Button variant="outline" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
                                 API Key
                             </Button>
                         }
+                        <IconButton
+                            variant="outline"
+                            icon={CancelIcon}
+                            className="mr-1"
+                            onClick={() => {
+                                
+                            }}
+                        />
                     </div>
                     <div className="text-sm">{getWarning(message.type)}</div>
                 </div>
