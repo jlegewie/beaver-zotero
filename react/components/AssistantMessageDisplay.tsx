@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Icon, RepeatIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
+import { Icon, RepeatIcon, Spinner, ShareIcon, AlertIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon, SettingsIcon } from './icons';
 import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
@@ -17,6 +17,7 @@ import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
+import { isPreferencePageVisibleAtom } from '../atoms/ui';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
@@ -155,9 +156,21 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             >
                 <MarkdownRenderer className="markdown" content={message.content} />
                 {message.status === 'error' &&
-                    <div className="font-color-red py-3 flex flex-row gap-2">
-                        <Icon icon={AlertIcon} className="mt-1"/>
-                        <span>{getErrorMessage()}</span>
+                    <div className="flex flex-col gap-0">
+                        <div className="font-color-red px-2 py-3 flex flex-row gap-4 items-center">
+                            <Icon icon={AlertIcon} className="scale-13"/>
+                            <span>{getErrorMessage()}</span>
+                        </div>
+                        {message.errorType === 'app_key_limit_exceeded' &&
+                            <div className="flex flex-1 flex-row" style={{ marginLeft: '32px' }}>
+                                {/* <div className="flex-1"></div> */}
+                                <Button variant="outline" icon={SettingsIcon} onClick={() => {
+                                    setIsPreferencePageVisible(true);
+                                }}>
+                                    Settings
+                                </Button>
+                            </div>
+                        }
                     </div>
                 }
             </div>
