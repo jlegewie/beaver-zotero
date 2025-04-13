@@ -278,7 +278,7 @@ function _processChatCompletionViaBackend(
                     errorType
                 });
             },
-            onWarning: (type, data) => {
+            onWarning: (type: string, data: any) => {
                 console.log(type)
                 console.log(data)
             }

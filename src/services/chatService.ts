@@ -30,7 +30,7 @@ export interface SSECallbacks {
     onToolcall: (data: any) => void;
     onDone: () => void;
     onError: (errorType: string) => void;
-    onWarning: (type: string, data: any) => void;
+    onWarning: (warningType: string, data: any) => void;
 }
 
 /**
@@ -231,12 +231,11 @@ export class ChatService extends ApiService {
                 onDone();
                 break;
             case 'error':
-                // e.g. data: {"detail": "..."}
-                onError('server_error');
+                onError(parsedData.type || 'server_error');
                 break;
             case 'warning':
-                if (parsedData?.type && parsedData?.data) {
-                    onWarning(parsedData.type, parsedData.data);
+                if (parsedData?.type) {
+                    onWarning(parsedData.type, parsedData?.data || null);
                 }
                 break;
             default:
