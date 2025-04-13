@@ -1,3 +1,18 @@
+:root {
+    --tag-yellow-primary: #ffd400e5;
+    --tag-yellow-secondary: #ffd4008c;
+    --tag-yellow-tertiary: #ffd4004d;
+    --tag-yellow-quarternary: #ffd4001f;
+    --tag-yellow-quinary: #ffd4000f;
+    --tag-yellow-senary: #ffd40008;
+    --tag-red-primary: #ff6666e5;
+    --tag-red-secondary: #ff66668c;
+    --tag-red-tertiary: #ff66664d;
+    --tag-red-quarternary: #ff66661f;
+    --tag-red-quinary: #ff66660f;
+    --tag-red-senary: #ff666608;
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
