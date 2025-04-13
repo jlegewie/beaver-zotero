@@ -1,7 +1,7 @@
 import React from 'react';
 // @ts-ignore no idea why
 import { useState, useRef, useMemo } from 'react';
-import { ChatMessage } from '../types/messages';
+import { ChatMessage, Warning } from '../types/messages';
 import MarkdownRenderer from './MarkdownRenderer';
 import { RepeatIcon, Spinner, ShareIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
 import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';
@@ -17,18 +17,20 @@ import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
-import { ErrorDisplay } from './ErrorWarningDisplay';
+import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
     isLastMessage: boolean;
     toolCallInProgress: boolean;
+    warningMessages: Warning[];
 }
 
 const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     message,
     isLastMessage,
-    toolCallInProgress
+    toolCallInProgress,
+    warningMessages
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
@@ -110,6 +112,9 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
+            {warningMessages.map((warningMessage, index) => (
+                <WarningDisplay key={index} message={warningMessage} />
+            ))}
             {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
                 <div className="py-1">
                     <Button

@@ -1,10 +1,10 @@
 import React from 'react';
-import { WarningMessage } from '../types/messages';
-import { Icon, AlertIcon, SettingsIcon } from './icons';
+import { Warning } from '../types/messages';
+import { Icon, AlertIcon, SettingsIcon, KeyIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-
+import IconButton from './IconButton';
 
 // Get appropriate error message based on the error type
 const getErrorMessage = (errorType: string) => {
@@ -56,6 +56,36 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                     </Button>
                 </div>
             }
+        </div>
+    );
+};
+
+const getWarning = (type: string) => {
+    switch (type) {
+        case 'app_key_limit_exceeded':
+            return "You have exceeded your monthly chat limit. Consider adding your own API key in settings.";
+        default:
+            return "Test warning message.";
+    }
+}
+
+
+export const WarningDisplay: React.FC<{ message: Warning }> = ({ message }) => {
+    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
+    
+    return (
+        <div className="flex flex-col gap-0">
+            <div className="font-color-yellow px-2 py-3 flex flex-row gap-4 items-center">
+                <Icon icon={AlertIcon} className="scale-12"/>
+                <span>{getWarning(message.type)}</span>
+                {message.showSettingsButton &&
+                    <div className="flex flex-1 flex-row">
+                        <IconButton variant="outline" icon={KeyIcon} onClick={() => {
+                            setIsPreferencePageVisible(true);
+                        }} />
+                    </div>
+                }
+            </div>
         </div>
     );
 };

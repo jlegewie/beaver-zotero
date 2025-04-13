@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { ChatMessage, createAssistantMessage, createUserMessage } from '../types/messages';
+import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/messages';
 import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
 import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom, addToolCallSourcesToThreadSourcesAtom } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
@@ -11,6 +11,7 @@ import { chatService, search_tool_request, ChatCompletionRequestBody } from '../
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';
+import { warningMessagesAtom } from './ui';
 
 const MODE = getPref('mode');
 
@@ -280,6 +281,14 @@ function _processChatCompletionViaBackend(
                 });
             },
             onWarning: (type: string, data: any) => {
+                // Add the warning message for the assistant message
+                const warningMessage = {
+                    messageId: assistantMessageId,
+                    text: 'TEST123',
+                    type: type,
+                    showSettingsButton: true
+                } as Warning;
+                set(warningMessagesAtom, (prev: Warning[]) => [...prev, warningMessage]);
                 console.log(type)
                 console.log(data)
             }

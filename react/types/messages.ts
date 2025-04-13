@@ -1,5 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolCall } from './chat/api';
+import { MessageAttachment, ToolCall } from './chat/api';
+
+// Warning messages
+export interface Warning {
+    messageId: string;
+    text: string;
+    type: string;
+    showSettingsButton: boolean;
+    attachments?: MessageAttachment[];
+}
 
 // Thread types
 export interface Thread {
