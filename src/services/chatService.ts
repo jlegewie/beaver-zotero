@@ -47,6 +47,15 @@ export interface VerifyKeyResponse {
     error_type?: ErrorType;
 }
 
+// Add this interface to the existing interfaces
+export interface Model {
+    provider: ProviderType;
+    name: string;
+    model_id: string;
+    reasoning_model?: boolean;
+    kwargs?: Record<string, any>;
+}
+
 /**
  * Service for handling Chat-related API requests with Server-Sent Events (SSE)
  */
@@ -314,6 +323,28 @@ export class ChatService extends ApiService {
             errorType = 'bad_request';
         }
         onError(errorType);
+    }
+
+    /**
+     * Fetches the list of models supported by the backend
+     * @returns Promise resolving to an array of supported models
+     */
+    async getModelList(): Promise<Model[]> {
+        try {
+            const endpoint = `${this.baseUrl}/chat/model-list`;
+            const headers = await this.getAuthHeaders();
+            
+            const response = await Zotero.HTTP.request('GET', endpoint, {
+                headers,
+                responseType: 'json'
+            });
+            
+            return response.response as Model[];
+        } catch (error) {
+            Zotero.debug(`ChatService: getModelList error - ${error}`, 1);
+            // Return empty array on error
+            return [];
+        }
     }
 }
 
