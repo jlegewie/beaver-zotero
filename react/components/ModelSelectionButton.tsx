@@ -91,7 +91,7 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
                 clearTimeout(debounceTimeout);
                 debounceTimeout = Zotero.getMainWindow().setTimeout(async () => {
                     const fetchedModels = await fetchModelsDebounced();
-                    setApiKeyStatus(prevKeys => {
+                    setApiKeyStatus(() => {
                         const latestKeys = {
                             google: !!getPref('googleGenerativeAiApiKey'),
                             openai: !!getPref('openAiApiKey'),
