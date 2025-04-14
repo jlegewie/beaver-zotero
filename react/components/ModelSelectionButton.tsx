@@ -5,7 +5,7 @@ import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon } from './icons';
 import { getPref } from '../../src/utils/prefs';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { 
   selectedModelAtom, 
   DEFAULT_MODEL, 
@@ -13,7 +13,8 @@ import {
   availableModelsAtom,
   initModelsAtom,
   fetchModelsAtom, 
-  updateSelectedModelAtom
+  updateSelectedModelAtom,
+  validateSelectedModelAtom
 } from '../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 17;
@@ -31,7 +32,13 @@ const ModelSelectionButton: React.FC = () => {
     const availableModels = useAtomValue(availableModelsAtom);
     const initModels = useAtom(initModelsAtom)[1];
     const fetchModels = useAtom(fetchModelsAtom)[1];
-    const updateSelectedModel = useAtom(updateSelectedModelAtom)[1];
+    const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
+    const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
+
+    // Add this new useEffect to watch for API key changes
+    useEffect(() => {
+        validateSelectedModel();
+    }, [availableModels, validateSelectedModel]);
 
     useEffect(() => {
         const loadAndInitializeModels = async () => {

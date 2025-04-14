@@ -89,6 +89,31 @@ export const initModelsAtom = atom(
     }
 );
 
+// Add this new atom to input.ts
+export const validateSelectedModelAtom = atom(
+    null,
+    (get, set) => {
+        const selectedModel = get(selectedModelAtom);
+        const availableModels = get(availableModelsAtom);
+
+        // Check if the selected model is still valid with current API keys
+        const isModelAvailable = 
+            selectedModel.model_id === DEFAULT_MODEL.model_id || 
+            availableModels.some(m => m.model_id === selectedModel.model_id);
+
+        // If not valid, revert to default or first available model
+        if (!isModelAvailable) {
+            if (availableModels.length > 0) {
+                set(selectedModelAtom, availableModels[0]);
+                setPref('lastUsedModel', JSON.stringify(availableModels[0]));
+            } else {
+                set(selectedModelAtom, DEFAULT_MODEL);
+                setPref('lastUsedModel', JSON.stringify(DEFAULT_MODEL));
+            }
+        }
+    }
+);
+
 // Atom to update models from API
 export const fetchModelsAtom = atom(
     null,
