@@ -319,6 +319,7 @@
 [id^="beaver-pane-"] .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
 [id^="beaver-pane-"] .h-2 { height: 0.5rem; }
+[id^="beaver-pane-"] .-ml-015 { margin-left: -0.15rem; }
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
