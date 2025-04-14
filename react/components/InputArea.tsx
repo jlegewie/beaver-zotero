@@ -24,7 +24,8 @@ export const DEFAULT_MODEL = {
     name: "Gemini 2.0 Flash",
     model_id: "gemini-2.0-flash-001",
     reasoning_model: false,
-    kwargs: {}
+    kwargs: {},
+    app_key: true
 } as Model;
 
 const InputArea: React.FC<InputAreaProps> = ({

@@ -54,6 +54,7 @@ export interface Model {
     model_id: string;
     reasoning_model?: boolean;
     kwargs?: Record<string, any>;
+    app_key: boolean;
 }
 
 /**
