@@ -3,17 +3,17 @@ import React from 'react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
-import { BrainIcon, ArrowDownIcon } from './icons';
+import { BrainIcon, ArrowDownIcon, Icon } from './icons';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { chatService, Model } from '../../src/services/chatService';
+import { DEFAULT_MODEL } from './InputArea';
 
-const DEFAULT_MODEL_ID = "gemini-2.0-flash-001";
-const DEFAULT_MODEL_NAME = "Gemini 2.0 Flash";
+const MAX_MODEL_NAME_LENGTH = 17;
 
 interface ModelSelectionButtonProps {
     className?: string;
-    selectedModel: string;
-    setSelectedModel: (modelId: string) => void;
+    selectedModel: Model;
+    setSelectedModel: (model: Model) => void;
 }
 
 /**
@@ -128,16 +128,28 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
         const items: MenuItem[] = [];
 
         items.push({
-            label: `${DEFAULT_MODEL_NAME}`,
+            label: 'Included Models',
+            isGroupHeader: true,
+            onClick: () => {},
+        });
+
+        items.push({
+            label: `${DEFAULT_MODEL.name}`,
             onClick: () => {
-                setSelectedModel(DEFAULT_MODEL_ID);
-                setPref('lastUsedModel', DEFAULT_MODEL_ID);
+                setSelectedModel(DEFAULT_MODEL);
+                setPref('lastUsedModel', JSON.stringify(DEFAULT_MODEL));
             },
             customContent: (
-                <span className={`flex-1 text-sm truncate ${selectedModel === DEFAULT_MODEL_ID ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
-                    {DEFAULT_MODEL_NAME} {/* <span className="font-color-tertiary">(Default)</span> */}
+                <span className={`flex-1 text-sm truncate ${selectedModel.model_id === DEFAULT_MODEL.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+                    {DEFAULT_MODEL.name} {/* <span className="font-color-tertiary">(Default)</span> */}
                 </span>
             )
+        });
+
+        items.push({
+            label: 'Your API Keys',
+            isGroupHeader: true,
+            onClick: () => {},
         });
 
         // if (availableModels.length > 0) {
@@ -148,15 +160,19 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
             items.push({
                 label: model.name,
                 onClick: () => {
-                    setSelectedModel(model.model_id);
-                    setPref('lastUsedModel', model.model_id);
+                    setSelectedModel(model);
+                    setPref('lastUsedModel', JSON.stringify(model));
                 },
                 icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
-                    <span className="flex items-start gap-2 w-full min-w-0">
-                        <span className={`flex-1 text-sm truncate ${selectedModel === model.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+                    <span className="flex items-center gap-2 min-w-0">
+                        <span className={`flex text-sm truncate ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                             {model.name}
                         </span>
+                        {model.reasoning_model
+                            ? <Icon icon={BrainIcon} className={`-ml-015 ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
+                            : undefined
+                        }
                     </span>
                 )
             });
@@ -169,15 +185,9 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
     const isButtonDisabled = !hasAnyKey;
 
     const getButtonLabel = () => {
-        if (selectedModel === DEFAULT_MODEL_ID) {
-            return `${DEFAULT_MODEL_NAME}`;
-        }
-        const allPossibleModels = [
-            { name: DEFAULT_MODEL_NAME, model_id: DEFAULT_MODEL_ID, provider: 'google' as const },
-            ...supportedModels
-        ];
-        const model = allPossibleModels.find(m => m.model_id === selectedModel);
-        return model ? model.name : 'Select Model';
+        return selectedModel.name.length > MAX_MODEL_NAME_LENGTH
+            ? `${selectedModel.name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
+            : selectedModel.name;
     };
 
     return (
@@ -185,7 +195,7 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
             menuItems={menuItems}
             variant="ghost-secondary"
             buttonLabel={getButtonLabel()}
-            icon={ BrainIcon }
+            icon={ selectedModel.reasoning_model ? BrainIcon : undefined }
             rightIcon={ArrowDownIcon}
             className={`${className} truncate`}
             style={{padding: '2px 0px', fontSize: '0.80rem', maxWidth: '120px'}}

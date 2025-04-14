@@ -12,10 +12,20 @@ import Button from './button';
 import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
 import { MenuPosition } from './SearchMenu';
+import ModelSelectionButton from './ModelSelectionButton';
+import { Model } from '../../src/services/chatService';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
+
+export const DEFAULT_MODEL = {
+    provider: "google",
+    name: "Gemini 2.0 Flash",
+    model_id: "gemini-2.0-flash-001",
+    reasoning_model: false,
+    kwargs: {}
+} as Model;
 
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
@@ -30,6 +40,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    let lastUsedModel = DEFAULT_MODEL;
+    try {
+        lastUsedModel = JSON.parse(getPref('lastUsedModel'));
+    } catch (error) {
+        // pass
+    }
+    const [selectedModel, setSelectedModel] = useState<Model>(lastUsedModel || DEFAULT_MODEL);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
@@ -200,6 +217,10 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Button Row */}
                 <div className="flex flex-row items-center pt-2">
+                    <ModelSelectionButton
+                        selectedModel={selectedModel}
+                        setSelectedModel={setSelectedModel}
+                    />
                     <div className="flex-1" />
                     <div className="flex gap-2">
                         <Button
