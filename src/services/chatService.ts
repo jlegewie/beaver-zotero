@@ -1,6 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
+import { MessageModel, AppState, MessageAttachment } from '../../react/types/chat/api';
+import { Model, ProviderType } from '../../react/atoms/models';
 
 export interface ToolRequest {
     function: "hybrid_search" | "related_items_search";
@@ -19,6 +20,7 @@ export interface ChatCompletionRequestBody {
     assistant_message_id: string;       // The in-progress assistant UUID
     content: string;                    // The user's input text
     user_api_key: string | null;        // The user's API key, if provided
+    model: Model;                       // The model to use for the request
     custom_instructions?: string;       // Custom instructions for the assistant
     attachments: MessageAttachment[];   // The attachments to include in the request
     app_state: AppState;                // Current app state
@@ -34,7 +36,7 @@ export interface SSECallbacks {
     onWarning: (warningType: string, data: any) => void;
 }
 
-export type ProviderType = "anthropic" | "google" | "openai";
+
 export type ErrorType = "AuthenticationError" | "PermissionDeniedError" | "RateLimitError" | "UnexpectedError";
 
 export interface VerifyKeyRequest {
@@ -45,16 +47,6 @@ export interface VerifyKeyRequest {
 export interface VerifyKeyResponse {
     valid: boolean;
     error_type?: ErrorType;
-}
-
-// Add this interface to the existing interfaces
-export interface Model {
-    provider: ProviderType;
-    name: string;
-    model_id: string;
-    reasoning_model?: boolean;
-    kwargs?: Record<string, any>;
-    app_key: boolean;
 }
 
 /**

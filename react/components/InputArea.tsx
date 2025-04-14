@@ -13,20 +13,11 @@ import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
-import { Model } from '../../src/services/chatService';
+import { selectedModelAtom } from 'react/atoms/models';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
-
-export const DEFAULT_MODEL = {
-    provider: "google",
-    name: "Gemini 2.0 Flash",
-    model_id: "gemini-2.0-flash-001",
-    reasoning_model: false,
-    kwargs: {},
-    app_key: true
-} as Model;
 
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
@@ -42,29 +33,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     
-    // Model selection
-    let modelList: Model[] = [];
-    try {
-        const supportedModelsPref = JSON.parse(getPref('supportedModels'));
-        if (Array.isArray(supportedModelsPref)) {
-            modelList = supportedModelsPref;
-        }
-    } catch (error) {
-        // pass
-    }
-    
-    let lastUsedModel = DEFAULT_MODEL;
-    try {
-        const lastUsedModelPref = JSON.parse(getPref('lastUsedModel'));
-        if (modelList.some(m => m.model_id === lastUsedModelPref.model_id)) {
-            lastUsedModel = lastUsedModelPref;
-        }
-    } catch (error) {
-        // pass
-    }
-    const [supportedModels, setSupportedModels] = useState<Model[]>(modelList);
-    const [selectedModel, setSelectedModel] = useState<Model>(lastUsedModel || DEFAULT_MODEL);
-
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
         isLibrarySearch: boolean = false
@@ -72,7 +40,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         e.preventDefault();
         chatCompletion(userMessage, isCommandPressed || isLibrarySearch);
     };
-    
 
     const chatCompletion = async (
         query: string,
@@ -234,12 +201,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Button Row */}
                 <div className="flex flex-row items-center pt-2">
-                    <ModelSelectionButton
-                        selectedModel={selectedModel}
-                        setSelectedModel={setSelectedModel}
-                        supportedModels={supportedModels}
-                        setSupportedModels={setSupportedModels}
-                    />
+                    <ModelSelectionButton />
                     <div className="flex-1" />
                     <div className="flex gap-2">
                         <Button
