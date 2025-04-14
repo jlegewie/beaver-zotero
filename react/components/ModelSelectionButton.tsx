@@ -9,6 +9,8 @@ import { chatService, Model } from '../../src/services/chatService';
 import { DEFAULT_MODEL } from './InputArea';
 
 const MAX_MODEL_NAME_LENGTH = 17;
+const REFETCH_INTERVAL_HOURS = 6;
+const REFETCH_INTERVAL_MS = REFETCH_INTERVAL_HOURS * 60 * 60 * 1000;
 
 interface ModelSelectionButtonProps {
     className?: string;
@@ -38,7 +40,7 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
     const [isLoading, setIsLoading] = useState(supportedModels.length === 0);
     const [isMounted, setIsMounted] = useState(false);
 
-    const fetchModelsDebounced = useCallback(async () => {
+    const fetchModels = useCallback(async () => {
         if (!isMounted) return [];
         console.log("Fetching model list...");
         try {
@@ -46,7 +48,7 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
             if (isMounted) {
                 setSupportedModels(models);
                 setPref('supportedModels', JSON.stringify(models));
-                console.log("Models fetched and stored:", models);
+                setPref('supportedModelsLastFetched', Date.now().toString());
             }
             return models;
         } catch (error) {
@@ -54,12 +56,11 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
             if (isMounted) setSupportedModels([]);
             return [];
         }
-    }, [isMounted]);
+    }, [isMounted, setSupportedModels]);
 
     useEffect(() => {
         setIsMounted(true);
-        let debounceTimeout: number | undefined;
-
+        
         const loadData = async () => {
             const googleKey = getPref('googleGenerativeAiApiKey');
             const openaiKey = getPref('openAiApiKey');
@@ -71,39 +72,44 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
             };
             setApiKeyStatus(currentApiKeyStatus);
 
-            let models: Model[] = [];
+            let cachedModels: Model[] = [];
             const cachedModelsPref = getPref('supportedModels');
+            const lastFetchedPref = getPref('supportedModelsLastFetched');
+            const lastFetchedTime = lastFetchedPref ? parseInt(lastFetchedPref, 10) : 0;
+            const timeSinceLastFetch = Date.now() - lastFetchedTime;
+
             try {
                 if (cachedModelsPref) {
-                    models = JSON.parse(cachedModelsPref);
-                    if (!Array.isArray(models)) models = [];
+                    cachedModels = JSON.parse(cachedModelsPref);
+                    if (!Array.isArray(cachedModels)) cachedModels = [];
                 }
             } catch (e) {
                 console.error("Error parsing cached supportedModels:", e);
-                models = [];
+                cachedModels = [];
             }
-
-            setSupportedModels(models);
-            filterAndSetAvailableModels(models, currentApiKeyStatus);
+            
+            setSupportedModels(cachedModels); // Set initially from cache
+            filterAndSetAvailableModels(cachedModels, currentApiKeyStatus); // Filter initially
 
             const hasAnyKey = currentApiKeyStatus.google || currentApiKeyStatus.openai || currentApiKeyStatus.anthropic;
-            if (hasAnyKey) {
-                clearTimeout(debounceTimeout);
-                debounceTimeout = Zotero.getMainWindow().setTimeout(async () => {
-                    const fetchedModels = await fetchModelsDebounced();
-                    setApiKeyStatus(() => {
-                        const latestKeys = {
-                            google: !!getPref('googleGenerativeAiApiKey'),
-                            openai: !!getPref('openAiApiKey'),
-                            anthropic: !!getPref('anthropicApiKey'),
-                        };
-                        filterAndSetAvailableModels(fetchedModels, latestKeys);
-                        return latestKeys;
-                    });
-                    setIsLoading(false);
-                }, 1000);
-            } else {
+            const shouldFetch = hasAnyKey && (cachedModels.length === 0 || timeSinceLastFetch > REFETCH_INTERVAL_MS);
+            
+            if (shouldFetch) {
+                console.log("Fetching models because list is empty or outdated.");
+                setIsLoading(true);
+                const fetchedModels = await fetchModels();
+                // Refetch API keys status in case they changed while fetching
+                const latestKeys = {
+                    google: !!getPref('googleGenerativeAiApiKey'),
+                    openai: !!getPref('openAiApiKey'),
+                    anthropic: !!getPref('anthropicApiKey'),
+                };
+                setApiKeyStatus(latestKeys);
+                filterAndSetAvailableModels(fetchedModels, latestKeys);
                 setIsLoading(false);
+            } else {
+                console.log("Using cached models.");
+                setIsLoading(false); // Already loaded from cache or no keys
             }
         };
 
@@ -115,15 +121,24 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
                 return false;
             });
             setAvailableModels(filtered);
+
+            // Ensure selectedModel is still available, otherwise reset to default
+            const isSelectedModelAvailable = filtered.some(m => m.model_id === selectedModel.model_id) || selectedModel.model_id === DEFAULT_MODEL.model_id;
+            if (!isSelectedModelAvailable && filtered.length > 0) {
+                setSelectedModel(filtered[0]);
+                setPref('lastUsedModel', JSON.stringify(filtered[0]));
+            } else if (!isSelectedModelAvailable && filtered.length === 0) {
+                setSelectedModel(DEFAULT_MODEL);
+                setPref('lastUsedModel', JSON.stringify(DEFAULT_MODEL));
+            }
         };
 
         loadData();
 
         return () => {
             setIsMounted(false);
-            clearTimeout(debounceTimeout);
         };
-    }, [fetchModelsDebounced]);
+    }, [fetchModels, selectedModel, setSelectedModel]);
 
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
