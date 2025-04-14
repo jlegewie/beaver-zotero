@@ -41,16 +41,23 @@ const InputArea: React.FC<InputAreaProps> = ({
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     
-    let lastUsedModel = DEFAULT_MODEL;
+    // Model selection
+    let modelList: Model[] = [];
     try {
-        lastUsedModel = JSON.parse(getPref('lastUsedModel'));
+        const supportedModelsPref = JSON.parse(getPref('supportedModels'));
+        if (Array.isArray(supportedModelsPref)) {
+            modelList = supportedModelsPref;
+        }
     } catch (error) {
         // pass
     }
-    let modelList = [];
+    
+    let lastUsedModel = DEFAULT_MODEL;
     try {
-        // if (!Array.isArray(models)) models = [];
-        modelList = JSON.parse(getPref('supportedModels'));
+        const lastUsedModelPref = JSON.parse(getPref('lastUsedModel'));
+        if (modelList.some(m => m.model_id === lastUsedModelPref.model_id)) {
+            lastUsedModel = lastUsedModelPref;
+        }
     } catch (error) {
         // pass
     }
