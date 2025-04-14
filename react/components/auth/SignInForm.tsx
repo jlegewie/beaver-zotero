@@ -2,7 +2,7 @@ import React  from 'react'
 // @ts-ignore: React is defined
 import { useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
-import Button from '../Button'
+import Button from '../button'
 
 const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> = ({ setErrorMsg }) => {
     const [email, setEmail] = useState('')
