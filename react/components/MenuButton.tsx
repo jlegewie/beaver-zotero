@@ -12,8 +12,11 @@ interface MenuButtonProps {
     maxWidth?: string;
     maxHeight?: string;
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     className?: string;
+    style?: React.CSSProperties;
     iconClassName?: string;
+    rightIconClassName?: string;
     buttonLabel?: string;
     disabled?: boolean;
     ariaLabel?: string;
@@ -40,8 +43,11 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     maxWidth = undefined,
     maxHeight = undefined,
     icon,
+    rightIcon,
     className = '',
+    style = {},
     iconClassName = '',
+    rightIconClassName = '',
     buttonLabel,
     ariaLabel,
     disabled = false,
@@ -86,11 +92,12 @@ const MenuButton: React.FC<MenuButtonProps> = ({
         <button
             className={`
                 variant-${variant}
-                ${icon && !buttonLabel ? 'icon-only' : ''}
+                ${((icon || rightIcon) && !buttonLabel) ? 'icon-only' : ''}
                 ${className}`
             }
             ref={buttonRef}
             onClick={handleButtonClick}
+            style={style}
             aria-label={ariaLabel || buttonLabel}
             aria-haspopup="menu"
             aria-expanded={isMenuOpen}
@@ -98,6 +105,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
         >
             {icon && <Icon icon={icon} className={iconClassName} />}
             {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
+            {rightIcon && <Icon icon={rightIcon} className={rightIconClassName} />}
         </button>
     );
 
