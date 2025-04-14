@@ -91,7 +91,7 @@ const ModelSelectionButton: React.FC = () => {
         });
 
         items.push({
-            label: 'Your API Keys',
+            label: 'Bring Your Own Key',
             isGroupHeader: true,
             onClick: () => {},
         });
