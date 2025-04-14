@@ -14,6 +14,8 @@ interface ModelSelectionButtonProps {
     className?: string;
     selectedModel: Model;
     setSelectedModel: (model: Model) => void;
+    supportedModels: Model[];
+    setSupportedModels: (models: Model[]) => void;
 }
 
 /**
@@ -24,15 +26,16 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
     className = '',
     selectedModel,
     setSelectedModel,
+    supportedModels,
+    setSupportedModels,
 }) => {
-    const [supportedModels, setSupportedModels] = useState<Model[]>([]);
     const [availableModels, setAvailableModels] = useState<Model[]>([]);
     const [apiKeyStatus, setApiKeyStatus] = useState({
         google: false,
         openai: false,
         anthropic: false,
     });
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(supportedModels.length === 0);
     const [isMounted, setIsMounted] = useState(false);
 
     const fetchModelsDebounced = useCallback(async () => {
@@ -58,8 +61,6 @@ const ModelSelectionButton: React.FC<ModelSelectionButtonProps> = ({
         let debounceTimeout: number | undefined;
 
         const loadData = async () => {
-            setIsLoading(true);
-
             const googleKey = getPref('googleGenerativeAiApiKey');
             const openaiKey = getPref('openAiApiKey');
             const anthropicKey = getPref('anthropicApiKey');
