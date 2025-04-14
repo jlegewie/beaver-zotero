@@ -63,10 +63,11 @@ export class QueueService extends ApiService {
     /**
      * Mark an upload as complete
      * @param item Queue item
+     * @param pageCount Number of pages in the attachment
      * @returns Promise resolving to success indicator
      */
-    async completeUpload(item: UploadQueueItem): Promise<boolean> {
-        return this.post<boolean>('/queue/complete', { item });
+    async completeUpload(item: UploadQueueItem, pageCount: number | null = null): Promise<boolean> {
+        return this.post<boolean>('/queue/complete', { item, page_count: pageCount });
     }
 
     /**
