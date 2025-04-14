@@ -9,6 +9,7 @@ import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
+import { Model, selectedModelAtom, DEFAULT_MODEL } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { getAppState } from '../utils/appState';
@@ -74,6 +75,9 @@ export const generateResponseAtom = atom(
         const threadMessages = get(threadMessagesAtom);
         const threadSources = get(threadSourcesAtom);
 
+        // Get current model
+        const model = get(selectedModelAtom);
+
         // Create user and assistant messages
         const userMsg = createUserMessage(payload.content);
         const assistantMsg = createAssistantMessage();
@@ -110,6 +114,7 @@ export const generateResponseAtom = atom(
                 } as MessageAttachment)),
                 payload.appState,
                 payload.isLibrarySearch,
+                model,
                 set
             );
         }
@@ -138,6 +143,7 @@ export const regenerateFromMessageAtom = atom(
         const threadMessages = get(threadMessagesAtom);
         const threadSources = get(threadSourcesAtom);
         const currentThreadId = get(currentThreadIdAtom);
+        const model = get(selectedModelAtom);
         if (!currentThreadId) return null;
 
         // Find the index of the last user message
@@ -177,6 +183,7 @@ export const regenerateFromMessageAtom = atom(
                 [],                 // sources remain unchanged
                 getAppState(),      // current app state
                 false,              // isLibrarySearch remains unchanged
+                model,
                 set
             );
         }
@@ -224,8 +231,25 @@ function _processChatCompletionViaBackend(
     attachments: MessageAttachment[],
     appState: AppState,
     isLibrarySearch: boolean,
+    model: Model,
     set: any
 ) {
+    // Set user API key
+    let userApiKey = undefined;
+    if (!model.app_key) {
+        if (model.provider === 'google') {
+            userApiKey = getPref('googleGenerativeAiApiKey') || undefined;
+        } else if (model.provider === 'openai') {
+            userApiKey = getPref('openAiApiKey') || undefined;
+        } else if (model.provider === 'anthropic') {
+            userApiKey = getPref('anthropicApiKey') || undefined;
+        }
+        if (!userApiKey) {
+            model = DEFAULT_MODEL;
+        }
+    }
+
+    // Set payload
     const payload = {
         thread_id: currentThreadId,
         user_message_id: userMessageId,
@@ -234,7 +258,8 @@ function _processChatCompletionViaBackend(
         attachments: attachments,
         tool_request: isLibrarySearch ? search_tool_request : null,
         custom_instructions: getPref('customInstructions') || undefined,
-        user_api_key: getPref('googleGenerativeAiApiKey') || undefined
+        user_api_key: userApiKey,
+        model: model
     } as ChatCompletionRequestBody;
     if (appState.view == "reader") {
         payload.app_state = appState;
