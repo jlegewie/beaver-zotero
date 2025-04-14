@@ -3,7 +3,7 @@
  * @param {Zotero.Item} item - The PDF attachment item
  * @returns {Promise<Number|null>} - A promise that resolves with the page count or null if unavailable
  */
-export async function getPDFPageCount(item: Zotero.Item) {
+export async function getPDFPageCount(item: Zotero.Item): Promise<number | null> {
     if (!item.isPDFAttachment()) {
         return null;
     }
