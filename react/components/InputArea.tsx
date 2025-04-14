@@ -40,12 +40,21 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    
     let lastUsedModel = DEFAULT_MODEL;
     try {
         lastUsedModel = JSON.parse(getPref('lastUsedModel'));
     } catch (error) {
         // pass
     }
+    let modelList = [];
+    try {
+        // if (!Array.isArray(models)) models = [];
+        modelList = JSON.parse(getPref('supportedModels'));
+    } catch (error) {
+        // pass
+    }
+    const [supportedModels, setSupportedModels] = useState<Model[]>(modelList);
     const [selectedModel, setSelectedModel] = useState<Model>(lastUsedModel || DEFAULT_MODEL);
 
     const handleSubmit = async (
@@ -220,6 +229,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton
                         selectedModel={selectedModel}
                         setSelectedModel={setSelectedModel}
+                        supportedModels={supportedModels}
+                        setSupportedModels={setSupportedModels}
                     />
                     <div className="flex-1" />
                     <div className="flex gap-2">
