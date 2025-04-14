@@ -7,6 +7,7 @@ pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
 pref("anthropicApiKey", "");
 pref("lastUsedModel", "");
+pref("supportedModelsLastFetched", "");
 pref("supportedModels","[]");
 
 // Citation format: author-year or numeric

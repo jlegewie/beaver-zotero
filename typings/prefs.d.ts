@@ -14,6 +14,7 @@ declare namespace _ZoteroTypes {
       "openAiApiKey": string;
       "anthropicApiKey": string;
       "lastUsedModel": string;
+      "supportedModelsLastFetched": string;
       "supportedModels": string;
       "citationFormat": string;
       "citationStyle": string;
