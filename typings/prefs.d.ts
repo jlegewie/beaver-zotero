@@ -13,6 +13,8 @@ declare namespace _ZoteroTypes {
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
       "anthropicApiKey": string;
+      "lastUsedModel": string;
+      "supportedModels": string;
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
