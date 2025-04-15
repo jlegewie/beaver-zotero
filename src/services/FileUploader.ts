@@ -8,7 +8,8 @@
 
 import PQueue from 'p-queue';
 import { queueService, UploadQueueItem, PopQueueResponse, QueueStatus } from "./queueService";
-import { SyncStatus } from 'react/atoms/ui';
+import { SyncStatus } from '../../react/atoms/ui';
+import { getPDFPageCount } from '../../react/utils/pdfUtils';
 
 
 export interface UploadProgressInfo {
@@ -254,6 +255,10 @@ export class FileUploader {
                 return;
             }
 
+            // Get the page count for PDF attachments
+            const pageCount = await getPDFPageCount(attachment);
+
+            // Get the file path for the attachment
             let filePath: string | null = null;
             filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
@@ -304,7 +309,7 @@ export class FileUploader {
                     }
                     
                     // Use our new completion method
-                    await this.markUploadCompleted(item);
+                    await this.markUploadCompleted(item, pageCount);
                     uploadSuccess = true;
                 } catch (uploadError: any) {
                     if (
@@ -369,10 +374,10 @@ export class FileUploader {
     }
 
     // When marking an upload as completed, also update our progress
-    private async markUploadCompleted(item: UploadQueueItem): Promise<void> {
+    private async markUploadCompleted(item: UploadQueueItem, pageCount: number | null): Promise<void> {
         try {
-            await queueService.completeUpload(item);
-            Zotero.debug(`Beaver File Uploader: Successfully uploaded file for attachment ${item.attachment_key}`, 3);
+            await queueService.completeUpload(item, pageCount);
+            Zotero.debug(`Beaver File Uploader: Successfully uploaded file for attachment ${item.attachment_key} (page count: ${pageCount})`, 3);
             
             // Increment our local completed count immediately
             // This provides immediate feedback without waiting for the next server poll
