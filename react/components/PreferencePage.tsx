@@ -1,7 +1,7 @@
 import React from "react";
 // @ts-ignore no idea
 import { useState, useCallback, useEffect } from "react";
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { UserIcon, LogoutIcon, LinkIcon, CancelIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon } from './icons';
@@ -10,7 +10,9 @@ import Button from "./button";
 import { supabase } from "../../src/services/supabaseClient";
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
-import { chatService, ProviderType, ErrorType } from '../../src/services/chatService';
+import { chatService, ErrorType } from '../../src/services/chatService';
+import { ProviderType } from '../atoms/models';
+import { profileAtom } from "../atoms/profile";
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -60,6 +62,7 @@ interface QuickPromptSettingsProps {
 const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt, onChange }) => {
     const [text, setText] = useState(prompt.text);
     const [title, setTitle] = useState(prompt.title);
+    const profile = useAtomValue(profileAtom);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = event.target.value;
@@ -300,6 +303,7 @@ const PreferencePage: React.FC = () => {
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    const profile = useAtomValue(profileAtom);
 
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
@@ -344,11 +348,15 @@ const PreferencePage: React.FC = () => {
             <SectionHeader>Account</SectionHeader>
             {user ? (
                 <div className="display-flex flex-col gap-3">
-                    <div className="display-flex flex-row items-center gap-4">
+                    <div className="display-flex flex-row items-center gap-2">
                         <span className="font-color-secondary">Signed in as:</span>
                         <span className="font-semibold font-color-primary">{user.email}</span>
                     </div>
-                    <div className="display-flex flex-row items-center gap-3">
+                    <div className="display-flex flex-row items-center gap-2">
+                        <span className="font-color-secondary">Plan:</span>
+                        <span className="font-semibold font-color-primary">{profile?.display_name || 'Unknown'}</span>
+                    </div>
+                    <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
                         <Button variant="outline" icon={LogoutIcon} onClick={handleLogout}>Logout</Button>
                     </div>
