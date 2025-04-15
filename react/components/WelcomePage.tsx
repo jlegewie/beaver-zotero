@@ -1,6 +1,6 @@
 import React from "react";
 // @ts-ignore no idea
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Button from "./button";
 import FileStatusStats from "./FileStatusStats";
 import FileStatusDisplay from "./FileStatusDisplay";
@@ -14,6 +14,7 @@ import { getAppState } from "../utils/appState";
 import { isStreamingAtom } from '../atoms/threads';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { currentSourcesAtom } from "../atoms/input";
+import { fetchProfileAtom } from "../atoms/profile";
 
 const getQuickPromptPreferences = (): QuickPrompt[] => {
     const quickPrompts: QuickPrompt[] = [];
@@ -92,8 +93,15 @@ const WelcomePage: React.FC = () => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
+    const fetchProfile = useSetAtom(fetchProfileAtom);
 
     // Realtime listening for file status updates
+    useFileStatus();
+
+    useEffect(() => {
+        console.log('Fetching profile');
+        fetchProfile();
+    }, []);
     useFileStatus();
 
     const handleQuickPrompt = async (
