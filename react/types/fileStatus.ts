@@ -23,6 +23,7 @@ export interface FileStatus {
 
     // Docling processing status
     docling_unavailable: number;
+    docling_balance_insufficient: number;
     docling_queued: number;
     docling_processing: number;
     docling_converted: number;
