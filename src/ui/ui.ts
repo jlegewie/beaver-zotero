@@ -20,14 +20,14 @@ export class BeaverUIFactory {
         function createMountingElement(id: string, location: 'library' | 'reader') {
             const mountPoint = win.document.createXULElement("vbox");
             mountPoint.setAttribute("id", id);
-            mountPoint.setAttribute("class", "flex flex-1 h-full min-w-0");
+            mountPoint.setAttribute("class", "display-flex flex-1 h-full min-w-0");
             mountPoint.setAttribute("style", "min-width: 0px; display: none;");
             
             // Create a div inside the vbox as mount point for the React component
             const reactContainer = win.document.createElement("div");
             reactContainer.setAttribute("id", `beaver-react-root-${location}`);
             reactContainer.setAttribute("data-location", location);
-            reactContainer.setAttribute("class", "flex flex-1 flex-col h-full min-w-0");
+            reactContainer.setAttribute("class", "display-flex flex-1 flex-col h-full min-w-0");
             mountPoint.appendChild(reactContainer);
             
             return { mountPoint, reactContainer };

@@ -101,10 +101,10 @@ const DatabaseStatusIndicator: React.FC = () => {
     
     // Create the tooltip content
     const customContent = (
-        <div className="flex flex-col gap-3 px-0 py-1 max-w-xs">
-            <div className="card flex flex-col gap-3 items-start">
-                <div className="flex flex-row justify-between items-center w-full">
-                    <div className="flex items-center gap-3">
+        <div className="display-flex flex-col gap-3 px-0 py-1 max-w-xs">
+            <div className="card display-flex flex-col gap-3 items-start">
+                <div className="display-flex flex-row justify-between items-center w-full">
+                    <div className="display-flex items-center gap-3">
                         {syncStatus === 'in_progress' ? (
                             <Spinner size={14} />
                         ) : syncStatus === 'failed' ? (
@@ -133,8 +133,8 @@ const DatabaseStatusIndicator: React.FC = () => {
                 </span>
             </div>
             
-            <div className="card flex flex-col gap-3 items-start">
-                <div className="flex flex-row items-center gap-3">
+            <div className="card display-flex flex-col gap-3 items-start">
+                <div className="display-flex flex-row items-center gap-3">
                     {fileStatus === 'in_progress' ? (
                         <Spinner size={14} />
                     ) : fileStatus === 'failed' ? (

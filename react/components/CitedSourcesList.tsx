@@ -20,7 +20,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
                 {sources.map((source, index) => (
-                    <div key={index} className={`p-2 rounded-md flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                    <div key={index} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         <div className="p-2">
                             <div className="source-citation text-sm">
@@ -29,11 +29,11 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                         </div>
 
                         {/* Right column */}
-                        <div className="flex flex-col justify-between w-full min-w-0">
+                        <div className="display-flex flex-col justify-between w-full min-w-0">
                             {/* Right top section */}
-                            <div className="flex flex-row w-full items-center min-w-0">
+                            <div className="display-flex flex-row w-full items-center min-w-0">
                                 
-                                <div className="flex flex-1 min-w-0 p-2">
+                                <div className="display-flex flex-1 min-w-0 p-2">
                                     {source.icon &&
                                         <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                             <CSSItemTypeIcon className="scale-85" itemType={source.icon} />
@@ -43,7 +43,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         {source.name}
                                     </span>
                                 </div>
-                                <div className="flex gap-2 flex-shrink-0">
+                                <div className="display-flex gap-2 flex-shrink-0">
                                     {source.parentKey &&
                                         <IconButton
                                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={10} />}
@@ -51,7 +51,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                             onClick={() => saveAsNote(source)}
                                             ariaLabel="Save as Item Note"
                                             title="Save as Item Note"
-                                            className="scale-90 flex"
+                                            className="scale-90 display-flex"
                                         />
                                     }
                                     <IconButton
@@ -60,7 +60,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         onClick={() => revealSource(source)}
                                         ariaLabel="Reveal source"
                                         title="Reveal"
-                                        className="scale-90 flex"
+                                        className="scale-90 display-flex"
                                     />
                                     <IconButton
                                         icon={() => <ZoteroIcon icon={ZOTERO_ICONS.OPEN} size={10} />}
@@ -68,7 +68,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         onClick={() => openSource(source)}
                                         ariaLabel="Open source"
                                         title="Open"
-                                        className="scale-90 flex"
+                                        className="scale-90 display-flex"
                                     />
                                 </div>
                             </div>

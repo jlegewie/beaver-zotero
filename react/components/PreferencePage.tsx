@@ -106,14 +106,14 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
     };
 
     return (
-        <div className="flex flex-col gap-2">
-            <div className="flex flex-row gap-3 items-center">
+        <div className="display-flex flex-col gap-2">
+            <div className="display-flex flex-row gap-3 items-center">
                 <label className="font-semibold text-sm font-color-primary">
                     Quick Prompt
                 </label>
                 <label className="font-semibold text-sm font-color-secondary">⌘{index + 1}</label>
             </div>
-            <div className="flex flex-row gap-2 items-center">
+            <div className="display-flex flex-row gap-2 items-center">
                 <label className="text-sm font-color-secondary">Title</label>
                 <input
                     type="text"
@@ -130,7 +130,7 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                 rows={2}
                 className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
             />
-            <div className="flex flex-row gap-4 items-center">
+            <div className="display-flex flex-row gap-4 items-center">
                 <label className={`flex items-center gap-05 text-sm ${prompt.librarySearch ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
                     <input
                         type="checkbox"
@@ -253,7 +253,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 
     return (
         <div className={`flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
-            <div className="flex flex-row items-start gap-1 flex-1 w-full">
+            <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
                 <label htmlFor={id} className="text-sm font-semibold font-color-primary">{label}</label>
                 {linkUrl && (
                     <IconButton
@@ -265,7 +265,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     />
                 )}
             </div>
-            <div className="flex flex-row items-start gap-2 mt-1 mb-1 flex-1 w-full">
+            <div className="display-flex flex-row items-start gap-2 mt-1 mb-1 flex-1 w-full">
                 <input
                     id={id}
                     type="password"
@@ -332,9 +332,9 @@ const PreferencePage: React.FC = () => {
     return (
         <div
             id="beaver-preferences"
-            className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-2 scrollbar min-w-0 p-4"
+            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-2 scrollbar min-w-0 p-4"
         >
-            <div className="flex flex-row items-center gap-4 justify-between">
+            <div className="display-flex flex-row items-center gap-4 justify-between">
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
                 </h1>
@@ -343,12 +343,12 @@ const PreferencePage: React.FC = () => {
             {/* --- Account Section --- */}
             <SectionHeader>Account</SectionHeader>
             {user ? (
-                <div className="flex flex-col gap-3">
-                    <div className="flex flex-row items-center gap-4">
+                <div className="display-flex flex-col gap-3">
+                    <div className="display-flex flex-row items-center gap-4">
                         <span className="font-color-secondary">Signed in as:</span>
                         <span className="font-semibold font-color-primary">{user.email}</span>
                     </div>
-                    <div className="flex flex-row items-center gap-3">
+                    <div className="display-flex flex-row items-center gap-3">
                         <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
                         <Button variant="outline" icon={LogoutIcon} onClick={handleLogout}>Logout</Button>
                     </div>
@@ -374,7 +374,7 @@ const PreferencePage: React.FC = () => {
                     Read more.
                 </a>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="display-flex flex-col gap-3">
                 <ApiKeyInput
                     id="gemini-key"
                     label="Google API Key"
@@ -427,7 +427,7 @@ const PreferencePage: React.FC = () => {
             <div className="text-sm font-color-secondary mb-2">
                 Configure up to 6 quick prompts with keyboard shortcuts (⌘1-⌘6). Enable library search or set conditions based on attachments.
             </div>
-            <div className="flex flex-col gap-5">
+            <div className="display-flex flex-col gap-5">
                 {quickPrompts.map((prompt: QuickPrompt, index: number) => (
                     <QuickPromptSettings
                         key={index}

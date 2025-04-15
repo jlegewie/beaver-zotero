@@ -206,7 +206,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                     label: threadName,
                     onClick: () => handleLoadThread(thread.id),
                     customContent: (
-                        <div className="flex flex-col w-full">
+                        <div className="display-flex flex-col w-full">
                             {editingThreadId === thread.id ? (
                                 // Edit mode
                                 <input
@@ -275,7 +275,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                 <>
                 {hasMore ? (
                     <button 
-                        className="scale-85 variant-outline has-text mb-1 flex items-center justify-center"
+                        className="scale-85 variant-outline has-text mb-1 display-flex items-center justify-center"
                         onClick={loadMoreThreads}
                         disabled={isLoading}
                     >

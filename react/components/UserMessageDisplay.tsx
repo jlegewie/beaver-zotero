@@ -42,7 +42,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             
             {/* Message sources */}
             {messageSources.length > 0 && (
-                <div className="flex flex-wrap gap-3 mb-2">
+                <div className="display-flex flex-wrap gap-3 mb-2">
                     {messageSources.map((source, index) => (
                         <SourceButton
                             key={index}

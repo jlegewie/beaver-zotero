@@ -124,7 +124,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             style={{ minHeight: 'fit-content' }}
         >
             {/* Message sources */}
-            <div className="flex flex-wrap gap-3 mb-2">
+            <div className="display-flex flex-wrap gap-3 mb-2">
                 <AddSourcesMenu
                     showText={currentSources.length == 0 && threadSourceCount == 0}
                     onClose={() => {
@@ -161,7 +161,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             </div>
 
             {/* Input Form */}
-            <form onSubmit={handleSubmit} className="flex flex-col">
+            <form onSubmit={handleSubmit} className="display-flex flex-col">
                 {/* Message Input  */}
                 <div className="mb-2 -ml-1">
                     <textarea
@@ -200,10 +200,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
 
                 {/* Button Row */}
-                <div className="flex flex-row items-center pt-2">
+                <div className="display-flex flex-row items-center pt-2">
                     <ModelSelectionButton />
                     <div className="flex-1" />
-                    <div className="flex gap-2">
+                    <div className="display-flex gap-2">
                         <Button
                             type={(isCommandPressed && !isStreaming && userMessage.length > 0) ? "button" : undefined}
                             variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}

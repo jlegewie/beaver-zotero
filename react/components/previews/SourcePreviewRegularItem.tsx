@@ -82,7 +82,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
             
             {/* Combined Attachments and Notes Section */}
             <div className="mt-3">
-                <div className="flex items-center font-color-secondary mb-2">
+                <div className="display-flex items-center font-color-secondary mb-2">
                     <ZoteroIcon 
                         icon={ZOTERO_ICONS.ATTACHMENTS} 
                         size={15} 

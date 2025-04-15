@@ -30,8 +30,8 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const closeChatShortcut = Zotero.isMac ? '⌘L' : 'Ctrl+L';
 
     return (
-        <div id="beaver-header" className="flex flex-row px-3 py-2">
-            <div className="flex-1 flex gap-4">
+        <div id="beaver-header" className="display-flex flex-row px-3 py-2">
+            <div className="flex-1 display-flex gap-4">
                 <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
                     <IconButton
                         icon={CancelIcon}
@@ -55,7 +55,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                 />
             </div>
             {isAuthenticated && (
-                <div className="flex gap-4">
+                <div className="display-flex gap-4">
                     <DatabaseStatusIndicator />
                     <UserAccountMenuButton
                         className="scale-14"

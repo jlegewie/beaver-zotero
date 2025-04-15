@@ -177,7 +177,7 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                 >
                     {renderContent()}
                     {readerItemKey == source.itemKey &&
-                        <div className="flex flex-row items-center gap-1 opacity-50">
+                        <div className="display-flex flex-row items-center gap-1 opacity-50">
                             <Icon icon={BookmarkIcon} className="scale-11" />
                             <span>Current Reader Item, page {getCurrentPage()}</span>
                         </div>
@@ -185,8 +185,8 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                 </div>
 
                 {/* buttons */}
-                <div className="px-1 pt-1 flex flex-row items-center">
-                    <div className="flex-1 gap-3 flex">
+                <div className="px-1 pt-1 display-flex flex-row items-center">
+                    <div className="flex-1 gap-3 display-flex">
                         <Button
                             variant="ghost"
                             onClick={handlePin}
@@ -220,7 +220,7 @@ const SourcePreview: React.FC<SourcePreviewProps> = ({ source }) => {
                             Remove
                         </Button>
                     </div>
-                    <div className="flex">
+                    <div className="display-flex">
                         <IconButton
                             icon={CancelIcon}
                             variant="ghost"

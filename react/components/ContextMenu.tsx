@@ -26,7 +26,7 @@ export interface MenuItem {
      *     label: "Custom Item", // still needed for accessibility
      *     onClick: () => console.log("Custom item clicked"),
      *     customContent: (
-     *       <div className="flex flex-col">
+     *       <div className="display-flex flex-col">
      *         <span className="font-bold">Custom Title</span>
      *         <span className="text-xs">Additional description text</span>
      *       </div>
@@ -353,7 +353,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     className={`
                         ${item.isDivider ? 'border-t border-quinary my-1' : ''}
                         ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
-                          `flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
+                          `display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                           ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
                         }
@@ -390,18 +390,18 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         <span className="truncate">{item.label}</span>
                     ) : item.customContent ? (
                         // Render custom content if provided
-                        <div className="w-full relative flex flex-row">
+                        <div className="w-full relative display-flex flex-row">
                             <div className="flex-1 overflow-hidden">
                                 {item.customContent}
                             </div>
                             
                             {/* Action buttons - shown based on state */}
                             {activeActionsIndex === index && item.actionButtons && item.actionButtons.length > 0 && (
-                                <div className={`flex items-center ml-1 gap-3 transition-opacity ${activeActionsIndex === index ? 'opacity-100' : 'opacity-0'}`}>
+                                <div className={`display-flex items-center ml-1 gap-3 transition-opacity ${activeActionsIndex === index ? 'opacity-100' : 'opacity-0'}`}>
                                     {item.actionButtons.map((btn, btnIndex) => (
                                         <button
                                             key={btnIndex}
-                                            className={`variant-thread-menu flex ${btn.className || ''}`}
+                                            className={`variant-thread-menu display-flex ${btn.className || ''}`}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 btn.onClick(e);
@@ -421,7 +421,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         </div>
                     ) : (
                         // Otherwise render default icon + label layout
-                        <span className="flex items-center gap-2 w-full min-w-0">
+                        <span className="display-flex items-center gap-2 w-full min-w-0">
                             {item.icon && (
                                 <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                             )}

@@ -211,7 +211,7 @@
 }
 
 /* Layout Utilities */
-[id^="beaver-pane-"], [id^="beaver-pane-"] .flex { display: flex; }
+[id^="beaver-pane-"], [id^="beaver-pane-"] .display-flex { display: flex; }
 [id^="beaver-pane-"] .flex-none { flex: none; }
 [id^="beaver-pane-"] .flex-row { flex-direction: row; }
 [id^="beaver-pane-"] .flex-col { flex-direction: column; }

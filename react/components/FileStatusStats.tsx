@@ -67,7 +67,7 @@ const Stat: React.FC<{
         : '';
 
     return (
-        <div className="flex flex-col gap-05 items-end">
+        <div className="display-flex flex-col gap-05 items-end">
             <div className="font-color-tertiary text-sm">
                 {label}
                 {info && <Icon icon={InformationCircleIcon} className="scale-85 mb-1 -mr-2" />}
@@ -146,10 +146,10 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
 
     // Display error codes and counts
     return (
-        <div className="flex flex-col gap-1">
+        <div className="display-flex flex-col gap-1">
             <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Processing Errors</div>
             {isLoading &&
-                <div className="text-base font-color-secondary mb-1 items-center flex flex-row">
+                <div className="text-base font-color-secondary mb-1 items-center display-flex flex-row">
                     <div className="mt-1"><Spinner size={14}/></div>
                     <div className="ml-2 font-color-tertiary">Loading...</div>
                 </div>
@@ -160,7 +160,7 @@ const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ fai
                     <div className="text-base font-color-secondary">No specific error details available.</div>
                 ) : (
                     Object.entries(aggregatedStats).map(([message, count]) => (
-                        <div key={message} className="flex justify-between items-center text-base whitespace-nowrap">
+                        <div key={message} className="display-flex justify-between items-center text-base whitespace-nowrap">
                             <span className="font-color-tertiary mr-4">{message}:</span>
                             <span className="font-color-secondary font-mono">{count}</span>
                         </div>
@@ -181,14 +181,14 @@ const FileStatusStats: React.FC<{
     const fileStats = useAtomValue(fileStatusStatsAtom);
 
     return (
-        <div className="flex flex-col gap-4">
+        <div className="display-flex flex-col gap-4">
 
             {/* Overall progress */}
-            <div className="flex flex-row items-end">
+            <div className="display-flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Overall</div>
                 <div className="flex-1" />
-                <div className="flex flex-row" style={{ width: 'calc(100% - 140px)', maxWidth: '300px' }}>
-                    <div className="flex flex-col gap-1 items-end w-full">
+                <div className="display-flex flex-row" style={{ width: 'calc(100% - 140px)', maxWidth: '300px' }}>
+                    <div className="display-flex flex-col gap-1 items-end w-full">
                         <div className="font-color-tertiary text-sm">
                             {/* {formatCount(completedFiles) + " / " + formatCount(totalFiles) + " completed"} */}
                             {fileStats.progress < 100 ? formatPercentage(fileStats.progress) + " completed" : formatCount(fileStats.completedFiles) + " completed"}
@@ -204,10 +204,10 @@ const FileStatusStats: React.FC<{
             </div>
 
             {/* Upload stats */}
-            <div className="flex flex-row items-end">
+            <div className="display-flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Uploads</div>
                 <div className="flex-1" />
-                <div className="flex flex-row gap-5">
+                <div className="display-flex flex-row gap-5">
                     <Stat label="Pending" count={fileStats.uploadPendingCount} isLoading={!fileStats}/>
                     <Stat label="Done" count={fileStats.uploadCompletedCount} isLoading={!fileStats}/>
                     <Stat label="Failed" count={fileStats.uploadFailedCount} isFailed={true} isLoading={!fileStats} />
@@ -215,10 +215,10 @@ const FileStatusStats: React.FC<{
             </div>
 
             {/* File processing stats */}
-            <div className="flex flex-row items-end">
+            <div className="display-flex flex-row items-end">
                 <div className="font-color-secondary text-lg">Processing</div>
                 <div className="flex-1" />
-                <div className="flex flex-row gap-5">
+                <div className="display-flex flex-row gap-5">
                     <Stat label="Pending" count={fileStats.queuedProcessingCount} isLoading={!fileStats} />
                     {/* <Stat label="Processing" count={fileStats.md_processing + fileStats.md_chunked + fileStats.md_converted}/> */}
                     <Stat label="Active" count={fileStats.activeProcessingCount} isLoading={!fileStats}/>

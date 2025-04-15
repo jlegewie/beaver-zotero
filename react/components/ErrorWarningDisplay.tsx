@@ -43,11 +43,11 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
     const showSettingsButton = errorType === 'app_key_limit_exceeded';
     
     return (
-        <div className="flex flex-col gap-0 rounded-md border-quinary mb-3" style={{ borderColor: 'var(--tag-red-tertiary)' }}>
-            <div className="font-color-red p-3 flex flex-row gap-3 items-start">
+        <div className="display-flex flex-col gap-0 rounded-md border-quinary mb-3" style={{ borderColor: 'var(--tag-red-tertiary)' }}>
+            <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                <div className="flex flex-col gap-2">
-                    <div className="flex flex-row gap-4 items-center">
+                <div className="display-flex flex-col gap-2">
+                    <div className="display-flex flex-row gap-4 items-center">
                         <div>Error</div>
                         <div className="flex-1"/>
                         {showSettingsButton &&
@@ -87,11 +87,11 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> =
     const showSettingsIcon = warning.type === 'user_key_failed_unexpected' || warning.type === 'user_key_rate_limit_exceeded' || warning.type === 'user_key_failed';
     
     return (
-        <div className="flex flex-col gap-0 rounded-md border-quinary mb-4" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
-            <div className="font-color-yellow p-3 flex flex-row gap-3 items-start">
+        <div className="display-flex flex-col gap-0 rounded-md border-quinary mb-4" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
+            <div className="font-color-yellow p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                <div className="flex flex-col gap-2">
-                    <div className="flex flex-row gap-2 items-center">
+                <div className="display-flex flex-col gap-2">
+                    <div className="display-flex flex-row gap-2 items-center">
                         <div>Warning</div>
                         <div className="flex-1"/>
                         {showSettingsIcon &&

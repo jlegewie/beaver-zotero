@@ -10,7 +10,7 @@ interface SourcePreviewHeadingProps {
 
 const SourcePreviewHeading: React.FC<SourcePreviewHeadingProps> = ({ source, item }) => {
     return (
-        <span className="flex items-center font-color-primary">
+        <span className="display-flex items-center font-color-primary">
             <span className="fit-content">
                 {<CSSItemTypeIcon itemType={item.getItemTypeIconName()} className="scale-85" />}
             </span>

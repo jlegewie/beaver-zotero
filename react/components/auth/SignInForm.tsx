@@ -28,10 +28,10 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
     
     return (
         <>
-        <form onSubmit={handleSignIn} className="flex flex-col gap-3 w-full">
+        <form onSubmit={handleSignIn} className="display-flex flex-col gap-3 w-full">
             {/* <h2 className="text-lg font-semibold text-center mb-2">Sign In</h2> */}
             
-            <div className="flex flex-col gap-1">
+            <div className="display-flex flex-col gap-1">
                 <label htmlFor="signInEmail" className="text-sm font-medium">Email</label>
                 <input
                     id="signInEmail"
@@ -44,7 +44,7 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
                 />
             </div>
             
-            <div className="flex flex-col gap-1">
+            <div className="display-flex flex-col gap-1">
                 <label htmlFor="signInPassword" className="text-sm font-medium">Password</label>
                 <input
                     id="signInPassword"
@@ -57,7 +57,7 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
                 />
             </div>
             
-            <div className="flex flex-row">
+            <div className="display-flex flex-row">
                 <Button 
                     type="submit" 
                     variant="solid" 

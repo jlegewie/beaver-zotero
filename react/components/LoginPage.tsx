@@ -9,11 +9,11 @@ const LoginPage: React.FC = () => {
     return (
         <div 
             id="beaver-welcome"
-            className="flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 p-4"
+            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 p-4"
         >
-            <div className="flex flex-col items-center justify-center max-w-md mx-auto w-full">
+            <div className="display-flex flex-col items-center justify-center max-w-md mx-auto w-full">
                 {/* Logo and header section */}
-                <div className="flex flex-col items-center mb-4 mt-6">
+                <div className="display-flex flex-col items-center mb-4 mt-6">
                     <div className="mb-2">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="var(--fill-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -30,9 +30,9 @@ const LoginPage: React.FC = () => {
                     <SignInForm setErrorMsg={setErrorMsg} />
                     
                     {/* Additional links */}
-                    {/* <div className="flex flex-col items-center gap-2 mt-4 text-sm">
+                    {/* <div className="display-flex flex-col items-center gap-2 mt-4 text-sm">
                         <a href="#" className="font-color-tertiary hover:font-color-primary transition">Forgot password?</a>
-                        <div className="flex items-center gap-1">
+                        <div className="display-flex items-center gap-1">
                             <span className="font-color-tertiary">Don't have an account?</span>
                             <a href="#" className="font-color-secondary hover:font-color-primary transition">Register</a>
                         </div>

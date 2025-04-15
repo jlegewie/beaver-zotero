@@ -343,7 +343,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                 role="menuitem"
                                 tabIndex={focusedIndex === index ? 0 : -1}
                                 className={`
-                                    flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
                                     ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
                                 `}
                                 style={{ maxWidth: '100%', minWidth: 0 }}
@@ -368,7 +368,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                 {item.customContent ? (
                                     item.customContent
                                 ) : (
-                                    <span className="flex items-center gap-2 w-full min-w-0">
+                                    <span className="display-flex items-center gap-2 w-full min-w-0">
                                         {item.icon && (
                                             <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                                         )}
@@ -420,7 +420,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                 role="menuitem"
                                 tabIndex={focusedIndex === index ? 0 : -1}
                                 className={`
-                                    flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
                                     ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
                                 `}
                                 style={{ maxWidth: '100%', minWidth: 0 }}
@@ -445,7 +445,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                                 {item.customContent ? (
                                     item.customContent
                                 ) : (
-                                    <span className="flex items-center gap-2 w-full min-w-0">
+                                    <span className="display-flex items-center gap-2 w-full min-w-0">
                                         {item.icon && (
                                             <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                                         )}

@@ -141,7 +141,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         >
             {/* Drag overlay */}
             {isDragging && (
-                <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--color-background)', opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}>
+                <div className="absolute inset-0 display-flex items-center justify-center z-10" style={{ background: 'var(--color-background)', opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}>
                     <div className="text-center p-4">
                         <ZoteroIcon 
                             icon={ZOTERO_ICONS.ATTACHMENTS} 
@@ -157,7 +157,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
 
             {/* Error message */}
             {dragError && (
-                <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'var(--color-background)', opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}>
+                <div className="absolute inset-0 display-flex items-center justify-center z-10" style={{ background: 'var(--color-background)', opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}>
                     <div className="text-center p-4 font-color-red">
                         {dragError}
                     </div>

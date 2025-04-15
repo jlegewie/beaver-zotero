@@ -142,7 +142,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
             {/* Copy, repeat, and share buttons - visible on hover */}
             <div
                 className={`
-                    flex flex-row items-center pt-2 mr-4 ml-1
+                    display-flex flex-row items-center pt-2 mr-4 ml-1
                     ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
                     ${isStreaming && isLastMessage ? 'hidden' : ''}`}
             >
@@ -163,7 +163,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                         </Button>
                     )}
                 </div>
-                <div className="flex gap-4">
+                <div className="display-flex gap-4">
                     {message.status !== 'error' &&
                         <MenuButton
                             icon={ShareIcon}

@@ -27,7 +27,7 @@ const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className = '', ic
     const formattedCount = formatCount(count);
 
     return (
-        <span className={`flex items-center gap-1 ${className}`}>
+        <span className={`display-flex items-center gap-1 ${className}`}>
             <Icon icon={icon} className={`${iconClassName}`} />
             <span className="text-lg">{formattedCount}</span>
         </span>
@@ -77,13 +77,13 @@ const FileStatusDisplay: React.FC<{
     return (
         <Button
             variant="ghost"
-            className={`flex fit-content items-center ${animationClass} ${className}`}
+            className={`display-flex fit-content items-center ${animationClass} ${className}`}
             ariaLabel="File processing status"
             title="File Processing Status"
             onClick={() => setShowFileStatus(!showFileStatus)}
         >
-            {/* <div className="flex flex-row gap-2"> */}
-            <div className="flex flex-row gap-4">
+            {/* <div className="display-flex flex-row gap-2"> */}
+            <div className="display-flex flex-row gap-4">
                 <StatusItem icon={SyncIcon} count={fileStats.activeCount} iconClassName={syncIconClassName} />
                 <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} iconClassName="scale-115 text-green-500" />
                 <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} iconClassName="scale-115 text-red-500" />

@@ -104,7 +104,7 @@ const ModelSelectionButton: React.FC = () => {
                 },
                 icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
-                    <span className="flex items-center gap-2 min-w-0">
+                    <span className="display-flex items-center gap-2 min-w-0">
                         <span className={`flex text-sm truncate ${selectedModel.model_id === model.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                             {model.name}
                         </span>

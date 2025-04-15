@@ -232,7 +232,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         >
             <span className={`
                     px-2 py-1 block
-                    ${singleLine ? 'flex items-center' : ''}
+                    ${singleLine ? 'display-flex items-center' : ''}
                     ${singleLine ? 'single-line' : ''}
                 `}
                 style={{ display: singleLine ? 'flex' : 'block' }}

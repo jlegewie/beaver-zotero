@@ -125,7 +125,7 @@ const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
                                 <span className="scale-70" style={{ marginTop: '-2px' }}>
                                     <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
                                 </span>
-                                <div className="flex flex-col gap-1 min-w-0 font-color-secondary">
+                                <div className="display-flex flex-col gap-1 min-w-0 font-color-secondary">
                                     <span className="truncate text-sm font-color-secondary">
                                         {getDisplayNameFromItem(item)}
                                     </span>

@@ -141,10 +141,10 @@ const AddSourcesMenu: React.FC<{
             onClick: async () => await handleMenuItemClick(source, isValid),
             // disabled: !isValid,
             customContent: (
-                <div className={`flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
+                <div className={`display-flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
                     {getIconElement(item)}
-                    <div className="flex flex-col gap-2 min-w-0 font-color-secondary">
-                        <div className="flex flex-row justify-between min-w-0">
+                    <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
+                        <div className="display-flex flex-row justify-between min-w-0">
                             <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
                                 {getDisplayNameFromItem(item)}
                             </span>
