@@ -13,6 +13,7 @@ export interface FileStatus {
     
     // Markdown processing status
     md_unavailable: number;
+    md_balance_insufficient: number;
     md_queued: number;
     md_processing: number;
     md_converted: number;
