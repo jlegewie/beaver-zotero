@@ -62,7 +62,6 @@ interface QuickPromptSettingsProps {
 const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt, onChange }) => {
     const [text, setText] = useState(prompt.text);
     const [title, setTitle] = useState(prompt.title);
-    const profile = useAtomValue(profileAtom);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = event.target.value;
