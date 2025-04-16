@@ -40,7 +40,7 @@ export interface MessageModel {
     attachments?: MessageAttachment[];
     tool_calls?: ToolCall[];
     app_state?: AppState;
-    status: 'in_progress' | 'completed' | 'error';
+    status: 'in_progress' | 'completed' | 'error' | 'canceled';
     created_at?: string;
     metadata?: Record<string, any>;
     error?: string;

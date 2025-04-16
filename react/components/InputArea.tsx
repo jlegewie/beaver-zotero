@@ -3,7 +3,7 @@ import React, { useState, useRef } from 'react';
 import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, threadSourceCountAtom, newThreadAtom } from '../atoms/threads';
+import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
@@ -13,7 +13,6 @@ import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
-import { selectedModelAtom } from 'react/atoms/models';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -32,6 +31,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
+    const cancelStreamingMessage = useSetAtom(cancelStreamingMessageAtom);
     
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
@@ -58,15 +59,23 @@ const InputArea: React.FC<InputAreaProps> = ({
             isLibrarySearch: isLibrarySearch
         });
 
-        console.log('Chat completion:', query);
+        Zotero.debug(`Chat completion: ${query}`);
     };
 
     const handleStop = () => {
-        console.log('Stopping chat completion');
+        Zotero.debug('Stopping chat completion');
+        if (isCancellable && cancellerHolder.current) {
+            cancelStreamingMessage();
+            cancellerHolder.current();
+            cancellerHolder.current = null;
+            setIsCancellable(false);
+        } else {
+            Zotero.debug('WARNING: handleStop called but no canceller function was found in holder.');
+        }
     };
 
     const handleAddSources = async () => {
-        console.log('Adding context item');
+        Zotero.debug('Adding context item');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -223,7 +232,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
                             className="mr-1"
                             onClick={isStreaming ? handleStop : handleSubmit}
-                            disabled={userMessage.length === 0 && !isStreaming}
+                            disabled={(userMessage.length === 0 && !isStreaming) || (isStreaming && !isCancellable)}
                         >
                             {isStreaming
                                 ? 'Stop'

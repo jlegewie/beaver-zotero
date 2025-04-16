@@ -2,7 +2,17 @@ import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/messages';
 import { MessageModel, AppState, MessageAttachment } from 'react/types/chat/api';
-import { threadMessagesAtom, setMessageStatusAtom, streamToMessageAtom, threadSourcesAtom, currentThreadIdAtom, addOrUpdateMessageAtom, addToolCallSourcesToThreadSourcesAtom } from './threads';
+import {
+    threadMessagesAtom,
+    setMessageStatusAtom,
+    streamToMessageAtom,
+    threadSourcesAtom,
+    currentThreadIdAtom,
+    addOrUpdateMessageAtom,
+    addToolCallSourcesToThreadSourcesAtom,
+    cancellerHolder,
+    isCancellableAtom
+} from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
@@ -292,6 +302,9 @@ function _processChatCompletionViaBackend(
             onDone: () => {
                 // Mark the assistant as completed
                 set(setMessageStatusAtom, { id: assistantMessageId, status: 'completed' });
+                // Clear the holder and the cancellable state
+                cancellerHolder.current = null;
+                set(isCancellableAtom, false);
             },
             onError: (errorType) => {
                 // Mark the assistant message as error
@@ -300,6 +313,9 @@ function _processChatCompletionViaBackend(
                     status: 'error',
                     errorType
                 });
+                // Clear the holder and the cancellable state
+                cancellerHolder.current = null;
+                set(isCancellableAtom, false);
             },
             onWarning: (type: string, data: any) => {
                 // Warning
@@ -315,6 +331,16 @@ function _processChatCompletionViaBackend(
                 console.log(type)
                 console.log(data)
             }
+        },
+        // Store the canceller function directly in the holder
+        // and update the boolean state atom (potentially async)
+        (canceller) => {
+            console.log('Received canceller, storing in holder:', canceller);
+            cancellerHolder.current = canceller;
+            // Update the boolean atom asynchronously to avoid sync interference
+            setTimeout(() => {
+                set(isCancellableAtom, true);
+            }, 0);
         }
     );
 }

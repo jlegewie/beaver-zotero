@@ -24,7 +24,7 @@ export interface ChatMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
     tool_calls?: ToolCall[];
-    status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error';
+    status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error' | 'canceled';
     errorType?: string;
     warnings?: Warning[];
 }

@@ -85,7 +85,7 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
 
     // Extract citation IDs from message content to get the source citations
     const citedSources: SourceCitation[] = useMemo(() => {
-        if (message.status !== 'completed' || !message.content) {
+        if (!(message.status == 'completed' || message.status == 'canceled') || !message.content) {
             return [];
         }
 
