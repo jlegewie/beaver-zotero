@@ -116,7 +116,7 @@ const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
                         return (
                             <div
                                 key={itemId} 
-                                className={`flex flex-row gap-1 items-start min-w-0 p-1 last:border-0 rounded-md cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
+                                className={`display-flex flex-row gap-1 items-start min-w-0 p-1 last:border-0 rounded-md cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
                                 onClick={() => handleItemClick(item)}
                                 onMouseEnter={() => setHoveredItemId(itemId)}
                                 onMouseLeave={() => setHoveredItemId(null)}
