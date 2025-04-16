@@ -165,7 +165,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 {/* Message Input  */}
                 <div className="mb-2 -ml-1">
                     <textarea
-                        ref={inputRef}
+                        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                         value={userMessage}
                         // onChange={(e) => setUserMessage(e.target.value)}
                         onChange={(e) => {
