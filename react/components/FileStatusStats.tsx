@@ -3,9 +3,12 @@ import React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { useAtomValue, useAtom } from 'jotai';
 import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
-import { Icon, InformationCircleIcon, Spinner } from './icons';
+import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from './icons';
 import Tooltip from './Tooltip';
+import IconButton from './IconButton';
 import { attachmentsService } from '../../src/services/attachmentsService';
+import { queueService } from '../../src/services/queueService';
+import { fileUploader } from '../../src/services/FileUploader';
 
 function formatCount(count: number): string {
     if (count >= 10000) {
@@ -180,6 +183,15 @@ const FileStatusStats: React.FC<{
 
     const fileStats = useAtomValue(fileStatusStatsAtom);
 
+    const resetFailedUploads = () => {
+        queueService.resetFailedUploads()
+            .then(() => {
+                console.log('Failed uploads reset');
+                fileUploader.start();
+            })
+            .catch(err => console.error('Failed to reset failed uploads:', err));
+    };
+
     return (
         <div className="display-flex flex-col gap-4">
 
@@ -205,7 +217,14 @@ const FileStatusStats: React.FC<{
 
             {/* Upload stats */}
             <div className="display-flex flex-row items-end">
-                <div className="font-color-secondary text-lg">Uploads</div>
+                <div className="display-flex flex-row items-center gap-2">
+                    <div className="font-color-secondary text-lg">Uploads</div>
+                    {fileStats.uploadFailedCount > 0 && (
+                        <Tooltip content="Retry failed uploads" placement="top">
+                            <IconButton icon={RepeatIcon} variant="ghost-secondary" className="mt-1" onClick={resetFailedUploads} />
+                        </Tooltip>
+                    )}
+                </div>
                 <div className="flex-1" />
                 <div className="display-flex flex-row gap-5">
                     <Stat label="Pending" count={fileStats.uploadPendingCount} isLoading={!fileStats}/>
