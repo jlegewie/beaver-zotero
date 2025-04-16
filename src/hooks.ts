@@ -65,7 +65,14 @@ async function onStartup() {
 
 	BeaverUIFactory.registerShortcuts();
 
-	// BasicExampleFactory.registerPrefs();
+	// Register preference pane
+	// Zotero.PreferencePanes.register({
+	// 	pluginID: addon.data.config.addonID,
+	// 	src: rootURI + "content/preferences.xhtml",
+	// 	label: "Beaver",
+	// 	image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+	// });
+	// ztoolkit.log("Preference pane registered");
 	
 	// BasicExampleFactory.registerNotifier();
 	
