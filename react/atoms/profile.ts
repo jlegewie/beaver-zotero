@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { ProfileWithPlanName } from "../types/profile";
-import { accountService } from "src/services/accountService";
+import { accountService } from "../../src/services/accountService";
 
 export const profileAtom = atom<ProfileWithPlanName | null>(null);
 
