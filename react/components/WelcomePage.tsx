@@ -133,7 +133,7 @@ const WelcomePage: React.FC = () => {
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 p-4"
         >
             {/* <div className="flex-1"/> */}
-            <div style={{height: "10%"}}/>
+            {/* <div style={{height: "10%"}}/> */}
             {prompts.length > 0 && (
                 <>
                 <div className="display-flex flex-row justify-between items-center">
