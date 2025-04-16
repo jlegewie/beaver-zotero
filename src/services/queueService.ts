@@ -90,6 +90,15 @@ export class QueueService extends ApiService {
     }
 
     /**
+     * Reset failed uploads
+     * @returns Promise resolving to success indicator
+     */
+    async resetFailedUploads(): Promise<boolean> {
+        return this.post<boolean>('/queue/reset-failed', {});
+    }
+
+
+    /**
      * Get the status of the upload queue
      * @returns Promise resolving to queue status
      */
