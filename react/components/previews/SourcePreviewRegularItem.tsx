@@ -108,8 +108,8 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
                         <div 
                             key={`att-${child.id}`}
                             className={validItemIds[child.id]
-                                ? `flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${threadSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
-                                : `flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
+                                ? `display-flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${threadSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
+                                : `display-flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
                             }
                             onClick={() => validItemIds[child.id] && !threadSourceKeys.includes(child.key) ? handleToggleItem(child.key) : null}
                         >

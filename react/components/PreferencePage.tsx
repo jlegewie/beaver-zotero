@@ -133,7 +133,7 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                 className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
             />
             <div className="display-flex flex-row gap-4 items-center">
-                <label className={`flex items-center gap-05 text-sm ${prompt.librarySearch ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
+                <label className={`display-flex items-center gap-05 text-sm ${prompt.librarySearch ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
                     <input
                         type="checkbox"
                         checked={prompt.librarySearch}
@@ -142,7 +142,7 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                     />
                     Library Search
                 </label>
-                <label className={`flex items-center gap-05 text-sm ${prompt.requiresAttachment ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
+                <label className={`display-flex items-center gap-05 text-sm ${prompt.requiresAttachment ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
                     <input
                         type="checkbox"
                         checked={prompt.requiresAttachment}
@@ -254,7 +254,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const buttonVariant = 'outline';
 
     return (
-        <div className={`flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
+        <div className={`display-flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
             <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
                 <label htmlFor={id} className="text-sm font-semibold font-color-primary">{label}</label>
                 {linkUrl && (
