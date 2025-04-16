@@ -1,11 +1,14 @@
 import React from 'react';
+// @ts-ignore correct type
+import { useState } from 'react';
 import { Warning } from '../types/messages';
-import { Icon, AlertIcon, SettingsIcon, KeyIcon, CancelIcon } from './icons';
+import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { removeWarningFromMessageAtom } from '../atoms/threads';
 import IconButton from './IconButton';
+import ZoteroItemsList from './ZoteroItemsList';
 
 // Get appropriate error message based on the error type
 const getErrorMessage = (errorType: string) => {
@@ -75,7 +78,7 @@ const getWarning = (type: string) => {
     case 'user_key_failed':
       return "Your API key didn't work. Please check it's correct. Using app's backup key and default model.";
     case 'missing_attachments':
-      return "Error processing attachment. Removed from this conversation.";
+      return "Unable to process the following attachments:";
     default:
       return "Problem with your API key. Using app's backup key and default model.";
   }
@@ -90,7 +93,7 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> =
         <div className="display-flex flex-col gap-0 rounded-md border-quinary mb-4" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
             <div className="font-color-yellow p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-center">
                         <div>Warning</div>
                         <div className="flex-1"/>
@@ -111,9 +114,13 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> =
                         />
                     </div>
                     <div className="text-sm">{getWarning(warning.type)}</div>
+                    <div className="display-flex flex-col -ml-1">
+                        {warning.type === 'missing_attachments' && warning.attachments && (
+                            <ZoteroItemsList messageAttachments={warning.attachments} />
+                        )}
+                    </div>
                 </div>
             </div>
-            
         </div>
     );
 };
