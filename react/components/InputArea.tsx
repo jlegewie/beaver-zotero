@@ -3,7 +3,7 @@ import React, { useState, useRef } from 'react';
 import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom } from '../atoms/threads';
+import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
@@ -33,6 +33,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
     const cancelStreamingMessage = useSetAtom(cancelStreamingMessageAtom);
+    const setIsCancelling = useSetAtom(isCancellingAtom);
     
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
@@ -65,9 +66,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleStop = () => {
         Zotero.debug('Stopping chat completion');
         if (isCancellable && cancellerHolder.current) {
-            cancelStreamingMessage();
+            // Set the cancelling state to true so that onError will cancel the message
+            setIsCancelling(true);
+            // Cancel the html connection (which will trigger the onError event)
             cancellerHolder.current();
             cancellerHolder.current = null;
+            // Reset the cancellable state to false
             setIsCancellable(false);
         } else {
             Zotero.debug('WARNING: handleStop called but no canceller function was found in holder.');

@@ -11,7 +11,9 @@ import {
     addOrUpdateMessageAtom,
     addToolCallSourcesToThreadSourcesAtom,
     cancellerHolder,
-    isCancellableAtom
+    isCancellableAtom,
+    isCancellingAtom,
+    cancelStreamingMessageAtom
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -125,7 +127,8 @@ export const generateResponseAtom = atom(
                 payload.appState,
                 payload.isLibrarySearch,
                 model,
-                set
+                set,
+                get
             );
         }
         
@@ -194,7 +197,8 @@ export const regenerateFromMessageAtom = atom(
                 getAppState(),      // current app state
                 false,              // isLibrarySearch remains unchanged
                 model,
-                set
+                set,
+                get
             );
         }
         
@@ -242,7 +246,8 @@ function _processChatCompletionViaBackend(
     appState: AppState,
     isLibrarySearch: boolean,
     model: Model,
-    set: any
+    set: any,
+    get: any
 ) {
     // Set user API key
     let userApiKey = undefined;
@@ -307,12 +312,18 @@ function _processChatCompletionViaBackend(
                 set(isCancellableAtom, false);
             },
             onError: (errorType) => {
-                // Mark the assistant message as error
-                set(setMessageStatusAtom, {
-                    id: assistantMessageId,
+                const isCancelling = get(isCancellingAtom);
+                if (isCancelling) {
+                    // Cancel the message
+                    set(cancelStreamingMessageAtom, { assistantMessageId });
+                } else {
+                    // Mark the assistant message as error
+                    set(setMessageStatusAtom, {
+                        id: assistantMessageId,
                     status: 'error',
-                    errorType
-                });
+                        errorType
+                    });
+                }
                 // Clear the holder and the cancellable state
                 cancellerHolder.current = null;
                 set(isCancellableAtom, false);

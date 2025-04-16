@@ -57,19 +57,19 @@ export const cancellerHolder = {
     current: null as (() => void) | null
 };
 export const isCancellableAtom = atom<boolean>(false);
+export const isCancellingAtom = atom<boolean>(false);
 
 // Atom to store recent threads
 export const recentThreadsAtom = atom<Thread[]>([]);
 
 export const cancelStreamingMessageAtom = atom(
     null,
-    async (get, set) => {
+    async (get, set, { assistantMessageId }: { assistantMessageId: string }) => {
         const currentThreadId = get(currentThreadIdAtom);
         if (!currentThreadId) return;
         const messages = get(threadMessagesAtom);
-        const streamingMessages = messages.filter((message) => message.role === 'assistant' && ['searching', 'thinking', 'in_progress'].includes(message.status));
-        if (streamingMessages.length > 0) {
-            const streamingMessage = streamingMessages[streamingMessages.length - 1];
+        const streamingMessage = messages.find((message) => message.id === assistantMessageId);
+        if (streamingMessage) {
             await chatService.cancelChatCompletion(
                 streamingMessage.id,
                 currentThreadId,
