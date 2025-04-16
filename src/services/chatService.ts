@@ -96,6 +96,43 @@ export class ChatService extends ApiService {
     }
 
     /**
+     * Cancels a chat completion
+     * @param threadId The ID of the thread to cancel
+     * @param assistantMessageId The ID of the assistant message to cancel
+     * @param partialContent The partial content of the message to cancel
+     */
+    async cancelChatCompletion(
+        assistantMessageId: string,
+        threadId: string,
+        partialContent: string
+    ): Promise<void> {
+        try {
+            const endpoint = `${this.baseUrl}/chat/cancel`;
+            const headers = await this.getAuthHeaders();
+
+            console.log('Cancelling chat completion', assistantMessageId, threadId, partialContent);
+            console.log({
+                    assistant_message_id: assistantMessageId,
+                    thread_id: threadId,
+                    partial_content: partialContent
+                });
+            
+            await Zotero.HTTP.request('POST', endpoint, {
+                body: JSON.stringify({
+                    assistant_message_id: assistantMessageId,
+                    thread_id: threadId,
+                    partial_content: partialContent
+                }),
+                headers
+            });
+            
+            Zotero.debug('Chat completion canceled successfully');
+        } catch (error) {
+            Zotero.debug(`Error canceling chat completion: ${error}`);
+        }
+    }
+
+    /**
      * requestChatCompletion
      * 
      * Makes a POST request to /chat/completions with SSE streaming. 
@@ -115,7 +152,8 @@ export class ChatService extends ApiService {
      */
     async requestChatCompletion(
         requestBody: ChatCompletionRequestBody,
-        callbacks: SSECallbacks
+        callbacks: SSECallbacks,
+        setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
         const { onThread, onToken, onToolcall, onDone, onError, onWarning } = callbacks;
 
@@ -184,7 +222,8 @@ export class ChatService extends ApiService {
                     body: JSON.stringify(requestBody),
                     headers,
                     requestObserver,
-                    timeout: 0 // indefinite streaming
+                    timeout: 0, // indefinite streaming
+                    cancellerReceiver: setCanceller // Pass the canceller function to the caller
                 }).catch((err: unknown) => {
                     // If the request fails to even start (network error)
                     onError('network');
