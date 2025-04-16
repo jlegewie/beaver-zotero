@@ -6,6 +6,7 @@ import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachments } from "../types/chat/converters";
+import { chatService } from "../../src/services/chatService";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -51,8 +52,33 @@ export const isStreamingAtom = atom((get) => {
     return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
 });
 
+// Atom for the current canceller
+export const cancellerHolder = {
+    current: null as (() => void) | null
+};
+export const isCancellableAtom = atom<boolean>(false);
+
 // Atom to store recent threads
 export const recentThreadsAtom = atom<Thread[]>([]);
+
+export const cancelStreamingMessageAtom = atom(
+    null,
+    async (get, set) => {
+        const currentThreadId = get(currentThreadIdAtom);
+        if (!currentThreadId) return;
+        const messages = get(threadMessagesAtom);
+        const streamingMessages = messages.filter((message) => message.role === 'assistant' && ['searching', 'thinking', 'in_progress'].includes(message.status));
+        if (streamingMessages.length > 0) {
+            const streamingMessage = streamingMessages[streamingMessages.length - 1];
+            await chatService.cancelChatCompletion(
+                streamingMessage.id,
+                currentThreadId,
+                streamingMessage.content || ''
+            );
+            set(setMessageStatusAtom, { id: streamingMessage.id, status: 'canceled' });
+        }
+    }
+);
 
 // Setter atoms
 export const newThreadAtom = atom(
