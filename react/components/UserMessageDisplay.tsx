@@ -47,7 +47,8 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                         <SourceButton
                             key={index}
                             source={source}
-                            disabled={true}
+                            // disabled={true}
+                            canEdit={false}
                         />
                     ))}
                 </div>

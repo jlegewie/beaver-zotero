@@ -22,6 +22,7 @@ export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
     source: InputSource
+    canEdit?: boolean
     disabled?: boolean
 }
 
@@ -31,6 +32,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             source,
             className,
             disabled = false,
+            canEdit = true,
             ...rest
         } = props
         // States
@@ -50,7 +52,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const hoverTimerRef = useRef<number | null>(null);
 
         const getIconElement = () => {
-            if (isHovered && readerItemKey != source.itemKey) {
+            if (isHovered && readerItemKey != source.itemKey && canEdit) {
                 // return (<IconButton
                 //     icon={CancelIcon}
                 //     className="scale-80 m-0 p-0"
@@ -173,8 +175,15 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
-                    if (isValid) {
+                    if (isValid && canEdit) {
                         togglePinSource(source.id);
+                    }
+                    if (!canEdit) {
+                        const item = getZoteroItem(source);
+                        if (item) {
+                            // @ts-ignore selectItem exists
+                            Zotero.getActiveZoteroPane().itemsView.selectItem(item.id);
+                        }
                     }
                 }}
                 {...rest}
