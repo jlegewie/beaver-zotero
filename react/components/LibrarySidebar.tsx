@@ -12,6 +12,7 @@ import { isLibraryTabAtom } from "../atoms/ui";
 import { initializeSessionAtom } from '../atoms/auth';
 import { useRecentThreads } from '../hooks/useRecentThreads';
 import { useZoteroSync } from '../hooks/useZoteroSync';
+import { useProfileSync } from '../hooks/useProfileSync';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
@@ -37,6 +38,9 @@ const LibrarySidebar = () => {
     // Control visibility of the sidebar across app
     useToggleSidebar();
     useZoteroTabSelection();
+
+    // Profile sync
+    useProfileSync();
 
     // Zotero sync
     useZoteroSync();
