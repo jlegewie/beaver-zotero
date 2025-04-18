@@ -4,7 +4,7 @@ import { accountService } from "../../src/services/accountService";
 
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 
-export const fetchProfileAtom = atom(
+export const fetchProfileWithPlanAtom = atom(
     null,
     async (get, set) => {
         try {
