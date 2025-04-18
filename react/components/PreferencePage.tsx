@@ -12,7 +12,7 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
 import { chatService, ErrorType } from '../../src/services/chatService';
 import { ProviderType } from '../atoms/models';
-import { profileAtom } from "../atoms/profile";
+import { profileWithPlanAtom } from "../atoms/profile";
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -302,7 +302,7 @@ const PreferencePage: React.FC = () => {
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
-    const profile = useAtomValue(profileAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
 
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
@@ -353,7 +353,7 @@ const PreferencePage: React.FC = () => {
                     </div>
                     <div className="display-flex flex-row items-center gap-2">
                         <span className="font-color-secondary">Plan:</span>
-                        <span className="font-semibold font-color-primary">{profile?.display_name || 'Unknown'}</span>
+                        <span className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</span>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
