@@ -45,12 +45,14 @@ export enum SubscriptionStatus {
 /**
  * Profile interface representing user profile data (based on SafeProfileModel)
  */
-export interface SafeProfileModel {
+export interface ProfileModel {
     user_id: string;             // UUID
     current_plan_id: string;     // UUID
     subscription_status: SubscriptionStatus;
     current_period_start?: Date;
     current_period_end?: Date;
+    stripe_customer_id: string | null;
+    stripe_subscription_id: string | null;
     // Balances
     basic_page_balance: number;
     advanced_page_balance: number;
@@ -59,6 +61,8 @@ export interface SafeProfileModel {
     app_key_chats_count: number;
     user_key_chats_count: number;
 }
+
+export type SafeProfileModel = Omit<ProfileModel, 'stripe_customer_id' | 'stripe_subscription_id'>;
 
 export interface ProfileWithPlan extends SafeProfileModel {
     plan: SafePlanModel;
