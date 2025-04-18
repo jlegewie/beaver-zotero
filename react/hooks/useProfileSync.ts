@@ -32,16 +32,16 @@ export const useProfileSync = () => {
 
     useEffect(() => {
         const syncProfileData = async (userId: string) => {
-            console.log(`useProfileSync: User ${userId} authenticated. Fetching profile and plan.`);
+            Zotero.debug(`useProfileSync: User ${userId} authenticated. Fetching profile and plan.`);
             try {
                 // 1. Fetch initial ProfileWithPlan
                 const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
                 setProfileWithPlan(fetchedProfileWithPlan);
-                console.log(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+                Zotero.debug(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
                 // --- Realtime Setup ---
                 if (channelRef.current) {
-                    console.log(`useProfileSync: Removing existing channel subscription for ${userId}.`);
+                    Zotero.debug(`useProfileSync: Removing existing channel subscription for ${userId}.`);
                     await channelRef.current.unsubscribe();
                     supabase.realtime.removeChannel(channelRef.current);
                     channelRef.current = null;
@@ -50,11 +50,11 @@ export const useProfileSync = () => {
                 // 3. Get current session for the auth token (needed for realtime RLS)
                 const { data: sessionData } = await supabase.auth.getSession();
                 if (!sessionData.session?.access_token) {
-                    console.log(`useProfileSync: No access token found, cannot set auth for realtime. Aborting subscription setup.`, 2);
+                    Zotero.debug(`useProfileSync: No access token found, cannot set auth for realtime. Aborting subscription setup.`, 2);
                     return;
                 }
                 supabase.realtime.setAuth(sessionData.session.access_token);
-                console.log(`useProfileSync: Realtime auth token set for ${userId}.`);
+                Zotero.debug(`useProfileSync: Realtime auth token set for ${userId}.`);
 
                 // 4. Create and subscribe to the channel for PROFILE updates
                 const newChannel = supabase
@@ -71,7 +71,7 @@ export const useProfileSync = () => {
                         (payload) => {
                             const updatedProfileData = toSafeProfileModel(payload.new);
                             
-                            console.log(`useProfileSync: Realtime profile UPDATE received for ${userId}: ${JSON.stringify(updatedProfileData)}`);
+                            Zotero.debug(`useProfileSync: Realtime profile UPDATE received for ${userId}: ${JSON.stringify(updatedProfileData)}`);
 
                             // Use functional update to safely access the previous state (prev)
                             let shouldRefetch = false;
@@ -79,20 +79,20 @@ export const useProfileSync = () => {
                                 if (!prev) {
                                     // This case might happen if an update arrives before initial fetch completes
                                     // or after an error cleared the state. Safest is to wait for potential refetch.
-                                    console.log(`useProfileSync: Received update but previous state is null. Scheduling potential refetch.`, 1);
+                                    Zotero.debug(`useProfileSync: Received update but previous state is null. Scheduling potential refetch.`, 1);
                                     shouldRefetch = true; // Mark for refetch as we can't merge
                                     return null; // Keep state null for now
                                 }
 
                                 // Check if the plan ID changed
                                 if (updatedProfileData.current_plan_id !== prev.current_plan_id) {
-                                    console.log(`useProfileSync: current_plan_id changed (${prev.current_plan_id} -> ${updatedProfileData.current_plan_id}). Scheduling full refetch.`);
+                                    Zotero.debug(`useProfileSync: current_plan_id changed (${prev.current_plan_id} -> ${updatedProfileData.current_plan_id}). Scheduling full refetch.`);
                                     shouldRefetch = true;
                                     // Return previous state temporarily; the refetch below will update it properly.
                                     return prev;
                                 } else {
                                     // Merge if plan ID is the same
-                                    console.log(`useProfileSync: Merging profile update as current_plan_id did not change.`);
+                                    Zotero.debug(`useProfileSync: Merging profile update as current_plan_id did not change.`);
                                     // Create a new object merging previous state with new profile data.
                                     return {
                                         ...prev,
@@ -105,13 +105,13 @@ export const useProfileSync = () => {
                             if (shouldRefetch) {
                                 (async () => {
                                     try {
-                                        console.log(`useProfileSync: Refetching ProfileWithPlan for ${userId} due to plan_id change or null previous state.`);
+                                        Zotero.debug(`useProfileSync: Refetching ProfileWithPlan for ${userId} due to plan_id change or null previous state.`);
                                         const refreshedProfileWithPlan = await accountService.getProfileWithPlan();
                                         // Set the state with the complete, fresh data
                                         setProfileWithPlan(refreshedProfileWithPlan);
-                                        console.log(`useProfileSync: Successfully refreshed ProfileWithPlan for ${userId}.`);
+                                        Zotero.debug(`useProfileSync: Successfully refreshed ProfileWithPlan for ${userId}.`);
                                     } catch (error: any) {
-                                        console.log(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);
+                                        Zotero.debug(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);
                                     }
                                 })();
                             }
@@ -119,17 +119,17 @@ export const useProfileSync = () => {
                     )
                     .subscribe((status, err) => {
                         if (err) {
-                            console.log(`useProfileSync: Realtime subscription error for ${userId}: ${JSON.stringify(err)}`, 3);
+                            Zotero.debug(`useProfileSync: Realtime subscription error for ${userId}: ${JSON.stringify(err)}`, 3);
                             console.error(`useProfileSync: realtime subscription error:`, err);
                         } else {
-                            console.log(`useProfileSync: Realtime subscription status for ${userId}: ${status}`);
+                            Zotero.debug(`useProfileSync: Realtime subscription status for ${userId}: ${status}`);
                         }
                     });
 
                 channelRef.current = newChannel;
 
             } catch (error: any) {
-                console.log(`useProfileSync: Error during initial fetch for ${userId}: ${error?.message}`, 3);
+                Zotero.debug(`useProfileSync: Error during initial fetch for ${userId}: ${error?.message}`, 3);
                 setProfileWithPlan(null);
                 if (channelRef.current) {
                     await channelRef.current.unsubscribe();
@@ -143,11 +143,11 @@ export const useProfileSync = () => {
         if (isAuthenticated && user) {
             syncProfileData(user.id);
         } else {
-            console.log(`useProfileSync: User not authenticated or user data unavailable. Clearing profile.`);
+            Zotero.debug(`useProfileSync: User not authenticated or user data unavailable. Clearing profile.`);
             setProfileWithPlan(null);
             if (channelRef.current) {
                 const userIdForUnsub = channelRef.current.topic.split(':').pop();
-                console.log(`useProfileSync: Unsubscribing from channel due to logout/auth change for user ${userIdForUnsub}.`);
+                Zotero.debug(`useProfileSync: Unsubscribing from channel due to logout/auth change for user ${userIdForUnsub}.`);
                 channelRef.current.unsubscribe();
                 supabase.realtime.removeChannel(channelRef.current);
                 channelRef.current = null;
@@ -158,12 +158,12 @@ export const useProfileSync = () => {
         return () => {
             if (channelRef.current) {
                 const userIdForUnsub = channelRef.current.topic.split(':').pop();
-                console.log(`useProfileSync: Cleaning up channel subscription for ${userIdForUnsub} on unmount/dependency change.`);
+                Zotero.debug(`useProfileSync: Cleaning up channel subscription for ${userIdForUnsub} on unmount/dependency change.`);
                 channelRef.current.unsubscribe();
                 supabase.realtime.removeChannel(channelRef.current);
                 channelRef.current = null;
             } else {
-                console.log(`useProfileSync: Cleanup called, no active channel to remove.`);
+                Zotero.debug(`useProfileSync: Cleanup called, no active channel to remove.`);
             }
         };
     }, [isAuthenticated, user, setProfileWithPlan]);
