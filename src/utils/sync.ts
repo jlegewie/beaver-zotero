@@ -103,9 +103,9 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
             const bestAttachment = await item.parentItem.getBestAttachment();
             is_primary = !!bestAttachment && bestAttachment.key === item.key;
         } catch (error) {
-        logger(`Beaver Sync: Error getting best attachment for parent of ${item.key}`, 2);
+            logger(`Beaver Sync: Error getting best attachment for parent of ${item.key}`, 2);
+        }
     }
-}
 
     // 3. Prepare the object containing only fields for hashing
     const hashedFields: AttachmentDataHashedFields = {
