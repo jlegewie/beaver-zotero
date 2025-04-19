@@ -10,6 +10,7 @@ import PQueue from 'p-queue';
 import { queueService, UploadQueueItem, PopQueueResponse, QueueStatus } from "./queueService";
 import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
+import { logger } from '../utils/logger';
 
 
 export interface UploadProgressInfo {
@@ -115,11 +116,11 @@ export class FileUploader {
      */
     public start(): void {
         if (this.isRunning) {
-            Zotero.debug('Beaver File Uploader: Already running. Start call ignored.', 4);
+            logger('Beaver File Uploader: Already running. Start call ignored.', 4);
             return;
         }
         this.isRunning = true;
-        Zotero.debug('Beaver File Uploader: Starting file uploader', 3);
+        logger('Beaver File Uploader: Starting file uploader', 3);
 
         // Report starting status
         this.reportStatus('in_progress', 0, 0);
@@ -130,7 +131,7 @@ export class FileUploader {
         // Begin processing in the background
         this.runQueue()
             .catch(error => {
-                Zotero.debug('Beaver File Uploader: Error in runQueue: ' + error.message, 1);
+                logger('Beaver File Uploader: Error in runQueue: ' + error.message, 1);
                 Zotero.logError(error);
                 this.reportStatus('failed');
             });
@@ -146,7 +147,7 @@ export class FileUploader {
         }
 
         this.isRunning = false;
-        Zotero.debug('Beaver File Uploader: Stopping file uploader', 3);
+        logger('Beaver File Uploader: Stopping file uploader', 3);
 
         // Wait for all queued tasks to finish, if any
         try {
@@ -154,7 +155,7 @@ export class FileUploader {
             // Update status to completed if we stopped cleanly
             this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
         } catch (error: any) {
-            Zotero.debug('Beaver File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
+            logger('Beaver File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
             Zotero.logError(error);
             this.reportStatus('failed');
         }
@@ -179,7 +180,7 @@ export class FileUploader {
             try {
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
-                    Zotero.debug(`Beaver File Uploader: Backing off for ${backoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
+                    logger(`Beaver File Uploader: Backing off for ${backoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
                     await new Promise(resolve => setTimeout(resolve, backoffTime));
                     // Exponential backoff with max of 1 minute
                     backoffTime = Math.min(backoffTime * 2, 60000);
@@ -189,7 +190,7 @@ export class FileUploader {
                 const response: PopQueueResponse = await queueService.popQueueItems(this.MAX_CONCURRENT);
                 const items = response.items;
                 const status = response.status;
-                Zotero.debug(`Beaver File Uploader: Popped ${items.length} items from the queue. Status: ${JSON.stringify(status)}`, 3);
+                logger(`Beaver File Uploader: Popped ${items.length} items from the queue. Status: ${JSON.stringify(status)}`, 3);
 
                 // Update progress with the received status
                 this.reportProgress(status);
@@ -213,7 +214,7 @@ export class FileUploader {
                 // Wait for these uploads to finish before popping the next batch
                 await this.uploadQueue.onIdle();
             } catch (error: any) {
-                Zotero.debug('Beaver File Uploader: runQueue encountered an error: ' + error.message, 1);
+                logger('Beaver File Uploader: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
                 
                 // Report error status
@@ -224,7 +225,7 @@ export class FileUploader {
                 
                 // If we've hit max consecutive errors, take a break
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    Zotero.debug(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, pausing for recovery`, 2);
+                    logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, pausing for recovery`, 2);
                     await new Promise(resolve => setTimeout(resolve, 60000)); // 1 minute timeout
                     consecutiveErrors = 0; // Reset counter after pause
                 }
@@ -236,7 +237,7 @@ export class FileUploader {
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
-        Zotero.debug('Beaver File Uploader: Finished processing queue.', 3);
+        logger('Beaver File Uploader: Finished processing queue.', 3);
     }
 
     /**
@@ -245,12 +246,12 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueItem): Promise<void> {
         try {
-            Zotero.debug(`Beaver File Uploader: Uploading file for ${item.attachment_key}`, 3);
+            logger(`Beaver File Uploader: Uploading file for ${item.attachment_key}`, 3);
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.attachment_key);
             if (!attachment) {
-                Zotero.debug(`Beaver File Uploader: Attachment not found: ${item.attachment_key}`, 1);
+                logger(`Beaver File Uploader: Attachment not found: ${item.attachment_key}`, 1);
                 await this.handlePermanentFailure(item, "Attachment not found in Zotero");
                 return;
             }
@@ -262,7 +263,7 @@ export class FileUploader {
             let filePath: string | null = null;
             filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
-                Zotero.debug(`Beaver File Uploader: File path not found for attachment: ${item.attachment_key}`, 1);
+                logger(`Beaver File Uploader: File path not found for attachment: ${item.attachment_key}`, 1);
                 await this.handlePermanentFailure(item, "File path not found");
                 return;
             }
@@ -272,7 +273,7 @@ export class FileUploader {
             try {
                 fileArrayBuffer = await IOUtils.read(filePath);
             } catch (readError: any) {
-                Zotero.debug(`Beaver File Uploader: Error reading file: ${item.attachment_key}`, 1);
+                logger(`Beaver File Uploader: Error reading file: ${item.attachment_key}`, 1);
                 Zotero.logError(readError);
                 await this.handlePermanentFailure(item, "Error reading file");
                 return;
@@ -299,7 +300,7 @@ export class FileUploader {
                     if (!response.ok) {
                         if (response.status >= 500) {
                             // Server error - may be temporary
-                            Zotero.debug(`Beaver File Uploader: Server error ${response.status} on attempt ${attempt}, will retry`, 2);
+                            logger(`Beaver File Uploader: Server error ${response.status} on attempt ${attempt}, will retry`, 2);
                             await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
                             continue;
                         } else {
@@ -326,7 +327,7 @@ export class FileUploader {
                         )
                     ) {
                         // Network error, retry with backoff
-                        Zotero.debug(`Beaver File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
+                        logger(`Beaver File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
                         await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
                     } else {
                         // Other errors, rethrow to be handled by outer catch
@@ -341,7 +342,7 @@ export class FileUploader {
             }
 
         } catch (error: any) {
-            Zotero.debug(`Beaver File Uploader: Error uploading file for attachment ${item.attachment_key}: ${error.message}`, 1);
+            logger(`Beaver File Uploader: Error uploading file for attachment ${item.attachment_key}: ${error.message}`, 1);
             Zotero.logError(error);
 
             // If attempts are too high, treat as permanently failed
@@ -352,7 +353,7 @@ export class FileUploader {
                 try {
                     await queueService.resetUpload(item.id);
                 } catch (resetError: any) {
-                    Zotero.debug('Beaver File Uploader: Error resetting failed upload: ' + resetError.message, 1);
+                    logger('Beaver File Uploader: Error resetting failed upload: ' + resetError.message, 1);
                     Zotero.logError(resetError);
                 }
             }
@@ -363,12 +364,12 @@ export class FileUploader {
      * Handles permanent failures by marking items as failed in the queue
      */
     private async handlePermanentFailure(item: UploadQueueItem, reason: string): Promise<void> {
-        Zotero.debug(`Beaver File Uploader: Permanent failure for ${item.attachment_key}: ${reason}`, 1);
+        logger(`Beaver File Uploader: Permanent failure for ${item.attachment_key}: ${reason}`, 1);
         try {
             // Mark the item as failed
-            await queueService.markUploadAsFailed(item.id, item.file_id);
+            await queueService.markUploadAsFailed(item.id, item.hash);
         } catch (failError: any) {
-            Zotero.debug('Beaver File Uploader: Error marking item as failed: ' + failError.message, 1);
+            logger('Beaver File Uploader: Error marking item as failed: ' + failError.message, 1);
             Zotero.logError(failError);
         }
     }
@@ -377,7 +378,7 @@ export class FileUploader {
     private async markUploadCompleted(item: UploadQueueItem, pageCount: number | null): Promise<void> {
         try {
             await queueService.completeUpload(item, pageCount);
-            Zotero.debug(`Beaver File Uploader: Successfully uploaded file for attachment ${item.attachment_key} (page count: ${pageCount})`, 3);
+            logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.attachment_key} (page count: ${pageCount})`, 3);
             
             // Increment our local completed count immediately
             // This provides immediate feedback without waiting for the next server poll
@@ -389,7 +390,7 @@ export class FileUploader {
             );
             
         } catch (error: any) {
-            Zotero.debug(`Beaver File Uploader: Error marking upload as completed: ${error.message}`, 1);
+            logger(`Beaver File Uploader: Error marking upload as completed: ${error.message}`, 1);
             Zotero.logError(error);
         }
     }
