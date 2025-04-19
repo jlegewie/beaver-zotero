@@ -12,6 +12,7 @@ import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 
+const idleBackoffTime = 2500;
 
 export interface UploadProgressInfo {
   status: SyncStatus;
@@ -199,7 +200,7 @@ export class FileUploader {
                 if (items.length === 0 && (status.pending > 0 || status.in_progress > 0)) {
                     logger(`Beaver File Uploader: No items to process, but there are pending or in-progress items. Waiting 1 second before checking again.`, 3);
                     // Wait a bit before checking again to avoid hammering the server
-                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    await new Promise(resolve => setTimeout(resolve, idleBackoffTime));
                     continue;
                 }
 
