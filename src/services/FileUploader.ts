@@ -195,6 +195,14 @@ export class FileUploader {
                 // Update progress with the received status
                 this.reportProgress(status);
 
+                // Add a short delay when no items are available but processing is ongoing
+                if (items.length === 0 && (status.pending > 0 || status.in_progress > 0)) {
+                    logger(`Beaver File Uploader: No items to process, but there are pending or in-progress items. Waiting 1 second before checking again.`, 3);
+                    // Wait a bit before checking again to avoid hammering the server
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    continue;
+                }
+
                 // If no items and no pending/in-progress items, we're done
                 if (items.length === 0 && status.pending === 0 && status.in_progress === 0) {
                     // Set final completed status with our tracked total
