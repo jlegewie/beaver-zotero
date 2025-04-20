@@ -212,6 +212,7 @@ export class FileUploader {
                     consecutiveIdle++;
                     if (consecutiveIdle >= MAX_CONSECUTIVE_IDLE) {
                         logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_IDLE} consecutive idle`, 2);
+                        this.isRunning = false;
                         break;
                     }
                     continue;
