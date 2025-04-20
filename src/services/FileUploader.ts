@@ -12,8 +12,6 @@ import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 
-const idleBackoffTime = 2500;
-
 export interface UploadProgressInfo {
   status: SyncStatus;
   current: number;
@@ -173,18 +171,26 @@ export class FileUploader {
             total: 0
         };
         
-        let consecutiveErrors = 0;
+        // Idle backoff handling
+        const MAX_CONSECUTIVE_IDLE = 10;
+        const IDLE_BACKOFF_TIME = 2500;
+        let consecutiveIdle = 0;
+        let idleBackoffTime = IDLE_BACKOFF_TIME;
+
+        // Error backoff handling
         const MAX_CONSECUTIVE_ERRORS = 5;
-        let backoffTime = 1000; // Start with 1 second backoff
+        const ERROR_BACKOFF_TIME = 1000;
+        let consecutiveErrors = 0;
+        let errorBackoffTime = ERROR_BACKOFF_TIME;
 
         while (this.isRunning) {
             try {
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
-                    logger(`Beaver File Uploader: Backing off for ${backoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
-                    await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    logger(`Beaver File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
+                    await new Promise(resolve => setTimeout(resolve, errorBackoffTime));
                     // Exponential backoff with max of 1 minute
-                    backoffTime = Math.min(backoffTime * 2, 60000);
+                    errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
 
                 // Fetch up to MAX_CONCURRENT items from the server, along with the updated status
@@ -201,6 +207,13 @@ export class FileUploader {
                     logger(`Beaver File Uploader: No items to process, but there are pending or in-progress items. Waiting 1 second before checking again.`, 3);
                     // Wait a bit before checking again to avoid hammering the server
                     await new Promise(resolve => setTimeout(resolve, idleBackoffTime));
+                    // Exponential backoff with max of 1 minute
+                    idleBackoffTime = Math.min(idleBackoffTime * 2, 60000);
+                    consecutiveIdle++;
+                    if (consecutiveIdle >= MAX_CONSECUTIVE_IDLE) {
+                        logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_IDLE} consecutive idle`, 2);
+                        break;
+                    }
                     continue;
                 }
 
@@ -211,9 +224,11 @@ export class FileUploader {
                     break;
                 }
 
-                // Reset error counter on successful queue pop
+                // Reset idle and error counters on successful queue pop
                 consecutiveErrors = 0;
-                backoffTime = 1000;
+                errorBackoffTime = ERROR_BACKOFF_TIME;
+                consecutiveIdle = 0;
+                idleBackoffTime = IDLE_BACKOFF_TIME;
 
                 // Add each upload task to the concurrency queue
                 for (const item of items) {
