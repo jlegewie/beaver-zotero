@@ -5,7 +5,7 @@ import LibrarySidebar from './components/LibrarySidebar';
 import ReaderSidebar from './components/ReaderSidebar';
 
 // Create a shared store instance
-const store = createStore();
+export const store = createStore();
 
 export function renderAiSidebar(domElement: HTMLElement, location: 'library' | 'reader') {
     const root = createRoot(domElement);
