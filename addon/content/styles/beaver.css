@@ -379,6 +379,7 @@
 /* Scaling */
 
 [id^="beaver-pane-"] .scale-70 { transform: scale(0.7); }
+[id^="beaver-pane-"] .scale-75 { transform: scale(0.75); }
 [id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
 [id^="beaver-pane-"] .scale-85 { transform: scale(0.85); }
 [id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
