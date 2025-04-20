@@ -61,14 +61,14 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                         onMouseLeave={() => setHoveredItemId(null)}
                         title="Click to reveal in Zotero"
                     >
-                        <span className="scale-70" style={{ marginTop: '-2px' }}>
+                        <span className="scale-75" style={{ marginTop: '-2px' }}>
                             <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
                         </span>
-                        <div className="display-flex flex-col gap-1 min-w-0 font-color-secondary">
-                            <span className="truncate text-sm font-color-secondary">
+                        <div className="display-flex flex-col gap-1 min-w-0 font-color-primary">
+                            <span className="truncate text-sm font-color-primary">
                                 {getDisplayNameFromItem(item)}
                             </span>
-                            <span className="truncate text-sm font-color-tertiary min-w-0">
+                            <span className="truncate text-sm font-color-secondary min-w-0">
                                 {item.getDisplayTitle()}
                             </span>
                         </div>
