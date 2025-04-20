@@ -38,7 +38,7 @@ export interface SyncCompleteResponse {
 
 // --- Item Types ---
 
-/** Fields included in the Item metadata hash calculation. */
+/** Fields included in the Item metadata file_hash calculation. */
 export interface ItemDataHashedFields {
     zotero_key: string;
     item_type: string;
@@ -65,15 +65,15 @@ export interface ItemData extends ItemDataHashedFields {
 // --- Attachment & File Types ---
 
 export interface FileData {
-    name: string;
-    hash: string;
+    filename: string;
+    file_hash: string;
     size: number;
     mime_type: string;
-    content?: string;
+    // content?: string;
     storage_path?: string;
 }
 
-/** Fields included in the Attachment metadata hash calculation. */
+/** Fields included in the Attachment metadata file_hash calculation. */
 export interface AttachmentDataHashedFields {
     // Attachment fields
     library_id: number;
@@ -83,10 +83,10 @@ export interface AttachmentDataHashedFields {
     deleted: boolean;
     title: string;
     // Relevant File fields (flattened, handling null file case)
-    file_content_hash: string | null; // Renamed for clarity vs attachment hash
-    file_size: number | null;
-    file_mime_type: string | null;
-    file_name: string | null;
+    file_hash?: string;
+    size?: number;
+    mime_type?: string;
+    filename?: string;
 }
 
 export interface AttachmentData {
@@ -100,8 +100,12 @@ export interface AttachmentData {
     date_added: string;
     date_modified: string;
     // file table data
-    file: FileData | null;
-    attachment_metadata_hash: string; // Hash of the fields defined in AttachmentDataHashedFields
+    file_hash?: string;
+    size?: number;
+    mime_type?: string;
+    filename?: string;
+    // Hash of the fields defined in AttachmentDataHashedFields
+    attachment_metadata_hash: string;
 }
 
 export interface LastSyncDateResponse {

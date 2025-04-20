@@ -20,7 +20,7 @@ export interface QueueStatus {
 export interface UploadQueueItem {
     id: string;
     user_id: string;
-    file_id: string;
+    file_hash: string;
     library_id: number;
     attachment_key: string;
     storage_path: string;
@@ -82,11 +82,11 @@ export class QueueService extends ApiService {
     /**
      * Mark an upload as failed
      * @param queueId ID of the queue item
-     * @param fileId ID of the file
+     * @param file_hash Hash of the file
      * @returns Promise resolving to success indicator
      */
-    async markUploadAsFailed(queueId: string, fileId: string): Promise<boolean> {
-        return this.post<boolean>('/queue/fail', { queue_id: queueId, file_id: fileId });
+    async markUploadAsFailed(queueId: string, file_hash: string): Promise<boolean> {
+        return this.post<boolean>('/queue/fail', { queue_id: queueId, file_hash: file_hash });
     }
 
     /**

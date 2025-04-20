@@ -68,13 +68,13 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
 
     try {
         const fileName = item.attachmentFilename;
-        const hash = await item.attachmentHash; // File content hash
+        const file_hash = await item.attachmentHash; // File content hash
         const size = await Zotero.Attachments.getTotalFileSize(item);
         const mimeType = item.attachmentContentType || 'application/octet-stream';
 
         return {
-            name: fileName || '',
-            hash: hash || '', // File content hash
+            filename: fileName || '',
+            file_hash: file_hash || '', // File content hash
             size: size || 0,
             mime_type: mimeType || ''
         };
@@ -117,10 +117,11 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
         // Include relevant file fields (or nulls if fileData is null)
-        file_content_hash: fileData?.hash ?? null,
-        file_size: fileData?.size ?? null,
-        file_mime_type: fileData?.mime_type ?? null,
-        file_name: fileData?.name ?? null,
+        ...(fileData || {})
+        // file_content_hash: fileData?.file_hash ?? null,
+        // file_size: fileData?.size ?? null,
+        // file_mime_type: fileData?.mime_type ?? null,
+        // file_name: fileData?.filename ?? null,
     };
 
     // 4. Calculate hash from the prepared hashed fields object
@@ -139,7 +140,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // Include the nested file data object
-        file: fileData,
+        ...(fileData || {}),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
     };
@@ -305,6 +306,7 @@ export async function syncItemsToBackend(
     
     // Start file uploader if there are attachments to upload
     if (attachmentCount > 0) {
+        logger(`Beaver Sync: Starting file uploader with ${attachmentCount} attachments to upload`, 2);
         fileUploader.start();
     }
 }

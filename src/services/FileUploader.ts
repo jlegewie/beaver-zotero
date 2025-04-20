@@ -401,7 +401,7 @@ export class FileUploader {
         logger(`Beaver File Uploader: Permanent failure for ${item.attachment_key}: ${reason}`, 1);
         try {
             // Mark the item as failed
-            await queueService.markUploadAsFailed(item.id, item.hash);
+            await queueService.markUploadAsFailed(item.id, item.file_hash);
         } catch (failError: any) {
             logger('Beaver File Uploader: Error marking item as failed: ' + failError.message, 1);
             Zotero.logError(failError);

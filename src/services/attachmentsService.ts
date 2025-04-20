@@ -17,7 +17,8 @@ export interface AttachmentStatusResponse {
     library_id: number;
     zotero_key: string;
 
-    file_id?: string;      // Optional UUID
+    user_id?: string;
+    file_hash?: string;      // Optional UUID
     mime_type?: string;
     page_count?: number;
 
