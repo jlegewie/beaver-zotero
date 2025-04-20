@@ -11,6 +11,8 @@ import { queueService, UploadQueueItem, PopQueueResponse, QueueStatus } from "./
 import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
+import { store } from '../../react/index';
+import { isAuthenticatedAtom } from '../../react/atoms/auth';
 
 export interface UploadProgressInfo {
   status: SyncStatus;
@@ -185,6 +187,13 @@ export class FileUploader {
 
         while (this.isRunning) {
             try {
+                // check authentication status
+                const isAuthenticated = store.get(isAuthenticatedAtom);
+                if (!isAuthenticated) {
+                    logger('Beaver File Uploader: Not authenticated. Stopping.', 3);
+                    this.isRunning = false;
+                    break;
+                }
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
                     logger(`Beaver File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
