@@ -73,10 +73,10 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
         const mimeType = item.attachmentContentType || 'application/octet-stream';
 
         return {
-            filename: fileName || '',
-            file_hash: file_hash || '', // File content hash
-            size: size || 0,
-            mime_type: mimeType || ''
+            filename: fileName,
+            file_hash: file_hash,
+            size: size,
+            mime_type: mimeType
         };
     } catch (error: any) {
         logger(`Beaver Sync: Error extracting file data for ${item.key}: ${error.message}`, 1);
@@ -116,12 +116,6 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         // @ts-ignore - Add runtime check or proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
-        // Include relevant file fields (or nulls if fileData is null)
-        ...(fileData || {})
-        // file_content_hash: fileData?.file_hash ?? null,
-        // file_size: fileData?.size ?? null,
-        // file_mime_type: fileData?.mime_type ?? null,
-        // file_name: fileData?.filename ?? null,
     };
 
     // 4. Calculate hash from the prepared hashed fields object
@@ -129,7 +123,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
 
     // 5. Construct final AttachmentData object
     const attachmentData: AttachmentData = {
-        // Include base fields (redundant with hashedFields but clearer)
+        // Include base fields
         library_id: hashedFields.library_id,
         zotero_key: hashedFields.zotero_key,
         parent_key: hashedFields.parent_key,
@@ -139,7 +133,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData>
         // Add non-hashed fields
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
-        // Include the nested file data object
+        // File data
         ...(fileData || {}),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,

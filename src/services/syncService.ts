@@ -75,18 +75,12 @@ export interface FileData {
 
 /** Fields included in the Attachment metadata file_hash calculation. */
 export interface AttachmentDataHashedFields {
-    // Attachment fields
     library_id: number;
     zotero_key: string;
     parent_key: string | null;
     is_primary: boolean | null;
     deleted: boolean;
     title: string;
-    // Relevant File fields (flattened, handling null file case)
-    file_hash?: string;
-    size?: number;
-    mime_type?: string;
-    filename?: string;
 }
 
 export interface AttachmentData {
