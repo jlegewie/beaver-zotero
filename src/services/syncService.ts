@@ -124,6 +124,17 @@ export interface DeleteResult {
     failed: number;
 }
 
+// Add these interfaces after the existing interfaces
+export interface AttachmentFileUpdateRequest {
+    library_id: number;
+    zotero_key: string;
+    file_hash: string;
+}
+
+export interface AttachmentUpdateResponse {
+    enqueued: boolean;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -216,6 +227,21 @@ export class SyncService extends ApiService {
         return this.post<DeleteResult>('/zotero/sync/items/delete', {
             library_id: libraryId,
             zotero_keys: zoteroKeys
+        });
+    }
+
+    /**
+     * Forces update of an attachment's file hash
+     * @param libraryId The Zotero library ID
+     * @param zoteroKey The Zotero key of the attachment
+     * @param fileHash The new file hash
+     * @returns Promise with the update response indicating if the hash was enqueued
+     */
+    async forceAttachmentFileUpdate(libraryId: number, zoteroKey: string, fileHash: string): Promise<AttachmentUpdateResponse> {
+        return this.post<AttachmentUpdateResponse>('/zotero/sync/items/attachment-update', {
+            library_id: libraryId,
+            zotero_key: zoteroKey,
+            file_hash: fileHash
         });
     }
 }
