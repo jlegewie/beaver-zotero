@@ -32,24 +32,11 @@ export interface UploadQueueItem {
     last_attempt_at?: string;
 }
 
-export interface AddUploadQueueFromAttachmentRequest {
-    library_id: number;
-    attachment_keys: string[];
-}
 
 /**
  * Sync-specific API service that extends the base API service
  */
 export class QueueService extends ApiService {
-
-    /**
-     * Add an item to the upload queue
-     * @param request Request containing library ID, attachment keys, and type
-     * @returns Promise resolving to success indicator
-     */
-    async addItemsFromAttachmentKeys(request: AddUploadQueueFromAttachmentRequest): Promise<boolean> {
-        return this.post<boolean>('/queue/add_from_attachment', request);
-    }
 
     /**
      * Pop items from the upload queue
