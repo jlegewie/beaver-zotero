@@ -4,6 +4,7 @@ import { useAtom, useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom } from "../atoms/ui";
 import { useToggleSidebar } from '../hooks/useToggleSidebar';
+import { useAttachmentStatusInfoRow } from '../hooks/useAttachmentStatusInfoRow';
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useZoteroTabSelection } from '../hooks/useZoteroTabSelection';
@@ -37,6 +38,7 @@ const LibrarySidebar = () => {
     // Control visibility of the sidebar across app
     useToggleSidebar();
     useZoteroTabSelection();
+    useAttachmentStatusInfoRow();
 
     // Profile sync
     useProfileSync();
