@@ -1,9 +1,7 @@
-import React from 'react';
-// @ts-ignore no idea why
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from './icons';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
-import { MessageAttachment } from 'react/types/chat/api';
+import { MessageAttachment } from '../types/chat/api';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;

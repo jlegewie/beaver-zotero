@@ -1,4 +1,3 @@
-// @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";

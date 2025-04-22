@@ -1,6 +1,4 @@
 import React from 'react';
-// @ts-ignore correct type
-import { useState } from 'react';
 import { Warning } from '../types/messages';
 import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';

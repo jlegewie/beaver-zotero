@@ -1,5 +1,4 @@
 import React from 'react';
-// @ts-ignore: No idea why this is needed
 import { useEffect } from 'react';
 import { useAtom, useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";

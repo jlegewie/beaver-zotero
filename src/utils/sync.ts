@@ -1,5 +1,5 @@
 import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
-import { SyncStatus } from 'react/atoms/ui';
+import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';

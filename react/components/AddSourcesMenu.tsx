@@ -1,5 +1,4 @@
 import React from 'react';
-// @ts-ignore no types for react
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
 import { ItemSearchResult, searchService } from '../../src/services/searchService';
@@ -8,8 +7,7 @@ import { createSourceFromItem } from '../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { currentSourcesAtom } from '../atoms/input';
 import { useAtom } from 'jotai';
-import { InputSource } from 'react/types/sources';
-
+import { InputSource } from '../types/sources';
 
 const AddSourcesMenu: React.FC<{
     showText: boolean,

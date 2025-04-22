@@ -1,6 +1,4 @@
-import React from "react";
-// @ts-ignore no idea
-import { useState } from "react";
+import React, { useState } from "react";
 import Button from "./button";
 import FileStatusStats from "./FileStatusStats";
 import FileStatusDisplay from "./FileStatusDisplay";

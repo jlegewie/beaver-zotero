@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { currentSourcesAtom } from './input';
-import { InputSource } from 'react/types/sources';
+import { InputSource } from '../types/sources';
 import { FileStatus } from '../types/fileStatus';
 
 export const isSidebarVisibleAtom = atom(false);

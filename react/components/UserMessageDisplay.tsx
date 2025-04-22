@@ -1,15 +1,12 @@
 import React from 'react';
-// @ts-ignore no idea why
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/messages';
 import { isStreamingAtom, threadSourcesAtom } from '../atoms/threads';
-// @ts-ignore no idea why
-import { useRef } from 'react';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
-import { InputSource } from 'react/types/sources';
+import { InputSource } from '../types/sources';
 import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
 
 interface UserMessageDisplayProps {
