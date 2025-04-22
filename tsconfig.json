@@ -9,7 +9,9 @@
     "baseUrl": ".",
     "paths": {
       "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"],
-      "../../addon/content/reactBundle": ["typings/reactBundle.d.ts"]
+      "../../addon/content/reactBundle": ["typings/reactBundle.d.ts"],
+      "react": ["node_modules/react"],
+      "react/*": ["node_modules/react/*"]
     },
     "jsx": "react",
     "esModuleInterop": true,
