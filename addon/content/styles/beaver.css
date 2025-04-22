@@ -24,6 +24,22 @@
     padding: 4px;
 }
 
+attachment-box .metadata-table #beaver-status {
+    margin-top: 3px;
+}
+
+attachment-box .metadata-table #beaver-file-status-reprocess {
+    height: 22px;
+    width: 22px;
+    padding: 1px;
+    margin-left: 4px;
+    list-style-image: url("chrome://zotero/skin/20/universal/sync.svg");
+
+    &:not([disabled='true']) {
+        color: var(--fill-secondary);
+    }
+}
+
 #zotero-beaver-tb-chat-toggle:hover {
     background-color: var(--fill-quinary);
 }
