@@ -4,7 +4,7 @@ import { MessageAttachment } from '../../react/types/chat/api';
 import { FileStatus } from '../../react/types/fileStatus';
 
 // processing_status from backend
-export type ProcessingStatus = "unavailable" | "queued" | "processing" | "converted" | "chunked" | "embedded" | "failed";
+export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "converted" | "chunked" | "embedded" | "failed";
 // upload_status_literal from backend
 export type UploadStatus = "pending" | "completed" | "failed";
 
