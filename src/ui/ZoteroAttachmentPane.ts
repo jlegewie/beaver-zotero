@@ -1,5 +1,6 @@
 // import { logger } from '../../src/utils/logger';
-import { getFileStatusForAttachmentInfo } from './getFileStatusForAttachmentInfo';
+// import { getFileStatusForAttachmentInfo } from './getFileStatusForAttachmentInfo';
+import { eventManager } from '../../react/events/eventManager';
 
 declare global {
     interface Element {
@@ -180,7 +181,11 @@ export class ZoteroAttachmentPane {
 
                     // 5. Get the status asynchronously for the current attachment
                     ztoolkit.log(`ZoteroAttachmentPane: Awaiting Beaver status for item ${currentItemId}`);
-                    const statusInfo = await getFileStatusForAttachmentInfo(attachmentItem); // Call your ASYNC logic function
+                    // const statusInfo = await getFileStatusForAttachmentInfo(attachmentItem); // Call your ASYNC logic function
+                    eventManager.dispatch('getAttachmentStatus', { 
+                        library_id: attachmentItem.libraryID,
+                        zotero_key: attachmentItem.key
+                    });
 
                     // 6. Check if the selected item *still* matches the one we started fetching for
                     // This prevents updating the wrong row if the user selected another item quickly.
@@ -188,52 +193,6 @@ export class ZoteroAttachmentPane {
                         ztoolkit.log(`ZoteroAttachmentPane: Item changed (${this.item?.id}) while fetching status for ${currentItemId}. Aborting UI update.`);
                         return; // Bail out, a new asyncRender cycle will handle the current item
                     }
-
-                    ztoolkit.log(`ZoteroAttachmentPane: Received status for item ${currentItemId}:`, statusInfo);
-
-                    // 7. Update the UI elements with the final status
-                    if (statusLabel) {
-                        statusLabel.textContent = statusInfo.text;
-                    } else {
-                         ztoolkit.log('ZoteroAttachmentPane: #beaver-status label not found after await');
-                    }
-
-                    if (statusButton) {
-                        statusButton.hidden = !statusInfo.showButton;
-                        if (statusInfo.showButton) {
-                            statusButton.tooltipText = statusInfo.buttonTooltip || '';
-                            statusButton.label = statusInfo.buttonLabel || '';
-                        }
-                        // Keep the command logic - it's set up once and uses the data-attribute
-                        // Re-setting it here is redundant unless the command itself needs to change based on status
-                        statusButton.setAttribute('data-attachment-id', String(attachmentItem.id)); // Ensure ID is current
-                         // Define or redefine oncommand *if necessary*, otherwise it persists from row creation
-                         statusButton.oncommand = function(event: any) {
-                            const button = event.target as XUL.Element;
-                            button.hidden = true;
-                            const clickedAttachmentId = parseInt(button.getAttribute('data-attachment-id') || '0');
-                            if (clickedAttachmentId > 0) {
-                                ztoolkit.log(`Beaver button clicked for attachment ID: ${clickedAttachmentId}`);
-                                setTimeout(() => {
-                                try {
-                                    ztoolkit.log(`Reprocess buttom clicked for attachment ID: ${clickedAttachmentId}`);
-                                    // @ts-ignore Beaver is defined in the main window
-                                    // Zotero.getMainWindow().Zotero.Beaver?.reprocessAttachment(clickedAttachmentId);
-                                } catch (reprocessErr: any) {
-                                    ztoolkit.log(`Error calling reprocessAttachment: ${reprocessErr}`);
-                                    Zotero.logError(reprocessErr);
-                                }
-                            }, 50);
-                            } else {
-                                ztoolkit.log('Beaver button clicked but no attachment ID found.');
-                            }
-                         };
-                    } else {
-                        ztoolkit.log('ZoteroAttachmentPane: #beaver-status-button not found after await');
-                    }
-
-                    // 8. Make sure the row is visible (redundant if already set, but safe)
-                    beaverRow.hidden = false;
 
                 } catch (err: any) {
                      ztoolkit.log(`ZoteroAttachmentPane: Error during async status update for ${currentItemId}: ${err}`);
