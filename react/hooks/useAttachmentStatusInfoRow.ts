@@ -50,7 +50,7 @@ export function useAttachmentStatusInfoRow() {
                 setTimeout(() => {
                     statusButton_new.disabled = false;
                     if (statusInfo.onClick) statusInfo.onClick();
-                }, 50);
+                }, 1500);
             };
             // @ts-ignore custom event handler
             statusButton_new.addEventListener("command", statusButton_new._existingHandler);
