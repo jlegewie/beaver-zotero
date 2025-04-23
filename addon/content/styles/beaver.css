@@ -28,16 +28,26 @@ attachment-box .metadata-table #beaver-status {
     margin-top: 3px;
 }
 
-attachment-box .metadata-table #beaver-file-status-reprocess {
+#beaver-status-button {
     height: 22px;
     width: 22px;
     padding: 1px;
     margin-left: 4px;
     list-style-image: url("chrome://zotero/skin/20/universal/sync.svg");
+    fill: var(--fill-secondary);
+    stroke: var(--fill-secondary);
+    /* list-style-image: url("chrome: //beaver/content/icons/magic-wand.svg"); */
 
     &:not([disabled='true']) {
         color: var(--fill-secondary);
     }
+}
+
+#beaver-status-button[disabled='true'] {
+    opacity: .5;
+}
+#beaver-status-button:disabled {
+    opacity: .5;
 }
 
 #zotero-beaver-tb-chat-toggle:hover {
