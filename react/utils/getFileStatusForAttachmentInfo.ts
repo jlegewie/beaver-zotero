@@ -1,6 +1,7 @@
 import { syncingItemFilter } from '../../src/utils/sync';
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { syncService } from '../../src/services/syncService';
+import { fileUploader } from '../../src/services/FileUploader';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../components/FileStatusStats'
 
@@ -49,6 +50,13 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         const currentHash = await attachmentItem.attachmentHash;
         const hashChanged = Boolean(!attachmentStatus.file_hash) || attachmentStatus.file_hash !== currentHash;
 
+        if (attachmentStatus.upload_status === 'pending') {
+            return {
+                text: 'Uploading...',
+                showButton: false
+            };
+        }
+
         // 5. Return the status
         switch (fileStatus) {
             case 'unavailable':
@@ -84,6 +92,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonDisabled: !hashChanged,
                     onClick: () => {
                         syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        fileUploader.start();
                     }
                 };
             case 'failed': {
@@ -97,6 +106,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonDisabled: !hashChanged,
                     onClick: () => {
                         syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        fileUploader.start();
                     }
                 };
               }
