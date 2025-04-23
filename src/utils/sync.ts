@@ -348,9 +348,9 @@ export async function performInitialSync(
         // Zotero.Libraries.getName() is deprecated. Use Zotero.Library.prototype.name instead
         // Zotero.Library.prototype.name
         const libraryName = Zotero.Libraries.getName(libraryID);
-    logger(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
+        logger(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
     
-    // 1. Get all items from the library
+        // 1. Get all items from the library
         const syncDate = Zotero.Date.dateToSQL(new Date(), true);
         const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
         
@@ -358,12 +358,12 @@ export async function performInitialSync(
         const itemsToSync = allItems.filter(filterFunction);
         const totalItems = itemsToSync.length;
         
-    logger(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
+        logger(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
     
-    if (totalItems === 0) {
-        logger('Beaver Sync: No items to sync, skipping sync operation', 3);
-        return { status: 'completed', message: 'No items to sync' };
-    }
+        if (totalItems === 0) {
+            logger('Beaver Sync: No items to sync, skipping sync operation', 3);
+            return { status: 'completed', message: 'No items to sync' };
+        }
         
         // 3. Process items in batches using the new function
         await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
