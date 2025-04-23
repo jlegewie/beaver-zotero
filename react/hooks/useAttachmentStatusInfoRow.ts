@@ -4,7 +4,6 @@ import { getFileStatusForAttachmentInfo } from '../../src/ui/getFileStatusForAtt
 export function useAttachmentStatusInfoRow() {
     
     useEventSubscription('getAttachmentStatus', async (detail) => {
-        console.log(`getAttachmentStatus EVENT`);
         const { library_id, zotero_key } = detail;
         const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
 
@@ -27,13 +26,20 @@ export function useAttachmentStatusInfoRow() {
         const beaverRow = Zotero.getMainWindow().document.getElementById('beaverStatusRow') as HTMLDivElement | null;
         if (!beaverRow) return;
         const statusLabel = beaverRow.querySelector('#beaver-status') as HTMLLabelElement | null;
-        const statusButton = beaverRow.querySelector('#beaver-status-button') as HTMLButtonElement | null;
         if (statusLabel) {
-            console.log(`Updating status label`);
             statusLabel.textContent = statusInfo.text;
+        }
+        const statusButton = beaverRow.querySelector('#beaver-status-button') as HTMLButtonElement | null;
+        if (!statusButton) {
+            const statusButton = Zotero.getMainWindow().document.createXULElement("toolbarbutton");
+            statusButton.setAttribute("id", "beaver-status-button");
+            statusButton.setAttribute("tooltiptext", `Reprocess File`);
+            statusLabel?.parentElement?.appendChild(statusButton);
+            statusButton.hidden = !statusInfo.showButton
         }
         if (statusButton) {
             statusButton.hidden = !statusInfo.showButton;
-        }
+        }        
+        // statusButton.addEventListener("command", () => triggerToggleChat(win));
     });
 } 

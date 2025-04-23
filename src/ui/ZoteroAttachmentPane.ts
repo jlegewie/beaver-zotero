@@ -148,7 +148,6 @@ export class ZoteroAttachmentPane {
             const updateStatus = async () => {
                 let beaverRow: Element | null = null;
                 let statusLabel: HTMLLabelElement | null = null;
-                let statusButton: Element | null = null;
 
                 try {
                     // 3. Ensure our custom row exists (might have been created by original render or previous run)
@@ -172,16 +171,13 @@ export class ZoteroAttachmentPane {
 
                     // Find elements within the row
                     statusLabel = beaverRow.querySelector('#beaver-status') as HTMLLabelElement | null;
-                    statusButton = beaverRow.querySelector('#beaver-status-button') as XUL.ToolBarButton | null;
 
                     // 4. Show Loading State
                     if (statusLabel) statusLabel.textContent = 'Loading status...'; // Or use a spinner class/element
-                    if (statusButton) statusButton.hidden = true; // Hide button while loading
                     beaverRow.hidden = false; // Ensure row is visible
 
                     // 5. Get the status asynchronously for the current attachment
                     ztoolkit.log(`ZoteroAttachmentPane: Awaiting Beaver status for item ${currentItemId}`);
-                    // const statusInfo = await getFileStatusForAttachmentInfo(attachmentItem); // Call your ASYNC logic function
                     eventManager.dispatch('getAttachmentStatus', { 
                         library_id: attachmentItem.libraryID,
                         zotero_key: attachmentItem.key
@@ -200,7 +196,6 @@ export class ZoteroAttachmentPane {
                      // Show error state in the UI
                      if (beaverRow) {
                          if (statusLabel) statusLabel.textContent = 'Error loading status';
-                         if (statusButton) statusButton.hidden = true;
                          beaverRow.hidden = false; // Make sure row is visible to show the error
                      }
                      if (beaverRow) beaverRow.hidden = true;
@@ -236,18 +231,14 @@ export class ZoteroAttachmentPane {
                 ])
             ]),
             elements.create('html:div', { class: 'meta-data' }, [
-                elements.create('html:label', { id: 'beaver-status' }),
-                elements.create('toolbarbutton', { // Use XUL toolbarbutton
-                    id: 'beaver-file-status-reprocess',
+                elements.create('html:label', { id: 'beaver-status' })
+                /*elements.create('toolbarbutton', { // Use XUL toolbarbutton
+                    id: 'beaver-status-button',
                     hidden: 'true', // Start hidden
                     tooltiptext: 'Reprocess File',
                     // 'oncommand' is set dynamically in the patch
-                }, [
-                    // Optional Icon:
-                    elements.create('image', { class: 'toolbarbutton-icon' }),
-                    // Optional Label (can be empty if only icon/tooltip):
-                    elements.create('label', { class: 'toolbarbutton-text', value: '' })
-                 ])
+                }
+                )*/
             ])
         ]);
     }
