@@ -3,6 +3,7 @@ import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTab
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
+import { BeaverDB } from "./services/database";
 import { VectorStoreDB } from "./services/vectorStore";
 import { VoyageClient } from "./services/voyage";
 import { ItemService } from "./services/ItemService";
@@ -30,6 +31,7 @@ class Addon {
     public itemService?: ItemService;
     public aiProvider?: AIProvider;
     public citationService?: CitationService;
+    public db?: BeaverDB;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

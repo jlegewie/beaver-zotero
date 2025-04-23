@@ -17,6 +17,7 @@ import eventBus from "../react/eventBus";
 import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttachmentPane'
+import { BeaverDB } from "./services/database";
 
 const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -32,12 +33,21 @@ async function onStartup() {
 	ztoolkit.log("Startup");
 
 	// Initialize database and vector store
-	const dbConnection = new Zotero.DBConnection("beaver");
-	const vectorStore = new VectorStoreDB(dbConnection);
+	const dbConnectionVectorStore = new Zotero.DBConnection("beaverVectorStore");
+	const vectorStore = new VectorStoreDB(dbConnectionVectorStore);
 	
 	// Test connection and initialize schema
-	await dbConnection.test();
+	await dbConnectionVectorStore.test();
 	await vectorStore.initDatabase();
+
+	// Initialize database
+	const dbConnection = new Zotero.DBConnection("beaver");
+	const beaverDB = new BeaverDB(dbConnection);
+	addon.db = beaverDB;
+
+	// Test connection and initialize schema
+	await dbConnection.test();
+	await beaverDB.initDatabase();
 	
 	// Initialize Voyage client
 	const voyageApiKey = getPref("voyageApiKey");
