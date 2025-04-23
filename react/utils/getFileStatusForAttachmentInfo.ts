@@ -1,5 +1,6 @@
 import { syncingItemFilter } from '../../src/utils/sync';
 import { attachmentsService } from '../../src/services/attachmentsService';
+import { syncService } from '../../src/services/syncService';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../components/FileStatusStats'
 
@@ -22,7 +23,13 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             return { text: 'Unsupported library', showButton: false };
         }
         if (!syncingItemFilter(attachmentItem)) {
-            return { text: 'Unsupported file type', showButton: false };
+            return {
+                text: 'Unsupported file type',
+                showButton: true,
+                buttonIcon: 'chrome://beaver/content/icons/info.svg',
+                buttonTooltip: 'Beaver only supports PDF and image files',
+                buttonDisabled: true
+            };
         }
 
         // 2. Does the attachment file exist?
@@ -45,9 +52,22 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         // 5. Return the status
         switch (fileStatus) {
             case 'unavailable':
-                return { text: 'Processing not available', showButton: false };
+                return {
+                    text: 'Processing not available',
+                    showButton: true,
+                    buttonIcon: 'chrome://beaver/content/icons/info.svg',
+                    buttonTooltip: 'File processing is only available for users with a subscription.',
+                    buttonDisabled: true
+                };
             case 'balance_insufficient':
-                return { text: 'Insufficient balance', showButton: true, buttonDisabled: hashChanged, onClick: () => {console.log('clicked') } };
+                return {
+                    text: 'Insufficient balance',
+                    showButton: true,
+                    buttonIcon: 'chrome://beaver/content/icons/info.svg',
+                    buttonTooltip: 'Your balance is insufficient to process this file.',
+                    buttonDisabled: true,
+                    onClick: () => {syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash); }
+                };
             case 'queued':
                 return { text: 'Waiting for processing...', showButton: false };
             case 'processing':
@@ -59,8 +79,12 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     text: 'Completed',
                     showButton: true, // Allow reprocessing
                     buttonTooltip: 'Reprocess this attachment',
-                    buttonDisabled: !hashChanged
+                    buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
+                    buttonDisabled: !hashChanged,
+                    onClick: () => {
+                        syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                    }
                 };
             case 'failed': {
                 // Error code if any
@@ -69,8 +93,11 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     text: `Processing failed: ${errorDescription}`,
                     showButton: true, // Allow retry
                     buttonTooltip: 'Retry processing',
-                    buttonDisabled: !hashChanged
-                    // buttonIcon: 'chrome://zotero/skin/cross.png',
+                    buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
+                    buttonDisabled: !hashChanged,
+                    onClick: () => {
+                        syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                    }
                 };
               }
             default:

@@ -41,6 +41,9 @@ export function useAttachmentStatusInfoRow() {
             statusButton_new.hidden = !statusInfo.showButton;
             statusButton_new.disabled = statusInfo.buttonDisabled || false;
             statusButton_new.setAttribute("tooltiptext", statusInfo.buttonTooltip || '');
+            if (statusInfo.buttonIcon) {
+                statusButton_new.style.listStyleImage = `url(${statusInfo.buttonIcon})`;
+            }
             // Event handlers
             // @ts-ignore custom event handler
             statusButton_new.removeEventListener("command", statusButton_new._existingHandler);
