@@ -1,5 +1,5 @@
 import { useEventSubscription } from './useEventSubscription';
-import { getFileStatusForAttachmentInfo } from '../../src/ui/getFileStatusForAttachmentInfo';
+import { getFileStatusForAttachmentInfo } from '../utils/getFileStatusForAttachmentInfo';
 
 export function useAttachmentStatusInfoRow() {
     

@@ -1,6 +1,6 @@
-import { syncingItemFilter } from '../utils/sync';
-import { attachmentsService } from '../services/attachmentsService';
-import { logger } from '../utils/logger';
+import { syncingItemFilter } from '../../src/utils/sync';
+import { attachmentsService } from '../../src/services/attachmentsService';
+import { logger } from '../../src/utils/logger';
 // import { attachmentsService as staticAttachmentsService, AttachmentStatusResponse } from '../services/attachmentsService';
 
 
@@ -41,6 +41,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         // 3. Get status from backend
         const attachmentStatus = await attachmentsService.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key);
         const fileStatus = attachmentStatus.md_status;
+        const errorCode = attachmentStatus.md_error_code;
         if (!fileStatus) {
             return { text: 'Unknown status', showButton: false };
         }
