@@ -115,8 +115,8 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 	]);
 
 	// Register Beaver UI elements
-	BeaverUIFactory.registerMenuItems();
-	BeaverUIFactory.registerInfoRow();
+	// BeaverUIFactory.registerMenuItems();
+	// BeaverUIFactory.registerInfoRow();
 
 	// Create (or reuse) an EventTarget for this window
 	if (!win.__beaverEventBus) {
