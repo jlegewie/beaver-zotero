@@ -34,8 +34,10 @@ attachment-box .metadata-table #beaver-status {
     padding: 1px;
     margin-left: 4px;
     list-style-image: url("chrome://zotero/skin/20/universal/sync.svg");
+    /* list-style-image: url("chrome://beaver/content/icons/info.svg"); */
     fill: var(--fill-secondary);
     stroke: var(--fill-secondary);
+    /* cursor: pointer; */
     /* list-style-image: url("chrome: //beaver/content/icons/magic-wand.svg"); */
 
     &:not([disabled='true']) {
@@ -43,11 +45,9 @@ attachment-box .metadata-table #beaver-status {
     }
 }
 
-#beaver-status-button[disabled='true'] {
+#beaver-status-button[disabled="true"] {
     opacity: .5;
-}
-#beaver-status-button:disabled {
-    opacity: .5;
+    /* cursor: default; */
 }
 
 #zotero-beaver-tb-chat-toggle:hover {
