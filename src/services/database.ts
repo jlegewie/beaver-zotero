@@ -398,6 +398,133 @@ export class BeaverDB {
         );
          return rows.length === 0 ? null : BeaverDB.rowToAttachmentRecord(rows[0]);
     }
+
+    /**
+     * Upsert multiple attachment records in a single transaction.
+     * Inserts attachments that don't exist, updates attachments where fields have changed.
+     * @param attachments An array of attachment data. Requires 'library_id', 'zotero_key', 'attachment_metadata_hash'.
+     * @returns An array of the internal 'id's corresponding to the input attachments (either existing or newly inserted).
+     */
+    public async upsertAttachmentsBatch(attachments: (Pick<AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & Partial<Omit<AttachmentRecord, 'id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>)[]): Promise<string[]> {
+        if (attachments.length === 0) {
+            return [];
+        }
+
+        const defaults: Partial<AttachmentRecord> = {
+            file_hash: null,
+            upload_status: 'pending',
+            md_status: 'unavailable',
+            docling_status: 'unavailable',
+            md_error_code: null,
+            docling_error_code: null,
+        };
+
+        const finalIds: string[] = [];
+        const attachmentsToInsert: (Omit<AttachmentRecord, 'id'> & { generatedId: string })[] = [];
+        const attachmentsToUpdate: { libraryId: number; zoteroKey: string; updates: Partial<Omit<AttachmentRecord, 'id' | 'library_id' | 'zotero_key'>> }[] = [];
+        const attachmentMap = new Map<string, typeof attachments[0]>(); // Key: "libraryId-zoteroKey"
+        attachments.forEach(attachment => {
+            const finalAttachment = { ...defaults, ...attachment };
+            attachmentMap.set(`${finalAttachment.library_id}-${finalAttachment.zotero_key}`, finalAttachment);
+        });
+
+        // 1. Fetch existing attachments matching the batch
+        const keys = attachments.map(attachment => [attachment.library_id, attachment.zotero_key]);
+        // Construct IN clause placeholders: ((?,?), (?,?), ...)
+        const placeholders = keys.map(() => '(?,?)').join(',');
+        const values = keys.flat();
+        const query = `SELECT * FROM attachments WHERE (library_id, zotero_key) IN (VALUES ${placeholders})`;
+        const existingRows = await this.conn.queryAsync(query, values);
+        const existingAttachmentsMap = new Map<string, AttachmentRecord>(); // Key: "libraryId-zoteroKey"
+        existingRows.forEach((row: any) => {
+            const record = BeaverDB.rowToAttachmentRecord(row);
+            existingAttachmentsMap.set(`${record.library_id}-${record.zotero_key}`, record);
+        });
+
+        // 2. Determine inserts vs updates
+        for (const attachment of attachments) {
+            const finalAttachment = { ...defaults, ...attachment };
+            const key = `${finalAttachment.library_id}-${finalAttachment.zotero_key}`;
+            const existing = existingAttachmentsMap.get(key);
+            
+            if (existing) {
+                finalIds.push(existing.id); // Use existing ID
+                
+                // Check which fields need updating
+                const updates: Partial<Omit<AttachmentRecord, 'id' | 'library_id' | 'zotero_key'>> = {};
+                let hasChanges = false;
+                
+                if (existing.attachment_metadata_hash !== finalAttachment.attachment_metadata_hash) {
+                    updates.attachment_metadata_hash = finalAttachment.attachment_metadata_hash;
+                    hasChanges = true;
+                }
+                
+                // Check all other fields for changes
+                const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
+                    'file_hash', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
+                ];
+                
+                fieldsToCheck.forEach(field => {
+                    if (finalAttachment[field] !== undefined && existing[field] !== finalAttachment[field]) {
+                        updates[field] = finalAttachment[field] as any;
+                        hasChanges = true;
+                    }
+                });
+                
+                if (hasChanges) {
+                    attachmentsToUpdate.push({
+                        libraryId: finalAttachment.library_id,
+                        zoteroKey: finalAttachment.zotero_key,
+                        updates
+                    });
+                }
+            } else {
+                const newId = uuidv4();
+                finalIds.push(newId); // Use newly generated ID
+                attachmentsToInsert.push({ 
+                    ...finalAttachment, 
+                    generatedId: newId 
+                } as any);
+            }
+        }
+
+        // 3. Execute within a transaction
+        await this.conn.executeTransaction(async () => {
+            // Batch Insert
+            if (attachmentsToInsert.length > 0) {
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertValues: any[] = [];
+                attachmentsToInsert.forEach(attachment => {
+                    insertValues.push(
+                        attachment.generatedId,
+                        attachment.library_id,
+                        attachment.zotero_key,
+                        attachment.attachment_metadata_hash,
+                        attachment.file_hash,
+                        attachment.upload_status,
+                        attachment.md_status,
+                        attachment.docling_status,
+                        attachment.md_error_code,
+                        attachment.docling_error_code
+                    );
+                });
+                const insertQuery = `INSERT INTO attachments (id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
+                await this.conn.queryAsync(insertQuery, insertValues);
+            }
+
+            // Updates (individually within the transaction)
+            for (const update of attachmentsToUpdate) {
+                const setClauses = Object.keys(update.updates).map(field => `${field} = ?`).join(', ');
+                const updateValues = [...Object.values(update.updates), update.libraryId, update.zoteroKey];
+                await this.conn.queryAsync(
+                    `UPDATE attachments SET ${setClauses} WHERE library_id = ? AND zotero_key = ?`,
+                    updateValues
+                );
+            }
+        });
+
+        return finalIds;
+    }
 }
 
 /* Example Usage:
