@@ -2,15 +2,6 @@ import { syncingItemFilter } from '../../src/utils/sync';
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../components/FileStatusStats'
-// import { attachmentsService as staticAttachmentsService, AttachmentStatusResponse } from '../services/attachmentsService';
-
-
-// import { AttachmentStatusResponse } from '../services/attachmentsService';
-
-// Copied from react/utils/sourceUtils.ts
-// export function syncingItemFilter(item: Zotero.Item): boolean {
-//     return item.libraryID === 1 && (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
-// };
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
