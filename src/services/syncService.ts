@@ -22,10 +22,19 @@ export interface ItemBatchRequest {
     close_log?: boolean;
 }
 
+export interface ItemResult {
+    library_id: number;
+    zotero_key: string;
+    metadata_hash: string;
+    file_hash: string | null;
+    success: boolean;
+}
 
 export interface BatchResult {
     sync_id: string;
     sync_status: "in_progress" | "completed" | "failed";
+    items: ItemResult[];
+    attachments: ItemResult[];
     processed: number;
     success: number;
     failed: number;
