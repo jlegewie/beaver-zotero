@@ -3,6 +3,7 @@ import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
+import { ItemRecord, AttachmentRecord } from '../services/database';
 
 /**
  * Interface for item filter function
@@ -223,12 +224,41 @@ export async function syncItemsToBackend(
     
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
-    logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`, 4);
+        logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`, 4);
     
-    // Transform Zotero items to our format
+        // Transform Zotero items to our format
         const itemsData = await Promise.all(batch.filter(item => item.isRegularItem()).map(extractItemData));
-        const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData));
-        attachmentCount += attachmentsData.length;
+        const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData).filter(Boolean)) as AttachmentData[];
+
+        // Get database items and attachments
+        // @ts-ignore Beaver exists
+        const itemsDB = await Zotero.Beaver.db.getItemsByZoteroKeys(libraryID, itemsData.map(item => item.zotero_key));
+        // @ts-ignore Beaver exists
+        const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(libraryID, attachmentsData.map(att => att.zotero_key));
+
+        // Filter out items where the metadata_hash did not change
+        const itemsDataFiltered = itemsData.filter((item) => {
+            const itemDB = itemsDB.find((itemDB: ItemRecord) => itemDB.zotero_key === item.zotero_key);
+            if (!itemDB) return true;
+            return itemDB.item_metadata_hash !== item.item_metadata_hash;
+        });
+        console.log(itemsDataFiltered);
+
+        // Filter out attachments where the metadata_hash did not change
+        const attachmentsDataFiltered = attachmentsData.filter((att) => {
+            const attDB = attachmentsDB.find((attDB: AttachmentRecord) => attDB.zotero_key === att.zotero_key);
+            if (!attDB) return true;
+            return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
+        });
+
+        // If there are no items or attachments to sync, skip the batch
+        if (attachmentsDataFiltered.length === 0 && itemsDataFiltered.length === 0) {
+            logger(`Beaver Sync: No items or attachments to sync for batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)}`, 4);
+            continue;
+        }
+
+        // Update attachment count
+        attachmentCount += attachmentsDataFiltered.length;
 
         // sync options
         const createLog = i === 0;
@@ -242,7 +272,15 @@ export async function syncItemsToBackend(
             
             while (attempts < maxAttempts) {
                 try {
-                    batchResult = await syncService.processItemsBatch(libraryID, itemsData, attachmentsData, syncType, createLog, closeLog, syncId);
+                    batchResult = await syncService.processItemsBatch(
+                        libraryID,
+                        itemsDataFiltered,
+                        attachmentsDataFiltered,
+                        syncType,
+                        createLog,
+                        closeLog,
+                        syncId
+                    );
                     break; // Success, exit retry loop
                 } catch (retryError) {
                     attempts++;
