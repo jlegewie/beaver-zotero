@@ -1,8 +1,10 @@
 import { useEventSubscription } from './useEventSubscription';
 import { getFileStatusForAttachmentInfo } from '../utils/getFileStatusForAttachmentInfo';
+import { isAuthenticatedAtom } from '../atoms/auth';
+import { store } from '../../react/index';
 
 export function useAttachmentStatusInfoRow() {
-    
+
     useEventSubscription('setAttachmentStatusInfoRow', async (detail) => {
         const { library_id, zotero_key } = detail;
         const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -19,10 +21,19 @@ export function useAttachmentStatusInfoRow() {
         }
 
         // 2. Get attachment status
-        const statusInfo = await getFileStatusForAttachmentInfo(attachmentItem);
+        let statusInfo;
+        if (store.get(isAuthenticatedAtom)) {
+            statusInfo = await getFileStatusForAttachmentInfo(attachmentItem);
+        } else {
+            statusInfo = {
+                text: 'Not authenticated',
+                showButton: false,
+                buttonDisabled: true
+            };
+        }
         console.log(`statusInfo: ${statusInfo}`);
 
-        // 3. Update UI
+        // 4. Update UI
         const beaverRow = Zotero.getMainWindow().document.getElementById('beaverStatusRow') as HTMLDivElement | null;
         if (!beaverRow) return;
         const statusLabel = beaverRow.querySelector('#beaver-status') as HTMLLabelElement | null;
