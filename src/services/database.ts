@@ -588,6 +588,46 @@ export class BeaverDB {
         
         return result;
     }
+
+    /**
+     * Retrieve multiple item records by their library_id and zotero_keys.
+     * @param libraryId The library_id of the items.
+     * @param zoteroKeys Array of zotero_keys to retrieve.
+     * @returns Array of ItemRecord objects found, empty array if none found.
+     */
+    public async getItemsByZoteroKeys(libraryId: number, zoteroKeys: string[]): Promise<ItemRecord[]> {
+        if (zoteroKeys.length === 0) {
+            return [];
+        }
+        
+        const placeholders = zoteroKeys.map(() => '?').join(',');
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM items WHERE library_id = ? AND zotero_key IN (${placeholders})`,
+            [libraryId, ...zoteroKeys]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToItemRecord(row));
+    }
+
+    /**
+     * Retrieve multiple attachment records by their library_id and zotero_keys.
+     * @param libraryId The library_id of the attachments.
+     * @param zoteroKeys Array of zotero_keys to retrieve.
+     * @returns Array of AttachmentRecord objects found, empty array if none found.
+     */
+    public async getAttachmentsByZoteroKeys(libraryId: number, zoteroKeys: string[]): Promise<AttachmentRecord[]> {
+        if (zoteroKeys.length === 0) {
+            return [];
+        }
+        
+        const placeholders = zoteroKeys.map(() => '?').join(',');
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE library_id = ? AND zotero_key IN (${placeholders})`,
+            [libraryId, ...zoteroKeys]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
 }
 
 /* Example Usage:
