@@ -128,7 +128,6 @@ export class ZoteroAttachmentPane {
         patch(proto, 'asyncRender', original => async function(this: any, ...args: any[]) {
             const currentItem = this.item; // Get current item context
             const currentItemId = currentItem ? currentItem.id : null;
-             ztoolkit.log(`ZoteroAttachmentPane: >> ENTER Patched asyncRender for item ${currentItemId ?? 'null'}. Active lock: ${activeItemId ?? 'null'}`);
 
             // --- Reset Lock Condition ---
             // If the current item is different from the active one, clear the lock.
@@ -139,16 +138,13 @@ export class ZoteroAttachmentPane {
             }
 
             // 1. Run original rendering
-            ztoolkit.log(`ZoteroAttachmentPane: >> CALLING Original asyncRender for item ${currentItemId ?? 'null'}`);
             await original.apply(this, args);
-            ztoolkit.log(`ZoteroAttachmentPane: >> RETURNED Original asyncRender for item ${currentItemId ?? 'null'}`);
 
             // 2. Safety check
             if (!currentItem || !currentItem.isAttachment()) {
                 const customRow = this.querySelector('#beaverStatusRow');
                 if (customRow) customRow.hidden = true;
                 // Clear lock if no valid attachment is displayed
-                 ztoolkit.log(`ZoteroAttachmentPane: << EXIT (No valid attachment), clearing lock ${activeItemId ?? 'null'}.`);
                 activeItemId = null;
                 return;
             }
@@ -156,7 +152,6 @@ export class ZoteroAttachmentPane {
             // --- Debounce Logic ---
             // If an update for this *specific* item is already active, skip.
             if (currentItemId === activeItemId) {
-                 ztoolkit.log(`ZoteroAttachmentPane: << EXIT (Skipping duplicate update for active item ${currentItemId})`);
                 return;
             }
 
@@ -235,18 +230,11 @@ export class ZoteroAttachmentPane {
                          if (statusLabel) statusLabel.textContent = 'Error loading status';
                          beaverRow.hidden = false;
                      }
-                } finally {
-                    // --- Lock Release ---
-                    // The lock is now released ONLY when a *different* item is selected (handled at the start)
-                    // or when no valid attachment is displayed. We don't release it here automatically.
-                    // This ensures the second asyncRender call finds the lock active and exits early.
-                     ztoolkit.log(`ZoteroAttachmentPane: << FINISHED updateStatus execution for item ${itemIdForThisUpdate}. Lock state remains: ${activeItemId ?? 'null'}.`);
                 }
             };
 
             // Execute the async update function
             updateStatus();
-             ztoolkit.log(`ZoteroAttachmentPane: << EXIT Patched asyncRender (Scheduled updateStatus) for item ${currentItemId}`);
         });
 
         this.patched = true;
