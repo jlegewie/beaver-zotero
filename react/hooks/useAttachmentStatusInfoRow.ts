@@ -3,7 +3,7 @@ import { getFileStatusForAttachmentInfo } from '../utils/getFileStatusForAttachm
 
 export function useAttachmentStatusInfoRow() {
     
-    useEventSubscription('getAttachmentStatus', async (detail) => {
+    useEventSubscription('setAttachmentStatusInfoRow', async (detail) => {
         const { library_id, zotero_key } = detail;
         const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
 

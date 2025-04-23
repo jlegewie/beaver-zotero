@@ -178,7 +178,7 @@ export class ZoteroAttachmentPane {
 
                     // 5. Get the status asynchronously for the current attachment
                     ztoolkit.log(`ZoteroAttachmentPane: Awaiting Beaver status for item ${currentItemId}`);
-                    eventManager.dispatch('getAttachmentStatus', { 
+                    eventManager.dispatch('setAttachmentStatusInfoRow', { 
                         library_id: attachmentItem.libraryID,
                         zotero_key: attachmentItem.key
                     });

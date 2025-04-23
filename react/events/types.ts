@@ -2,7 +2,7 @@ export interface BeaverEvents {
     toggleChat: {
         location?: 'library' | 'reader';
     };
-    getAttachmentStatus: {
+    setAttachmentStatusInfoRow: {
         library_id: number;
         zotero_key: string;
     };
