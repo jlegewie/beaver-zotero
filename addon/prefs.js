@@ -1,6 +1,9 @@
 /* eslint-disable no-undef */
 pref("enable", true);
 pref("input", "This is input");
+// User ID
+pref("userId", "");
+pref("userEmail", "");
 // API keys
 pref("voyageApiKey", "");
 pref("googleGenerativeAiApiKey", "");
