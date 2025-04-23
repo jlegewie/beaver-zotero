@@ -1,6 +1,7 @@
 import { syncingItemFilter } from '../../src/utils/sync';
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { logger } from '../../src/utils/logger';
+import { errorMapping } from '../components/FileStatusStats'
 // import { attachmentsService as staticAttachmentsService, AttachmentStatusResponse } from '../services/attachmentsService';
 
 
@@ -70,14 +71,17 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonDisabled: !hashChanged
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
                 };
-            case 'failed':
+            case 'failed': {
+                // Error code if any
+                const errorDescription = errorMapping[errorCode as keyof typeof errorMapping] || "Unexpected error";
                 return {
-                    text: 'Processing failed',
+                    text: `Processing failed: ${errorDescription}`,
                     showButton: true, // Allow retry
                     buttonTooltip: 'Retry processing',
                     buttonDisabled: !hashChanged
                     // buttonIcon: 'chrome://zotero/skin/cross.png',
                 };
+              }
             default:
                 // Handle unexpected status values explicitly
                 return {

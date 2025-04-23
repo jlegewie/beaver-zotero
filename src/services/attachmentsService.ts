@@ -26,6 +26,10 @@ export interface AttachmentStatusResponse {
     upload_status?: UploadStatus;
     md_status?: ProcessingStatus;
     docling_status?: ProcessingStatus;
+
+    // error codes
+    md_error_code?: string
+    docling_error_code?: string
 }
 
 

@@ -82,7 +82,7 @@ const Stat: React.FC<{
     );
 };
 
-const errorMapping = {
+export const errorMapping = {
     "encrypted": "File is encrypted",
     "no_text_layer": "Requires OCR",
     "insufficient_text": "Unknown error",
