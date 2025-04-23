@@ -9,6 +9,8 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "enable": boolean;
       "input": string;
+      "userId": string;
+      "userEmail": string;
       "voyageApiKey": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
