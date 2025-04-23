@@ -269,7 +269,29 @@ export async function syncItemsToBackend(
                 Zotero.logError(error);
                 break;
             }
-            
+
+            // Update database items
+            if (batchResult.items.length > 0) {
+                const items = batchResult.items.map(item => ({
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                    item_metadata_hash: item.metadata_hash
+                }));
+                // @ts-ignore Beaver exists
+                await Zotero.Beaver.db.upsertItemsBatch(items);
+            }
+
+            // Update database attachments
+            if (batchResult.attachments.length > 0) {
+                const attachments = batchResult.attachments.map(attachment => ({
+                    library_id: attachment.library_id,
+                    zotero_key: attachment.zotero_key,
+                    attachment_metadata_hash: attachment.metadata_hash
+                }));
+                // @ts-ignore Beaver exists
+                await Zotero.Beaver.db.upsertAttachmentsBatch(attachments);
+            }
+
             // Update processed count with actual success count
             const newProcessed = processedCount + batchResult.success;
             
