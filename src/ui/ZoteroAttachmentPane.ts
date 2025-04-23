@@ -122,95 +122,138 @@ export class ZoteroAttachmentPane {
 
         ztoolkit.log('ZoteroAttachmentPane: Patching AttachmentBox.prototype.asyncRender');
 
-        // Store pending status check promise to avoid race conditions
-        let pendingStatusCheck: Promise<void> | null = null;
+        // Keep track of the item ID for which the update process is active
+        let activeItemId: number | null = null;
 
-        // --- The Core Patch ---
         patch(proto, 'asyncRender', original => async function(this: any, ...args: any[]) {
-            // `this` refers to the attachment-box instance
+            const currentItem = this.item; // Get current item context
+            const currentItemId = currentItem ? currentItem.id : null;
+             ztoolkit.log(`ZoteroAttachmentPane: >> ENTER Patched asyncRender for item ${currentItemId ?? 'null'}. Active lock: ${activeItemId ?? 'null'}`);
 
-            // 1. Run the original rendering logic first
+            // --- Reset Lock Condition ---
+            // If the current item is different from the active one, clear the lock.
+            // This allows processing for a new item selection.
+            if (currentItemId !== activeItemId) {
+                 ztoolkit.log(`ZoteroAttachmentPane: Item changed (${currentItemId ?? 'null'} vs ${activeItemId ?? 'null'}), clearing lock.`);
+                activeItemId = null;
+            }
+
+            // 1. Run original rendering
+            ztoolkit.log(`ZoteroAttachmentPane: >> CALLING Original asyncRender for item ${currentItemId ?? 'null'}`);
             await original.apply(this, args);
+            ztoolkit.log(`ZoteroAttachmentPane: >> RETURNED Original asyncRender for item ${currentItemId ?? 'null'}`);
 
-            // 2. Safety check: Ensure we have an item and it's an attachment
-            if (!this.item || !this.item.isAttachment()) {
-                // Hide our row if no valid attachment is selected
+            // 2. Safety check
+            if (!currentItem || !currentItem.isAttachment()) {
                 const customRow = this.querySelector('#beaverStatusRow');
                 if (customRow) customRow.hidden = true;
-                pendingStatusCheck = null; // Cancel any pending check
+                // Clear lock if no valid attachment is displayed
+                 ztoolkit.log(`ZoteroAttachmentPane: << EXIT (No valid attachment), clearing lock ${activeItemId ?? 'null'}.`);
+                activeItemId = null;
                 return;
             }
 
-            const attachmentItem = this.item as Zotero.Item;
-            const currentItemId = attachmentItem.id;
-            ztoolkit.log(`ZoteroAttachmentPane: Patched asyncRender starting for item ${currentItemId}`);
+            // --- Debounce Logic ---
+            // If an update for this *specific* item is already active, skip.
+            if (currentItemId === activeItemId) {
+                 ztoolkit.log(`ZoteroAttachmentPane: << EXIT (Skipping duplicate update for active item ${currentItemId})`);
+                return;
+            }
+
+            // --- Acquire Lock ---
+            // Mark this item ID as active *before* starting the async work.
+            activeItemId = currentItemId;
+             ztoolkit.log(`ZoteroAttachmentPane: Acquired lock for item ${currentItemId}. Starting update process.`);
+
 
             const updateStatus = async () => {
-                let beaverRow: Element | null = null;
+                 // Capture the ID this specific updateStatus is for
+                const itemIdForThisUpdate = currentItemId;
+                 ztoolkit.log(`ZoteroAttachmentPane: updateStatus started for item ${itemIdForThisUpdate}`);
+
+                let beaverRow: Element | null = this.querySelector('#beaverStatusRow');
                 let statusLabel: HTMLLabelElement | null = null;
 
                 try {
-                    // 3. Ensure our custom row exists (might have been created by original render or previous run)
-                    beaverRow = this.querySelector('#beaverStatusRow') as HTMLDivElement;
+                    // 3. Ensure row exists (Create ONLY if not found)
                     if (!beaverRow) {
-                        ztoolkit.log('ZoteroAttachmentPane: Creating beaverStatusRow');
-                        beaverRow = ZoteroAttachmentPane.createBeaverRow(this.ownerDocument); // Use static method
+                         ztoolkit.log(`ZoteroAttachmentPane: Creating beaverStatusRow for item ${itemIdForThisUpdate}.`);
+                        beaverRow = ZoteroAttachmentPane.createBeaverRow(this.ownerDocument); // Pass correct document context
                         const metadataTable = this.querySelector('.metadata-table');
                         if (metadataTable) {
                             const indexRow = metadataTable.querySelector('#indexStatusRow');
-                            if (indexRow && indexRow.nextSibling) {
-                                metadataTable.insertBefore(beaverRow, indexRow.nextSibling);
-                            } else {
-                                metadataTable.appendChild(beaverRow);
-                            }
+                            metadataTable.insertBefore(beaverRow, indexRow?.nextSibling ?? null);
+                             ztoolkit.log(`ZoteroAttachmentPane: beaverStatusRow added to DOM for item ${itemIdForThisUpdate}.`);
                         } else {
-                            ztoolkit.log('ZoteroAttachmentPane: Could not find .metadata-table to add row.');
-                            return; // Can't add the row
+                             ztoolkit.log(`ZoteroAttachmentPane: Could not find .metadata-table for item ${itemIdForThisUpdate}.`);
+                            // If we fail to add the row, we should release the lock for this item
+                            if (activeItemId === itemIdForThisUpdate) {
+                                activeItemId = null;
+                            }
+                            return;
                         }
+                    } else {
+                         ztoolkit.log(`ZoteroAttachmentPane: Found existing beaverStatusRow for item ${itemIdForThisUpdate}.`);
                     }
 
-                    // Find elements within the row
                     statusLabel = beaverRow.querySelector('#beaver-status') as HTMLLabelElement | null;
 
                     // 4. Show Loading State
-                    if (statusLabel) statusLabel.textContent = 'Loading status...'; // Or use a spinner class/element
-                    beaverRow.hidden = false; // Ensure row is visible
+                    if (statusLabel) statusLabel.textContent = 'Loading status...';
+                    beaverRow.hidden = false;
 
-                    // 5. Get the status asynchronously for the current attachment
-                    ztoolkit.log(`ZoteroAttachmentPane: Awaiting Beaver status for item ${currentItemId}`);
-                    eventManager.dispatch('setAttachmentStatusInfoRow', { 
-                        library_id: attachmentItem.libraryID,
-                        zotero_key: attachmentItem.key
+                    // 5. Dispatch event
+                    // Check if the lock is *still* held by *this* item before dispatching.
+                    // This prevents a potential race condition if the user clicks away *very* fast.
+                    if (activeItemId !== itemIdForThisUpdate) {
+                         ztoolkit.log(`ZoteroAttachmentPane: Lock changed (${activeItemId ?? 'null'}) before dispatching for ${itemIdForThisUpdate}. Aborting dispatch.`);
+                        return; // Don't dispatch if the lock was cleared or taken by another item
+                    }
+                    // Also check if the item context in the pane `this.item` still matches.
+                     if (!this.item || this.item.id !== itemIdForThisUpdate) {
+                          ztoolkit.log(`ZoteroAttachmentPane: Item context changed (${this.item?.id}) before dispatching for ${itemIdForThisUpdate}. Aborting dispatch.`);
+                         // Although the lock might still be ours, the UI context moved on. Release lock.
+                         if (activeItemId === itemIdForThisUpdate) {
+                             activeItemId = null;
+                         }
+                         return;
+                     }
+
+
+                    ztoolkit.log(`ZoteroAttachmentPane: Dispatching setAttachmentStatusInfoRow event for item ${itemIdForThisUpdate}`);
+                    eventManager.dispatch('setAttachmentStatusInfoRow', {
+                        library_id: currentItem.libraryID, // Use currentItem from outer scope
+                        zotero_key: currentItem.key
                     });
 
-                    // 6. Check if the selected item *still* matches the one we started fetching for
-                    // This prevents updating the wrong row if the user selected another item quickly.
-                    if (!this.item || this.item.id !== currentItemId) {
-                        ztoolkit.log(`ZoteroAttachmentPane: Item changed (${this.item?.id}) while fetching status for ${currentItemId}. Aborting UI update.`);
-                        return; // Bail out, a new asyncRender cycle will handle the current item
-                    }
-
                 } catch (err: any) {
-                     ztoolkit.log(`ZoteroAttachmentPane: Error during async status update for ${currentItemId}: ${err}`);
+                     ztoolkit.log(`ZoteroAttachmentPane: Error during updateStatus for item ${itemIdForThisUpdate}: ${err}`);
                      Zotero.logError(err);
-                     // Show error state in the UI
+                     // Attempt to show error in UI
                      if (beaverRow) {
+                         statusLabel = beaverRow.querySelector('#beaver-status') as HTMLLabelElement | null;
                          if (statusLabel) statusLabel.textContent = 'Error loading status';
-                         beaverRow.hidden = false; // Make sure row is visible to show the error
+                         beaverRow.hidden = false;
                      }
-                     if (beaverRow) beaverRow.hidden = true;
+                } finally {
+                    // --- Lock Release ---
+                    // The lock is now released ONLY when a *different* item is selected (handled at the start)
+                    // or when no valid attachment is displayed. We don't release it here automatically.
+                    // This ensures the second asyncRender call finds the lock active and exits early.
+                     ztoolkit.log(`ZoteroAttachmentPane: << FINISHED updateStatus execution for item ${itemIdForThisUpdate}. Lock state remains: ${activeItemId ?? 'null'}.`);
                 }
             };
 
             // Execute the async update function
-            pendingStatusCheck = updateStatus();
+            updateStatus();
+             ztoolkit.log(`ZoteroAttachmentPane: << EXIT Patched asyncRender (Scheduled updateStatus) for item ${currentItemId}`);
         });
 
         this.patched = true;
         ztoolkit.log('ZoteroAttachmentPane: Patching complete.');
     }
 
-    // Static method to create the row structure
+    // Static method to create the row structure (NO BUTTON HERE)
     private static createBeaverRow(doc: Document): Element {
         const elements = { // Simple helper for namespaced elements
             create: (tag: string, attrs: Record<string, any> = {}, children: Node[] = []) => {
@@ -223,22 +266,16 @@ export class ZoteroAttachmentPane {
                 return el;
             }
         };
-
-        return elements.create('html:div', { id: 'beaverStatusRow', class: 'meta-row', hidden: 'true' }, [ // Start hidden
+        // Create row structure *without* the button initially
+        return elements.create('html:div', { id: 'beaverStatusRow', class: 'meta-row', hidden: 'true' }, [
             elements.create('html:div', { class: 'meta-label' }, [
                 elements.create('html:label', { id: 'beaver-status-label', class: 'key' }, [
                     doc.createTextNode('Beaver Status')
                 ])
             ]),
-            elements.create('html:div', { class: 'meta-data' }, [
-                elements.create('html:label', { id: 'beaver-status' })
-                /*elements.create('toolbarbutton', { // Use XUL toolbarbutton
-                    id: 'beaver-status-button',
-                    hidden: 'true', // Start hidden
-                    tooltiptext: 'Reprocess File',
-                    // 'oncommand' is set dynamically in the patch
-                }
-                )*/
+            elements.create('html:div', { id: 'beaver-status-data', class: 'meta-data flex items-center' }, [
+                elements.create('html:label', { id: 'beaver-status', class: 'mr-1' })
+                // Button will be added/managed by the React hook
             ])
         ]);
     }
