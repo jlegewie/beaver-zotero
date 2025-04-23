@@ -24,13 +24,13 @@ export interface AttachmentRecord {
 }
 
 /**
- * Manages the beaver-cache SQLite database using Zotero's DBConnection.
+ * Manages the beaver SQLite database using Zotero's DBConnection.
  */
 export class BeaverDB {
     private conn: any; // Instance of Zotero.DBConnection
 
     /**
-     * @param dbConnection An initialized Zotero.DBConnection instance for 'beaver-cache'.
+     * @param dbConnection An initialized Zotero.DBConnection instance for 'beaver'.
      */
     constructor(dbConnection: any) {
         if (!dbConnection) {
@@ -402,8 +402,8 @@ export class BeaverDB {
 
 /* Example Usage:
 (async () => {
-    // Assume 'beaverCacheDB' is an initialized Zotero.DBConnection("beaver-cache")
-    // const beaverCacheDB = new Zotero.DBConnection("beaver-cache");
+    // Assume 'beaverCacheDB' is an initialized Zotero.DBConnection("beaver")
+    // const beaverCacheDB = new Zotero.DBConnection("beaver");
     // await beaverCacheDB.test(); // Ensure DB connection is working
 
     const db = new BeaverDB(beaverCacheDB);
