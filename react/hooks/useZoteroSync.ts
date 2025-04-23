@@ -15,7 +15,7 @@ const DEBOUNCE_MS = 2000;
 interface CollectedEvents {
     addModify: Set<number>; // Item IDs for add/modify events
     delete: Map<number, { libraryID: number, key: string }>; // ID to {libraryID, key} mapping for delete events
-    timer: number | null; // Timer ID for debounce
+    timer: NodeJS.Timeout | null; // Timer ID for debounce
     timestamp: number; // Last event timestamp
 }
 
