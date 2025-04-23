@@ -117,6 +117,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             for (const [libraryID, keys] of keysByLibrary.entries()) {
                 Zotero.debug(`Beaver: Deleting ${keys.length} items from library ${libraryID}`, 3);
                 await syncService.deleteItems(libraryID, keys);
+                // @ts-ignore Beaver exists
+                await Zotero.Beaver.db.deleteByLibraryAndKey(libraryID, keys);
             }
         } catch (error: any) {
             Zotero.debug(`Beaver: Error handling deleted items: ${error.message}`, 1);
