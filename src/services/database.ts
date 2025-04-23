@@ -16,9 +16,9 @@ export interface AttachmentRecord {
     zotero_key: string;
     attachment_metadata_hash: string;
     file_hash: string | null;
-    upload_status: UploadStatus;
-    md_status: ProcessingStatus;
-    docling_status: ProcessingStatus;
+    upload_status: UploadStatus | null;
+    md_status: ProcessingStatus | null;
+    docling_status: ProcessingStatus | null;
     md_error_code: string | null;
     docling_error_code: string | null;
 }
@@ -143,9 +143,9 @@ export class BeaverDB {
         const id = uuidv4();
         const defaults: Partial<AttachmentRecord> = {
             file_hash: null,
-            upload_status: 'pending',
-            md_status: 'unavailable',
-            docling_status: 'unavailable',
+            upload_status: null,
+            md_status: null,
+            docling_status: null,
             md_error_code: null,
             docling_error_code: null,
         };
