@@ -61,9 +61,9 @@ export class BeaverDB {
                 zotero_key               TEXT NOT NULL,
                 attachment_metadata_hash TEXT NOT NULL,
                 file_hash                TEXT,
-                upload_status            TEXT NOT NULL DEFAULT 'pending',
-                md_status                TEXT NOT NULL DEFAULT 'unavailable',
-                docling_status           TEXT NOT NULL DEFAULT 'unavailable',
+                upload_status            TEXT,
+                md_status                TEXT,
+                docling_status           TEXT,
                 md_error_code            TEXT,
                 docling_error_code       TEXT,
                 UNIQUE(library_id, zotero_key)
@@ -524,6 +524,69 @@ export class BeaverDB {
         });
 
         return finalIds;
+    }
+
+    /**
+     * Delete an item record by library_id and zotero_key.
+     * @param libraryId The library_id of the item to delete.
+     * @param zoteroKey The zotero_key of the item to delete.
+     * @returns boolean indicating whether an item was deleted.
+     */
+    public async deleteItem(libraryId: number, zoteroKey: string): Promise<boolean> {
+        const result = await this.conn.queryAsync(
+            `DELETE FROM items WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey]
+        );
+        return result.changes > 0;
+    }
+
+    /**
+     * Delete an attachment record by library_id and zotero_key.
+     * @param libraryId The library_id of the attachment to delete.
+     * @param zoteroKey The zotero_key of the attachment to delete.
+     * @returns boolean indicating whether an attachment was deleted.
+     */
+    public async deleteAttachment(libraryId: number, zoteroKey: string): Promise<boolean> {
+        const result = await this.conn.queryAsync(
+            `DELETE FROM attachments WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey]
+        );
+        return result.changes > 0;
+    }
+
+    /**
+     * Delete a record from either items or attachments table by library_id and zotero_key.
+     * Use this method when you don't know which table contains the record.
+     * @param libraryId The library_id of the record to delete.
+     * @param zoteroKey The zotero_key of the record to delete.
+     * @returns An object indicating which types of records were deleted and how many.
+     */
+    public async deleteByLibraryAndKey(libraryId: number, zoteroKey: string): Promise<{
+        itemDeleted: boolean;
+        attachmentDeleted: boolean;
+    }> {
+        const result = {
+            itemDeleted: false,
+            attachmentDeleted: false
+        };
+        
+        // Execute both delete operations in a transaction for atomicity
+        await this.conn.executeTransaction(async () => {
+            const itemResult = await this.conn.queryAsync(
+                `DELETE FROM items WHERE library_id = ? AND zotero_key = ?`,
+                [libraryId, zoteroKey]
+            );
+            
+            const attachmentResult = await this.conn.queryAsync(
+                `DELETE FROM attachments WHERE library_id = ? AND zotero_key = ?`,
+                [libraryId, zoteroKey]
+            );
+            
+            result.itemDeleted = itemResult.changes > 0;
+            result.attachmentDeleted = attachmentResult.changes > 0;
+        });
+        
+        return result;
     }
 }
 
