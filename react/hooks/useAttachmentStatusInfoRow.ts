@@ -35,11 +35,25 @@ export function useAttachmentStatusInfoRow() {
             statusButton.setAttribute("id", "beaver-status-button");
             statusButton.setAttribute("tooltiptext", `Reprocess File`);
             statusLabel?.parentElement?.appendChild(statusButton);
-            statusButton.hidden = !statusInfo.showButton
         }
-        if (statusButton) {
-            statusButton.hidden = !statusInfo.showButton;
-        }        
-        // statusButton.addEventListener("command", () => triggerToggleChat(win));
+        const statusButton_new = beaverRow.querySelector('#beaver-status-button') as HTMLButtonElement | null;
+        if (statusButton_new) {
+            statusButton_new.hidden = !statusInfo.showButton;
+            statusButton_new.disabled = statusInfo.buttonDisabled || false;
+            statusButton_new.setAttribute("tooltiptext", statusInfo.buttonTooltip || '');
+            // Event handlers
+            // @ts-ignore custom event handler
+            statusButton_new.removeEventListener("command", statusButton_new._existingHandler);
+            // @ts-ignore custom event handler
+            statusButton_new._existingHandler = () => {
+                statusButton_new.disabled = true;
+                setTimeout(() => {
+                    statusButton_new.disabled = false;
+                    if (statusInfo.onClick) statusInfo.onClick();
+                }, 50);
+            };
+            // @ts-ignore custom event handler
+            statusButton_new.addEventListener("command", statusButton_new._existingHandler);
+        }
     });
 } 
