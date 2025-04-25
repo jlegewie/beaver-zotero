@@ -31,6 +31,21 @@ interface SafePlanModel {
     max_chat_attachments_per_message: number;
 }
 
+export interface PlanFeatures {
+    databaseSync: boolean;
+    uploadFiles: boolean;
+    basicProcessing: boolean;
+    advancedProcessing: boolean;
+    fileProcessing: boolean;
+    ragSearch: boolean;
+    agenticSearch: boolean;
+    deepResearch: boolean;
+    basicPagesRemaining: number;
+    advancedPagesRemaining: number;
+    chatMessagesRemaining: number;
+    byok: boolean;
+}
+
 /**
  * Subscription status enum (based on SubscriptionStatus)
  */
