@@ -103,10 +103,10 @@ export interface AttachmentData {
     date_added: string;
     date_modified: string;
     // file table data
-    file_hash?: string;
-    size?: number;
-    mime_type?: string;
-    filename?: string;
+    file_hash: string;
+    size: number;
+    mime_type: string;
+    filename: string;
     // Hash of the fields defined in AttachmentDataHashedFields
     attachment_metadata_hash: string;
 }
