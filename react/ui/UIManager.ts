@@ -3,6 +3,7 @@ import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
 class UIManager {
     private elements: DOMElements;
     private collapseState: CollapseState;
+    private sidebarWidth: number = 350;
 
     constructor() {
         this.collapseState = {
@@ -10,6 +11,49 @@ class UIManager {
             reader: null
         };
         this.elements = this.initializeElements();
+
+        // Initialize sidebar width tracking
+        this.initSidebarWidthTracking();
+    }
+
+    private initSidebarWidthTracking(): void {
+        // Observe width changes and maintain consistency
+        const win = Zotero.getMainWindow();
+        if (win) {
+            // Store initial width from reader sidebar if available
+            const readerSidebarWidth = Zotero.Reader.getSidebarWidth();
+            if (readerSidebarWidth) {
+                this.sidebarWidth = readerSidebarWidth;
+            }
+            
+            // Override the reader's width change handler to maintain fixed width
+            const originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
+            Zotero.Reader.onChangeSidebarWidth = (width) => {
+                // Only call the original handler with our fixed width
+                if (originalOnChangeSidebarWidth) {
+                    originalOnChangeSidebarWidth(this.sidebarWidth);
+                }
+                
+                // Force our desired width after a short delay
+                setTimeout(() => {
+                    this.enforceConsistentWidth();
+                }, 50);
+            };
+        }
+    }
+
+    private enforceConsistentWidth(): void {
+        // Apply consistent width to both sidebars
+        if (this.elements.librarySidebar) {
+            (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+        }
+        
+        if (this.elements.readerSidebar) {
+            (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+            
+            // Force reader to use our width
+            Zotero.Reader.setSidebarWidth(this.sidebarWidth);
+        }
     }
 
     private initializeElements(): DOMElements {
@@ -59,7 +103,8 @@ class UIManager {
     }
 
     private handleLibraryPane(show: boolean): void {
-        const itemPane = Zotero.getMainWindow().ZoteroPane.itemPane;
+        const win = Zotero.getMainWindow() as unknown as CustomZoteroWindow;
+        const itemPane = win.ZoteroPane.itemPane;
         
         if (show && itemPane) {
             // Store current collapse state
@@ -74,6 +119,7 @@ class UIManager {
             this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
             if (this.elements.librarySidebar) {
                 (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
+                (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
             }
         } else {
             // Restore collapse state
@@ -105,6 +151,9 @@ class UIManager {
             this.elements.readerContent?.forEach(el => (el as HTMLElement).style.display = 'none');
             if (this.elements.readerSidebar) {
                 (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
+                (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                // Force Zotero to use our fixed width
+                Zotero.Reader.setSidebarWidth(this.sidebarWidth);
             }
         } else {
             // Restore collapse state
@@ -124,6 +173,7 @@ class UIManager {
         this.updateToolbarButton(state.isVisible);
         
         if (state.isVisible) {
+            setTimeout(() => this.enforceConsistentWidth(), 50);
             if (state.isLibraryTab) {
                 this.handleLibraryPane(true);
                 this.handleReaderPane(false);
@@ -150,7 +200,16 @@ class UIManager {
         this.handleLibraryPane(false);
         this.handleReaderPane(false);
         this.updateToolbarButton(false);
+
+        // Restore original onChangeSidebarWidth if needed
+        const win = Zotero.getMainWindow();
+        if (win && this.originalOnChangeSidebarWidth) {
+            Zotero.Reader.onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
+        }
     }
+
+    // Store the original handler
+    private originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
 }
 
 // Export a singleton instance
