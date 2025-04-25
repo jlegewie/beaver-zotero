@@ -12,7 +12,7 @@ export interface SearchMenuItem {
     /** Callback function when item is clicked */
     onClick: () => void;
     /** Optional icon element */
-    icon?: ReactNode;
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Optional custom content to render instead of the default label and icon. */
     customContent?: ReactNode;
 }

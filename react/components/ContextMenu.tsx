@@ -13,7 +13,7 @@ export interface MenuItem {
     /** Callback function when item is clicked */
     onClick: () => void;
     /** Optional icon element */
-    icon?: ReactNode;
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Whether the item is disabled */
     disabled?: boolean;
     /** 
