@@ -12,7 +12,7 @@ export function useSidebarDOMEffects() {
     const readerWasCollapsed = useRef<boolean | null>(null);
 
     useEffect(() => {
-        const win = Zotero.getMainWindow();
+        const win = Zotero.getMainWindow() as unknown as CustomZoteroWindow;
         
         // Get chat toggle button
         const chatToggleBtn = win.document.querySelector("#zotero-beaver-tb-chat-toggle");
