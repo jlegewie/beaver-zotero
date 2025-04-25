@@ -27,7 +27,7 @@ interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonEl
 }
 
 export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
-    function SourceButton(props: SourceButtonProps, ref: React.RefObject<HTMLButtonElement>) {
+    function SourceButton(props: SourceButtonProps, ref: React.ForwardedRef<HTMLButtonElement>) {
         const {
             source,
             className,
