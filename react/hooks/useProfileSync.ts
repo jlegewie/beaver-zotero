@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { fileUploader } from '../../src/services/FileUploader';
 import { profileWithPlanAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
@@ -111,6 +112,10 @@ export const useProfileSync = () => {
                                         // Set the state with the complete, fresh data
                                         setProfileWithPlan(refreshedProfileWithPlan);
                                         logger(`useProfileSync: Successfully refreshed ProfileWithPlan for ${userId}.`);
+                                        // If the plan allows file uploads, start the file uploader
+                                        if (refreshedProfileWithPlan.plan.upload_files) {
+                                            fileUploader.start();
+                                        }
                                     } catch (error: any) {
                                         logger(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);
                                     }
