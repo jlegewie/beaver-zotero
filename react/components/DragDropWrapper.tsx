@@ -15,7 +15,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     // Drag and drop states
     const [isDragging, setIsDragging] = useState(false);
     const [dragError, setDragError] = useState<string | null>(null);
-    const dragErrorTimeoutRef = useRef<number | null>(null);
+    const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Show error message temporarily
     const showErrorMessage = (message: string) => {
