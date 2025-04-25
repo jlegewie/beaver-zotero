@@ -1,5 +1,4 @@
 import { getLocaleID, getString } from "../utils/locale";
-import { getItemMetadata } from "../utils/metadata";
 import { triggerToggleChat } from "./toggleChat";
 import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
