@@ -40,10 +40,13 @@ export interface PlanFeatures {
     ragSearch: boolean;
     agenticSearch: boolean;
     deepResearch: boolean;
+    byok: boolean;
+}
+
+export interface ProfileBalance {
     basicPagesRemaining: number;
     advancedPagesRemaining: number;
     chatMessagesRemaining: number;
-    byok: boolean;
 }
 
 /**
