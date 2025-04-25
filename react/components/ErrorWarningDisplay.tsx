@@ -44,7 +44,10 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
     const showSettingsButton = errorType === 'app_key_limit_exceeded';
     
     return (
-        <div className="display-flex flex-col gap-0 rounded-md border-quinary mb-3" style={{ borderColor: 'var(--tag-red-tertiary)' }}>
+        <div
+            className="display-flex flex-col gap-0 rounded-md border-quinary mb-3"
+            style={{ borderColor: 'var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+        >
             <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
                 <div className="display-flex flex-col gap-2">
@@ -88,7 +91,10 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> =
     const showSettingsIcon = warning.type === 'user_key_failed_unexpected' || warning.type === 'user_key_rate_limit_exceeded' || warning.type === 'user_key_failed';
     
     return (
-        <div className="display-flex flex-col gap-0 rounded-md border-quinary mb-4" style={{ borderColor: 'var(--tag-yellow-tertiary)' }}>
+        <div
+            className="display-flex flex-col gap-0 rounded-md border-quinary mb-4"
+            style={{ borderColor: 'var(--tag-yellow-tertiary)', background: 'var(--tag-yellow-quinary)'  }}
+        >
             <div className="font-color-yellow p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
