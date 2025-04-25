@@ -92,9 +92,10 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @param item Zotero item
  * @returns Promise resolving to AttachmentData object for syncing
  */
-async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData> {
+async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData | null> {
     // 1. Extract File Data (can be null)
     const fileData: FileData | null = await extractFileData(item);
+    if (!fileData) return null;
 
     // 2. Determine 'is_primary' status
     let is_primary = null;
@@ -496,9 +497,9 @@ export async function syncZoteroDatabase(
             }
             
         } catch (error: any) {
-        logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
-        Zotero.logError(error);
-        // Continue with next library even if one fails
+            logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
+            Zotero.logError(error);
+            // Continue with next library even if one fails
         }
     }
     
