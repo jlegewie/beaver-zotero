@@ -483,9 +483,9 @@ export async function syncZoteroDatabase(
         const libraryName = library.name;
         
         try {
-        logger(`Beaver Sync: Syncing library ${libraryID} (${libraryName})`, 3);
+            logger(`Beaver Sync: Syncing library ${libraryID} (${libraryName})`, 3);
         
-        // Get the last sync date for this library
+            // Get the last sync date for this library
             const response = await syncService.getLastSyncDate(libraryID);
             const lastSyncDate = response.last_sync_date;
             
