@@ -106,6 +106,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
             // rehypePlugins={[rehypeKatex]}
             components={{
+                // @ts-expect-error - Custom component not in ReactMarkdown types
                 citation: ({node, ...props}: any) => {
                     return <ZoteroCitation {...props} exportRendering={exportRendering} />;
                 }
