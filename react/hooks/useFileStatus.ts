@@ -3,11 +3,11 @@ import { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { fileStatusAtom } from '../atoms/ui';
-import { profileWithPlanAtom } from '../atoms/profile';
 import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
+import { planFeaturesAtom } from '../atoms/profile';
 
 /**
  * Hook that fetches the user's file status, keeps the fileStatusAtom updated,
@@ -18,8 +18,7 @@ export const useFileStatus = (): void => {
     const setFileStatus = useSetAtom(fileStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
-    // Read the profile state to ensure it's loaded before subscribing
-    const profileWithPlan = useAtomValue(profileWithPlanAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
     // Ref to manage the realtime channel instance
     const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -48,9 +47,9 @@ export const useFileStatus = (): void => {
 
     useEffect(() => {
         // --- Guard Clause ---
-        // Only proceed if user is authenticated, user data exists, AND profile is loaded.
-        if (!isAuthenticated || !user || !profileWithPlan) {
-            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${!!profileWithPlan}`);
+        // Only proceed if user is authenticated, user data exists, AND plan supports file processing
+        if (!isAuthenticated || !user || !planFeatures.fileProcessing) {
+            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${planFeatures.fileProcessing}`);
             setFileStatus(null); // Clear status if conditions not met
             // Ensure any existing channel is cleaned up if dependencies change mid-subscription
             if (channelRef.current) {
@@ -176,5 +175,5 @@ export const useFileStatus = (): void => {
                 logger(`useFileStatus: Cleanup called, no active channel to remove for user ${userId}.`);
             }
         };
-    }, [isAuthenticated, user, profileWithPlan, setFileStatus]);
+    }, [isAuthenticated, user, planFeatures.fileProcessing, setFileStatus]);
 };
