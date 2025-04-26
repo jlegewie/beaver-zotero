@@ -2,10 +2,10 @@ import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
-import { isAuthenticatedAtom } from "../atoms/auth";
+import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom, SyncStatus } from "../atoms/ui";
-import { queueService, AddUploadQueueFromAttachmentRequest } from "../../src/services/queueService";
 import { fileUploader, UploadProgressInfo } from "../../src/services/FileUploader";
+import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
 const DEBOUNCE_MS = 2000;
@@ -103,6 +103,12 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const processDeleteEvents = async () => {
         if (eventsRef.current.delete.size === 0) return;
         
+        const user = store.get(userAtom);
+        if (!user) {
+            logger('useZoteroSync: No user found', 1);
+            return;
+        }
+        
         try {
             // Group by library ID for batch processing
             const keysByLibrary = new Map<number, string[]>();
@@ -119,7 +125,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
                 await syncService.deleteItems(libraryID, keys);
                 // @ts-ignore Beaver exists
-                await Zotero.Beaver.db.deleteByLibraryAndKey(libraryID, keys);
+                await Zotero.Beaver.db.deleteByLibraryAndKey(user.id, libraryID, keys);
             }
         } catch (error: any) {
             logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);

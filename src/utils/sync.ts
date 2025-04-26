@@ -4,6 +4,8 @@ import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { ItemRecord, AttachmentRecord } from '../services/database';
+import { userAtom } from "../../react/atoms/auth";
+import { store } from "../../react/index";
 
 /**
  * Interface for item filter function
@@ -214,6 +216,11 @@ export async function syncItemsToBackend(
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 200
 ) {
+    const user = store.get(userAtom);
+    if (!user) {
+        logger('Beaver Sync: No user found', 1);
+        return;
+    }
     const totalItems = items.length;
     let attachmentCount = 0;
     let syncId = undefined;
@@ -233,9 +240,9 @@ export async function syncItemsToBackend(
 
         // Get database items and attachments
         // @ts-ignore Beaver exists
-        const itemsDB = await Zotero.Beaver.db.getItemsByZoteroKeys(libraryID, itemsData.map(item => item.zotero_key));
+        const itemsDB = await Zotero.Beaver.db.getItemsByZoteroKeys(user.id, libraryID, itemsData.map(item => item.zotero_key));
         // @ts-ignore Beaver exists
-        const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(libraryID, attachmentsData.map(att => att.zotero_key));
+        const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(user.id, libraryID, attachmentsData.map(att => att.zotero_key));
 
         // Filter out items where the metadata_hash did not change
         const itemsDataFiltered = itemsData.filter((item) => {
@@ -333,7 +340,7 @@ export async function syncItemsToBackend(
                     item_metadata_hash: item.metadata_hash
                 }));
                 // @ts-ignore Beaver exists
-                await Zotero.Beaver.db.upsertItemsBatch(items);
+                await Zotero.Beaver.db.upsertItemsBatch(user.id, items);
             }
 
             // Update database attachments
@@ -344,7 +351,7 @@ export async function syncItemsToBackend(
                     attachment_metadata_hash: attachment.metadata_hash
                 }));
                 // @ts-ignore Beaver exists
-                await Zotero.Beaver.db.upsertAttachmentsBatch(attachments);
+                await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
             }
 
             // Update processed count with actual success count
