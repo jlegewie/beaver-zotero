@@ -243,7 +243,6 @@ export async function syncItemsToBackend(
             if (!itemDB) return true;
             return itemDB.item_metadata_hash !== item.item_metadata_hash;
         });
-        console.log(itemsDataFiltered);
 
         // Filter out attachments where the metadata_hash did not change
         const attachmentsDataFiltered = attachmentsData.filter((att) => {
@@ -255,6 +254,23 @@ export async function syncItemsToBackend(
         // If there are no items or attachments to sync, skip the batch
         if (attachmentsDataFiltered.length === 0 && itemsDataFiltered.length === 0) {
             logger(`Beaver Sync: No items or attachments to sync for batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)}`, 4);
+            
+            // Update processed count with the batch size (or remaining items)
+            const batchItemCount = batch.length;
+            processedCount += batchItemCount;
+            if (onProgress) {
+                onProgress(processedCount, totalItems);
+            }
+            
+            // If this is the last batch, mark sync as completed
+            if (i + batchSize >= items.length) {
+                onStatusChange?.('completed');
+                // Report 100% completion at the end for consistency
+                if (onProgress) {
+                    onProgress(totalItems, totalItems);
+                }
+            }
+            
             continue;
         }
 
@@ -467,6 +483,7 @@ export async function performPeriodicSync(
  * Performs initial or periodic sync for all libraries
  * @param filterFunction Optional function to filter which items to sync
  * @param batchSize Size of item batches to process (default: 50)
+ * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Promise resolving when all libraries have been processed
  */
