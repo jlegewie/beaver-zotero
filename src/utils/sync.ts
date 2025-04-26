@@ -352,9 +352,9 @@ export async function syncItemsToBackend(
                 }
             }
         } catch (error: any) {
-        logger(`Beaver Sync: Error processing batch: ${error.message}`, 1);
-        Zotero.logError(error);
-        onStatusChange?.('failed');
+            logger(`Beaver Sync: Error processing batch: ${error.message}`, 1);
+            Zotero.logError(error);
+            onStatusChange?.('failed');
             break;
         }
     }
