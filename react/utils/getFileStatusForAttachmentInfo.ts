@@ -5,6 +5,8 @@ import { fileUploader } from '../../src/services/FileUploader';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../components/FileStatusStats'
 import { AttachmentStatusResponse } from '../../src/services/attachmentsService';
+import { store } from '../index';
+import { userAtom } from '../atoms/auth';
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
@@ -18,8 +20,12 @@ interface BeaverStatusInfo {
 }
 
 export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item): Promise<BeaverStatusInfo> {
-    logger(`Getting Beaver status for item ${attachmentItem.id}`);
+    logger(`getFileStatusForAttachmentInfo: Getting Beaver status for item ${attachmentItem.id}`);
     try {
+        const user = store.get(userAtom);
+        if (!user) {
+            return { text: 'Not logged in', showButton: false };
+        }
         // 1. Is file valid
         if (attachmentItem.libraryID !== 1) {
             return { text: 'Unsupported library', showButton: false };
@@ -41,12 +47,13 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
 
         // 3. Try to get attachment status from Beaver DB
         // @ts-ignore Beaver is defined
-        const attachmentsDB = await Zotero.Beaver.db?.getAttachmentsByZoteroKeys(attachmentItem.libraryID, [attachmentItem.key]);
+        const attachmentsDB = await Zotero.Beaver.db?.getAttachmentsByZoteroKeys(user.id, attachmentItem.libraryID, [attachmentItem.key]);
         let attachmentStatus: AttachmentStatusResponse | null = null;
         if (attachmentsDB && attachmentsDB.length > 0) {
+            logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
             const attachmentDB = attachmentsDB[0];
             if (attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'embedded') {
-                logger(`Beaver DB found attachment status for ${attachmentItem.key}`);
+                logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
                 attachmentStatus = {
                     attachment_id: attachmentDB.id,
                     ...attachmentDB
@@ -54,7 +61,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             }
         }
         if (!attachmentStatus) {
-            logger(`Beaver DB not found for ${attachmentItem.key}. Getting status from backend.`);
+            logger(`getFileStatusForAttachmentInfo: Getting status from backend.`);
             // 4. Get status from backend
             attachmentStatus = await attachmentsService.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key);
 
@@ -62,6 +69,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             try {
                 // @ts-ignore Beaver is defined
                 await Zotero.Beaver.db?.updateAttachment(
+                    user.id,
                     attachmentItem.libraryID,
                     attachmentItem.key,
                     {
@@ -74,7 +82,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     }
                 );
             } catch (error) {
-                logger(`Error saving attachment status to Beaver DB for ${attachmentItem.key}: ${error}`);
+                logger(`getFileStatusForAttachmentInfo: Error saving attachment status to Beaver DB for ${attachmentItem.key}: ${error}`);
             }
         }
         if (!attachmentStatus) {
@@ -160,7 +168,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         }
 
     } catch (error) {
-        logger(`Error fetching Beaver status for ${attachmentItem.id}: ${error}`);
+        logger(`getFileStatusForAttachmentInfo: Error fetching Beaver status for ${attachmentItem.id}: ${error}`);
         return { text: 'Error fetching status', showButton: false }; // Return an error status
     }
 }

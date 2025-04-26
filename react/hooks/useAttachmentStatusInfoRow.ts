@@ -31,7 +31,6 @@ export function useAttachmentStatusInfoRow() {
                 buttonDisabled: true
             };
         }
-        console.log(`statusInfo: ${statusInfo}`);
 
         // 4. Update UI
         const beaverRow = Zotero.getMainWindow().document.getElementById('beaverStatusRow') as HTMLDivElement | null;
