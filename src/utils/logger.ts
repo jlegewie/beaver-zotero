@@ -6,7 +6,7 @@ export const logger = function (
     stack?: number | boolean,
 ) {
     if ("Beaver" in Zotero && (Zotero as any).Beaver.data.env === "development") {
-        console.log(message);
+        console.log(`[Beaver] ${message}`);
     }
     Zotero.debug(message, level, maxDepth, stack);
 }
