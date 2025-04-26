@@ -6,6 +6,7 @@ import { isAuthenticatedAtom } from "../atoms/auth";
 import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom, SyncStatus } from "../atoms/ui";
 import { queueService, AddUploadQueueFromAttachmentRequest } from "../../src/services/queueService";
 import { fileUploader, UploadProgressInfo } from "../../src/services/FileUploader";
+import { logger } from "../../src/utils/logger";
 
 const DEBOUNCE_MS = 2000;
 
@@ -82,7 +83,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Sync each library's items separately
             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
-                Zotero.debug(`Beaver: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
+                logger(`useZoteroSync: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
                 await syncItemsToBackend(libraryID, libraryItems, 'incremental', 
                     (status) => setSyncStatus(status), 
                     (processed, total) => {
@@ -91,7 +92,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                     });
             }
         } catch (error: any) {
-            Zotero.debug(`Beaver: Error syncing modified items: ${error.message}`, 1);
+            logger(`useZoteroSync: Error syncing modified items: ${error.message}`, 1);
             Zotero.logError(error);
         }
     };
@@ -115,13 +116,13 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
-                Zotero.debug(`Beaver: Deleting ${keys.length} items from library ${libraryID}`, 3);
+                logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
                 await syncService.deleteItems(libraryID, keys);
                 // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.deleteByLibraryAndKey(libraryID, keys);
             }
         } catch (error: any) {
-            Zotero.debug(`Beaver: Error handling deleted items: ${error.message}`, 1);
+            logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);
             Zotero.logError(error);
         }
     };
@@ -130,8 +131,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
      * Process all collected events and reset the collection
      */
     const processEvents = async () => {
-        Zotero.debug(`Beaver: Processing collected events after ${debounceMs}ms of inactivity`, 3);
-        Zotero.debug(`Beaver: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete`, 3);
+        logger(`useZoteroSync: Processing collected events after ${debounceMs}ms of inactivity`, 3);
+        logger(`useZoteroSync: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete`, 3);
         
         // Process each type of event
         await processAddModifyEvents();
@@ -145,7 +146,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
 
     useEffect(() => {
         if (!isAuthenticated) return;
-        Zotero.debug("Beaver: Setting up Zotero sync", 3);
+        // if (!planFeatures.databaseSync) return;
+
+        logger("useZoteroSync: Setting up Zotero sync", 3);
         
         // Initialize atoms to completed state instead of idle
         setSyncStatus('completed');
@@ -221,7 +224,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         
         // Cleanup function
         return () => {
-            Zotero.debug("Beaver: Cleaning up Zotero sync", 3);
+            logger("useZoteroSync: Cleaning up Zotero sync", 3);
             if (observerRef.current) {
                 Zotero.Notifier.unregisterObserver(observerRef.current);
                 observerRef.current = null;
