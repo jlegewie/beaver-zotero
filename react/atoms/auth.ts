@@ -1,13 +1,16 @@
-// auth/atoms.ts
 import { atom } from 'jotai';
-import { supabase } from '../../src/services/supabaseClient';
 import { Session } from '@supabase/supabase-js';
-import { logger } from '../../src/utils/logger';
 
-// Properly typed session atom
+/**
+ * Atom representing the current authentication session
+ * Null when no active session exists
+ */
 export const sessionAtom = atom<Session | null>(null);
 
-// Derived atom to check if user is authenticated
+/**
+ * Derived atom that determines if the user is authenticated
+ * Uses the session's access token to verify authentication status
+ */
 export const isAuthenticatedAtom = atom(
     (get) => {
         const session = get(sessionAtom);
@@ -15,33 +18,22 @@ export const isAuthenticatedAtom = atom(
     }
 );
 
-// Type and atom for user data
-type AuthUser = {
+/**
+ * User information extracted from the authentication session
+ */
+export type AuthUser = {
     id: string;
     email?: string;
     last_sign_in_at?: string;
 }
+
+/**
+ * Atom containing the current user's information
+ * Null when no user is authenticated
+ */
 export const userAtom = atom<AuthUser | null>(null);
 
-// Initialize session on app start
-export const initializeSessionAtom = atom(
-    null,
-    async (get, set) => {
-        const { data } = await supabase.auth.getSession();
-        set(sessionAtom, data.session);
-
-        logger(`auth: initializeSessionAtom ${data.session ? 'success' : 'failure'}`);
-        // Set up listener for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
-            logger(`auth: state changed ${event}`);
-            set(sessionAtom, newSession);
-            set(userAtom, newSession?.user ? { id: newSession.user.id, email: newSession.user.email, last_sign_in_at: newSession.user.last_sign_in_at } : null);
-        });
-
-        // Return cleanup function
-        return () => {
-            logger(`auth: unsubscribing from auth state changes`);
-            subscription.unsubscribe();
-        };
-    }
-);
+/**
+ * Loading state atom to track auth initialization status
+ */
+export const authLoadingAtom = atom<boolean>(true);
