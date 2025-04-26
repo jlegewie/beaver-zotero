@@ -1,5 +1,3 @@
-// import { logger } from '../../src/utils/logger';
-// import { getFileStatusForAttachmentInfo } from './getFileStatusForAttachmentInfo';
 import { eventManager } from '../../react/events/eventManager';
 
 declare global {
@@ -158,7 +156,7 @@ export class ZoteroAttachmentPane {
             // --- Acquire Lock ---
             // Mark this item ID as active *before* starting the async work.
             activeItemId = currentItemId;
-             ztoolkit.log(`ZoteroAttachmentPane: Acquired lock for item ${currentItemId}. Starting update process.`);
+            ztoolkit.log(`ZoteroAttachmentPane: Acquired lock for item ${currentItemId}. Starting update process.`);
 
 
             const updateStatus = async () => {
