@@ -215,7 +215,7 @@ attachment-box .metadata-table #beaver-status {
     /* color: var(--fill-secondary); */
     background-color: transparent;
     border: 0px solid transparent;
-    border-radius: 8px;
+    /* border-radius: 8px; */
     outline: none;
     caret-color: var(--fill-primary);
     resize: none;
