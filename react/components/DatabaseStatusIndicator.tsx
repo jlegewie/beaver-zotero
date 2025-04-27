@@ -102,18 +102,18 @@ const DatabaseStatusIndicator: React.FC = () => {
     // Create the tooltip content
     const customContent = (
         <div className="display-flex flex-col gap-3 px-0 py-1 max-w-xs">
-            <div className="card display-flex flex-col gap-3 items-start">
+            <div className="display-flex flex-col gap-3 items-start">
                 <div className="display-flex flex-row justify-between items-center w-full">
                     <div className="display-flex items-center gap-3">
                         {syncStatus === 'in_progress' ? (
                             <Spinner size={14} />
                         ) : syncStatus === 'failed' ? (
-                            <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />
+                            <Icon icon={CancelCircleIcon} className="font-color-red scale-12" />
                         ) : (
-                            <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />
+                            <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-12" />
                         )}
                         <span className="font-color-secondary text-base">
-                            Zotero Database Sync
+                            Sync with Beaver
                         </span>
                     </div>
                     
@@ -133,14 +133,14 @@ const DatabaseStatusIndicator: React.FC = () => {
                 </span>
             </div>
             
-            <div className="card display-flex flex-col gap-3 items-start">
+            <div className="display-flex flex-col gap-3 items-start">
                 <div className="display-flex flex-row items-center gap-3">
                     {fileStatus === 'in_progress' ? (
                         <Spinner size={14} />
                     ) : fileStatus === 'failed' ? (
-                        <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />
+                        <Icon icon={CancelCircleIcon} className="font-color-red scale-12" />
                     ) : (
-                        <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />
+                        <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-12" />
                     )}
                     <span className="font-color-secondary text-base">
                         File Uploads
@@ -180,7 +180,7 @@ const DatabaseStatusIndicator: React.FC = () => {
             <IconButton
                 icon={memoizedIcon}
                 onClick={handleSyncClick}
-                className="scale-14"
+                className="scale-12"
                 ariaLabel="Sync status"
                 onMouseEnter={() => setIsHovering(true)}
                 onMouseLeave={() => setIsHovering(false)}
