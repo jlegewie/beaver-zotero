@@ -5,9 +5,8 @@ import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
-import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
-import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
+import { useProfileSync } from './hooks/useProfileSync';
 
 // Create a shared store instance
 export const store = createStore();
@@ -20,10 +19,14 @@ const App = ({ location }: { location: 'library' | 'reader' }) => {
     // Handle Zotero sync
     useZoteroSync();
 
-    // Control visibility of the sidebar across app
-    useToggleSidebar();
+    // Control visibility of the sidebar
+    // useToggleSidebar();
+
+    // Handle Zotero tab selection
     useZoteroTabSelection();
-    useAttachmentStatusInfoRow();
+
+    // Fetch and realtime listener for user profile
+    useProfileSync();
 
     // Return the sidebar if it is visible and the currently selected tab is a library tab
     return (
