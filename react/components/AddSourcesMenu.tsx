@@ -24,6 +24,7 @@ const AddSourcesMenu: React.FC<{
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
+    // Set initial menu items
     useEffect(() => {
         if (isMenuOpen) {
             const getMenuItems = async () => {
@@ -33,7 +34,8 @@ const AddSourcesMenu: React.FC<{
                         .filter((item): item is Zotero.Item => Boolean(item))
                         .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
                 );
-                setMenuItems(menuItems);
+                const header = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
+                setMenuItems(menuItems.length > 0 ? [...menuItems, header] : []);
             }
             getMenuItems();
         }
@@ -47,14 +49,14 @@ const AddSourcesMenu: React.FC<{
     }
 
     // This function is called when the user types in the search field
-    const handleSearch = async (query: string) => {
+    const handleSearch = async (query: string, limit: number = 10) => {
         if (!query.trim()) return [];
         
         try {
             setIsLoading(true);
             
             // Search Zotero items via the API
-            const results = await searchService.search(query);
+            const results = await searchService.search(query, limit);
             console.log(results);
             // Update the search results
             setSearchResults(results);
@@ -158,6 +160,7 @@ const AddSourcesMenu: React.FC<{
     }, []);
 
     useEffect(() => {
+        const header = { label: "Search Results", isGroupHeader: true, onClick: () => {} };
         const searchToMenuItems = async (results: ItemSearchResult[]) => {
             // Map the search results to menu items
             const menuItems: SearchMenuItem[] = [];
@@ -174,7 +177,7 @@ const AddSourcesMenu: React.FC<{
                     menuItems.push(menuItem);
                 }
             }
-            setMenuItems(menuItems);
+            setMenuItems(menuItems.length > 0 ? [...menuItems, header] : []);
         }
         searchToMenuItems(searchResults);
     }, [searchResults, sources, createMenuItemFromZoteroItem]);
@@ -203,7 +206,7 @@ const AddSourcesMenu: React.FC<{
                 width="250px"
                 onSearch={handleSearch}
                 noResultsText="No results found"
-                placeholder="Search Zotero Items"
+                placeholder="Search by author, year and title"
                 closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
