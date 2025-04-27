@@ -91,8 +91,8 @@ export const newThreadAtom = atom(
         set(currentUserMessageAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
-        // READER VIEW
-        if (!isLibraryTab) {
+        // Update sources from Zotero selection or reader
+        if (isLibraryTab) {
             set(updateSourcesFromZoteroSelectionAtom);
         } else {
             set(updateSourcesFromReaderAtom);
