@@ -8,6 +8,66 @@ import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { currentSourcesAtom } from '../atoms/input';
 import { useAtom } from 'jotai';
 import { InputSource } from '../types/sources';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { getRecentAsync } from '../utils/zotero';
+
+const RECENT_ITEMS_LIMIT = 5;
+
+interface RecentItem {
+    zotero_key: string;
+    library_id: number;
+}
+
+const updateRecentItems = async (newRecentItems: RecentItem[]) => {
+    // Get recent items from preferences
+    const recentItemsPref = getPref("recentItems");
+    let recentItems: RecentItem[] = [];
+    if (recentItemsPref) {
+        const recentItemsPrefParsed = JSON.parse(recentItemsPref as string);
+        if (Array.isArray(recentItemsPrefParsed)) {
+            recentItems = (await Promise.all(
+                recentItemsPrefParsed
+                    .filter((recentItem): recentItem is RecentItem => 
+                        typeof recentItem === 'object' && 
+                        recentItem !== null && 
+                        'zotero_key' in recentItem && 
+                        'library_id' in recentItem
+                    )
+            ));
+        }
+    }
+    // Combine recent items and new recent items
+    const combinedItems = [...newRecentItems, ...recentItems]
+        .filter((item, index, self) =>
+            index === self.findIndex((t) => t.zotero_key === item.zotero_key && t.library_id === item.library_id)
+        )
+        .slice(0, RECENT_ITEMS_LIMIT)
+
+    // Update recent items
+    setPref('recentItems', JSON.stringify(combinedItems));
+}
+
+const getRecentItems = async (): Promise<Zotero.Item[]> => {
+    const recentItemsPref = getPref("recentItems");
+    let recentItems: Zotero.Item[] = [];
+    if (recentItemsPref) {
+        const recentItemsPrefParsed = JSON.parse(recentItemsPref as string);
+        if (Array.isArray(recentItemsPrefParsed)) {
+            recentItems = (await Promise.all(
+                recentItemsPrefParsed
+                    .filter((recentItem): recentItem is RecentItem => 
+                        typeof recentItem === 'object' && 
+                        recentItem !== null && 
+                        'zotero_key' in recentItem && 
+                        'library_id' in recentItem
+                    )
+                    .map(async (recentItem) => await Zotero.Items.getByLibraryAndKeyAsync(recentItem.library_id, recentItem.zotero_key))
+            )).filter((item): item is Zotero.Item => Boolean(item));
+        }
+    }
+    return recentItems;
+}
+
 
 const AddSourcesMenu: React.FC<{
     showText: boolean,
@@ -28,14 +88,48 @@ const AddSourcesMenu: React.FC<{
     useEffect(() => {
         if (isMenuOpen) {
             const getMenuItems = async () => {
+
+                // Current sources
+                const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
                 const items = await Promise.all(sources.map(async (source) => await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, source.itemKey)));
-                const menuItems = await Promise.all(
+                const menuItemsCurrentSources = await Promise.all(
                     items
                         .filter((item): item is Zotero.Item => Boolean(item))
                         .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
                 );
-                const header = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
-                setMenuItems(menuItems.length > 0 ? [...menuItems, header] : []);
+                const menuItemsCurrentSourcesWithHeader = menuItemsCurrentSources.length > 0 ? [...menuItemsCurrentSources, currentSourcesHeader] : [];
+
+                // Recently used items
+                const recentItemsHeader = { label: "Recent Items", isGroupHeader: true, onClick: () => {} };
+                const recentItems: Zotero.Item[] = await getRecentItems();
+                
+                // Recently modified items
+                const recentlyModifiedItems = await getRecentAsync(1, { limit: RECENT_ITEMS_LIMIT*3 }) as Zotero.Item[];
+                const recentlyModifiedItemsFiltered = await Promise.all(
+                    recentlyModifiedItems
+                        .map((item) => item.parentItem ? item.parentItem : item)
+                        .filter((item) => item.isRegularItem() || item.isAttachment())
+                );
+                // setMenuItems(menuItemsRecentlyModified);
+
+                // Remove duplicates from recent items and recently modified items
+                const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
+                    .filter((item, index, self) =>
+                        index === self.findIndex((t) => t.id === item.id) &&
+                        !sources.some((source) => source.itemKey === item.key && source.libraryID === item.libraryID)
+                    )
+                    .slice(0, Math.max(RECENT_ITEMS_LIMIT - menuItemsCurrentSources.length, 0));
+
+                // Create menu items from combined items
+                const menuItemsRecentItems = await Promise.all(
+                    combinedItems
+                        .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
+                );
+
+                const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentItemsHeader] : [];
+
+                // Set menu items
+                setMenuItems([...menuItemsCurrentSourcesWithHeader,...menuItemsRecentItemsWithHeader]);
             }
             getMenuItems();
         }
@@ -115,6 +209,7 @@ const AddSourcesMenu: React.FC<{
             );
             if (!exists) {
                 // Add source to sources atom
+                updateRecentItems([{ zotero_key: source.itemKey, library_id: source.libraryID }]);
                 setSources((prevSources) => [...prevSources, source]);
             } else {
                 // Remove source from sources atom
@@ -159,6 +254,7 @@ const AddSourcesMenu: React.FC<{
         };
     }, []);
 
+    // Search
     useEffect(() => {
         const header = { label: "Search Results", isGroupHeader: true, onClick: () => {} };
         const searchToMenuItems = async (results: ItemSearchResult[]) => {
