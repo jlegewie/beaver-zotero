@@ -80,9 +80,9 @@ const DatabaseStatusIndicator: React.FC = () => {
     const getProgressText = (status: SyncStatus, progress: number, current: number, total: number, type: 'database' | 'file'): string => {
         // Combine 'idle' and 'completed' statuses for display purposes
         if (status === 'idle' || status === 'completed') {
-            return type === 'database' ? 'Sync completed' : 'Uploads completed';
+            return type === 'database' ? 'Status: completed' : 'Status: completed';
         }
-        if (status === 'failed') return type === 'database' ? 'Sync failed' : 'Uploads failed';
+        if (status === 'failed') return type === 'database' ? 'Status: failed' : 'Status: failed';
         
         // Format the progress display for in_progress state
         if (total > 0) {
