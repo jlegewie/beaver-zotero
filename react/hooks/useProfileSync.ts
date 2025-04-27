@@ -72,7 +72,6 @@ export const useProfileSync = () => {
                         // Realtime Update Handler
                         (payload) => {
                             const updatedProfileData = toSafeProfileModel(payload.new);
-                            ztoolkit.log(`useProfileSync: Realtime profile UPDATE received for ${userId}: ${JSON.stringify(updatedProfileData)}`);
                             logger(`useProfileSync: Realtime profile UPDATE received for ${userId}: ${JSON.stringify(updatedProfileData)}`);
 
                             // Use functional update to safely access the previous state (prev)
