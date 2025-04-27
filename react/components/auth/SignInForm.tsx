@@ -1,14 +1,23 @@
-import React  from 'react'
+import React, { useEffect } from 'react'
 // @ts-ignore: React is defined
 import { useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../button'
 import { getPref, setPref } from '../../../src/utils/prefs'
 
-const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> = ({ setErrorMsg }) => {
+interface SignInFormProps {
+    setErrorMsg: (errorMsg: string | null) => void;
+    emailInputRef?: React.RefObject<HTMLInputElement>;
+}
+
+const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) => {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
+
+    useEffect(() => {
+        emailInputRef?.current?.focus();
+    }, []);
     
     const handleSignIn = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -55,6 +64,7 @@ const SignInForm: React.FC<{ setErrorMsg: (errorMsg: string | null) => void }> =
                     required
                     className="border-quinary rounded-md p-2 bg-quaternary focus:border-tertiary transition outline-none"
                     placeholder="your.email@example.com"
+                    ref={emailInputRef}
                 />
             </div>
             

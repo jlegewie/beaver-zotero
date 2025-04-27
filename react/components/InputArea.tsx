@@ -1,5 +1,5 @@
 // @ts-ignore no idea
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
@@ -34,6 +34,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
     const cancelStreamingMessage = useSetAtom(cancelStreamingMessageAtom);
     const setIsCancelling = useSetAtom(isCancellingAtom);
+
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
     
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,

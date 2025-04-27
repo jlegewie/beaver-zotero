@@ -17,6 +17,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const loginEmailRef = useRef<HTMLInputElement>(null);
     const threadId = useAtomValue(currentThreadIdAtom);
     const threadMessages = useAtomValue(threadMessagesAtom);
     const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
@@ -25,11 +26,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-
-    useEffect(() => {
-        // Focus the input
-        inputRef.current?.focus();
-    }, []);
 
     useEffect(() => {
         if (messagesContainerRef.current) {
@@ -49,7 +45,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         return (
             <div className="sidebar-container h-full display-flex flex-col min-w-0">
                 <Header />
-                <LoginPage />
+                <LoginPage emailInputRef={loginEmailRef} />
             </div>
         );
     }

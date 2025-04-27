@@ -3,7 +3,11 @@ import React from "react";
 import { useState } from 'react'
 import SignInForm from "./auth/SignInForm";
 
-const LoginPage: React.FC = () => {
+interface LoginPageProps {
+    emailInputRef?: React.RefObject<HTMLInputElement>;
+}
+
+const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
     const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
     return (
@@ -27,7 +31,7 @@ const LoginPage: React.FC = () => {
                 
                 {/* Form container with subtle background */}
                 <div className="w-90 rounded-lg border-quinary p-4 bg-quaternary">
-                    <SignInForm setErrorMsg={setErrorMsg} />
+                    <SignInForm setErrorMsg={setErrorMsg} emailInputRef={emailInputRef} />
                     
                     {/* Additional links */}
                     {/* <div className="display-flex flex-col items-center gap-2 mt-4 text-sm">
