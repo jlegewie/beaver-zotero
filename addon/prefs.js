@@ -13,6 +13,9 @@ pref("lastUsedModel", "");
 pref("supportedModelsLastFetched", "");
 pref("supportedModels","[]");
 
+// Search
+pref("recentItems", "[]");
+
 // Citation format: author-year or numeric
 pref("citationFormat", "author-year");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
