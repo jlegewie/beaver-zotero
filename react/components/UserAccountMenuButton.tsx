@@ -2,9 +2,9 @@ import React from 'react';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon } from './icons';
-import { supabase } from '../../src/services/supabaseClient';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
+import { useAuth } from '../hooks/useAuth';
 
 interface UserAccountMenuButtonProps {
     className?: string;
@@ -19,6 +19,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
     ariaLabel = 'User Account Menu',
 }) => {
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    const { signOut } = useAuth();
 
     // Create menu items from threads
     const menuItems: MenuItem[] = [
@@ -34,8 +35,8 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         },
         {
             label: "Logout",
-            onClick: () => {
-                supabase.auth.signOut();
+            onClick: async () => {
+                await signOut();
             },
             icon: LogoutIcon,
         }
