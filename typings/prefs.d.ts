@@ -18,6 +18,7 @@ declare namespace _ZoteroTypes {
       "lastUsedModel": string;
       "supportedModelsLastFetched": string;
       "supportedModels": string;
+      "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
