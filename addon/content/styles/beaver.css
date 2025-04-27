@@ -368,6 +368,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .text-2xl { font-size: 1.5rem; }
 [id^="beaver-pane-"] .font-medium { font-weight: 500; }
 [id^="beaver-pane-"] .font-semibold { font-weight: 600; }
+[id^="beaver-pane-"] .font-bold { font-weight: 700; }
 [id^="beaver-pane-"] .font-color-primary { color: var(--fill-primary); }
 [id^="beaver-pane-"] .font-color-secondary { color: var(--fill-secondary); }
 [id^="beaver-pane-"] .font-color-tertiary { color: var(--fill-tertiary); }
