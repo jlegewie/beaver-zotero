@@ -15,6 +15,8 @@ export interface SearchMenuItem {
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Optional custom content to render instead of the default label and icon. */
     customContent?: ReactNode;
+    /** Whether this item is a group header */
+    isGroupHeader?: boolean;
 }
 
 /**
@@ -244,20 +246,30 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 case 'ArrowDown':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        const next = (prev + 1) % displayOrderMenuItems.length;
+                        let next = (prev + 1) % displayOrderMenuItems.length;
+                        // Skip group headers
+                        while (displayOrderMenuItems[next].isGroupHeader && next !== prev) {
+                            next = (next + 1) % displayOrderMenuItems.length;
+                        }
                         return next;
                     });
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        const next = (prev - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
+                        let next = (prev - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
+                        // Skip group headers
+                        while (displayOrderMenuItems[next].isGroupHeader && next !== prev) {
+                            next = (next - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
+                        }
                         return next;
                     });
                     break;
                 case 'Enter':
                     e.preventDefault();
-                    if (focusedIndex >= 0 && focusedIndex < displayOrderMenuItems.length) {
+                    if (focusedIndex >= 0 && 
+                        focusedIndex < displayOrderMenuItems.length && 
+                        !displayOrderMenuItems[focusedIndex].isGroupHeader) {
                         displayOrderMenuItems[focusedIndex].onClick();
                         if(closeOnSelect) onClose();
                     }
@@ -279,21 +291,33 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 
             // If we have items, highlight first or last depending on direction
             if (menuItems.length > 0) {
-            if (verticalPosition === 'above') {
-                // highlight the item that ends up at the bottom (the last in normal order)
-                setFocusedIndex(menuItems.length - 1);
+                let initialIndex = -1;
+                
+                if (verticalPosition === 'above') {
+                    // Start from the bottom (last in normal order)
+                    initialIndex = menuItems.length - 1;
+                    // Skip any group headers
+                    while (initialIndex >= 0 && menuItems[initialIndex].isGroupHeader) {
+                        initialIndex--;
+                    }
+                } else {
+                    // Start from the top (first in normal order)
+                    initialIndex = 0;
+                    // Skip any group headers
+                    while (initialIndex < menuItems.length && menuItems[initialIndex].isGroupHeader) {
+                        initialIndex++;
+                    }
+                }
+                
+                setFocusedIndex(initialIndex >= 0 ? initialIndex : -1);
             } else {
-                setFocusedIndex(0);
-            }
-            } else {
-            setFocusedIndex(-1);
+                setFocusedIndex(-1);
             }
         } else {
             setFocusedIndex(-1);
             setHoveredIndex(-1);
         }
     }, [isOpen, menuItems, verticalPosition]);
-
     
     // Modified search input handler
     const handleSearchInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -314,6 +338,82 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         ? [...menuItems].reverse() 
         : menuItems;
 
+    // Helper function to render menu item
+    const renderMenuItem = (item: SearchMenuItem, index: number) => {
+        if (item.isGroupHeader) {
+            // Render group header
+            return (
+                <div
+                    key={index}
+                    role="presentation"
+                    className="px-2 py-1 font-color-tertiary text-sm font-semibold mt-1 first:mt-0"
+                >
+                    <span className="truncate">{item.label}</span>
+                </div>
+            );
+        }
+        
+        // Regular menu item
+        return (
+            <div
+                key={index}
+                role="menuitem"
+                tabIndex={focusedIndex === index ? 0 : -1}
+                className={`
+                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
+                `}
+                style={{ maxWidth: '100%', minWidth: 0 }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    item.onClick();
+                    if(closeOnSelect) onClose();
+                }}
+                onMouseEnter={() => {
+                    if (!item.isGroupHeader) {
+                        setHoveredIndex(index);
+                        setFocusedIndex(index);
+                    }
+                }}
+                onMouseLeave={() => {
+                    if (hoveredIndex === index) {
+                        setHoveredIndex(-1);
+                    }
+                }}
+                onFocus={() => {
+                    if (!item.isGroupHeader) {
+                        setFocusedIndex(index);
+                    }
+                }}
+            >
+                {item.customContent ? (
+                    item.customContent
+                ) : (
+                    <span className="display-flex items-center gap-2 w-full min-w-0">
+                        {item.icon && (
+                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                        )}
+                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                    </span>
+                )}
+            </div>
+        );
+    };
+
+    const textInput = (
+        <div>
+            <input
+                ref={inputRef}
+                type="text"
+                value={searchQuery}
+                onChange={handleSearchInput}
+                placeholder={placeholder}
+                className="w-full bg-quaternary font-color-secondary px-1 outline-none chat-input"
+                aria-label="Search"
+            />
+        </div>
+    )
+
     return (
         <div
             ref={menuRef}
@@ -325,7 +425,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 maxWidth: maxWidth || undefined,
                 width: width || undefined,
                 maxHeight: maxHeight || '80vh'
-                // boxSizing: 'border-box',
             }}
             tabIndex={-1}
             role="menu"
@@ -337,123 +436,24 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 <>
                     {/* Menu items first when positioned above */}
                     {displayOrderMenuItems.length > 0 ? (
-                        displayOrderMenuItems.map((item: SearchMenuItem, index: number) => (
-                            <div
-                                key={index}
-                                role="menuitem"
-                                tabIndex={focusedIndex === index ? 0 : -1}
-                                className={`
-                                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
-                                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
-                                `}
-                                style={{ maxWidth: '100%', minWidth: 0 }}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    item.onClick();
-                                    if(closeOnSelect) onClose();
-                                }}
-                                onMouseEnter={() => {
-                                    setHoveredIndex(index);
-                                    setFocusedIndex(index);
-                                }}
-                                onMouseLeave={() => {
-                                    if (hoveredIndex === index) {
-                                        setHoveredIndex(-1);
-                                    }
-                                }}
-                                onFocus={() => {
-                                    setFocusedIndex(index);
-                                }}
-                            >
-                                {item.customContent ? (
-                                    item.customContent
-                                ) : (
-                                    <span className="display-flex items-center gap-2 w-full min-w-0">
-                                        {item.icon && (
-                                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
-                                        )}
-                                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
-                                    </span>
-                                )}
-                            </div>
-                        ))
+                        displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                     ) : (
                         <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                            {/* {noResultsText} */}
                             {searchQuery.trim() ? "No results found" : "Start typing to search"}
                         </div>
                     )}
                     
                     {/* Search input at the bottom when positioned above */}
-                    <div>
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={searchQuery}
-                            onChange={handleSearchInput}
-                            placeholder={placeholder}
-                            className="w-full bg-quaternary font-color-secondary px-1 outline-none chat-input"
-                            aria-label="Search"
-                        />
-                    </div>
+                    {textInput}
                 </>
             ) : (
                 <>
                     {/* Search input at the top when positioned below */}
-                    <div>
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={searchQuery}
-                            onChange={handleSearchInput}
-                            placeholder={placeholder}
-                            className="w-full bg-quaternary font-color-secondary text-sm p-1 outline-none chat-input"
-                            aria-label="Search"
-                        />
-                    </div>
+                    {textInput}
                     
                     {/* Menu items */}
                     {displayOrderMenuItems.length > 0 ? (
-                        displayOrderMenuItems.map((item: SearchMenuItem, index: number) => (
-                            <div
-                                key={index}
-                                role="menuitem"
-                                tabIndex={focusedIndex === index ? 0 : -1}
-                                className={`
-                                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
-                                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
-                                `}
-                                style={{ maxWidth: '100%', minWidth: 0 }}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    item.onClick();
-                                    onClose();
-                                }}
-                                onMouseEnter={() => {
-                                    setHoveredIndex(index);
-                                    setFocusedIndex(index);
-                                }}
-                                onMouseLeave={() => {
-                                    if (hoveredIndex === index) {
-                                        setHoveredIndex(-1);
-                                    }
-                                }}
-                                onFocus={() => {
-                                    setFocusedIndex(index);
-                                }}
-                            >
-                                {item.customContent ? (
-                                    item.customContent
-                                ) : (
-                                    <span className="display-flex items-center gap-2 w-full min-w-0">
-                                        {item.icon && (
-                                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
-                                        )}
-                                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
-                                    </span>
-                                )}
-                            </div>
-                        ))
+                        displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                     ) : (
                         <div className="px-2 py-1 text-sm font-color-tertiary text-center">
                             {noResultsText}
