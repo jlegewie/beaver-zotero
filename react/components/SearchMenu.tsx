@@ -408,7 +408,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 value={searchQuery}
                 onChange={handleSearchInput}
                 placeholder={placeholder}
-                className="w-full bg-quaternary font-color-secondary px-1 outline-none chat-input"
+                className="w-full bg-quaternary font-color-primary px-1 outline-none chat-input mt-2"
                 aria-label="Search"
             />
         </div>
