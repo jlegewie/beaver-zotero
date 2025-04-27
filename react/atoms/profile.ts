@@ -4,6 +4,11 @@ import { accountService } from "../../src/services/accountService";
 
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 
+export const planNameAtom = atom<string>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.plan.display_name || 'Unknown';
+});
+
 export const fetchProfileWithPlanAtom = atom(
     null,
     async (get, set) => {
