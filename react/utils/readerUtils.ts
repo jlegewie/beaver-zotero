@@ -142,4 +142,61 @@ function getReaderContext(): ReaderContext | undefined {
     return context;
 }
 
-export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem, getReaderContext };
+function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void) {
+    if (reader.type !== "pdf") {
+        return null;
+    }
+    try {
+        // Access the PDF.js iframe window
+        const iframeWindow = reader._internalReader._primaryView._iframeWindow;
+        
+        // Keep track of previous selection state
+        let hadPreviousSelection = false;
+        
+        // Define the event handler function
+        const handleSelectionChange = () => {
+            const selection = iframeWindow.getSelection();
+            const selectedText = selection.toString();
+            
+            // Call the callback in two cases:
+            // 1. When text is selected
+            // 2. When text was previously selected but now is empty (selection removed)
+            if (selectedText) {
+                hadPreviousSelection = true;
+                callback({
+                    text: selectedText,
+                    page: iframeWindow.PDFViewerApplication.pdfViewer.currentPageNumber,
+                    hasSelection: true
+                } as TextSelection);
+            } else if (hadPreviousSelection) {
+                // TextSelection was removed
+                hadPreviousSelection = false;
+                callback({
+                    text: "",
+                    page: iframeWindow.PDFViewerApplication.pdfViewer.currentPageNumber,
+                    hasSelection: false
+                } as TextSelection);
+            }
+        };
+        
+        // Add the event listener
+        iframeWindow.document.addEventListener(
+            "selectionchange",
+            handleSelectionChange,
+        );
+        
+        // Return a function to remove the event listener when no longer needed
+        return () => {
+            iframeWindow.document.removeEventListener(
+                "selectionchange",
+                handleSelectionChange,
+            );
+        };
+    } catch (e) {
+        console.error("Error setting up selection listener:", e);
+        return null;
+    }
+}
+
+export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem, getReaderContext, TextSelection, addSelectionChangeListener, getSelectedTextAsTextSelection };
+
