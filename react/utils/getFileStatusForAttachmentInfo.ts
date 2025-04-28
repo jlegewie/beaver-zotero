@@ -7,6 +7,7 @@ import { errorMapping } from '../components/FileStatusStats'
 import { AttachmentStatusResponse } from '../../src/services/attachmentsService';
 import { store } from '../index';
 import { userAtom } from '../atoms/auth';
+import { planFeaturesAtom } from '../atoms/profile';
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
@@ -26,6 +27,18 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         if (!user) {
             return { text: 'Not logged in', showButton: false };
         }
+
+        // 0. Check if user has a subscription
+        if (!store.get(planFeaturesAtom).fileProcessing) {
+            return {
+                text: 'Processing not available',
+                showButton: true,
+                buttonIcon: 'chrome://beaver/content/icons/info.svg',
+                buttonTooltip: `File processing is only available for users without a subscription.`,
+                buttonDisabled: true
+            };
+        }
+        
         // 1. Is file valid
         if (attachmentItem.libraryID !== 1) {
             return { text: 'Unsupported library', showButton: false };
