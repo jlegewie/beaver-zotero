@@ -162,7 +162,7 @@ function extractPrimaryCreators(item: Zotero.Item): any[] {
  * @param item Zotero item
  * @returns Extracted year or undefined
  */
-function extractYear(item: Zotero.Item): number | undefined {
+export function extractYear(item: Zotero.Item): number | undefined {
     const date = item.getField('date');
     if (!date) return undefined;
     
