@@ -77,6 +77,16 @@ function getSelectedText(reader: any): string | null {
     }
 }
 
+function getSelectedTextAsTextSelection(reader: any): TextSelection | null {
+    const text = getSelectedText(reader);
+    if (!text) return null;
+    return {
+        text,
+        page: getCurrentPage(reader),
+        hasSelection: !!text,
+    } as TextSelection;
+}
+
 /**
  * Retrieves the item of the current reader.
  * 
