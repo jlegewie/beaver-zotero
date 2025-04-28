@@ -32,3 +32,4 @@ export { default as InformationCircleIcon } from './icons/InformationCircleIcon'
 export { default as LinkIcon } from './icons/LinkIcon';
 export { default as KeyIcon } from './icons/KeyIcon';
 export { default as BrainIcon } from './icons/BrainIcon';
+export { default as TextAlignLeftIcon } from './icons/TextAlignLeftIcon';
