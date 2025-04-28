@@ -5,8 +5,8 @@ import { createSourceIdentifier } from './sourceUtils';
  * 
  * @returns The current reader instance or undefined if no reader is found.
  */
-function getCurrentReader(): any | undefined {
-    const window = Zotero.getMainWindow();
+function getCurrentReader(window?: Window): any | undefined {
+    window = window || Zotero.getMainWindow();
     const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
     return reader;
 }
