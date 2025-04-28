@@ -1,6 +1,16 @@
 import { createSourceIdentifier } from './sourceUtils';
 
 /**
+ * Represents a text selection in the reader.
+ */
+interface TextSelection {
+    text: string;
+    page: number;
+    hasSelection: boolean;
+}
+
+
+/**
  * Retrieves the current reader instance.
  * 
  * @returns The current reader instance or undefined if no reader is found.
