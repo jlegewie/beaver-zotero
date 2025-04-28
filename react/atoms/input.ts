@@ -3,6 +3,7 @@ import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
 import { threadSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
+import { TextSelection } from '../utils/readerUtils';
 
 /**
 * Current user message and sources
@@ -11,6 +12,10 @@ export const currentUserMessageAtom = atom<string>('');
 export const currentSourcesAtom = atom<InputSource[]>([]);
 export const readerItemKeyAtom = atom<string | null>(null);
 
+/**
+ * Current reader text selection
+*/
+export const readerTextSelectionAtom = atom<TextSelection | null>(null);
 
 /**
 * Cache to track removed item keys to prevent them from reappearing
