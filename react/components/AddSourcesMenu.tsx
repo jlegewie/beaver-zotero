@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
-import { ItemSearchResult, searchService } from '../../src/services/searchService';
+import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
@@ -10,6 +10,8 @@ import { useAtom } from 'jotai';
 import { InputSource } from '../types/sources';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { getRecentAsync } from '../utils/zotero';
+import { searchTitleCreatorYear } from '../utils/search';
+import { logger } from '../../src/utils/logger';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -148,10 +150,22 @@ const AddSourcesMenu: React.FC<{
         
         try {
             setIsLoading(true);
+
+            // Query formatting
+            query = query.replace(/ (?:&|and) /g, " ");
+			query = query.replace(/,/, ' ');
+			query = query.replace(/&/, ' ');
+            query = query.replace(/ ?(\d{1,4})$/, ' $1');
+            query = query.trim();
             
-            // Search Zotero items via the API
-            const results = await searchService.search(query, limit);
-            console.log(results);
+            // Search Zotero items via API
+            // const results = await searchService.search(query, limit);
+
+            // Search Zotero items via Zotero
+            logger(`AddSourcesMenu.handleSearch: Searching for ${query}`)
+            const resultsItems = (await searchTitleCreatorYear(query, true)).slice(0, limit);
+            const results = resultsItems.map(itemSearchResultFromZoteroItem).filter(Boolean) as ItemSearchResult[];
+
             // Update the search results
             setSearchResults(results);
         } catch (error) {
