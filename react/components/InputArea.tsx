@@ -201,7 +201,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder="How can I help you today?"
+                        placeholder="@ to add a source"
                         className="chat-input"
                         onKeyDown={(e) => {
                             handleKeyDown(e);
