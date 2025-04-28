@@ -1,5 +1,7 @@
+import { v4 as uuidv4 } from 'uuid';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { extractYear } from '../utils/sync'
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
@@ -14,6 +16,24 @@ export interface ItemSearchResult {
     rank?: number;
     similarity?: number;
 }
+
+export function itemSearchResultFromZoteroItem(item: Zotero.Item) {
+    return {
+        id: uuidv4(),
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        item_type: item.itemType,
+        // @ts-ignore - Add proper types later
+        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        title: item.getField('title'),
+        year: extractYear(item),
+        // @ts-ignore Beaver exists
+        reference: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+        rank: 0,
+        similarity: 0,
+    } as ItemSearchResult;
+}
+
 
 // Type for search params to keep track of the various query parameters
 export interface SearchParams {
