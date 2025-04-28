@@ -9,7 +9,8 @@ import { logger } from '../../src/utils/logger';
  * @returns A promise that resolves to an array of Zotero.Item objects matching the criteria.
  */
 export async function searchTitleCreatorYear(
-    searchTerm: string
+    searchTerm: string,
+    libraryCondition?: boolean
 ): Promise<Zotero.Item[]> {
     // If no search term is provided, return an empty array.
     if (!searchTerm || searchTerm.trim() === "") {
