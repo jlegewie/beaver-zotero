@@ -22,10 +22,13 @@ export async function searchTitleCreatorYear(
         const search = new Zotero.Search();
         
         // Set the search scope to the currently selected library.
-        // const libraryID = Zotero.getActiveZoteroPane()?.getSelectedLibraryID();
-        // if (libraryID !== null) {
-        //     search.addCondition("libraryID", "is", libraryID)
-        // }
+        if (libraryCondition) {
+            search.addCondition("libraryID", "is", 1)
+            // const libraryID = Zotero.getActiveZoteroPane()?.getSelectedLibraryID();
+            // if (libraryID !== null) {
+            //     search.addCondition("libraryID", "is", libraryID)
+            // }
+        }
 
         // Use 'quicksearch-titleCreatorYear' condition.
         // This internally creates an OR search across title-related fields,
