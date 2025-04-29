@@ -17,7 +17,7 @@ export function useReaderTabSelection() {
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
     const zoteroNotifierIdRef = useRef<string | null>(null);
-    const currentReaderRef = useRef<any>(null);
+    const currentReaderIdRef = useRef<number | null>(null);
 
     // Define main window
     const window = Zotero.getMainWindow();
@@ -33,7 +33,7 @@ export function useReaderTabSelection() {
 
         const poll = () => {
             // Reader might have become invalid (e.g., tab closed) during polling
-            if (currentReaderRef.current !== reader) {
+            if (currentReaderIdRef.current !== reader.itemID) {
                  logger("useReaderTabSelection:waitForInternalReader: Reader changed during polling. Aborting.");
                  return;
             }
@@ -70,12 +70,12 @@ export function useReaderTabSelection() {
 
         // Cleanup any existing selection listener first
         if (selectionCleanupRef.current) {
-            logger(`useReaderTabSelection:setupReader: Cleaning up previous selection listener for reader ${currentReaderRef.current?.itemID}`);
+            logger(`useReaderTabSelection:setupReader: Cleaning up previous selection listener for reader ${currentReaderIdRef.current}`);
             selectionCleanupRef.current();
             selectionCleanupRef.current = null;
         }
 
-        currentReaderRef.current = reader; // Store the reader instance
+        currentReaderIdRef.current = reader.itemID; // Store just the ID
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
         // Update sources for the new reader
@@ -84,7 +84,7 @@ export function useReaderTabSelection() {
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, () => {
             // Check if the reader context is still the same after waiting
-            if (currentReaderRef.current !== reader) {
+            if (currentReaderIdRef.current !== reader.itemID) {
                 logger(`useReaderTabSelection:setupReader: Reader changed after waitForInternalReader for ${reader.itemID}. Skipping setup.`);
                 return;
             }
@@ -98,11 +98,11 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Adding selection listener for reader ${reader.itemID}`);
             selectionCleanupRef.current = addSelectionChangeListener(reader, (newSelection: TextSelection) => {
                 // Ensure the event is for the currently active reader this hook manages
-                if (currentReaderRef.current === reader) {
+                if (currentReaderIdRef.current === reader.itemID) {
                     logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection.text}"`);
                     setReaderTextSelection(newSelection);
                 } else {
-                     logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader is ${currentReaderRef.current?.itemID}. Ignoring.`);
+                     logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
                 }
             });
         });
@@ -132,7 +132,7 @@ export function useReaderTabSelection() {
 
                     if (selectedTab.type === 'reader') {
                         const newReader = Zotero.Reader.getByTabID(selectedTab.id);
-                        if (newReader && newReader !== currentReaderRef.current) {
+                        if (newReader && newReader.itemID !== currentReaderIdRef.current) {
                             logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Setting up new reader.`);
                             setupReader(newReader);
                         } else if (!newReader) {
@@ -140,7 +140,7 @@ export function useReaderTabSelection() {
                             // If we somehow switch to a reader tab but can't get the instance, clear state
                             if (selectionCleanupRef.current) selectionCleanupRef.current();
                             selectionCleanupRef.current = null;
-                            currentReaderRef.current = null;
+                            currentReaderIdRef.current = null;
                             setReaderTextSelection(null);
                         }
                         // If newReader is the same as current, do nothing - already handled
@@ -151,7 +151,7 @@ export function useReaderTabSelection() {
                             selectionCleanupRef.current();
                             selectionCleanupRef.current = null;
                          }
-                         currentReaderRef.current = null;
+                         currentReaderIdRef.current = null;
                          setReaderTextSelection(null);
                          // updateSourcesFromReader(null); // Consider if sources should be cleared here too
                     }
@@ -180,7 +180,7 @@ export function useReaderTabSelection() {
                 }
                 zoteroNotifierIdRef.current = null;
             }
-            currentReaderRef.current = null;
+            currentReaderIdRef.current = null;
             // Reset atom state on unmount
             setReaderTextSelection(null);
         };
