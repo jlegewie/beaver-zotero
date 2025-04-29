@@ -14,6 +14,8 @@ import LoginPage from './LoginPage';
 import PreferencePage from './PreferencePage';
 import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { isAuthenticatedAtom } from '../atoms/auth';
+import TextSelectionPreview from './TextSelectionPreview';
+import { previewTextSelectionAtom } from '../atoms/ui';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -26,6 +28,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
+    const previewTextSelection = useAtomValue(previewTextSelectionAtom);
 
     useEffect(() => {
         if (messagesContainerRef.current) {
@@ -87,6 +90,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     </div>
                 </div>
                 {previewedSource && <SourcePreview source={previewedSource} />}
+                {previewTextSelection && <TextSelectionPreview />}
                 <InputArea inputRef={inputRef} />
             </div>
         </div>
