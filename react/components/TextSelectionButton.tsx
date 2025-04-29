@@ -2,7 +2,7 @@
 import React, { useState, forwardRef, useRef } from 'react'
 import { CSSIcon, Icon } from "./icons"
 import { useSetAtom, useAtomValue } from 'jotai'
-import { readerItemKeyAtom, removeSourceAtom } from '../atoms/input'
+import { readerItemKeyAtom, readerTextSelectionAtom, removeSourceAtom } from '../atoms/input'
 import { previewedSourceAtom } from '../atoms/ui'
 import { TextAlignLeftIcon } from './icons'
 import { TextSelection } from '../utils/readerUtils'
@@ -25,9 +25,9 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         } = props
         // States
         const [isHovered, setIsHovered] = useState(false);
-        const removeSource = useSetAtom(removeSourceAtom);
         const setPreviewedSource = useSetAtom(previewedSourceAtom);
         const readerItemKey = useAtomValue(readerItemKeyAtom);
+        const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
         // const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
         
         // Hover timer ref for handling delayed hover behavior
@@ -37,29 +37,29 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             if (isHovered && canEdit) {
                 return (<span
                     role="button"
-                    className="source-remove"
+                    className="source-remove -ml-020 -mr-015"
                     onClick={(e) => {
                         e.stopPropagation()
                         handleRemove()
-                    }}
+                    }}   
                 >
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
             }
             return (
-                <span className="font-color-secondary mt-015">
-                    <Icon icon={TextAlignLeftIcon} />
-                </span>
+                <Icon icon={TextAlignLeftIcon} className="mt-015 font-color-secondary"/>
             )
         }
 
         const handleRemove = () => {
-            // removeSource(source)
+            setReaderTextSelection(null);
         }
 
         return (
             <button
                 ref={ref}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
                 className={
                     `variant-outline source-button
                     ${className || ''}

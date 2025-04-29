@@ -347,10 +347,12 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
 [id^="beaver-pane-"] .h-2 { height: 0.5rem; }
 [id^="beaver-pane-"] .-ml-015 { margin-left: -0.15rem; }
+[id^="beaver-pane-"] .-ml-020 { margin-left: -0.20rem; }
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
 [id^="beaver-pane-"] .-mr-015 { margin-right: -0.15rem; }
+[id^="beaver-pane-"] .-mr-020 { margin-right: -0.20rem; }
 [id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
 [id^="beaver-pane-"] .-mr-2 { margin-right: -0.5rem; }
 [id^="beaver-pane-"] .-mr-3 { margin-right: -0.75rem; }
