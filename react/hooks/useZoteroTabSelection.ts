@@ -1,27 +1,24 @@
-// @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { logger } from "../../src/utils/logger";
-import { readerItemKeyAtom, readerTextSelectionAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroItemsAtom } from "../atoms/input";
+import { readerItemKeyAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroItemsAtom } from "../atoms/input";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
-import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from "../utils/readerUtils";
 
 /**
- * Listens to changes in Zotero tab selection
- * 
+ * Listens to changes in Zotero tab selection.
+ *
  * Sets isLibraryTabAtom and updates sources based on the selected tab type.
- * Also manages the reader text selection listener based on the active tab.
+ * Updates the main UI state when tabs change.
+ * Does NOT manage reader text selection listeners (handled by useReaderTextSelection).
  */
 export function useZoteroTabSelection() {
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     const setReaderItemKey = useSetAtom(readerItemKeyAtom);
     const updateSourcesFromReader = useSetAtom(updateSourcesFromReaderAtom);
-    const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
-    const selectionCleanupRef = useRef<(() => void) | null>(null);
     
     // define main window
     const window = Zotero.getMainWindow();
@@ -31,66 +28,6 @@ export function useZoteroTabSelection() {
         // Set initial state
         const initialIsLibrary = window.Zotero_Tabs.selectedType === 'library';
         setIsLibraryTab(initialIsLibrary);
-        if (!initialIsLibrary && window.Zotero_Tabs.selectedID) {
-            const reader = getCurrentReader(window);
-            if (reader) {
-                logger(`useZoteroTabSelection: initial reader tab detected, setting up selection listener`);
-                selectionCleanupRef.current = addSelectionChangeListener(reader, (newSelection: TextSelection) => {                    
-                    logger(`useZoteroTabSelection: (initial listener) Selection changed in reader, updating selection to "${newSelection.text}"`);
-                    setReaderTextSelection(newSelection);
-                });
-                // TODO: NOT SURE IF THIS IS NEEDED
-                updateSourcesFromReader(reader);
-            }
-        }
-
-        const resetReaderTextSelection = (reader: any) => {
-            // Add new selection listener
-            logger("useZoteroTabSelection: setting up reader selection listener");
-            selectionCleanupRef.current = addSelectionChangeListener(reader, (newSelection: TextSelection) => {
-                logger(`useZoteroTabSelection: Selection changed in reader, updating selection to "${newSelection.text}"`);
-                setReaderTextSelection(newSelection);
-            });
-            // Update current text selection
-            const selection = getSelectedTextAsTextSelection(reader);
-            if (selection) {
-                logger("useZoteroTabSelection: setting reader text selection to current selection");
-                setReaderTextSelection(selection);
-            }
-            else {
-                logger("useZoteroTabSelection: no selection in reader, setting reader text selection to null");
-                setReaderTextSelection(null);
-            }
-        }
-
-        // Function to poll for reader._internalReader
-        const waitForInternalReader = (reader: any, maxTime = 2000) => {
-            const startTime = Date.now();
-            const checkInterval = 100; // Check every 100ms
-            
-            const poll = () => {
-                // Check if reader is ready
-                if (reader._internalReader && reader._internalReader._primaryView && reader._internalReader._primaryView._iframeWindow) {
-                    logger("useZoteroTabSelection: reader._internalReader is ready");
-                    resetReaderTextSelection(reader);
-                    return;
-                }
-                
-                // Check if we've exceeded the maximum wait time
-                if (Date.now() - startTime >= maxTime) {
-                    logger("useZoteroTabSelection: timed out waiting for reader._internalReader");
-                    // Try anyway as a fallback
-                    resetReaderTextSelection(reader);
-                    return;
-                }
-                
-                // Continue polling
-                setTimeout(poll, checkInterval);
-            };
-            
-            // Start polling
-            poll();
-        };
 
         // Handler for tab selection changes
         const tabObserver = {
@@ -106,46 +43,41 @@ export function useZoteroTabSelection() {
 
                     // Get the reader for the selected tab
                     let reader = null;
-                    if (!isLibrary) {
+                    if (!isLibrary && selectedTab.type === 'reader') { // Ensure it's actually a reader tab
                         reader = Zotero.Reader.getByTabID(selectedTab.id);
                     }
 
                     // Update UI through UIManager if sidebar is visible
                     const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
                     if (isVisible) {
-                        logger("useZoteroTabSelection: updating sidebar UI");
+                        logger("useZoteroTabSelection: updating sidebar UI via UIManager");
                         uiManager.updateUI({
                             isVisible: true,
                             isLibraryTab: isLibrary,
-                            collapseState: {
+                            collapseState: { // Reset collapse state on tab change? Or fetch current? Assuming reset for now.
                                 library: null,
                                 reader: null
                             }
                         });
                     }
 
-                    // Cleanup previous selection listener
-                    if (selectionCleanupRef.current) {
-                        logger("useZoteroTabSelection: cleaning up previous selection listener");
-                        selectionCleanupRef.current();
-                        selectionCleanupRef.current = null;
-                    }
-
-                    // Update sources and text selection
+                    // Update sources based on tab type
                     if (isLibrary) {
                         logger("useZoteroTabSelection: updating sources from library items");
-                        const newSelectedItems = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+                        const newSelectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
+                        // Check if pane exists before calling getSelectedItems
                         await updateSourcesFromZoteroItems(newSelectedItems);
                         setReaderItemKey(null);
-                        setReaderTextSelection(null);
-                    } else if (selectedTab.type === 'reader') {
-                        if (reader) {
-                            // Update sources
-                            updateSourcesFromReader(reader);
-                            
-                            // Wait for reader._internalReader to be defined
-                            waitForInternalReader(reader);
-                        }
+                    } else if (reader) { // Check if reader instance exists
+                        logger(`useZoteroTabSelection: reader tab selected (itemID: ${reader.itemID}), updating sources`);
+                        // Update sources using the reader instance
+                        updateSourcesFromReader(reader);
+                    } else {
+                        // Handle cases where it's not library and not a reader (or reader couldn't be fetched)
+                        logger(`useZoteroTabSelection: selected tab is neither library nor a recognized reader (${selectedTab.type}). Clearing reader-specific state.`);
+                        setReaderItemKey(null);
+                         // Maybe clear sources here too? depends on desired behavior
+                        // updateSourcesFromReader(null);
                     }
                 }
             }
@@ -159,15 +91,12 @@ export function useZoteroTabSelection() {
         
         // Cleanup function
         return () => {
-            logger("useZoteroTabSelection: cleaning up tab observer and selection listener");
-            if (selectionCleanupRef.current) {
-                selectionCleanupRef.current();
-                selectionCleanupRef.current = null;
-            }
+            logger("useZoteroTabSelection: cleaning up tab observer");
             if (observerRef.current) {
+                logger("useZoteroTabSelection: unregistering tab observer");
                 Zotero.Notifier.unregisterObserver(observerRef.current);
                 observerRef.current = null;
             }
         };
-    }, [updateSourcesFromZoteroItems, setIsLibraryTab, setReaderItemKey, updateSourcesFromReader, setReaderTextSelection]);
+    }, [updateSourcesFromZoteroItems, setIsLibraryTab, setReaderItemKey, updateSourcesFromReader, window]);
 } 
