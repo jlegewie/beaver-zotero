@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { logger } from "../../src/utils/logger";
-import { updateSourcesFromZoteroItemsAtom } from "../atoms/input";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 
@@ -13,7 +12,6 @@ import { uiManager } from '../ui/UIManager';
  * Does NOT manage reader text selection listeners (handled by useReaderTextSelection).
  */
 export function useZoteroTabSelection() {
-    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
     // ref to prevent multiple registrations if dependencies change
     const observerRef = useRef<any>(null);
@@ -58,19 +56,6 @@ export function useZoteroTabSelection() {
                             }
                         });
                     }
-
-                    // Update sources based on tab type
-                    if (isLibrary) {
-                        logger("useZoteroTabSelection: updating sources from library items");
-                        const newSelectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
-                        // Check if pane exists before calling getSelectedItems
-                        await updateSourcesFromZoteroItems(newSelectedItems);
-                    } else if (reader) { // Check if reader instance exists
-                        logger(`useZoteroTabSelection: reader tab selected (itemID: ${reader.itemID}), updating sources`);
-                    } else {
-                        // Handle cases where it's not library and not a reader (or reader couldn't be fetched)
-                        logger(`useZoteroTabSelection: selected tab is neither library nor a recognized reader (${selectedTab.type}). Clearing reader-specific state.`);
-                    }
                 }
             }
         };
@@ -90,5 +75,5 @@ export function useZoteroTabSelection() {
                 observerRef.current = null;
             }
         };
-    }, [updateSourcesFromZoteroItems, setIsLibraryTab, window]);
+    }, [setIsLibraryTab, window]);
 } 
