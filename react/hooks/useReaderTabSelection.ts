@@ -151,13 +151,13 @@ export function useReaderTabSelection() {
                     } else {
                         // Tab switched to something other than a reader (e.g., library)
                         logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state.`);
-                         if (selectionCleanupRef.current) {
-                            selectionCleanupRef.current();
-                            selectionCleanupRef.current = null;
-                         }
-                         currentReaderIdRef.current = null;
-                         setReaderTextSelection(null);
-                         updateSourcesFromReader(null);
+                        if (selectionCleanupRef.current) {
+                        selectionCleanupRef.current();
+                        selectionCleanupRef.current = null;
+                        }
+                        currentReaderIdRef.current = null;
+                        setReaderTextSelection(null);
+                        updateSourcesFromReader(null);
                     }
                 }
             }
