@@ -335,6 +335,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .ml-2 { margin-left: 0.5rem; }
 [id^="beaver-pane-"] .ml-3 { margin-left: 0.75rem; }
 [id^="beaver-pane-"] .ml-4 { margin-left: 1rem; }
+[id^="beaver-pane-"] .mt-015 { margin-top: 0.15rem; }
 [id^="beaver-pane-"] .mt-1 { margin-top: 0.25rem; }
 [id^="beaver-pane-"] .mt-2 { margin-top: 0.5rem; }
 [id^="beaver-pane-"] .mt-3 { margin-top: 0.75rem; }
