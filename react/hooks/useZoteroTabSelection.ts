@@ -26,8 +26,8 @@ export function useZoteroTabSelection() {
         setIsLibraryTab(initialIsLibrary);
 
         // Handler for tab selection changes
-        const tabObserver = {
-            notify: async function(event: string, type: string, ids: string[], extraData: any) {
+        const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
+            notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
                 if (type === 'tab' && event === 'select') {
                     const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
@@ -61,7 +61,6 @@ export function useZoteroTabSelection() {
         };
 
         // Register the observer
-        // @ts-ignore registerObserver is not typed
         zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
         logger("useZoteroTabSelection: registered tab selection observer");
         
