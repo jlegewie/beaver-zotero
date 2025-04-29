@@ -68,7 +68,8 @@ function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {
         // Get text selection
         const hasSelection = primaryView._selectionRanges.length > 0
         if (!hasSelection) return null;
-        const selection = primaryView._selectionRanges[0].text;
+        // const selection = primaryView._selectionRanges[0].text;
+        const selection = primaryView._selectionRanges.map((range: any) => range.text).join('\n\n');
         if (!selection) return null;
         return selection;
 
