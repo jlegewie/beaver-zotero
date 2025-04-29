@@ -5,6 +5,7 @@ import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
+import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { getPref } from '../../src/utils/prefs';
@@ -13,6 +14,7 @@ import AddSourcesMenu from './AddSourcesMenu';
 import { getAppState } from '../utils/appState';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
+import { TextSelectionButton } from './TextSelectionButton';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -34,6 +36,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
     const cancelStreamingMessage = useSetAtom(cancelStreamingMessageAtom);
     const setIsCancelling = useSetAtom(isCancellingAtom);
+    const readerTextSelection = useAtomValue(readerTextSelectionAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -175,6 +178,9 @@ const InputArea: React.FC<InputAreaProps> = ({
                         source={source}
                     />
                 ))}
+                {readerTextSelection && readerTextSelection.hasSelection && (
+                    <TextSelectionButton selection={readerTextSelection} />
+                )}
             </div>
 
             {/* Input Form */}
