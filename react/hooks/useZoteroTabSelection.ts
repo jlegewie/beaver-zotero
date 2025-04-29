@@ -7,9 +7,8 @@ import { uiManager } from '../ui/UIManager';
 /**
  * Listens to changes in Zotero tab selection.
  *
- * Sets isLibraryTabAtom and updates sources based on the selected tab type.
+ * Sets isLibraryTabAtom and update UI through UIManager
  * Updates the main UI state when tabs change.
- * Does NOT manage reader text selection listeners (handled by useReaderTextSelection).
  */
 export function useZoteroTabSelection() {
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
@@ -36,12 +35,6 @@ export function useZoteroTabSelection() {
                     const isLibrary = selectedTab.type === 'library';
                     logger(`useZoteroTabSelection: tab changed to ${selectedTab.type}`);
                     setIsLibraryTab(isLibrary);
-
-                    // Get the reader for the selected tab
-                    let reader = null;
-                    if (!isLibrary && selectedTab.type === 'reader') { // Ensure it's actually a reader tab
-                        reader = Zotero.Reader.getByTabID(selectedTab.id);
-                    }
 
                     // Update UI through UIManager if sidebar is visible
                     const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
