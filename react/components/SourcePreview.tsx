@@ -12,7 +12,7 @@ import SourcePreviewRegularItem from './previews/SourcePreviewRegularItem';
 import SourcePreviewAttachment from './previews/SourcePreviewAttachment';
 import { getCurrentPage } from '../utils/readerUtils';
 import { getZoteroItem } from '../utils/sourceUtils';
-import { previewCloseTimeoutAtom } from './SourceButton';
+import { previewCloseTimeoutAtom } from '../atoms/ui';
 import Button from './button';
 import IconButton from './IconButton';
 
