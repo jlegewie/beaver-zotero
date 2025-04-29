@@ -106,8 +106,7 @@ export function useReaderTabSelection() {
                     } else {
                          logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
                     }
-                },
-                initialSelection?.hasSelection || false
+                }
             );
         });
 

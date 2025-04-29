@@ -56,20 +56,26 @@ function getCurrentPage(reader?: any): number | null {
  * @param reader - The reader instance.
  * @returns The selected text or null if the reader is not a PDF reader.
  */
-function getSelectedText(reader: any): string | null {
-    if (reader.type !== 'pdf') {
-        return null;
-    }
-    
+function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {    
     try {
+        // Get reader
+        reader = reader || getCurrentReader();
+        if (!reader || reader.type !== 'pdf') return null;
+
+        // Access primaryView
+        const primaryView = reader._internalReader._primaryView;
+        
+        // Get text selection
+        const hasSelection = primaryView._selectionRanges.length > 0
+        if (!hasSelection) return null;
+        const selection = primaryView._selectionRanges[0].text;
+        if (!selection) return null;
+        return selection;
+
         // Access the PDF.js iframe window
-        const iframeWindow = reader._internalReader._primaryView._iframeWindow;
-        
-        // Get the current selection from the window
-        const selection = iframeWindow.getSelection();
-        
-        // Return the selected text
-        return selection.toString();
+        // const iframeWindow = primaryView._iframeWindow;
+        // const selection = iframeWindow.getSelection();
+        // return selection.toString();
     }
     catch (e) {
         console.error('Error getting selected text:', e);
@@ -142,52 +148,38 @@ function getReaderContext(): ReaderContext | undefined {
     return context;
 }
 
-function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void, initiallyHasSelection = false) {
+function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void) {
     if (reader.type !== "pdf") {
         return null;
     }
     try {
-        // Access the PDF.js iframe window
-        const iframeWindow = reader._internalReader._primaryView._iframeWindow;
-        
-        // Keep track of previous selection state - initialize from parameter
-        let hadPreviousSelection = initiallyHasSelection;
-        
-        // Define the event handler function
+        // Handle initial selection
+        const selection = getSelectedTextAsTextSelection(reader);
+        if (selection) callback(selection);
+                
+        // Define the event handler for selection changes
         const handleSelectionChange = () => {
-            const selection = iframeWindow.getSelection();
-            const selectedText = selection.toString();
-            
-            // Call the callback in two cases:
-            // 1. When text is selected
-            // 2. When text was previously selected but now is empty (selection removed)
-            if (selectedText) {
-                hadPreviousSelection = true;
-                callback({
-                    text: selectedText,
-                    page: iframeWindow.PDFViewerApplication.pdfViewer.currentPageNumber,
-                    hasSelection: true
-                } as TextSelection);
-            } else if (hadPreviousSelection) {
-                // TextSelection was removed
-                hadPreviousSelection = false;
+            const selection = getSelectedTextAsTextSelection(reader);
+            if (selection) {
+                callback(selection);
+            } else {
                 callback({
                     text: "",
-                    page: iframeWindow.PDFViewerApplication.pdfViewer.currentPageNumber,
+                    page: getCurrentPage(reader),
                     hasSelection: false
                 } as TextSelection);
             }
         };
         
         // Add the event listener
-        iframeWindow.document.addEventListener(
+        reader._internalReader._primaryView._iframeWindow.document.addEventListener(
             "selectionchange",
             handleSelectionChange,
         );
         
         // Return a function to remove the event listener when no longer needed
         return () => {
-            iframeWindow.document.removeEventListener(
+            reader._internalReader._primaryView._iframeWindow.document.removeEventListener(
                 "selectionchange",
                 handleSelectionChange,
             );
