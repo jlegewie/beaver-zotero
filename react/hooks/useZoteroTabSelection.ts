@@ -13,8 +13,8 @@ import { uiManager } from '../ui/UIManager';
  */
 export function useZoteroTabSelection() {
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
-    // ref to prevent multiple registrations if dependencies change
-    const observerRef = useRef<any>(null);
+    // Reference to id of zotero notifier
+    const zoteroNotifierIdRef = useRef<string | null>(null);
     
     // define main window
     const window = Zotero.getMainWindow();
@@ -62,17 +62,16 @@ export function useZoteroTabSelection() {
 
         // Register the observer
         // @ts-ignore registerObserver is not typed
-        Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
+        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
         logger("useZoteroTabSelection: registered tab selection observer");
-        observerRef.current = tabObserver;
         
         // Cleanup function
         return () => {
             logger("useZoteroTabSelection: cleaning up tab observer");
-            if (observerRef.current) {
+            if (zoteroNotifierIdRef.current) {
                 logger("useZoteroTabSelection: unregistering tab observer");
-                Zotero.Notifier.unregisterObserver(observerRef.current);
-                observerRef.current = null;
+                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                zoteroNotifierIdRef.current = null;
             }
         };
     }, [setIsLibraryTab, window]);
