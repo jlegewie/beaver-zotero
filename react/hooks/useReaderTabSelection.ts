@@ -94,17 +94,21 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Initial selection for reader ${reader.itemID}: ${initialSelection?.text ? '"' + initialSelection.text + '"' : 'null'}`);
             setReaderTextSelection(initialSelection);
 
-            // Add new selection listener
+            // Add new selection listener with initiallyHasSelection parameter based on initial selection
             logger(`useReaderTabSelection:setupReader: Adding selection listener for reader ${reader.itemID}`);
-            selectionCleanupRef.current = addSelectionChangeListener(reader, (newSelection: TextSelection) => {
-                // Ensure the event is for the currently active reader this hook manages
-                if (currentReaderIdRef.current === reader.itemID) {
-                    logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection.text}"`);
-                    setReaderTextSelection(newSelection);
-                } else {
-                     logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
-                }
-            });
+            selectionCleanupRef.current = addSelectionChangeListener(
+                reader, 
+                (newSelection: TextSelection) => {
+                    // Ensure the event is for the currently active reader this hook manages
+                    if (currentReaderIdRef.current === reader.itemID) {
+                        logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection.text}"`);
+                        setReaderTextSelection(newSelection);
+                    } else {
+                         logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
+                    }
+                },
+                initialSelection?.hasSelection || false
+            );
         });
 
     }, [setReaderTextSelection, updateSourcesFromReader, waitForInternalReader]); // Dependencies

@@ -142,7 +142,7 @@ function getReaderContext(): ReaderContext | undefined {
     return context;
 }
 
-function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void) {
+function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void, initiallyHasSelection = false) {
     if (reader.type !== "pdf") {
         return null;
     }
@@ -150,8 +150,8 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
         // Access the PDF.js iframe window
         const iframeWindow = reader._internalReader._primaryView._iframeWindow;
         
-        // Keep track of previous selection state
-        let hadPreviousSelection = false;
+        // Keep track of previous selection state - initialize from parameter
+        let hadPreviousSelection = initiallyHasSelection;
         
         // Define the event handler function
         const handleSelectionChange = () => {
