@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, updateSourcesFromReaderAtom } from '../atoms/input';
+import { readerTextSelectionAtom, updateSourcesFromReaderAtom, readerItemKeyAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 
@@ -13,6 +13,7 @@ import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelecte
 export function useReaderTabSelection() {
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const updateSourcesFromReader = useSetAtom(updateSourcesFromReaderAtom);
+    const setReaderItemKey = useSetAtom(readerItemKeyAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -156,7 +157,7 @@ export function useReaderTabSelection() {
                          }
                          currentReaderIdRef.current = null;
                          setReaderTextSelection(null);
-                         // updateSourcesFromReader(null); // Consider if sources should be cleared here too
+                         updateSourcesFromReader(null);
                     }
                 }
             }
@@ -169,6 +170,9 @@ export function useReaderTabSelection() {
         // Cleanup function on unmount
         return () => {
             logger("useReaderTabSelection: Hook unmounting. Cleaning up listeners and observer.");
+            // Clear reader item key
+            setReaderItemKey(null);
+            // Cleanup selection event listner
             if (selectionCleanupRef.current) {
                 logger("useReaderTabSelection: Removing selection listener.");
                 selectionCleanupRef.current();
@@ -187,6 +191,6 @@ export function useReaderTabSelection() {
             // Reset atom state on unmount
             setReaderTextSelection(null);
         };
-    }, [setupReader, setReaderTextSelection, updateSourcesFromReader, window, waitForInternalReader]);
+    }, [setupReader, setReaderTextSelection, updateSourcesFromReader, setReaderItemKey, window, waitForInternalReader]);
 
 }
