@@ -10,10 +10,15 @@ import { useToggleSidebar } from '../hooks/useToggleSidebar';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
+    // Zotero selection evnet handler
     useZoteroSelection();
+
+    // Watch for pane collapse
     useObservePaneCollapse("library");
+
     // Recent threads subscription
     // useRecentThreads();
+
     // Render the sidebar
     return <Sidebar location="library" />;
 }
