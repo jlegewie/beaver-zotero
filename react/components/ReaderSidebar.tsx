@@ -6,10 +6,13 @@ import { isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useRecentThreads } from '../hooks/useRecentThreads';
 import { updateSourcesFromReaderAtom } from "../atoms/input";
+import { useReaderTabSelection } from '../hooks/useReaderTabSelection';
 
 // ReaderSidebarContent handles library-specific features
 const ReaderSidebarContent = () => {
     const updateSourcesFromReader = useSetAtom(updateSourcesFromReaderAtom);
+
+    useReaderTabSelection();
 
     useObservePaneCollapse("reader");
     // Recent threads subscription
