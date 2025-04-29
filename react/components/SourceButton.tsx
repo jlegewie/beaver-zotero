@@ -6,7 +6,7 @@ import { useSetAtom, useAtom, useAtomValue } from 'jotai'
 import { readerItemKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { previewedSourceAtom } from '../atoms/ui'
+import { previewedSourceAtom, previewCloseTimeoutAtom } from '../atoms/ui'
 import { truncateText } from '../utils/stringUtils'
 import { BookmarkIcon, Icon } from './icons'
 import { CancelIcon } from './icons'
@@ -16,9 +16,6 @@ import IconButton from './IconButton'
 import MissingSourceButton from './MissingSourceButton'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
-
-// Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
-export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
     source: InputSource
