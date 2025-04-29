@@ -1,11 +1,12 @@
 // @ts-ignore no idea
 import React, { useState, forwardRef, useRef } from 'react'
 import { CSSIcon, Icon } from "./icons"
-import { useSetAtom, useAtomValue } from 'jotai'
-import { readerItemKeyAtom, readerTextSelectionAtom, removeSourceAtom } from '../atoms/input'
-import { previewedSourceAtom } from '../atoms/ui'
+import { useSetAtom, useAtom } from 'jotai'
+import { readerTextSelectionAtom } from '../atoms/input'
+import { previewTextSelectionAtom } from '../atoms/ui'
 import { TextAlignLeftIcon } from './icons'
 import { TextSelection } from '../utils/readerUtils'
+import { previewCloseTimeoutAtom } from '../atoms/ui';
 
 
 interface TextSelectionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
@@ -25,14 +26,65 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         } = props
         // States
         const [isHovered, setIsHovered] = useState(false);
-        const setPreviewedSource = useSetAtom(previewedSourceAtom);
-        const readerItemKey = useAtomValue(readerItemKeyAtom);
+        const setPreviewTextSelection = useSetAtom(previewTextSelectionAtom);
         const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-        // const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
-        
+        const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
+
         // Hover timer ref for handling delayed hover behavior
         const hoverTimerRef = useRef<number | null>(null);
 
+        // Start a timeout to close the preview after delay
+        const startCloseTimer = () => {
+            // Clear any existing timeout
+            if (previewCloseTimeout) {
+                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+            }
+            
+            // Start a new timeout
+            const newTimeout = Zotero.getMainWindow().setTimeout(() => {
+                setPreviewTextSelection(false);
+                setPreviewCloseTimeout(null);
+            }, 350); // 300ms delay before closing
+            
+            setPreviewCloseTimeout(newTimeout);
+        };
+
+        const cancelCloseTimer = () => {
+            if (previewCloseTimeout) {
+                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+                setPreviewCloseTimeout(null);
+            }
+        };
+
+        const handleMouseEnter = () => {
+            setIsHovered(true);
+            cancelCloseTimer();
+            
+            // Show preview with a small delay to prevent flashing during quick mouse movements
+            if (hoverTimerRef.current) {
+                Zotero.getMainWindow().clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+            }
+            
+            hoverTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
+                setPreviewTextSelection(true);
+            }, 100); // Shorter delay of 100ms before showing preview
+        };
+
+        const handleMouseLeave = () => {
+            setIsHovered(false);
+            
+            // Clear any pending show timers
+            if (hoverTimerRef.current) {
+                Zotero.getMainWindow().clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+            }
+            
+            // Start the close timer when mouse leaves button
+            // This will be canceled if mouse enters preview quickly enough
+            startCloseTimer();
+        };
+        
         const getIconElement = () => {
             if (isHovered && canEdit) {
                 return (<span
@@ -58,8 +110,8 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         return (
             <button
                 ref={ref}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 className={
                     `variant-outline source-button
                     ${className || ''}

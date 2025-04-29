@@ -10,6 +10,9 @@ export const isPreferencePageVisibleAtom = atom(false);
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 
+// Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
+export const previewCloseTimeoutAtom = atom<number | null>(null)
+
 // Database sync status
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 // 'idle' - Initial state, no sync has been attempted
@@ -91,7 +94,7 @@ export const fileStatusStatsAtom = atom(
     }
 );
 
-// Source preview
+// Source, text selection and annotation preview
 export const previewedSourceIdAtom = atom<string | null>(null);
 export const previewedSourceAtom = atom(
     (get) => {
@@ -108,3 +111,5 @@ export const previewedSourceAtom = atom(
         set(previewedSourceIdAtom, source?.id || null);
     }
 );
+
+export const previewTextSelectionAtom = atom<boolean>(false);
