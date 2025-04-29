@@ -39,7 +39,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const setFileUploadCurrent = useSetAtom(fileUploadCurrentAtom);
 
     // ref to prevent multiple registrations if dependencies change
-    const observerRef = useRef<any>(null);
+    const zoteroNotifierIdRef = useRef<string | null>(null);
     
     // ref for collected events - using ref to persist between renders
     const eventsRef = useRef<CollectedEvents>({
@@ -225,15 +225,14 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         } as Zotero.Notifier.Notify;
         
         // Register the observer
-        Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
-        observerRef.current = observer;
+        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
         
         // Cleanup function
         return () => {
             logger("useZoteroSync: Cleaning up Zotero sync", 3);
-            if (observerRef.current) {
-                Zotero.Notifier.unregisterObserver(observerRef.current);
-                observerRef.current = null;
+            if (zoteroNotifierIdRef.current) {
+                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                zoteroNotifierIdRef.current = null;
             }
             
             // Clear any pending timers
