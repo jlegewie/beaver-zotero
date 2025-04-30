@@ -7,15 +7,13 @@ import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { isPreferencePageVisibleAtom, previewedSourceAtom, userScrolledAtom } from '../atoms/ui';
-import SourcePreview from './SourcePreview';
+import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
 import PreferencePage from './PreferencePage';
 import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import TextSelectionPreview from './TextSelectionPreview';
-import { previewTextSelectionAtom } from '../atoms/ui';
+import PreviewContainer from './PreviewContainer';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -25,10 +23,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
-    const previewedSource = useAtomValue(previewedSourceAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const previewTextSelection = useAtomValue(previewTextSelectionAtom);
 
     useEffect(() => {
         if (messagesContainerRef.current) {
@@ -85,12 +81,11 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 <div className="relative w-full h-0">
-                    <div className={`transition-opacity duration-300 ${userScrolled && !previewedSource ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <div className={`transition-opacity duration-300 ${userScrolled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         <ScrollDownButton onClick={handleScrollToBottom} />
                     </div>
                 </div>
-                {previewedSource && <SourcePreview source={previewedSource} />}
-                {previewTextSelection && <TextSelectionPreview />}
+                <PreviewContainer />
                 <InputArea inputRef={inputRef} />
             </div>
         </div>

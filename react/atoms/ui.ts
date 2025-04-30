@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { currentSourcesAtom } from './input';
 import { InputSource } from '../types/sources';
 import { FileStatus } from '../types/fileStatus';
+import { TextSelection } from '../utils/readerUtils';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -94,22 +95,10 @@ export const fileStatusStatsAtom = atom(
     }
 );
 
-// Source, text selection and annotation preview
-export const previewedSourceIdAtom = atom<string | null>(null);
-export const previewedSourceAtom = atom(
-    (get) => {
-        const previewSourceId = get(previewedSourceIdAtom);
-        const currentSources = get(currentSourcesAtom);
-        
-        if (!previewSourceId) return null;
-        
-        // Find the attachment with the latest data from attachmentsAtom
-        return currentSources.find(source => source.id === previewSourceId) || null;
-    },
-    (get, set, source: InputSource | null) => {
-        // When setting a new attachment to preview, just store its ID
-        set(previewedSourceIdAtom, source?.id || null);
-    }
-);
+// Active preview
+export type ActivePreview = 
+    | { type: 'source'; content: InputSource }
+    | { type: 'textSelection'; content: TextSelection }
+    | null;
 
-export const previewTextSelectionAtom = atom<boolean>(false);
+export const activePreviewAtom = atom<ActivePreview>(null);
