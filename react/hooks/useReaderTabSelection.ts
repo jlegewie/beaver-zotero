@@ -128,8 +128,9 @@ export function useReaderTabSelection() {
         }
 
         // Set up tab change listener
-        const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
+        const readerObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
             notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
+                // Tab change event
                 if (type === 'tab' && event === 'select') {
                     const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
@@ -160,12 +161,22 @@ export function useReaderTabSelection() {
                         updateSourcesFromReader(null);
                     }
                 }
+                // Annotation events
+                if (type === 'item' && (event === 'add' || event === 'modify')) {
+                    console.log(`Annotation event received`);
+                    const item = Zotero.Items.get(ids[0]);
+                    if (event === 'add' && item.isAnnotation()) {
+                        console.log(`Annotation item added ${item.id}`);
+                    } else if (event === 'modify' && item.isAnnotation()) {
+                        console.log(`Annotation item modified ${item.id}`);
+                    }
+                }
             }
         };
 
         logger("useReaderTabSelection: Registering tab selection observer");
         
-        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-readerSidebarTabObserver');
+        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(readerObserver, ['tab', 'item'], 'beaver-readerSidebarTabObserver');
 
         // Cleanup function on unmount
         return () => {
