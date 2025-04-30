@@ -10,6 +10,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import { planFeaturesAtom } from '../atoms/profile';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -20,6 +21,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
 
     const handleNewThread = async () => {
         await newThread();
@@ -56,7 +58,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
             </div>
             {isAuthenticated && (
                 <div className="display-flex gap-4">
-                    <DatabaseStatusIndicator />
+                    {planFeatures.databaseSync && <DatabaseStatusIndicator />}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
