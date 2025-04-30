@@ -44,6 +44,7 @@ export interface AnnotationAttachment extends BaseMessageAttachment {
   color?: string;
   page_label?: string;
   position?: Record<string, any>;
+  // position?: { x: number; y: number; page?: number };
   date_modified?: string; // ISO string
 }
 
@@ -55,7 +56,9 @@ export interface NoteAttachment extends BaseMessageAttachment {
   date_modified?: string; // ISO string
 }
 
-
+/**
+ * AppState represents the state of the app
+ */
 export interface AppState {
     view: 'library' | 'reader';
     reader_type: string | null;
