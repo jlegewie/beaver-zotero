@@ -132,8 +132,9 @@ attachment-box .metadata-table #beaver-status {
     padding-right: 0.75rem; */
     background-color: var(--material-mix-quarternary);
     color: var(--fill-secondary);
+    border: 1px solid var(--fill-quinary);
     /* border: 3px solid var(--fill-quinary); */
-    border-radius: 8px;
+    border-radius: 6px;
     user-select: text;
     margin-bottom: 0.5rem;
     max-height: 380px;
