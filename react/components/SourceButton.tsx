@@ -1,4 +1,3 @@
-// @ts-ignore no idea
 import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { InputSource } from '../types/sources'
@@ -35,6 +34,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // States
         const [isValid, setIsValid] = useState(true);
         const [isHovered, setIsHovered] = useState(false);
+        const [displayName, setDisplayName] = useState<string>('');
         const removeSource = useSetAtom(removeSourceAtom);
         const setActivePreview = useSetAtom(activePreviewAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
@@ -47,6 +47,21 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         
         // Hover timer ref for triggering preview display
         const showPreviewTimerRef = useRef<number | null>(null);
+
+        // Moved item null check after hooks, before useEffects that depend on item
+        useEffect(() => {
+            if (!item) {
+                setDisplayName('Missing Source');
+                return;
+            }
+
+            let name = getDisplayNameFromItem(item);
+            if (source.childItemKeys.length > 1) {
+                name = `${name} (${source.childItemKeys.length})`;
+            }
+            const truncatedName = truncateText(name, MAX_SOURCEBUTTON_TEXT_LENGTH);
+            setDisplayName(truncatedName);
+        }, [item, source.childItemKeys.length]);
 
         // Timer Utilities (moved outside handlers for clarity)
         const cancelCloseTimer = () => {
@@ -107,10 +122,6 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
             checkSourceValidity();
         }, [source])
-
-        // Truncate the name and add a count if there are child items
-        let displayName = truncateText(getDisplayNameFromItem(item), MAX_SOURCEBUTTON_TEXT_LENGTH);
-        if (source.childItemKeys.length > 1) displayName = `${displayName} (${source.childItemKeys.length})`;
 
         // Ensure handleRemove still works correctly
         const handleRemove = () => {
@@ -174,7 +185,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             >
                 {getIconElement()}
                 <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
-                    {displayName}
+                    {displayName || '...'}
                 </span>
                 {readerItemKey == source.itemKey && <Icon icon={BookmarkIcon} className="scale-11" /> }
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
