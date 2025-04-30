@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/messages';
-import { MessageModel, AppState, MessageAttachment } from '../types/chat/api';
+import { MessageModel, AppState, MessageAttachment, SourceAttachment } from '../types/chat/api';
 import {
     threadMessagesAtom,
     setMessageStatusAtom,
@@ -121,9 +121,10 @@ export const generateResponseAtom = atom(
                 assistantMsg.id,    // the ID from createAssistantMessage
                 userMsg.content,
                 payloadSources.map((s) => ({
+                    type: "source",
                     library_id: s.libraryID,
                     zotero_key: s.itemKey
-                } as MessageAttachment)),
+                } as SourceAttachment)),
                 payload.appState,
                 payload.isLibrarySearch,
                 model,
@@ -332,7 +333,7 @@ function _processChatCompletionViaBackend(
                 // Warning
                 const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
-                    warning.attachments = data.attachments as MessageAttachment[];
+                    warning.attachments = data.attachments as SourceAttachment[];
                 }
                 // Add the warning message for the assistant message
                 set(setMessageStatusAtom, {

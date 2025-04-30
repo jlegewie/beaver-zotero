@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { MessageAttachment, ToolCall } from './chat/api';
+import { SourceAttachment, ToolCall } from './chat/api';
 
 // Warning messages
 export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments";
 export interface Warning {
     id: string;
     type: WarningType;
-    attachments?: MessageAttachment[];
+    attachments?: SourceAttachment[];
 }
 
 

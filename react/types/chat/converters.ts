@@ -1,4 +1,4 @@
-import { MessageAttachment, MessageModel, ToolCall } from './api';
+import { MessageAttachment, MessageModel, SourceAttachment, ToolCall } from './api';
 import { ChatMessage } from '../messages';
 
 // export function toMessageUI(message: Message): MessageUI {
@@ -19,16 +19,18 @@ export function toMessageUI(message: MessageModel): ChatMessage {
     return chatMessage;
 }
 
-function isMessageAttachment(obj: any): obj is MessageAttachment {
+function isSourceAttachment(obj: any): obj is SourceAttachment {
     return (
         typeof obj === 'object' &&
         obj !== null &&
         typeof obj.library_id === 'number' &&
-        typeof obj.zotero_key === 'string'
+        typeof obj.zotero_key === 'string' &&
+        typeof obj.type === 'string' &&
+        obj.type === 'source'
     );
 }
 
-export function getResultAttachments(toolCall: ToolCall): MessageAttachment[] {
+export function getResultAttachmentsFromToolcall(toolCall: ToolCall): SourceAttachment[] {
     if (!toolCall.response) {
         return [];
     }
@@ -36,13 +38,14 @@ export function getResultAttachments(toolCall: ToolCall): MessageAttachment[] {
     const attachments = toolCall.response.attachments || [];
 
     return attachments.map((att: any) => {
-        if (isMessageAttachment(att)) {
+        if (isSourceAttachment(att)) {
             return att;
         } else {
-            // If the attachment doesn't match the interface, try to create a valid MessageAttachment
+            // If the attachment doesn't match the interface, try to create a valid SourceAttachment
             return {
+                type: 'source',
                 library_id: typeof att.library_id === 'number' ? att.library_id : 0,
-                zotero_key: typeof att.zotero_key === 'string' ? att.zotero_key : ''
+                zotero_key: typeof att.zotero_key === 'string' ? att.zotero_key : '',
             };
         }
     });

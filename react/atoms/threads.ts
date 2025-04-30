@@ -5,7 +5,7 @@ import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentUserMessageAtom, resetCurrentSourcesAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
-import { getResultAttachments } from "../types/chat/converters";
+import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 
 // Thread messages and sources
@@ -163,7 +163,7 @@ export const addToolCallSourcesToThreadSourcesAtom = atom(
         const sources: ThreadSource[] = [];
         for (const message of messages) {
             if (message.tool_calls && message.tool_calls.length > 0) {
-                const attachments = message.tool_calls.flatMap(getResultAttachments);
+                const attachments = message.tool_calls.flatMap(getResultAttachmentsFromToolcall);
                 if (attachments.length > 0) {
                     const items = await Promise.all(attachments.map(async (att) => await Zotero.Items.getByLibraryAndKeyAsync(att!.library_id, att!.zotero_key)));
                     const messageSources = await Promise.all(items

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from './icons';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
-import { MessageAttachment } from '../types/chat/api';
+import { SourceAttachment } from '../types/chat/api';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;
@@ -9,7 +9,7 @@ interface ItemWithSelectionId {
 }
 
 interface ZoteroItemsListProps {
-    messageAttachments: MessageAttachment[];
+    messageAttachments: SourceAttachment[];
 }
 
 const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({

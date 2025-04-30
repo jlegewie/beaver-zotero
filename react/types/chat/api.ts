@@ -14,13 +14,48 @@ export interface ToolCall {
 }
 
 /**
- * Represents an attachment in a message.
- * Mirrors the MessageAttachment Pydantic model in the backend.
+ * MessageAttachment represents an attachment in a message.
+ * Mirrors the pydantic models SourceAttachment, AnnotationAttachment, NoteAttachment
  */
-export interface MessageAttachment {
-    library_id: number;
-    zotero_key: string;
+
+export type MessageAttachment =
+  | SourceAttachment
+  | AnnotationAttachment
+  | NoteAttachment;
+
+interface BaseMessageAttachment {
+  type: "source" | "annotation" | "note";
+  library_id: number;
+  zotero_key: string;
 }
+
+// "source" type attachment
+export interface SourceAttachment extends BaseMessageAttachment {
+  type: "source";
+  chunk_ids?: string[]; // UUIDs as strings
+}
+
+// "annotation" type attachment
+export interface AnnotationAttachment extends BaseMessageAttachment {
+  type: "annotation";
+  parent_key: string;
+  annotation_type: string;
+  text?: string;
+  comment?: string;
+  color?: string;
+  page_label?: string;
+  position?: Record<string, any>;
+  date_modified?: string; // ISO string
+}
+
+// "note" type attachment
+export interface NoteAttachment extends BaseMessageAttachment {
+  type: "note";
+  parent_key?: string;
+  note_content: string;
+  date_modified?: string; // ISO string
+}
+
 
 export interface AppState {
     view: 'library' | 'reader';
@@ -44,4 +79,10 @@ export interface MessageModel {
     created_at?: string;
     metadata?: Record<string, any>;
     error?: string;
+}
+
+
+export interface ZoteroItemIdentifier {
+    zotero_key: string;
+    library_id: number;
 }
