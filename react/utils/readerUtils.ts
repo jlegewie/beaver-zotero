@@ -22,6 +22,24 @@ function getCurrentReader(window?: Window): any | undefined {
 }
 
 /**
+ * Scrolls a page into view.
+ * 
+ * @param reader - The reader instance.
+ * @param page - The page number to scroll into view.
+ */
+function scrollPageIntoView(reader: any, page: number) {
+    // const window = Zotero.getMainWindow();
+    // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
+    reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer.scrollPageIntoView({
+        pageNumber: page,
+    });
+    // BETTER
+    // await reader._internalReader._primaryView.navigate({
+    //     pageIndex: 5  // Zero-based, so this will go to page 1
+    // })
+}   
+
+/**
  * Retrieves the current page number of the reader.
  * 
  * @param reader - The reader instance.
