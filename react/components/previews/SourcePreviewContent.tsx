@@ -3,7 +3,7 @@ import { Icon, CancelIcon, BookmarkIcon } from '../icons';
 import { InputSource } from '../../types/sources';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
-import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom, readerItemKeyAtom } from '../../atoms/input';
+import { currentSourcesAtom, togglePinSourceAtom, removeSourceAtom, currentReaderAttachmentKeyAtom } from '../../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../../utils/openPDFInNewWindow';
 import SourcePreviewRegularItem from './SourcePreviewRegularItem';
@@ -22,7 +22,7 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
     const setActivePreview = useSetAtom(activePreviewAtom);
     const togglePinSource = useSetAtom(togglePinSourceAtom);
     const removeSource = useSetAtom(removeSourceAtom);
-    const readerItemKey = useAtomValue(readerItemKeyAtom);
+    const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
 
     // Get source from sources atom to ensure we have the latest data (e.g., pinned status)
     const currentSources = useAtomValue(currentSourcesAtom);
@@ -82,7 +82,7 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
                 style={{ maxHeight: `${maxContentHeight}px` }}
             >
                 {renderContent()}
-                {readerItemKey == source.itemKey &&
+                {currentReaderAttachmentKey == source.itemKey &&
                     <div className="display-flex flex-row items-center gap-1 opacity-50">
                         <Icon icon={BookmarkIcon} className="scale-11" />
                         <span>Current Reader Item, page {getCurrentPage()}</span>
@@ -92,7 +92,7 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
 
             {/* buttons */}
             <div className="px-1 pt-1 display-flex flex-row items-center">
-                {readerItemKey != source.itemKey && (
+                {currentReaderAttachmentKey != source.itemKey && (
                     <div className="gap-3 display-flex">
                         <Button
                             variant="ghost"
@@ -118,7 +118,7 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
                         <Button 
                             variant="ghost"
                             onClick={handleRemove}
-                            disabled={readerItemKey == source.itemKey}
+                            disabled={currentReaderAttachmentKey == source.itemKey}
                         >
                             <ZoteroIcon 
                                 icon={ZOTERO_ICONS.TRASH} 

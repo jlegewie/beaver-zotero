@@ -9,8 +9,9 @@ import { TextSelection } from '../utils/readerUtils';
 * Current user message and sources
 */
 export const currentMessageContentAtom = atom<string>('');
+export const currentReaderAttachmentKeyAtom = atom<string | null>(null);
+
 export const currentSourcesAtom = atom<InputSource[]>([]);
-export const readerItemKeyAtom = atom<string | null>(null);
 
 /**
  * Current reader text selection
@@ -105,7 +106,7 @@ export const updateSourcesFromReaderAtom = atom(
         if (item) {
             console.log("[Beaver] Updating sources from reader item", item.isRegularItem());
             await set(updateSourcesFromZoteroItemsAtom, [item]);
-            set(readerItemKeyAtom, item.key);
+            set(currentReaderAttachmentKeyAtom, item.key);
         }
     }
 );

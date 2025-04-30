@@ -2,7 +2,7 @@ import React, { useEffect, useState, forwardRef, useRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { InputSource } from '../types/sources'
 import { useSetAtom, useAtom, useAtomValue } from 'jotai'
-import { readerItemKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
+import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { previewCloseTimeoutAtom, activePreviewAtom } from '../atoms/ui'
@@ -38,7 +38,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const removeSource = useSetAtom(removeSourceAtom);
         const setActivePreview = useSetAtom(activePreviewAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
-        const readerItemKey = useAtomValue(readerItemKeyAtom);
+        const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
         const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
         // Get the Zotero item
@@ -146,7 +146,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         }
 
         const getIconElement = () => {
-            if (isHovered && readerItemKey != source.itemKey && canEdit && isValid) { // Check isValid
+            if (isHovered && currentReaderAttachmentKey != source.itemKey && canEdit && isValid) { // Check isValid
                 return (<span 
                     role="button"
                     className="source-remove"
@@ -187,7 +187,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                     {displayName || '...'}
                 </span>
-                {readerItemKey == source.itemKey && <Icon icon={BookmarkIcon} className="scale-11" /> }
+                {currentReaderAttachmentKey == source.itemKey && <Icon icon={BookmarkIcon} className="scale-11" /> }
                 {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
             </button>
         )
