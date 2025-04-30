@@ -92,40 +92,43 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
 
             {/* buttons */}
             <div className="px-1 pt-1 display-flex flex-row items-center">
-                <div className="flex-1 gap-3 display-flex">
-                    <Button
-                        variant="ghost"
-                        onClick={handlePin}
-                    >
-                        <ZoteroIcon 
-                            icon={currentSource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
-                            size={12}
-                        />
-                        <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        onClick={handleOpen}
-                        disabled={!canOpen}
-                    >
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.OPEN} 
-                            size={12}
-                        />
-                        Open
-                    </Button>
-                    <Button 
-                        variant="ghost"
-                        onClick={handleRemove}
-                        disabled={readerItemKey == source.itemKey}
-                    >
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.TRASH} 
-                            size={12}
-                        />
-                        Remove
-                    </Button>
-                </div>
+                {readerItemKey != source.itemKey && (
+                    <div className="gap-3 display-flex">
+                        <Button
+                            variant="ghost"
+                            onClick={handlePin}
+                        >
+                            <ZoteroIcon 
+                                icon={currentSource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
+                                size={12}
+                            />
+                            <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            onClick={handleOpen}
+                            disabled={!canOpen}
+                        >
+                            <ZoteroIcon 
+                                icon={ZOTERO_ICONS.OPEN} 
+                                size={12}
+                            />
+                            Open
+                        </Button>
+                        <Button 
+                            variant="ghost"
+                            onClick={handleRemove}
+                            disabled={readerItemKey == source.itemKey}
+                        >
+                            <ZoteroIcon 
+                                icon={ZOTERO_ICONS.TRASH} 
+                                size={12}
+                            />
+                            Remove
+                        </Button>
+                    </div>
+                )}
+                <div className="flex-1"/>
                 <div className="display-flex">
                     <IconButton
                         icon={CancelIcon}
