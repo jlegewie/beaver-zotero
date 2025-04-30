@@ -17,7 +17,7 @@ import {
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentUserMessageAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
@@ -109,7 +109,7 @@ export const generateResponseAtom = atom(
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
-        set(currentUserMessageAtom, '');
+        set(currentMessageContentAtom, '');
         
         // Execute chat completion
         if (MODE === 'local') {

@@ -8,7 +8,7 @@ import { TextSelection } from '../utils/readerUtils';
 /**
 * Current user message and sources
 */
-export const currentUserMessageAtom = atom<string>('');
+export const currentMessageContentAtom = atom<string>('');
 export const currentSourcesAtom = atom<InputSource[]>([]);
 export const readerItemKeyAtom = atom<string | null>(null);
 

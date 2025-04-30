@@ -4,7 +4,7 @@ import { SourceButton } from "./SourceButton";
 import { PlusSignIcon, StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
-import { currentSourcesAtom, currentUserMessageAtom } from '../atoms/input';
+import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';
 import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
@@ -23,7 +23,7 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
-    const [userMessage, setUserMessage] = useAtom(currentUserMessageAtom);
+    const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
@@ -47,7 +47,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         isLibrarySearch: boolean = false
     ) => {
         e.preventDefault();
-        chatCompletion(userMessage, isCommandPressed || isLibrarySearch);
+        chatCompletion(messageContent, isCommandPressed || isLibrarySearch);
     };
 
     const chatCompletion = async (
@@ -189,8 +189,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <div className="mb-2 -ml-1">
                     <textarea
                         ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-                        value={userMessage}
-                        // onChange={(e) => setUserMessage(e.target.value)}
+                        value={messageContent}
+                        // onChange={(e) => setMessageContent(e.target.value)}
                         onChange={(e) => {
                             if (e.target.value.endsWith('@')) {
                                 const rect = e.currentTarget.getBoundingClientRect();
@@ -200,7 +200,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 })
                                 setIsSourcesMenuOpen(true);
                             } else {
-                                setUserMessage(e.target.value);
+                                setMessageContent(e.target.value);
                             }
                         }}
                         onInput={(e) => {
@@ -228,12 +228,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <div className="flex-1" />
                     <div className="display-flex gap-2">
                         <Button
-                            type={(isCommandPressed && !isStreaming && userMessage.length > 0) ? "button" : undefined}
+                            type={(isCommandPressed && !isStreaming && messageContent.length > 0) ? "button" : undefined}
                             variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
                             // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                             className="mr-1"
                             onClick={(e) => handleSubmit(e as any, true)}
-                            disabled={isStreaming || userMessage.length === 0}
+                            disabled={isStreaming || messageContent.length === 0}
                         >
                             Library Search
                             <span className="opacity-50">
@@ -242,11 +242,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </Button>
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
-                            type={!isCommandPressed && !isStreaming && userMessage.length > 0 ? "button" : undefined}
+                            type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
                             variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
                             className="mr-1"
                             onClick={isStreaming ? handleStop : handleSubmit}
-                            disabled={(userMessage.length === 0 && !isStreaming) || (isStreaming && !isCancellable)}
+                            disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable)}
                         >
                             {isStreaming
                                 ? 'Stop'

@@ -14,7 +14,7 @@ import Spinner from './icons/Spinner';
 import { getDateGroup } from '../utils/dateUtils';
 import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import { currentSourcesAtom } from '../atoms/input';
-import { currentUserMessageAtom } from '../atoms/input';
+import { currentMessageContentAtom } from '../atoms/input';
 
 const MAX_THREADS = 10;
 
@@ -56,7 +56,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setThreadSources = useSetAtom(threadSourcesAtom);
     const setCurrentSources = useSetAtom(currentSourcesAtom);
-    const setCurrentUserMessage = useSetAtom(currentUserMessageAtom);
+    const setMessageContent = useSetAtom(currentMessageContentAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
     const addToolCallSourcesToThreadSources = useSetAtom(addToolCallSourcesToThreadSourcesAtom);
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
@@ -144,7 +144,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             
             // Clear sources for now
             setCurrentSources([]);
-            setCurrentUserMessage('');
+            setMessageContent('');
         } catch (error) {
             console.error('Error loading thread:', error);
         }
