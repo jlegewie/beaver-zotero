@@ -1,9 +1,8 @@
 // @ts-ignore no idea
 import React, { useState, forwardRef, useRef, useEffect } from 'react'
-import { CSSIcon, Icon } from "./icons"
+import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons"
 import { useSetAtom, useAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../atoms/input'
-import { TextAlignLeftIcon } from './icons'
 import { TextSelection } from '../utils/readerUtils'
 import { previewCloseTimeoutAtom, activePreviewAtom } from '../atoms/ui';
 
