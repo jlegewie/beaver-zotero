@@ -24,7 +24,6 @@ export type MessageAttachment =
   | NoteAttachment;
 
 interface BaseMessageAttachment {
-  type: "source" | "annotation" | "note";
   library_id: number;
   zotero_key: string;
 }
