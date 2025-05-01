@@ -125,15 +125,9 @@ attachment-box .metadata-table #beaver-status {
 
 /* Source Preview Container */
 [id^="beaver-pane-"] .source-preview {
-    padding:0.35rem;
-    /* padding-top: 0.75rem;
-    padding-bottom: 0.25rem;
-    padding-left: 0.75rem;
-    padding-right: 0.75rem; */
     background-color: var(--material-mix-quarternary);
     color: var(--fill-secondary);
-    border: 1px solid var(--fill-quinary);
-    /* border: 3px solid var(--fill-quinary); */
+    /* border: 1px solid var(--fill-quinary); */
     border-radius: 6px;
     user-select: text;
     margin-bottom: 0.5rem;
@@ -150,7 +144,8 @@ attachment-box .metadata-table #beaver-status {
 }
 
 [id^="beaver-pane-"] .source-content {
-    background-color: var(--material-sidepane);
+    background-color: var(--material-mix-quarternary);
+    /* background-color: var(--material-sidepane); */
     border-radius: 8px;
     overflow-y: auto;
     min-height: 1.5rem;

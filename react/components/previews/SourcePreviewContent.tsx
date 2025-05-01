@@ -82,16 +82,10 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
                 style={{ maxHeight: `${maxContentHeight}px` }}
             >
                 {renderContent()}
-                {currentReaderAttachmentKey == source.itemKey &&
-                    <div className="display-flex flex-row items-center gap-1 opacity-50">
-                        <Icon icon={BookmarkIcon} className="scale-11" />
-                        <span>Current Reader Item, page {getCurrentPage()}</span>
-                    </div>
-                }
             </div>
 
             {/* buttons */}
-            <div className="px-1 pt-1 display-flex flex-row items-center">
+            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 {currentReaderAttachmentKey != source.itemKey && (
                     <div className="gap-3 display-flex">
                         <Button
@@ -128,6 +122,12 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
                         </Button>
                     </div>
                 )}
+                {currentReaderAttachmentKey == source.itemKey &&
+                    <div className="display-flex flex-row items-center gap-1 font-color-tertiary">
+                        <Icon icon={BookmarkIcon} className="scale-11" />
+                        <span>Current Reader Item, page {getCurrentPage()}</span>
+                    </div>
+                }
                 <div className="flex-1"/>
                 <div className="display-flex">
                     <IconButton

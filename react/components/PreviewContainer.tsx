@@ -119,7 +119,7 @@ const PreviewContainer: React.FC = () => {
         <div className="absolute -top-4 inset-x-0 -translate-y-full px-3">
             <div
                 ref={previewRef}
-                className="source-preview shadow-md mx-0"
+                className="source-preview border-popup shadow-md mx-0"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
             >
