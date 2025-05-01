@@ -1,7 +1,7 @@
 import React from 'react';
 // @ts-ignore no types for react
 import { useEffect, useRef, useState, ReactNode } from 'react';
-import { Icon } from './icons';
+import { Icon, SearchIcon } from './icons';
 
 /**
 * Menu item interface for search menu
@@ -401,14 +401,19 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     };
 
     const textInput = (
-        <div>
+        // <div className="display-flex flex-row items-center gap-2">
+        //     <Icon icon={SearchIcon} size={14} className="font-color-secondary flex-shrink-0"/>
+        //     {textInput}
+        // </div>
+        <div className="display-flex flex-row items-center gap-05 px-1 mt-2">
+            <Icon icon={SearchIcon} size={14} className="font-color-tertiary flex-shrink-0"/>
             <input
                 ref={inputRef}
                 type="text"
                 value={searchQuery}
                 onChange={handleSearchInput}
                 placeholder={placeholder}
-                className="w-full bg-quaternary font-color-primary px-1 outline-none chat-input mt-2"
+                className="w-full bg-quaternary font-color-primary outline-none chat-input"
                 aria-label="Search"
             />
         </div>
