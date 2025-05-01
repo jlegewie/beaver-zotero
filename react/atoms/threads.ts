@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/messages";
+import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/chat/ui";
 import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolCall } from './chat/api';
-import { SourceAttachment } from './attachments';
+import { ToolCall } from './api';
+import { SourceAttachment } from '../attachments';
 
 
 // Warning messages

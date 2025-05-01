@@ -2,7 +2,7 @@ import React from 'react';
 import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
-import { ChatMessage } from '../types/messages';
+import { ChatMessage } from '../types/chat/ui';
 import { isStreamingAtom, threadSourcesAtom } from '../atoms/threads';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';

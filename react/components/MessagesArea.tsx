@@ -3,7 +3,7 @@ import React, { useEffect, useRef, forwardRef } from "react";
 import UserMessageDisplay from "./UserMessageDisplay"
 import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import { scrollToBottom } from "../utils/scrollToBottom";
-import { ChatMessage } from "../types/messages";
+import { ChatMessage } from "../types/chat/ui";
 import ToolMessageDisplay from "./ToolMessageDisplay";
 
 type MessagesAreaProps = {
