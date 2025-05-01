@@ -455,6 +455,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .rounded-xl { border-radius: 0.75rem; }
 
 /* Borders */
+[id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-secondary); }

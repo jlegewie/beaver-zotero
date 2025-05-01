@@ -360,7 +360,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 role="menuitem"
                 tabIndex={focusedIndex === index ? 0 : -1}
                 className={`
-                    display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none cursor-pointer
+                    display-flex items-center gap-2 px-2 py-15 transition user-select-none cursor-pointer
                     ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
                 `}
                 style={{ maxWidth: '100%', minWidth: 0 }}
@@ -405,7 +405,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         //     <Icon icon={SearchIcon} size={14} className="font-color-secondary flex-shrink-0"/>
         //     {textInput}
         // </div>
-        <div className="display-flex flex-row items-center gap-05 px-1 mt-2">
+        <div className="display-flex flex-row items-center gap-05 p-1 mt-1 border-top-quinary">
             <Icon icon={SearchIcon} size={14} className="font-color-tertiary flex-shrink-0"/>
             <input
                 ref={inputRef}
@@ -422,7 +422,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     return (
         <div
             ref={menuRef}
-            className={`bg-quaternary border-quinary rounded-md p-1 overflow-y-auto overflow-x-hidden scrollbar outline-none z-1000 shadow-md ${className}`}
+            className={`bg-quaternary border-quinary rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,
@@ -439,31 +439,39 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             {/* Render menu items and search input based on vertical position */}
             {verticalPosition === 'above' ? (
                 <>
-                    {/* Menu items first when positioned above */}
-                    {displayOrderMenuItems.length > 0 ? (
-                        displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
-                    ) : (
-                        <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                            {searchQuery.trim() ? "No results found" : "Start typing to search"}
-                        </div>
-                    )}
+                    {/* Menu items take remaining space and scroll */}
+                    <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
+                        {displayOrderMenuItems.length > 0 ? (
+                            displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
+                        ) : (
+                            <div className="px-2 p-1 py-2 text-sm font-color-tertiary text-center">
+                                {searchQuery.trim() ? "No results found" : "Start typing to search"}
+                            </div>
+                        )}
+                    </div>
                     
-                    {/* Search input at the bottom when positioned above */}
-                    {textInput}
+                    {/* Search input at the bottom, ensure it doesn't shrink */}
+                    <div className="flex-shrink-0"> 
+                        {textInput}
+                    </div>
                 </>
             ) : (
                 <>
-                    {/* Search input at the top when positioned below */}
-                    {textInput}
+                    {/* Search input at the top, ensure it doesn't shrink */}
+                    <div className="flex-shrink-0">
+                        {textInput}
+                    </div>
                     
-                    {/* Menu items */}
-                    {displayOrderMenuItems.length > 0 ? (
-                        displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
-                    ) : (
-                        <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                            {noResultsText}
-                        </div>
-                    )}
+                    {/* Menu items take remaining space and scroll */}
+                    <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
+                        {displayOrderMenuItems.length > 0 ? (
+                            displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
+                        ) : (
+                            <div className="px-2 py-1 text-sm font-color-tertiary text-center">
+                                {noResultsText}
+                            </div>
+                        )}
+                    </div>
                 </>
             )}
         </div>
