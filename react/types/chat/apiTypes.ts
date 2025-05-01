@@ -1,4 +1,4 @@
-import { MessageAttachment } from "../attachments";
+import { MessageAttachment } from "../attachments/apiTypes";
 
 export interface ThreadModel {
     id: string;

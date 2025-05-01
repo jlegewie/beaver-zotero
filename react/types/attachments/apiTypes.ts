@@ -42,22 +42,6 @@ export interface NoteAttachment extends BaseMessageAttachment {
 }
 
 /**
- * UIAttachment represents a message attachment on the UI
- */
-
-export interface UIAttachment {
-    id: string;
-    type: string;
-    libraryId: number;
-    zoteroKey: string;
-    parentKey?: string;
-    messageId?: string;  // Only set for thread attachments
-    pinned: boolean;
-    timestamp: number;
-    childKeys?: string[];
-}
-
-/**
  * Type guards for MessageAttachment
  */
 export function isSourceAttachment(attachment: MessageAttachment): attachment is SourceAttachment {
@@ -70,4 +54,12 @@ export function isAnnotationAttachment(attachment: MessageAttachment): attachmen
 
 export function isNoteAttachment(attachment: MessageAttachment): attachment is NoteAttachment {
     return attachment.type === "note";
+}
+
+/**
+ * Converter
+ */
+
+export function toMessageAttachment(attachment: SourceAttachment): MessageAttachment {
+    return attachment;
 }

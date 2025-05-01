@@ -1,6 +1,6 @@
 import { MessageModel, ToolCall } from './apiTypes';
 import { ChatMessage } from '../chat/uiTypes';
-import { SourceAttachment, MessageAttachment } from '../attachments';
+import { SourceAttachment, MessageAttachment } from '../attachments/apiTypes';
 
 // export function toMessageUI(message: Message): MessageUI {
 export function toMessageUI(message: MessageModel): ChatMessage {

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ToolCall } from './apiTypes';
-import { SourceAttachment } from '../attachments';
+import { SourceAttachment } from '../attachments/apiTypes';
 
 
 // Warning messages
