@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ZoteroItemIdentifier } from '../../react/types/chat/api';
+import { ZoteroItemIdentifier } from '../../react/types/chat/apiTypes';
 import { FileStatus } from '../../react/types/fileStatus';
 
 // processing_status from backend

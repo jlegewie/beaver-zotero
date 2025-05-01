@@ -3,7 +3,7 @@ import { ChatMessage } from '../../react/types/chat/uiTypes';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ThreadSource } from '../../react/types/sources';
-import { MessageModel } from '../../react/types/chat/api';
+import { MessageModel } from '../../react/types/chat/apiTypes';
 import { toMessageUI } from '../../react/types/chat/converters';
 import { createSourceFromItem } from '../../react/utils/sourceUtils';
 

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolCall } from './api';
+import { ToolCall } from './apiTypes';
 import { SourceAttachment } from '../attachments';
 
 

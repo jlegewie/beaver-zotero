@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel, AppState } from '../../react/types/chat/api';
+import { MessageModel, AppState } from '../../react/types/chat/apiTypes';
 import { MessageAttachment } from '../../react/types/attachments';
 import { Model, ProviderType } from '../../react/atoms/models';
 

@@ -1,4 +1,4 @@
-import { MessageModel, ToolCall } from './api';
+import { MessageModel, ToolCall } from './apiTypes';
 import { ChatMessage } from '../chat/uiTypes';
 import { SourceAttachment, MessageAttachment } from '../attachments';
 

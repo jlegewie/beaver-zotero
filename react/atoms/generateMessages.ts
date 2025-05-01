@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel, AppState } from '../types/chat/api';
+import { MessageModel, AppState } from '../types/chat/apiTypes';
 import { MessageAttachment, SourceAttachment } from '../types/attachments';
 import {
     threadMessagesAtom,
