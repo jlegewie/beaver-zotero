@@ -4,12 +4,12 @@
 
 export interface UIAttachment {
     id: string;
-    type: string;
-    libraryId: number;
-    zoteroKey: string;
-    parentKey?: string;
-    messageId?: string;  // Only set for thread attachments
+    type: "regularItem" | "attachment" | "note" | "annotation" | "reader";
+    messageId?: string;
+    libraryID: number;
+    itemKey: string;
     pinned: boolean;
+    parentKey: string | null;
+    childItemKeys: string[];
     timestamp: number;
-    childKeys?: string[];
 }
