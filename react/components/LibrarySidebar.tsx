@@ -1,10 +1,9 @@
 import React from 'react';
 import { useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";
-import { isSidebarVisibleAtom } from "../atoms/ui";
+import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
-import { isLibraryTabAtom } from "../atoms/ui";
 import { useAttachmentStatusInfoRow } from '../hooks/useAttachmentStatusInfoRow';
 import { useToggleSidebar } from '../hooks/useToggleSidebar';
 

@@ -1,8 +1,7 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from "jotai";
 import Sidebar from "./Sidebar";
-import { isSidebarVisibleAtom } from "../atoms/ui";
-import { isLibraryTabAtom } from "../atoms/ui";
+import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useRecentThreads } from '../hooks/useRecentThreads';
 import { updateSourcesFromReaderAtom } from "../atoms/input";

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ChatMessage } from '../../react/types/chat/ui';
+import { ChatMessage } from '../../react/types/chat/uiTypes';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ThreadSource } from '../../react/types/sources';

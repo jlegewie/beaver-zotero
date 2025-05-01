@@ -6,7 +6,7 @@ import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThrea
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
-import { Thread } from '../types/chat/ui';
+import { Thread } from '../types/chat/uiTypes';
 import { ChattingIcon } from './icons';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { userAtom } from '../atoms/auth';

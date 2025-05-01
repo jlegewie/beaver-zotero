@@ -1,7 +1,7 @@
 import React from 'react';
 // @ts-ignore no idea why
 import { useState, useRef, useMemo } from 'react';
-import { ChatMessage, Warning } from '../types/chat/ui';
+import { ChatMessage, Warning } from '../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import { RepeatIcon, Spinner, ShareIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
 import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';

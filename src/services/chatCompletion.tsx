@@ -1,4 +1,4 @@
-import { ChatMessage } from "../../react/types/chat/ui";
+import { ChatMessage } from "../../react/types/chat/uiTypes";
 import { APIMessage, ContentPart } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { getZoteroItem } from "../../react/utils/sourceUtils";

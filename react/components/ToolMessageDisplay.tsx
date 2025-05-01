@@ -1,7 +1,7 @@
 import React from 'react';
 // @ts-ignore no idea why
 import { useState, useEffect } from 'react';
-import { ChatMessage } from '../types/chat/ui';
+import { ChatMessage } from '../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, LibraryIcon } from './icons';
 import Button from './button';
