@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { SourceAttachment, ToolCall } from './chat/api';
+import { ToolCall } from './chat/api';
+import { SourceAttachment } from './attachments';
+
 
 // Warning messages
 export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments";
