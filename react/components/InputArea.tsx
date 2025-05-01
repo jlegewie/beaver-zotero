@@ -11,7 +11,6 @@ import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { getPref } from '../../src/utils/prefs';
 import Button from './button';
 import AddSourcesMenu from './AddSourcesMenu';
-import { getAppState } from '../utils/appState';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
 import { TextSelectionButton } from './TextSelectionButton';
@@ -56,14 +55,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     ) => {
         if (isStreaming || query.length === 0) return;
 
-        // Get context from reader if it exists
-        const appState = getAppState();
-
         // Generate response
         generateResponse({
             content: query,
             sources: currentSources,
-            appState: appState,
             isLibrarySearch: isLibrarySearch
         });
 

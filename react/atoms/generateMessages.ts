@@ -81,12 +81,14 @@ export const generateResponseAtom = atom(
     async (get, set, payload: {
         content: string;
         sources: InputSource[];
-        appState: AppState;
         isLibrarySearch: boolean;
     }) => {
         // Get current messages
         const threadMessages = get(threadMessagesAtom);
         const threadSources = get(threadSourcesAtom);
+
+        // Get context from reader if it exists
+        const appState = getAppState();
 
         // Get current model
         const model = get(selectedModelAtom);
@@ -126,7 +128,7 @@ export const generateResponseAtom = atom(
                     library_id: s.libraryID,
                     zotero_key: s.itemKey
                 } as SourceAttachment)),
-                payload.appState,
+                appState,
                 payload.isLibrarySearch,
                 model,
                 set,

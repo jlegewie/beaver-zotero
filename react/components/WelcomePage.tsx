@@ -8,7 +8,6 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { getPref } from '../../src/utils/prefs';
 import { QuickPrompt } from "./PreferencePage";
-import { getAppState } from "../utils/appState";
 import { isStreamingAtom } from '../atoms/threads';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { currentSourcesAtom } from "../atoms/input";
@@ -102,14 +101,10 @@ const WelcomePage: React.FC = () => {
         if (isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentSources.length === 0) return;
 
-        // Get context from reader if it exists
-        const appState = getAppState();
-
         // Generate response
         generateResponse({
             content: prompt.text,
             sources: currentSources,
-            appState: appState,
             isLibrarySearch: prompt.librarySearch
         });
 
