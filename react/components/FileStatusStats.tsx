@@ -207,7 +207,7 @@ const FileStatusStats: React.FC<{
                         </div>
                         <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mb-1" style={{ height: '8px' }}>
                             <div
-                                className="h-full bg-primary rounded-sm transition-width duration-500 ease-in-out"
+                                className="h-full bg-secondary rounded-sm transition-width duration-500 ease-in-out"
                                 style={{ width: `${fileStats.progress}%` }}
                             />
                         </div>
