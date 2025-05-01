@@ -1,4 +1,3 @@
-
 /**
  * MessageAttachment represents an attachment in a message.
  * Mirrors the pydantic models SourceAttachment, AnnotationAttachment, NoteAttachment
@@ -14,13 +13,13 @@ interface BaseMessageAttachment {
     zotero_key: string;
 }
 
-// "source" type attachment
+// "source" type attachment (Zotero attachment item)
 export interface SourceAttachment extends BaseMessageAttachment {
     type: "source";
     chunk_ids?: string[]; // UUIDs as strings
 }
 
-// "annotation" type attachment
+// "annotation" type attachment (Zotero annotation item)
 export interface AnnotationAttachment extends BaseMessageAttachment {
     type: "annotation";
     parent_key: string;
@@ -34,7 +33,7 @@ export interface AnnotationAttachment extends BaseMessageAttachment {
     date_modified?: string; // ISO string
 }
 
-// "note" type attachment
+// "note" type attachment (Zotero note item)
 export interface NoteAttachment extends BaseMessageAttachment {
     type: "note";
     parent_key?: string;
@@ -43,25 +42,23 @@ export interface NoteAttachment extends BaseMessageAttachment {
 }
 
 /**
- * UIMessageAttachment represents attachments with additional UI metadata
+ * UIAttachment represents a message attachment on the UI
  */
 
-export interface UIAttachmentState {
+export interface UIAttachment {
     id: string;
-    messageId: string;
+    type: string;
+    libraryId: number;
+    zoteroKey: string;
+    parentKey?: string;
+    messageId?: string;  // Only set for thread attachments
     pinned: boolean;
-    parentKey: string | null;
     timestamp: number;
+    childKeys?: string[];
 }
 
-export interface UISourceAttachment extends SourceAttachment, UIAttachmentState { }
-export interface UIAnnotationAttachment extends AnnotationAttachment, UIAttachmentState { }
-export interface UINoteAttachment extends NoteAttachment, UIAttachmentState { }
-
-export type UIMessageAttachment = UISourceAttachment | UIAnnotationAttachment | UINoteAttachment;
-
 /**
- * Type guards for MessageAttachment and UIMessageAttachment
+ * Type guards for MessageAttachment
  */
 export function isSourceAttachment(attachment: MessageAttachment): attachment is SourceAttachment {
     return attachment.type === "source";
@@ -72,17 +69,5 @@ export function isAnnotationAttachment(attachment: MessageAttachment): attachmen
 }
 
 export function isNoteAttachment(attachment: MessageAttachment): attachment is NoteAttachment {
-    return attachment.type === "note";
-}
-
-export function isUISourceAttachment(attachment: UIMessageAttachment): attachment is UISourceAttachment {
-    return attachment.type === "source";
-}
-
-export function isUIAnnotationAttachment(attachment: UIMessageAttachment): attachment is UIAnnotationAttachment {
-    return attachment.type === "annotation";
-}
-
-export function isUINoteAttachment(attachment: UIMessageAttachment): attachment is UINoteAttachment {
     return attachment.type === "note";
 }
