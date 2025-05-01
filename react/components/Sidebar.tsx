@@ -11,7 +11,6 @@ import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
 import PreferencePage from './PreferencePage';
-import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './PreviewContainer';
 
@@ -20,7 +19,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const loginEmailRef = useRef<HTMLInputElement>(null);
     const threadId = useAtomValue(currentThreadIdAtom);
     const threadMessages = useAtomValue(threadMessagesAtom);
-    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
