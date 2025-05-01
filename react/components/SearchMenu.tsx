@@ -422,7 +422,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     return (
         <div
             ref={menuRef}
-            className={`bg-quaternary border-quinary rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
+            className={`bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,
