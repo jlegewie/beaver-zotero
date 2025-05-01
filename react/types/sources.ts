@@ -1,7 +1,7 @@
 
 export interface InputSource {
     id: string;               // Unique identifier
-    type: "regularItem" | "attachment" | "note"; // Type of source
+    type: "regularItem" | "attachment" | "note" | "annotation"; // Type of source
     messageId?: string;       // Message ID for tracking
     libraryID: number;        // Zotero library ID
     itemKey: string;          // Zotero item key
@@ -12,7 +12,7 @@ export interface InputSource {
 }
 
 export type ThreadSource = Omit<InputSource, "type"> & {
-  type: "attachment" | "note";
+  type: "attachment" | "note" | "annotation";
 };
 
 export interface SourceCitation extends InputSource {
