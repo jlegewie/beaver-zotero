@@ -7,7 +7,7 @@ import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
+import { activePreviewAtom, isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import WelcomePage from './WelcomePage';
 import LoginPage from './LoginPage';
 import PreferencePage from './PreferencePage';
@@ -23,6 +23,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
+    const activePreview = useAtomValue(activePreviewAtom);
 
     useEffect(() => {
         if (messagesContainerRef.current) {
@@ -79,7 +80,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 <div className="relative w-full h-0">
-                    <div className={`transition-opacity duration-300 ${userScrolled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <div className={`transition-opacity duration-300 ${userScrolled && !activePreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         <ScrollDownButton onClick={handleScrollToBottom} />
                     </div>
                 </div>
