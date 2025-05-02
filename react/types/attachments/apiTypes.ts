@@ -80,6 +80,7 @@ export interface Annotation {
     page_label: string;
     position: AnnotationPosition;
     date_modified: string; // Timestamp in "YYYY-MM-DD HH:MM:SS" format (not strict ISO)
+    image_base64?: string;
 }
 
 
