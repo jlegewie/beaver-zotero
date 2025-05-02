@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, readerAnnotationsAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
-import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
+import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { toAnnotation } from '../types/attachments/converters';
 import { TextSelection } from '../types/attachments/apiTypes';
 
