@@ -90,6 +90,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
 
     const buttonElement = (
         <button
+            type="button"
             className={`
                 variant-${variant}
                 ${((icon || rightIcon) && !buttonLabel) ? 'icon-only' : ''}
