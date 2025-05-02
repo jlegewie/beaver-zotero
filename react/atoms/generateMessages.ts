@@ -69,59 +69,6 @@ async function validateSources(
 }
 
 
-
-
-/**
- * Processes and organizes sources for use in a message.
- * 
- * This function performs the following operations:
- * 1. Organizes sources by associating child sources with their parent sources
- * 2. Ensures regular Zotero items include their best attachment, or fall back to using child items
- * 3. Validates all sources and removes invalid ones
- * 4. Returns sources sorted by timestamp
- * 
- * @param sources - Array of Source objects to be processed
- * @param userMsg - Object containing the user message ID
- * @returns Promise resolving to an array of valid sources sorted by timestamp
- */
-async function prepareSources(
-    inputSources: InputSource[],
-    readerAttachment: InputSource | null,
-    messageId: string
-): Promise<ThreadSource[]> {
-    // Flatten regular item attachments
-    const sourcesFromRegularItems = inputSources
-        .filter((s) => s.type === "regularItem")
-        .flatMap((s) => getChildItems(s).map((item) => {
-            const source = createSourceFromAttachmentOrNote(item);
-            return {...source, messageId: messageId, timestamp: s.timestamp};
-        }))
-        .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.itemKey) as ThreadSource[];
-    
-    // Source and note attachments
-    const sourcesFromAttachmentsOrNotes = inputSources
-        .filter((s) => s.type === "attachment" || s.type === "note")
-        .map((s) => ({
-            ...s,
-            messageId: messageId
-        }))
-        .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.itemKey) as ThreadSource[];
-    
-    // reader attachment
-    const sourcesFromReaderAttachment = (readerAttachment ? [
-        {
-            ...readerAttachment,
-            messageId: messageId,
-            type: "reader"
-        }
-    ] : []) as ThreadSource[];
-    
-    // Combine sources
-    const sources = [...sourcesFromRegularItems, ...sourcesFromAttachmentsOrNotes, ...sourcesFromReaderAttachment];
-    const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
-    return validSources.sort((a, b) => a.timestamp - b.timestamp);
-}
-
 export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | null> {
     // Get current reader attachment
     const readerSource = store.get(currentReaderAttachmentAtom);
