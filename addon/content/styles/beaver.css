@@ -347,6 +347,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
+[id^="beaver-pane-"] .-mr-010 { margin-right: -0.10rem; }
 [id^="beaver-pane-"] .-mr-015 { margin-right: -0.15rem; }
 [id^="beaver-pane-"] .-mr-020 { margin-right: -0.20rem; }
 [id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
