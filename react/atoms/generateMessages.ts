@@ -133,7 +133,13 @@ export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | n
     const currentTextSelection = store.get(readerTextSelectionAtom);
     
     // Annotations from readerAnnotationsAtom
-    const annotations = store.get(readerAnnotationsAtom);
+    const annotations = store.get(readerAnnotationsAtom)
+        .filter((a) => 
+            (a.annotation_type === 'underline' && (a.text || a.comment)) ||
+            (a.annotation_type === 'highlight' && (a.text || a.comment)) ||
+            (a.annotation_type === 'note' && (a.text || a.comment)) ||
+            (a.annotation_type === 'image')
+        );
 
     // ReaderAttachment
     return {
