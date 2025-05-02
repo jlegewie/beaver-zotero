@@ -1,19 +1,16 @@
 // @ts-ignore no idea
 import React, { useState, useRef, useEffect } from 'react';
-import { SourceButton } from "./SourceButton";
-import { PlusSignIcon, StopIcon } from './icons';
+import { StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';
 import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
-import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { getPref } from '../../src/utils/prefs';
 import Button from './button';
-import AddSourcesMenu from './AddSourcesMenu';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
-import { TextSelectionButton } from './TextSelectionButton';
+import MessageAttachmentDisplay from './MessageAttachmentDisplay';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -29,7 +26,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const threadSourceCount = useAtomValue(threadSourceCountAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
-    const [isSourcesMenuOpen, setIsSourcesMenuOpen] = useState(false);
+    const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
@@ -138,45 +135,14 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
-            {/* Message sources */}
-            <div className="display-flex flex-wrap gap-3 mb-2">
-                <AddSourcesMenu
-                    showText={currentSources.length == 0 && threadSourceCount == 0}
-                    onClose={() => {
-                        inputRef.current?.focus();
-                        setIsSourcesMenuOpen(false);
-                    }}
-                    isMenuOpen={isSourcesMenuOpen}
-                    onOpen={() => setIsSourcesMenuOpen(true)}
-                    menuPosition={menuPosition}
-                    setMenuPosition={setMenuPosition}
-                />
-                {threadSourceCount > 0 && (
-                    <button
-                        className="sources-info"
-                        disabled={true}
-                        title={`This thread has ${threadSourceCount} sources.`}
-                    >
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.ATTACHMENTS} 
-                            size={14} 
-                            color="--accent-green"
-                            className="mr-1"
-                        />
-                        {threadSourceCount}
-                    </button>
-                )}
-
-                {currentSources.map((source, index) => (
-                    <SourceButton
-                        key={index}
-                        source={source}
-                    />
-                ))}
-                {readerTextSelection && readerTextSelection.hasSelection && (
-                    <TextSelectionButton selection={readerTextSelection} />
-                )}
-            </div>
+            {/* Message attachments */}
+            <MessageAttachmentDisplay
+                isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
+                setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
+                menuPosition={menuPosition}
+                setMenuPosition={setMenuPosition}
+                inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+            />
 
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
@@ -193,7 +159,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                     x: rect.left,
                                     y: rect.top - 5
                                 })
-                                setIsSourcesMenuOpen(true);
+                                setIsAddAttachmentMenuOpen(true);
                             } else {
                                 setMessageContent(e.target.value);
                             }
