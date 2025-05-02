@@ -1,3 +1,4 @@
+import { TextSelection } from "./attachments/apiTypes";
 
 export interface InputSource {
     id: string;               // Unique identifier
@@ -9,10 +10,13 @@ export interface InputSource {
     parentKey: string | null; // Key of the parent item
     childItemKeys: string[];  // Keys of child items
     timestamp: number;        // Creation timestamp
+    textSelection?: TextSelection;
 }
 
+export type ReaderSource = InputSource & { type: "reader" };
+
 export type ThreadSource = Omit<InputSource, "type"> & {
-  type: "attachment" | "note" | "annotation";
+  type: "attachment" | "note" | "annotation" | "reader";
 };
 
 export interface SourceCitation extends InputSource {

@@ -1,13 +1,5 @@
 import { createSourceIdentifier } from './sourceUtils';
-
-/**
- * Represents a text selection in the reader.
- */
-interface TextSelection {
-    text: string;
-    page: number;
-    hasSelection: boolean;
-}
+import { TextSelection } from '../types/attachments/apiTypes';
 
 
 /**
@@ -107,8 +99,7 @@ function getSelectedTextAsTextSelection(reader: any): TextSelection | null {
     if (!text) return null;
     return {
         text,
-        page: getCurrentPage(reader),
-        hasSelection: !!text,
+        page: getCurrentPage(reader)
     } as TextSelection;
 }
 
@@ -167,7 +158,7 @@ function getReaderContext(): ReaderContext | undefined {
     return context;
 }
 
-function addSelectionChangeListener(reader: any, callback: (selection: TextSelection) => void) {
+function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
     if (reader.type !== "pdf") {
         return null;
     }
@@ -182,11 +173,7 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
             if (selection) {
                 callback(selection);
             } else {
-                callback({
-                    text: "",
-                    page: getCurrentPage(reader),
-                    hasSelection: false
-                } as TextSelection);
+                callback(null);
             }
         };
         

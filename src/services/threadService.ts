@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../../react/types/chat/uiTypes';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
@@ -6,6 +5,7 @@ import { ThreadSource } from '../../react/types/sources';
 import { MessageModel } from '../../react/types/chat/apiTypes';
 import { toMessageUI } from '../../react/types/chat/converters';
 import { createSourceFromItem } from '../../react/utils/sourceUtils';
+import { toThreadSource } from '../../react/types/attachments/converters';
 
 // Types that match the backend models
 export interface Thread {
@@ -66,12 +66,10 @@ export class ThreadService extends ApiService {
         
         for (const message of messages) {
             for (const attachment of message.attachments || []) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
-                if (!item) continue;
-                sources.push({
-                    ...(await createSourceFromItem(item)),
-                    messageId: message.id,
-                } as ThreadSource);
+                const source = await toThreadSource(attachment, message.id);
+                if (source) {
+                    sources.push(source);
+                }
             }
         }
 

@@ -73,7 +73,7 @@ const MessageAttachmentDisplay = ({
             }
 
             {/* Current text selection */}
-            {readerTextSelection && readerTextSelection.hasSelection && (
+            {readerTextSelection && (
                 <TextSelectionButton selection={readerTextSelection} />
             )}
             

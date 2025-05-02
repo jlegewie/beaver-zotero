@@ -1,8 +1,8 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel, AppState } from '../types/chat/apiTypes';
-import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
+import { MessageModel } from '../types/chat/apiTypes';
+import { MessageAttachment, ReaderAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
     setMessageStatusAtom,
@@ -18,16 +18,58 @@ import {
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerAnnotationsAtom, readerTextSelectionAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
-import { ReaderContext } from '../utils/readerUtils';
+import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
 import { Model, selectedModelAtom, DEFAULT_MODEL } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
-import { getAppState } from '../utils/appState';
+import { store } from '../index';
+import { toMessageAttachment } from '../types/attachments/converters';
 
 const MODE = getPref('mode');
+
+/**
+ * Flattens sources from regular items, attachments, notes, and annotations.
+ * 
+ * @param inputSources - Array of InputSource objects to be flattened
+ * @returns Array of ThreadSource objects
+ */
+function flattenSources(
+    inputSources: InputSource[]
+): ThreadSource[] {
+    // Flatten regular item attachments
+    const sourcesFromRegularItems = inputSources
+        .filter((s) => s.type === "regularItem")
+        .flatMap((s) => getChildItems(s).map((item) => {
+            const source = createSourceFromAttachmentOrNote(item);
+            return {...source, timestamp: s.timestamp};
+        })) as ThreadSource[];
+    
+    // Source, note, and annotation attachments
+    const otherSources = (inputSources
+        .filter((s) => s.type === "attachment" || s.type === "note"  || s.type === "annotation")) as ThreadSource[];
+    
+    // Return flattened sources
+    return [...sourcesFromRegularItems, ...otherSources];
+}
+
+/**
+ * Validates sources and removes invalid ones.
+ * 
+ * @param sources - Array of ThreadSource objects to be validated
+ * @returns Array of valid sources sorted by timestamp
+ */
+async function validateSources(
+    sources: ThreadSource[]
+): Promise<ThreadSource[]> {
+    const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
+    return validSources.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+
+
 
 /**
  * Processes and organizes sources for use in a message.
@@ -44,23 +86,86 @@ const MODE = getPref('mode');
  */
 async function prepareSources(
     inputSources: InputSource[],
+    readerAttachment: InputSource | null,
     messageId: string
 ): Promise<ThreadSource[]> {
+    // Flatten regular item attachments
     const sourcesFromRegularItems = inputSources
         .filter((s) => s.type === "regularItem")
         .flatMap((s) => getChildItems(s).map((item) => {
             const source = createSourceFromAttachmentOrNote(item);
             return {...source, messageId: messageId, timestamp: s.timestamp};
-        })) as ThreadSource[];
+        }))
+        .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.itemKey) as ThreadSource[];
+    
+    // Source and note attachments
     const sourcesFromAttachmentsOrNotes = inputSources
-        .filter((s) => s.type !== "regularItem")
+        .filter((s) => s.type === "attachment" || s.type === "note")
         .map((s) => ({
             ...s,
             messageId: messageId
-        })) as ThreadSource[];
-    const sources = [...sourcesFromRegularItems, ...sourcesFromAttachmentsOrNotes];
+        }))
+        .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.itemKey) as ThreadSource[];
+    
+    // reader attachment
+    const sourcesFromReaderAttachment = (readerAttachment ? [
+        {
+            ...readerAttachment,
+            messageId: messageId,
+            type: "reader"
+        }
+    ] : []) as ThreadSource[];
+    
+    // Combine sources
+    const sources = [...sourcesFromRegularItems, ...sourcesFromAttachmentsOrNotes, ...sourcesFromReaderAttachment];
     const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | null> {
+    // Get current reader attachment
+    const readerSource = store.get(currentReaderAttachmentAtom);
+    if (!readerSource || readerSource.type !== "reader") {
+        return null;
+    }
+
+    // Text selection
+    const currentTextSelection = store.get(readerTextSelectionAtom);
+    
+    // Annotations from readerAnnotationsAtom
+    const annotations = store.get(readerAnnotationsAtom);
+
+    // ReaderAttachment
+    return {
+        type: "reader",
+        library_id: readerSource.libraryID,
+        zotero_key: readerSource.itemKey,
+        current_page: getCurrentPage() || 0,
+        ...(currentTextSelection && { text_selection: currentTextSelection }),
+        annotations: annotations
+    } as ReaderAttachment;
+}
+
+
+export async function getCurrentMessageAttachments(sources?: InputSource[]): Promise<MessageAttachment[]> {
+    // Get attachments
+    sources = sources || store.get(currentSourcesAtom);
+    
+    // Message attachments
+    const attachments: MessageAttachment[] = [];
+
+    // Reader Attachment
+    const readerAttachment = await getCurrentReaderAttachment();
+    if (readerAttachment) {
+        attachments.push(readerAttachment);
+    }
+    
+    // Source attachments
+    for(const source of sources) {
+        if (source.type === "reader") continue;
+        attachments.push(...await toMessageAttachment(source));
+    }
+    return attachments;
 }
 
 /**
@@ -83,13 +188,6 @@ export const generateResponseAtom = atom(
         sources: InputSource[];
         isLibrarySearch: boolean;
     }) => {
-        // Get current messages
-        const threadMessages = get(threadMessagesAtom);
-        const threadSources = get(threadSourcesAtom);
-
-        // Get context from reader if it exists
-        const appState = getAppState();
-
         // Get current model
         const model = get(selectedModelAtom);
 
@@ -98,43 +196,52 @@ export const generateResponseAtom = atom(
         const assistantMsg = createAssistantMessage();
 
         // Update thread messages atom
+        const threadMessages = get(threadMessagesAtom);
         const newMessages = [...threadMessages, userMsg, assistantMsg];
         set(threadMessagesAtom, newMessages);
         
         // Prepare sources
-        const payloadSources = await prepareSources(payload.sources, userMsg.id);
+        const flattenedSources = flattenSources(payload.sources);
+        const validatedSources = await validateSources(flattenedSources);
 
-        // Combine existing thread sources with payload sources
-        const newThreadSources: ThreadSource[] = [...threadSources, ...payloadSources];
-        
-        // Update thread sources atom
-        set(threadSourcesAtom, newThreadSources);
+        // Convert sources to MessageAttachments
+        const readerAttachment = await getCurrentReaderAttachment();
+        const userAttachments = await Promise.all(
+            validatedSources
+                .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.zotero_key)
+                .map(async (s) => await toMessageAttachment(s))
+        );
+        const messageAttachments: MessageAttachment[] = [
+            ...userAttachments.flat(),
+            ...(readerAttachment ? [readerAttachment] : [])
+        ];
+
+        // TODO: Add attachments to curren thread
+        // set(updateThreadSourcesAtom, {
+        //     attachments: messageAttachments,
+        //     messageId: userMsg.id
+        // });
+        // const threadSources = get(threadSourcesAtom);
+        // const payloadSources = await prepareSources(payload.sources, readerAttachment, userMsg.id);
+        // const newThreadSources: ThreadSource[] = [...threadSources, ...payloadSources];
+        // set(threadSourcesAtom, newThreadSources);
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
         set(currentMessageContentAtom, '');
         
         // Execute chat completion
-        if (MODE === 'local') {
-            _processChatCompletion(newMessages, newThreadSources, assistantMsg.id, undefined, set);
-        } else {
-            _processChatCompletionViaBackend(
-                get(currentThreadIdAtom),
-                userMsg.id,         // the ID from createUserMessage
-                assistantMsg.id,    // the ID from createAssistantMessage
-                userMsg.content,
-                payloadSources.map((s) => ({
-                    type: "source",
-                    library_id: s.libraryID,
-                    zotero_key: s.itemKey
-                } as SourceAttachment)),
-                appState,
-                payload.isLibrarySearch,
-                model,
-                set,
-                get
-            );
-        }
+        _processChatCompletionViaBackend(
+            get(currentThreadIdAtom),
+            userMsg.id,         // the ID from createUserMessage
+            assistantMsg.id,    // the ID from createAssistantMessage
+            userMsg.content,
+            messageAttachments,
+            payload.isLibrarySearch,
+            model,
+            set,
+            get
+        );
         
         return assistantMsg.id;
     }
@@ -198,7 +305,6 @@ export const regenerateFromMessageAtom = atom(
                 assistantMsg.id,    // new assistant message ID
                 "",                 // content remains unchanged
                 [],                 // sources remain unchanged
-                getAppState(),      // current app state
                 false,              // isLibrarySearch remains unchanged
                 model,
                 set,
@@ -247,7 +353,6 @@ function _processChatCompletionViaBackend(
     assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
-    appState: AppState,
     isLibrarySearch: boolean,
     model: Model,
     set: any,
@@ -280,9 +385,8 @@ function _processChatCompletionViaBackend(
         user_api_key: userApiKey,
         model: model
     } as ChatCompletionRequestBody;
-    if (appState.view == "reader") {
-        payload.app_state = appState;
-    }
+
+    // request chat completion
     chatService.requestChatCompletion(
         payload,
         {

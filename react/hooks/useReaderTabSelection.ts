@@ -99,10 +99,10 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Adding selection listener for reader ${reader.itemID}`);
             selectionCleanupRef.current = addSelectionChangeListener(
                 reader, 
-                (newSelection: TextSelection) => {
+                (newSelection: TextSelection | null) => {
                     // Ensure the event is for the currently active reader this hook manages
                     if (currentReaderIdRef.current === reader.itemID) {
-                        logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection.text}"`);
+                        logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection ? newSelection.text : 'null'}"`);
                         setReaderTextSelection(newSelection);
                     } else {
                          logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);

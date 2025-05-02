@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel, AppState } from '../../react/types/chat/apiTypes';
+import { MessageModel } from '../../react/types/chat/apiTypes';
 import { MessageAttachment } from '../../react/types/attachments/apiTypes';
 import { Model, ProviderType } from '../../react/atoms/models';
 
@@ -24,7 +24,6 @@ export interface ChatCompletionRequestBody {
     model: Model;                       // The model to use for the request
     custom_instructions?: string;       // Custom instructions for the assistant
     attachments: MessageAttachment[];   // The attachments to include in the request
-    app_state: AppState;                // Current app state
     tool_request: ToolRequest | null;   // User tool request, if any
 }
 

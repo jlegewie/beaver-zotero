@@ -6,7 +6,8 @@
 export type MessageAttachment =
     | SourceAttachment
     | AnnotationAttachment
-    | NoteAttachment;
+    | NoteAttachment
+    | ReaderAttachment;
 
 interface BaseMessageAttachment {
     library_id: number;
@@ -23,14 +24,13 @@ export interface SourceAttachment extends BaseMessageAttachment {
 export interface AnnotationAttachment extends BaseMessageAttachment {
     type: "annotation";
     parent_key: string;
-    annotation_type: string;
+    annotation_type: "highlight" | "underline" | "note" | "image";
     text?: string;
     comment?: string;
-    color?: string;
-    page_label?: string;
-    position?: Record<string, any>;
-    // position?: { x: number; y: number; page?: number };
-    date_modified?: string; // ISO string
+    color: string;
+    page_label: string;
+    position: AnnotationPosition;
+    date_modified: string;
 }
 
 // "note" type attachment (Zotero note item)
@@ -40,6 +40,48 @@ export interface NoteAttachment extends BaseMessageAttachment {
     note_content: string;
     date_modified?: string; // ISO string
 }
+
+// "reader" type attachment (Zotero reader item)
+export interface ReaderAttachment extends BaseMessageAttachment {
+    type: "reader";
+    current_page: number;
+    text_selection?: TextSelection;
+    annotations: Annotation[];
+}
+
+/**
+ * TextSelection represents a text selection in a reader.
+ */
+export interface TextSelection {
+    text: string;
+    page: number;
+}
+
+/**
+ * AnnotationPosition represents the position of an annotation in a reader.
+ */
+export interface AnnotationPosition {
+    page_index: number;
+    rects: number[][];
+}
+
+/**
+ * Annotation represents an annotation in a reader.
+ */
+export interface Annotation {
+    library_id: number;
+    zotero_key: string;
+    parent_key: string;
+    // annotation_type: "ink" | "highlight" | "underline" | "note" | "image" | "text";
+    annotation_type: "highlight" | "underline" | "note" | "image";
+    text?: string;
+    comment?: string;
+    color: string;
+    page_label: string;
+    position: AnnotationPosition;
+    date_modified: string; // Timestamp in "YYYY-MM-DD HH:MM:SS" format (not strict ISO)
+}
+
 
 /**
  * Type guards for MessageAttachment
@@ -54,6 +96,10 @@ export function isAnnotationAttachment(attachment: MessageAttachment): attachmen
 
 export function isNoteAttachment(attachment: MessageAttachment): attachment is NoteAttachment {
     return attachment.type === "note";
+}
+
+export function isReaderAttachment(attachment: MessageAttachment): attachment is ReaderAttachment {
+    return attachment.type === "reader";
 }
 
 /**

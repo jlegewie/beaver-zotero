@@ -5,6 +5,7 @@ import { threadSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../utils/readerUtils';
 import { logger } from "../../src/utils/logger";
+import { Annotation } from "../types/attachments/apiTypes";
 
 /**
 * Current user message and sources
@@ -22,9 +23,10 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
 });
 
 /**
- * Current reader text selection
+ * Current reader text selection and annotations
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
+export const readerAnnotationsAtom = atom<Annotation[]>([]);
 
 /**
 * Cache to track removed item keys to prevent them from reappearing

@@ -14,18 +14,6 @@ export interface ToolCall {
     response?: Record<string, any> | null;
 }
 
-/**
- * AppState represents the state of the app
- */
-export interface AppState {
-    view: 'library' | 'reader';
-    reader_type: string | null;
-    library_id: number | null;
-    item_keys: string[];
-    selection: string | null;
-    page: number | null;
-}
-
 export interface MessageModel {
     id: string;
     user_id?: string; // Set in DB
@@ -34,7 +22,6 @@ export interface MessageModel {
     content?: string;
     attachments?: MessageAttachment[];
     tool_calls?: ToolCall[];
-    app_state?: AppState;
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
     created_at?: string;
     metadata?: Record<string, any>;
