@@ -93,7 +93,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
-                    // TODO: Maybe navigate to annotation in reader? Or just rely on preview action
+                    // TODO: Implement navigation to annotation using `navigateToAnnotation`
                 }}
                 {...rest}
             >
