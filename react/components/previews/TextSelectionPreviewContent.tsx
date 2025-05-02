@@ -6,7 +6,8 @@ import { readerTextSelectionAtom } from '../../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import Button from '../button';
 import IconButton from '../IconButton';
-import { TextSelection } from '../../utils/readerUtils';
+import { TextSelection } from '../../types/attachments/apiTypes';
+import { navigateToPage } from '../../utils/readerUtils';
 
 interface TextSelectionPreviewContentProps {
     selection: TextSelection;

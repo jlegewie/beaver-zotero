@@ -3,7 +3,7 @@ import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
 import { threadSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection } from '../utils/readerUtils';
+import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
 import { Annotation } from "../types/attachments/apiTypes";
 
@@ -110,6 +110,8 @@ export const updateSourcesFromZoteroSelectionAtom = atom(
 export const updateReaderAttachmentAtom = atom(
     null,
     async (_, set, reader?: any) => {
+        // also gets the current reader item (parent item)
+        // Zotero.getActiveZoteroPane().getSelectedItems()
         // Get current reader
         reader = reader || getCurrentReader();
         if (!reader) {

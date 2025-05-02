@@ -1,11 +1,11 @@
-// @ts-ignore no idea
 import React, { forwardRef } from 'react'
 import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../atoms/input'
-import { TextSelection } from '../utils/readerUtils'
+import { navigateToPage } from '../utils/readerUtils'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { activePreviewAtom } from '../atoms/ui'
+import { TextSelection } from '../types/attachments/apiTypes'
 
 
 interface TextSelectionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {

@@ -4,6 +4,7 @@ import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttac
 import { logger } from '../../src/utils/logger';
 import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { toAnnotation } from '../types/attachments/converters';
+import { TextSelection } from '../types/attachments/apiTypes';
 
 const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"];
 
