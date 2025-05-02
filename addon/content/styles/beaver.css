@@ -250,7 +250,10 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .w-full { width: 100%; }
 [id^="beaver-pane-"] .w-90 { width: 90%; }
 [id^="beaver-pane-"] .w-screen { width: 100vw; }
+[id^="beaver-pane-"] .max-w-full { max-width: 100%; }
+[id^="beaver-pane-"] .max-h-full { max-height: 100%; }
 [id^="beaver-pane-"] .fit-content { width: fit-content; }
+[id^="beaver-pane-"] .object-contain { object-fit: contain; }
 [id^="beaver-pane-"] .min-w-0 { min-width: 0; }
 [id^="beaver-pane-"] .min-h-0 { min-height: 0; }
 [id^="beaver-pane-"] .relative { position: relative; }
