@@ -12,7 +12,7 @@ export const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
     underline: 'Underline',
     note: 'Note',
-    image: 'Image',
+    image: 'Area',
 }
 
 export const ANNOTATION_ICON_BY_TYPE = {

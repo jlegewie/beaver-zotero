@@ -5,10 +5,18 @@ import { readerAnnotationsAtom } from '../../atoms/input';
 import { navigateToPage } from '../../utils/readerUtils';
 import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../AnnotationButton';
+import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
 import Button from '../button';
 import IconButton from '../IconButton';
 import { CancelIcon, Icon } from '../icons';
+
+const ANNOTATION_TEXT_BY_TYPE = {
+    highlight: 'Highlighted Text',
+    underline: 'Underlined Text',
+    note: 'Note Annotation',
+    image: 'Selected Area',
+}
+
 
 interface AnnotationPreviewContentProps {
     annotation: Annotation;
