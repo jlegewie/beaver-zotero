@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, updateSourcesFromReaderAtom, currentReaderAttachmentKeyAtom } from '../atoms/input';
+import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 
@@ -11,9 +11,9 @@ import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelecte
  * between reader tabs.
  */
 export function useReaderTabSelection() {
+    const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-    const updateSourcesFromReader = useSetAtom(updateSourcesFromReaderAtom);
-    const setReaderAttachmentKey = useSetAtom(currentReaderAttachmentKeyAtom);
+    const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -79,8 +79,8 @@ export function useReaderTabSelection() {
         currentReaderIdRef.current = reader.itemID; // Store just the ID
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
-        // Update sources for the new reader
-        updateSourcesFromReader(reader);
+        // Update reader attachment for the new reader
+        updateReaderAttachment(reader);
 
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, () => {
@@ -111,7 +111,7 @@ export function useReaderTabSelection() {
             );
         });
 
-    }, [setReaderTextSelection, updateSourcesFromReader, waitForInternalReader]); // Dependencies
+    }, [setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
 
 
     useEffect(() => {
@@ -153,12 +153,12 @@ export function useReaderTabSelection() {
                         // Tab switched to something other than a reader (e.g., library)
                         logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state.`);
                         if (selectionCleanupRef.current) {
-                        selectionCleanupRef.current();
-                        selectionCleanupRef.current = null;
+                            selectionCleanupRef.current();
+                            selectionCleanupRef.current = null;
                         }
                         currentReaderIdRef.current = null;
                         setReaderTextSelection(null);
-                        updateSourcesFromReader(null);
+                        setReaderAttachment(null);
                     }
                 }
                 // Annotation events
@@ -182,7 +182,7 @@ export function useReaderTabSelection() {
         return () => {
             logger("useReaderTabSelection: Hook unmounting. Cleaning up listeners and observer.");
             // Clear reader item key
-            setReaderAttachmentKey(null);
+            setReaderAttachment(null);
             // Cleanup selection event listner
             if (selectionCleanupRef.current) {
                 logger("useReaderTabSelection: Removing selection listener.");
@@ -202,6 +202,6 @@ export function useReaderTabSelection() {
             // Reset atom state on unmount
             setReaderTextSelection(null);
         };
-    }, [setupReader, setReaderTextSelection, updateSourcesFromReader, setReaderAttachmentKey, window, waitForInternalReader]);
+    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader]);
 
 }

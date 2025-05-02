@@ -3,7 +3,7 @@ import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/c
 import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
 import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
-import { currentMessageContentAtom, resetCurrentSourcesAtom, updateSourcesFromReaderAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { currentMessageContentAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
@@ -95,7 +95,7 @@ export const newThreadAtom = atom(
         if (isLibraryTab) {
             set(updateSourcesFromZoteroSelectionAtom);
         } else {
-            set(updateSourcesFromReaderAtom);
+            set(updateReaderAttachmentAtom);
         }
         set(userScrolledAtom, false);
     }

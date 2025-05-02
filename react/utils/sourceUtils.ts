@@ -77,13 +77,15 @@ export function getSourceTypeFromItem(item: Zotero.Item): InputSource["type"] {
 export async function createSourceFromItem(
     item: Zotero.Item,
     pinned: boolean = false,
-    excludeKeys: string[] = []
+    excludeKeys: string[] = [],
+    type?: InputSource["type"]
 ): Promise<InputSource> {
+    type = type || getSourceTypeFromItem(item);
     const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
 
     return {
         id: uuidv4(),
-        type: getSourceTypeFromItem(item),
+        type: type,
         libraryID: item.libraryID,
         itemKey: item.key,
         pinned: pinned,

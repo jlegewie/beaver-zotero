@@ -4,14 +4,22 @@ import { createSourceFromItem } from "../utils/sourceUtils";
 import { threadSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../utils/readerUtils';
+import { logger } from "../../src/utils/logger";
 
 /**
 * Current user message and sources
 */
 export const currentMessageContentAtom = atom<string>('');
-export const currentReaderAttachmentKeyAtom = atom<string | null>(null);
-
 export const currentSourcesAtom = atom<InputSource[]>([]);
+export const currentReaderAttachmentAtom = atom<InputSource | null>(null);
+
+/**
+* Current reader attachment key
+*/
+export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
+    const source = get(currentReaderAttachmentAtom);
+    return source?.itemKey || null;
+});
 
 /**
  * Current reader text selection
@@ -97,16 +105,21 @@ export const updateSourcesFromZoteroSelectionAtom = atom(
 /**
 * Update sources based on Zotero reader item
 */
-export const updateSourcesFromReaderAtom = atom(
+export const updateReaderAttachmentAtom = atom(
     null,
-    async (get, set, reader?: any) => {
-        if (!reader) reader = getCurrentReader();
-        if (!reader) return;
+    async (_, set, reader?: any) => {
+        // Get current reader
+        reader = reader || getCurrentReader();
+        if (!reader) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        // Get reader item
         const item = Zotero.Items.get(reader.itemID);
         if (item) {
-            console.log("[Beaver] Updating sources from reader item", item.isRegularItem());
-            await set(updateSourcesFromZoteroItemsAtom, [item]);
-            set(currentReaderAttachmentKeyAtom, item.key);
+            logger(`Updating reader attachment to ${item.key}`);
+            set(currentReaderAttachmentAtom, await createSourceFromItem(item, false, [], "reader"));
+            await set(updateSourcesFromZoteroItemsAtom, []);
         }
     }
 );

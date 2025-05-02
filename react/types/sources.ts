@@ -1,7 +1,7 @@
 
 export interface InputSource {
     id: string;               // Unique identifier
-    type: "regularItem" | "attachment" | "note" | "annotation"; // Type of source
+    type: "regularItem" | "attachment" | "note" | "annotation" | "reader"; // Type of source
     messageId?: string;       // Message ID for tracking
     libraryID: number;        // Zotero library ID
     itemKey: string;          // Zotero item key

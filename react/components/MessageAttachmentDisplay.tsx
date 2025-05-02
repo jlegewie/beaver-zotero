@@ -1,7 +1,7 @@
 import React from 'react'
 import { SourceButton } from './SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom } from '../atoms/input';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/input';
 import { TextSelectionButton } from './TextSelectionButton';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from './AddSourcesMenu';
@@ -21,13 +21,14 @@ const MessageAttachmentDisplay = ({
     inputRef: React.RefObject<HTMLTextAreaElement>;
 }) => {
     const currentSources = useAtomValue(currentSourcesAtom);
+    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const threadSourceCount = useAtomValue(threadSourceCountAtom);
 
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
-                showText={currentSources.length == 0 && threadSourceCount == 0}
+                showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -53,12 +54,25 @@ const MessageAttachmentDisplay = ({
                 </button>
             )}
 
-            {currentSources.map((source, index) => (
+            {/* Current reader attachment */}
+            {currentReaderAttachment && (
                 <SourceButton
-                    key={index}
-                    source={source}
+                    source={currentReaderAttachment}
                 />
-            ))}
+            )}
+
+            {/* Current attachments */}
+            {currentSources
+                .filter((attachment) => !currentReaderAttachment || attachment.itemKey !== currentReaderAttachment.itemKey)
+                .map((source, index) => (
+                    <SourceButton
+                        key={index}
+                        source={source}
+                    />
+                ))
+            }
+
+            {/* Current text selection */}
             {readerTextSelection && readerTextSelection.hasSelection && (
                 <TextSelectionButton selection={readerTextSelection} />
             )}
