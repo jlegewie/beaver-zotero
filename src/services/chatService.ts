@@ -111,13 +111,6 @@ export class ChatService extends ApiService {
             const endpoint = `${this.baseUrl}/chat/cancel`;
             const headers = await this.getAuthHeaders();
 
-            console.log('Cancelling chat completion', assistantMessageId, threadId, partialContent);
-            console.log({
-                    assistant_message_id: assistantMessageId,
-                    thread_id: threadId,
-                    partial_content: partialContent
-                });
-            
             await Zotero.HTTP.request('POST', endpoint, {
                 body: JSON.stringify({
                     assistant_message_id: assistantMessageId,
