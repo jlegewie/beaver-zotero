@@ -126,22 +126,6 @@ export const updateReaderAttachmentAtom = atom(
     }
 );
 
-/**
-* Add a file source
-*/
-export const addFileSourceAtom = atom(
-    null,
-    (get, set, file: File) => {
-        // const currentSources = get(currentSourcesAtom);
-        // // Use file.name as a unique identifier for files
-        // const exists = currentSources.find(
-        //     (res) => res.type === 'file' && (res as any).filePath === file.name
-        // );
-        // if (!exists) {
-        //     set(currentSourcesAtom, [...currentSources, createFileSource(file)]);
-        // }
-    }
-);
 
 /**
 * Update child item keys of a Source
