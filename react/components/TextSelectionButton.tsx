@@ -1,10 +1,11 @@
 // @ts-ignore no idea
-import React, { useState, forwardRef, useRef, useEffect } from 'react'
+import React, { forwardRef } from 'react'
 import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons"
-import { useSetAtom, useAtom } from 'jotai'
+import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../atoms/input'
 import { TextSelection } from '../utils/readerUtils'
-import { previewCloseTimeoutAtom, activePreviewAtom } from '../atoms/ui';
+import { usePreviewHover } from '../hooks/usePreviewHover'
+import { activePreviewAtom } from '../atoms/ui'
 
 
 interface TextSelectionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
@@ -22,76 +23,27 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             canEdit = true,
             ...rest
         } = props
-        // States
-        const [isHovered, setIsHovered] = useState(false);
-        const setActivePreview = useSetAtom(activePreviewAtom);
-        const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-        const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
 
-        // Hover timer ref for triggering preview display
-        const showPreviewTimerRef = useRef<number | null>(null);
+        // States/Atoms needed for non-preview logic
+        const setActivePreview = useSetAtom(activePreviewAtom)
+        const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
 
-        // Timer Utilities (copied from SourceButton for consistency)
-        const cancelCloseTimer = () => {
-            if (previewCloseTimeout) {
-                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
-                setPreviewCloseTimeout(null);
-            }
-        };
+        // Use the custom hook for hover preview logic
+        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
+            { type: 'textSelection', content: selection }, // Preview content
+            { isEnabled: !disabled && canEdit } // Options: Disable if button disabled or not editable
+        )
 
-        const startCloseTimer = () => {
-            cancelCloseTimer(); 
-            const newTimeout = Zotero.getMainWindow().setTimeout(() => {
-                setActivePreview(null);
-                setPreviewCloseTimeout(null);
-            }, 350); 
-            setPreviewCloseTimeout(newTimeout);
-        };
-        
-        const cancelShowPreviewTimer = () => {
-             if (showPreviewTimerRef.current) {
-                Zotero.getMainWindow().clearTimeout(showPreviewTimerRef.current);
-                showPreviewTimerRef.current = null;
-            }
-        }
-
-        const handleMouseEnter = () => {
-            setIsHovered(true);
-            cancelCloseTimer(); 
-            cancelShowPreviewTimer(); 
-
-            // Show preview after a short delay
-            showPreviewTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
-                // Make sure selection still exists when timer fires
-                // (Could read readerTextSelectionAtom here, but passing selection prop is simpler)
-                 setActivePreview({ type: 'textSelection', content: selection });
-                 showPreviewTimerRef.current = null; 
-            }, 100); // Short delay
-        };
-
-        const handleMouseLeave = () => {
-            setIsHovered(false);
-            cancelShowPreviewTimer(); 
-            startCloseTimer(); 
-        };
-
-        // Cleanup timers on unmount
-        useEffect(() => {
-            return () => {
-                cancelShowPreviewTimer();
-            };
-        }, []);
-
-        // Removal handler
+        // Update handleRemove to use cancelTimers from the hook
         const handleRemove = () => {
-            cancelShowPreviewTimer(); // Prevent preview from showing if removed quickly
-            cancelCloseTimer();       // Stop any pending close
-            setActivePreview(null);   // Ensure preview is explicitly closed
-            setReaderTextSelection(null); // Remove the selection itself
+            cancelTimers() // Cancel preview timers
+            setActivePreview(null) // Ensure preview is explicitly closed
+            setReaderTextSelection(null) // Remove the selection itself
         }
-        
-        // Update getIconElement to use internal handleRemove
+
+        // Update getIconElement to use isHovered from the hook
         const getIconElement = () => {
+            // Use isHovered from the hook
             if (isHovered && canEdit) {
                 return (<span
                     role="button"
@@ -99,7 +51,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     onClick={(e) => {
                         e.stopPropagation()
                         handleRemove() // Use internal handleRemove
-                    }}   
+                    }}
                 >
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
@@ -112,8 +64,8 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         return (
             <button
                 ref={ref}
-                onMouseEnter={handleMouseEnter}
-                onMouseLeave={handleMouseLeave}
+                // Spread the event handlers from the hook
+                {...hoverEventHandlers}
                 className={
                     `variant-outline source-button
                     ${className || ''}
@@ -122,9 +74,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
-                    // _iframeWindow.PDFViewerApplication.pdfViewer.scrollPageIntoView({
                     // Maybe navigate to text in reader? Or just rely on preview action
-                    // scrollPageIntoView({pageNumber: location.pageIndex + 1})
                 }}
                 {...rest}
             >

@@ -1,18 +1,15 @@
-import React, { useEffect, useState, forwardRef, useRef } from 'react'
+import React, { useEffect, useState, forwardRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon } from "./icons"
 import { InputSource } from '../types/sources'
-import { useSetAtom, useAtom, useAtomValue } from 'jotai'
+import { useSetAtom, useAtomValue } from 'jotai'
 import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { previewCloseTimeoutAtom, activePreviewAtom } from '../atoms/ui'
 import { truncateText } from '../utils/stringUtils'
 import { BookmarkIcon, Icon } from './icons'
-import { CancelIcon } from './icons'
-// import Button from './Button'
-import { atom } from 'jotai'
-import IconButton from './IconButton'
 import MissingSourceButton from './MissingSourceButton'
+import { usePreviewHover } from '../hooks/usePreviewHover'
+import { activePreviewAtom } from '../atoms/ui'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 
@@ -33,20 +30,21 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         } = props
         // States
         const [isValid, setIsValid] = useState(true);
-        const [isHovered, setIsHovered] = useState(false);
         const [displayName, setDisplayName] = useState<string>('');
         const removeSource = useSetAtom(removeSourceAtom);
         const setActivePreview = useSetAtom(activePreviewAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
         const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
-        const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
+
+        // Use the custom hook for hover preview logic
+        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
+            isValid ? { type: 'source', content: source } : null, // Preview content
+            { isEnabled: !disabled } // Options: disable if button is disabled or invalid
+        );
 
         // Get the Zotero item
         const item = getZoteroItem(source);
         if (!item) return <MissingSourceButton source={source} />;
-        
-        // Hover timer ref for triggering preview display
-        const showPreviewTimerRef = useRef<number | null>(null);
 
         // Moved item null check after hooks, before useEffects that depend on item
         useEffect(() => {
@@ -63,59 +61,6 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             setDisplayName(truncatedName);
         }, [item, source.childItemKeys.length]);
 
-        // Timer Utilities (moved outside handlers for clarity)
-        const cancelCloseTimer = () => {
-            if (previewCloseTimeout) {
-                Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
-                setPreviewCloseTimeout(null);
-            }
-        };
-
-        const startCloseTimer = () => {
-            cancelCloseTimer(); // Ensure no duplicate timers
-            const newTimeout = Zotero.getMainWindow().setTimeout(() => {
-                setActivePreview(null); // Close preview after delay
-                setPreviewCloseTimeout(null);
-            }, 350); // Delay before closing
-            setPreviewCloseTimeout(newTimeout);
-        };
-        
-        const cancelShowPreviewTimer = () => {
-             if (showPreviewTimerRef.current) {
-                Zotero.getMainWindow().clearTimeout(showPreviewTimerRef.current);
-                showPreviewTimerRef.current = null;
-            }
-        }
-
-        const handleMouseEnter = () => {
-            setIsHovered(true);
-            cancelCloseTimer(); // Stop any pending close timer immediately
-            cancelShowPreviewTimer(); // Clear any pending show timer
-
-            // Show preview after a short delay, only if valid
-            if (isValid) {
-                showPreviewTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
-                    setActivePreview({ type: 'source', content: source });
-                    showPreviewTimerRef.current = null; // Clear ref after execution
-                }, 100); // Short delay before showing
-            }
-        };
-
-        const handleMouseLeave = () => {
-            setIsHovered(false);
-            cancelShowPreviewTimer(); // Cancel the timer to show if mouse leaves quickly
-            startCloseTimer(); // Start the timer to close the preview (will be canceled if mouse enters preview area)
-        };
-
-        // Cleanup timers on unmount
-        useEffect(() => {
-            return () => {
-                cancelShowPreviewTimer();
-                // No need to explicitly call cancelCloseTimer here, 
-                // as the PreviewContainer will handle its own cleanup if needed.
-            };
-        }, []);
-
         useEffect(() => {
             const checkSourceValidity = async () => {
                 setIsValid(await isSourceValid(source));
@@ -123,21 +68,19 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             checkSourceValidity();
         }, [source])
 
-        // Ensure handleRemove still works correctly
+        // Update handleRemove to use cancelTimers from the hook
         const handleRemove = () => {
-            cancelShowPreviewTimer(); // Prevent preview from showing if removed quickly
-            cancelCloseTimer();    // Prevent preview from closing then reopening if button removed
-            setActivePreview(null); // Ensure preview is closed if it was open
+            cancelTimers(); // Cancel preview timers before removing
+            setActivePreview(null); // Explicitly close any active preview
             removeSource(source);
         }
-        
-        // Update onClick for toggling pin
+
         const handlePinClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
             if (isValid && canEdit) {
                 togglePinSource(source.id);
-                // Optionally close preview on pin toggle, or let it stay
-                // setActivePreview(null); 
+                 // cancelTimers(); // Optional: Cancel preview timers on pin click?
+                 // setActivePreview(null); // Optional: Close preview on pin click?
             }
             if (!canEdit && item) {
                  // @ts-ignore selectItem exists
@@ -145,9 +88,11 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
         }
 
+        // Use isHovered from the hook
         const getIconElement = () => {
-            if (isHovered && currentReaderAttachmentKey != source.itemKey && canEdit && isValid) { // Check isValid
-                return (<span 
+            // Use isHovered from the hook
+            if (isHovered && currentReaderAttachmentKey != source.itemKey && canEdit && isValid) {
+                return (<span
                     role="button"
                     className="source-remove"
                     onClick={(e) => {
@@ -170,14 +115,14 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         return (
             <button
                 ref={ref}
-                onMouseEnter={handleMouseEnter}
-                onMouseLeave={handleMouseLeave}
+                // Spread the event handlers from the hook
+                {...hoverEventHandlers}
                 className={
                     `variant-outline source-button
                     ${className || ''}
                     ${disabled ? 'disabled-but-styled' : ''}
                     ${source.type === "regularItem" && source.childItemKeys.length == 0 ? 'opacity-60' : ''}
-                    ${!isValid ? 'border-red' : ''} 
+                    ${!isValid ? 'border-red' : ''}
                 `}
                 disabled={disabled}
                 onClick={handlePinClick} // Use updated handler
