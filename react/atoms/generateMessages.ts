@@ -26,7 +26,7 @@ import { Model, selectedModelAtom, DEFAULT_MODEL } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
-import { toMessageAttachment } from '../types/attachments/converters';
+import { toMessageAttachment, toThreadSource } from '../types/attachments/converters';
 
 const MODE = getPref('mode');
 
@@ -216,15 +216,10 @@ export const generateResponseAtom = atom(
             ...(readerAttachment ? [readerAttachment] : [])
         ];
 
-        // TODO: Add attachments to curren thread
-        // set(updateThreadSourcesAtom, {
-        //     attachments: messageAttachments,
-        //     messageId: userMsg.id
-        // });
-        // const threadSources = get(threadSourcesAtom);
-        // const payloadSources = await prepareSources(payload.sources, readerAttachment, userMsg.id);
-        // const newThreadSources: ThreadSource[] = [...threadSources, ...payloadSources];
-        // set(threadSourcesAtom, newThreadSources);
+        // Update thread sources
+        const newThreadSources = await Promise.all(messageAttachments.map(a => toThreadSource(a, userMsg.id)));
+        set(threadSourcesAtom, (prev) => 
+            [...prev, ...newThreadSources.filter(Boolean) as ThreadSource[]]);
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
