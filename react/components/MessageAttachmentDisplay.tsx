@@ -1,11 +1,12 @@
 import React from 'react'
 import { SourceButton } from './SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/input';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, readerAnnotationsAtom } from '../atoms/input';
 import { TextSelectionButton } from './TextSelectionButton';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from './AddSourcesMenu';
 import { threadSourceCountAtom } from '../atoms/threads';
+import { AnnotationButton } from './AnnotationButton';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -22,8 +23,9 @@ const MessageAttachmentDisplay = ({
 }) => {
     const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
+    const readerAnnotations = useAtomValue(readerAnnotationsAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
-    const threadSourceCount = useAtomValue(threadSourceCountAtom);
+    const threadSourceCount = useAtomValue(threadSourceCountAtom)
 
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
@@ -71,6 +73,14 @@ const MessageAttachmentDisplay = ({
                     />
                 ))
             }
+
+            {/* Current annotations */}
+            {readerAnnotations.map((annotation, index) => (
+                <AnnotationButton
+                    key={index}
+                    annotation={annotation}
+                />
+            ))}
 
             {/* Current text selection */}
             {readerTextSelection && (
