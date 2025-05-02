@@ -3,6 +3,7 @@ import { useAtom } from 'jotai';
 import { activePreviewAtom, previewCloseTimeoutAtom } from '../atoms/ui';
 import SourcePreviewContent from './previews/SourcePreviewContent';
 import TextSelectionPreviewContent from './previews/TextSelectionPreviewContent';
+import AnnotationPreviewContent from './previews/AnnotationPreviewContent';
 
 // Preview height constants
 const MIN_HEIGHT = 100;
@@ -110,6 +111,8 @@ const PreviewContainer: React.FC = () => {
                 return <SourcePreviewContent source={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'textSelection':
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
+            case 'annotation':
+                return <AnnotationPreviewContent annotation={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }
