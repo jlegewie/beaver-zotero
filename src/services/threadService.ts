@@ -139,12 +139,10 @@ export class ThreadService extends ApiService {
         
         for (const message of messages) {
             for (const attachment of message.attachments || []) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
-                if (!item) continue;
-                sources.push({
-                    ...(await createSourceFromItem(item)),
-                    messageId: message.id,
-                } as ThreadSource);
+                const source = await toThreadSource(attachment, message.id);
+                if (source) {
+                    sources.push(source);
+                }
             }
         }
 
