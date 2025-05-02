@@ -1,8 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom } from '../atoms/input';
+import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, readerAnnotationsAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
+import { toAnnotation } from '../types/attachments/converters';
+
+const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"];
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -13,6 +16,7 @@ import { TextSelection, addSelectionChangeListener, getCurrentReader, getSelecte
 export function useReaderTabSelection() {
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
+    const setReaderAnnotations = useSetAtom(readerAnnotationsAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
@@ -66,6 +70,7 @@ export function useReaderTabSelection() {
         if (!reader) {
             logger("useReaderTabSelection:setupReader: No reader provided.");
             setReaderTextSelection(null);
+            setReaderAnnotations([]);
             return;
         }
 
@@ -125,6 +130,7 @@ export function useReaderTabSelection() {
         } else {
              logger("useReaderTabSelection: No active reader on mount.");
              setReaderTextSelection(null); // Ensure selection is null if no reader
+             setReaderAnnotations([]);
         }
 
         // Set up tab change listener
@@ -147,6 +153,7 @@ export function useReaderTabSelection() {
                             selectionCleanupRef.current = null;
                             currentReaderIdRef.current = null;
                             setReaderTextSelection(null);
+                            setReaderAnnotations([]);
                         }
                         // If newReader is the same as current, do nothing - already handled
                     } else {
@@ -158,17 +165,41 @@ export function useReaderTabSelection() {
                         }
                         currentReaderIdRef.current = null;
                         setReaderTextSelection(null);
+                        setReaderAnnotations([]);
                         setReaderAttachment(null);
                     }
                 }
                 // Annotation events
-                if (type === 'item' && (event === 'add' || event === 'modify')) {
-                    console.log(`Annotation event received`);
-                    const item = Zotero.Items.get(ids[0]);
-                    if (event === 'add' && item.isAnnotation()) {
-                        console.log(`Annotation item added ${item.id}`);
-                    } else if (event === 'modify' && item.isAnnotation()) {
-                        console.log(`Annotation item modified ${item.id}`);
+                if (type === 'item') {
+                    // Add/modify events
+                    if (event === 'add' || event === 'modify') {
+                        const item = Zotero.Items.get(ids[0]);
+                        if(!item.isAnnotation() || !VALID_ANNOTATION_TYPES.includes(item.annotationType)) return;
+                        const eventAnnotation = toAnnotation(item);
+                        if (event === 'add' && eventAnnotation) {
+                            setReaderAnnotations((prev) => [...prev, eventAnnotation]);
+                        } else if (event === 'modify' && eventAnnotation) {
+                            setReaderAnnotations((prevAnnotations) => 
+                                prevAnnotations.map((annotation) => {
+                                    return annotation.zotero_key === eventAnnotation.zotero_key
+                                    ? eventAnnotation
+                                    : annotation;
+                                })
+                            );
+                        }
+                    }
+                    // Delete events
+                    if (event === 'delete') {
+                        ids.forEach(id => {
+                            if (extraData && extraData[id]) {
+                                const { libraryID, key } = extraData[id];
+                                if (libraryID && key) {
+                                    setReaderAnnotations((prev) =>
+                                        prev.filter((annotation) => !(annotation.library_id === libraryID && annotation.zotero_key === key)
+                                    ));
+                                }
+                            }
+                        });
                     }
                 }
             }
@@ -201,6 +232,7 @@ export function useReaderTabSelection() {
             currentReaderIdRef.current = null;
             // Reset atom state on unmount
             setReaderTextSelection(null);
+            setReaderAnnotations([]);
         };
     }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader]);
 
