@@ -19,17 +19,40 @@ function getCurrentReader(window?: Window): any | undefined {
  * @param reader - The reader instance.
  * @param page - The page number to scroll into view.
  */
-function scrollPageIntoView(reader: any, page: number) {
+async function navigateToPage(reader: any | null, page: number) {
+    reader = reader || getCurrentReader();
+    if (!reader) return;
+    await Zotero.Reader.open(reader.itemID, {pageIndex: page - 1})
+    // // const window = Zotero.getMainWindow();
+    // // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
+    // // reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer.scrollPageIntoView({
+    // //     pageNumber: page,
+    // // });
+    // // BETTER
+    // await reader._internalReader._primaryView.navigate({
+    //     pageIndex: page  // Zero-based, so this will go to page 1
+    // })
+}
+
+async function navigateToAnnotation(reader: any, annotation: Zotero.Item) {
     // const window = Zotero.getMainWindow();
     // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
-    reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer.scrollPageIntoView({
-        pageNumber: page,
-    });
-    // BETTER
-    // await reader._internalReader._primaryView.navigate({
-    //     pageIndex: 5  // Zero-based, so this will go to page 1
-    // })
-}   
+    // return await reader.navigate({annotationID: reader.annotationItemIDs[2]})
+    reader.navigate({annotationID: annotation.id});
+    // reader.setSelectedAnnotations([annotations[0].id])
+    // await Zotero.Reader.open(reader.itemID, {annotationID: reader.annotationItemIDs[0]})
+}
+
+
+/**
+ * Retrieves the annotations of the current reader.
+ * 
+ * @param reader - The reader instance.
+ * @returns The annotations.
+ */
+function getCurrentReaderAnnotations(reader: any) {
+    return reader.annotationItemIDs || [];
+}
 
 /**
  * Retrieves the current page number of the reader.
@@ -126,38 +149,6 @@ export type ReaderContext = {
     selection: string | null;
 }
 
-
-/**
- * Retrieves the reader context.
- * 
- * @returns The reader context.
- */
-function getReaderContext(): ReaderContext | undefined {
-    let context: ReaderContext | undefined;
-    const reader = getCurrentReader();
-    if (reader && reader.type === 'pdf') {
-        const item = getCurrentItem(reader);
-        const parentItem = item.parentItem;
-        const reference = parentItem
-            // @ts-ignore Beaver exists
-            ? Zotero.Beaver.citationService.formatBibliography(parentItem)
-            : null;
-        const type = parentItem
-            ? Zotero.ItemTypes.getLocalizedString(parentItem.itemType)
-            : 'article, book, report or other document';
-        context = {
-            libraryID: item.libraryID,
-            itemKey: item.key,
-            page: getCurrentPage(reader),
-            selection: getSelectedText(reader),
-            identifier: createSourceIdentifier(item),
-            itemType: type,
-            reference: reference,
-        } as ReaderContext;
-    }
-    return context;
-}
-
 function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
     if (reader.type !== "pdf") {
         return null;
@@ -196,5 +187,5 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
 }
 
-export { getCurrentReader, getCurrentPage, getSelectedText, getCurrentItem, getReaderContext, TextSelection, addSelectionChangeListener, getSelectedTextAsTextSelection };
+export { getCurrentReader, getCurrentPage, navigateToPage, getSelectedText, getCurrentItem, addSelectionChangeListener, getSelectedTextAsTextSelection };
 

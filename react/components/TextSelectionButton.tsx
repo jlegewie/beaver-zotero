@@ -50,7 +50,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     className="source-remove -ml-020 -mr-015"
                     onClick={(e) => {
                         e.stopPropagation()
-                        handleRemove() // Use internal handleRemove
+                        handleRemove()
                     }}
                 >
                     <CSSIcon name="x-8" className="icon-16" />
@@ -74,7 +74,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
-                    // Maybe navigate to text in reader? Or just rely on preview action
+                    navigateToPage(null, selection.page)
                 }}
                 {...rest}
             >

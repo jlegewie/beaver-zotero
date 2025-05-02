@@ -6,15 +6,16 @@ import { activePreviewAtom } from '../atoms/ui'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { readerAnnotationsAtom } from '../atoms/input';
 import { Annotation } from '../types/attachments/apiTypes';
+import { navigateToPage } from '../utils/readerUtils';
 
-const ANNOTATION_TEXT_BY_TYPE = {
+export const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
     underline: 'Underline',
     note: 'Note',
     image: 'Image',
 }
 
-const ANNOTATION_ICON_BY_TYPE = {
+export const ANNOTATION_ICON_BY_TYPE = {
     highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
     underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
     note: ZOTERO_ICONS.ANNOTATE_NOTE,
@@ -94,6 +95,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 onClick={(e) => {
                     e.stopPropagation();
                     // TODO: Implement navigation to annotation using `navigateToAnnotation`
+                    navigateToPage(null, annotation.position.page_index + 1);
                 }}
                 {...rest}
             >

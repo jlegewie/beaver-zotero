@@ -25,8 +25,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
     };
 
     const handleOpen = async () => {
-        // TODO: Implement "Go to Page" functionality
-        Zotero.getMainWindow().console.log("TODO: Implement Go to Page for Text Selection Preview");
+        navigateToPage(null, selection.page);
     };
 
     return (
