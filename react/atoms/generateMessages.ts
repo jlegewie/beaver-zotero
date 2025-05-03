@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
 import { MessageModel } from '../types/chat/apiTypes';
-import { MessageAttachment, ReaderAttachment, SourceAttachment } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, MessageAttachment, ReaderAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
     setMessageStatusAtom,
@@ -115,6 +115,55 @@ export async function getCurrentMessageAttachments(sources?: InputSource[]): Pro
 }
 
 /**
+ * Processes annotation attachments of type image to add base64 data.
+ * 
+ * @param attachments - Array of MessageAttachment objects to process
+ * @returns Array of MessageAttachment objects with base64 data
+ */
+export async function processImageAnnotations(attachments: MessageAttachment[]): Promise<MessageAttachment[]> {
+    // Process image annotations to add base64 data
+    const processedAttachments = await Promise.all(
+        attachments.map(async (attachment) => {
+            // Only process AnnotationAttachment of type image
+            if (!isAnnotationAttachment(attachment)) return attachment;
+            if (attachment.annotation_type !== 'image') return attachment;
+
+            // Create a reference to the Zotero item
+            const item = {
+                libraryID: attachment.library_id,
+                key: attachment.zotero_key
+            };
+
+            // Check if image exists in cache
+            const hasCachedImage = await Zotero.Annotations.hasCacheImage(item);
+            if (!hasCachedImage) {
+                logger(`processImageAnnotations: No cached image found for attachment ${attachment.zotero_key}`);
+                return attachment;
+            }
+
+            try {
+                // Get image path
+                const imagePath = Zotero.Annotations.getCacheImagePath(item);
+                
+                // Read the image file and convert to base64
+                const imageData = await IOUtils.read(imagePath);
+                const image_base64 = uint8ArrayToBase64(imageData);
+                
+                // Return attachment with image data
+                return {
+                    ...attachment,
+                    image_base64: image_base64
+                };
+            } catch (error) {
+                logger(`processImageAnnotations: Failed to process image for attachment ${attachment.zotero_key}: ${error}`);
+                return attachment;
+            }
+        })
+    );
+    return processedAttachments;
+}
+
+/**
  * Generates a response from the assistant based on the user's message and sources.
  * 
  * This function performs the following operations:
@@ -154,13 +203,14 @@ export const generateResponseAtom = atom(
         const readerAttachment = await getCurrentReaderAttachment();
         const userAttachments = await Promise.all(
             validatedSources
-                .filter((s) => !readerAttachment || s.itemKey !== readerAttachment.zotero_key)
+                .filter((s) => !readerAttachment || !(s.itemKey == readerAttachment.zotero_key && s.libraryID == readerAttachment.library_id))
                 .map(async (s) => await toMessageAttachment(s))
         );
-        const messageAttachments: MessageAttachment[] = [
+        // Process image annotations
+        const messageAttachments = await processImageAnnotations([
             ...userAttachments.flat(),
             ...(readerAttachment ? [readerAttachment] : [])
-        ];
+        ]);
 
         // Update thread sources
         const newThreadSources = await Promise.all(messageAttachments.map(a => toThreadSource(a, userMsg.id)));
