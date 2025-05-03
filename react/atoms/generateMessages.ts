@@ -166,15 +166,17 @@ export async function processImageAnnotations(attachments: MessageAttachment[]):
 /**
  * Generates a response from the assistant based on the user's message and sources.
  * 
- * This function performs the following operations:
- * 1. Creates a user message from the provided content
- * 2. Creates an assistant message
- * 3. Updates the thread messages atom with the new messages
- * 4. Prepares sources for the chat completion
- * 5. Combines existing thread sources with payload sources
- * 6. Updates the thread sources atom with the new sources
- * 7. Resets the current user message and source after adding to message
- * 8. Executes chat completion
+ * This function:
+ * 1. Creates user and assistant messages
+ * 2. Adds them to the thread messages
+ * 3. Processes input sources (flattens and validates them)
+ * 4. Converts validated sources to message attachments
+ * 5. Processes image annotations to include base64 data when available
+ * 6. Updates thread sources with the new attachments
+ * 7. Resets user input state (message content and sources)
+ * 8. Initiates chat completion via the backend service
+ * 
+ * @returns The ID of the created assistant message
  */
 export const generateResponseAtom = atom(
     null,
