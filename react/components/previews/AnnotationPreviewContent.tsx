@@ -69,8 +69,11 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ann
     };
 
     const handleGoToAnnotation = async () => {
-        // TODO: implement navigation or selection function            
-        navigateToPage(null, annotation.position.page_index + 1);
+        // TODO: implement navigation or selection function
+        const itemId = Zotero.Items.getIDFromLibraryAndKey(annotation.library_id, annotation.parent_key);
+        if (itemId) {
+            navigateToPage(itemId, annotation.position.page_index + 1);
+        }
     };
 
     const renderAnnotationContent = () => {

@@ -130,7 +130,10 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 onClick={(e) => {
                     e.stopPropagation();
                     // TODO: Implement navigation to annotation using `navigateToAnnotation`
-                    navigateToPage(null, derivedAnnotation.position.page_index + 1);
+                    const itemId = Zotero.Items.getIDFromLibraryAndKey(derivedAnnotation.library_id, derivedAnnotation.parent_key);
+                    if (itemId) {
+                        navigateToPage(itemId, derivedAnnotation.position.page_index + 1);
+                    }
                 }}
                 {...rest}
             >

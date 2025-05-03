@@ -7,7 +7,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import Button from '../button';
 import IconButton from '../IconButton';
 import { TextSelection } from '../../types/attachments/apiTypes';
-import { navigateToPage } from '../../utils/readerUtils';
+import { navigateToPageInCurrentReader } from '../../utils/readerUtils';
 
 interface TextSelectionPreviewContentProps {
     selection: TextSelection;
@@ -25,7 +25,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
     };
 
     const handleOpen = async () => {
-        navigateToPage(null, selection.page);
+        navigateToPageInCurrentReader(selection.page);
     };
 
     return (

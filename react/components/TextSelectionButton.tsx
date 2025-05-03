@@ -2,7 +2,7 @@ import React, { forwardRef } from 'react'
 import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../atoms/input'
-import { navigateToPage } from '../utils/readerUtils'
+import { navigateToPageInCurrentReader } from '../utils/readerUtils'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { activePreviewAtom } from '../atoms/ui'
 import { TextSelection } from '../types/attachments/apiTypes'
@@ -74,7 +74,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                 disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
-                    navigateToPage(null, selection.page)
+                    navigateToPageInCurrentReader(selection.page);
                 }}
                 {...rest}
             >

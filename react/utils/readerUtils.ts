@@ -14,21 +14,22 @@ function getCurrentReader(window?: Window): any | undefined {
 }
 
 /**
- * Scrolls a page into view.
+ * Navigates to a page in the reader.
  * 
- * @param reader - The reader instance.
- * @param page - The page number to scroll into view.
+ * @param itemID - The item ID.
+ * @param page - The page number to navigate to.
  */
-async function navigateToPage(reader: any | null, page: number) {
-    reader = reader || getCurrentReader();
+async function navigateToPage(itemID: number, page: number) {
+    await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+}
+
+async function navigateToPageInCurrentReader(page: number) {
+    const reader = getCurrentReader();
     if (!reader) return;
     await Zotero.Reader.open(reader.itemID, {pageIndex: page - 1})
-    // // const window = Zotero.getMainWindow();
-    // // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
-    // // reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer.scrollPageIntoView({
-    // //     pageNumber: page,
-    // // });
-    // // BETTER
+    // TODO: Use smooth scroll to page
+    // const window = Zotero.getMainWindow();
+    // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
     // await reader._internalReader._primaryView.navigate({
     //     pageIndex: page  // Zero-based, so this will go to page 1
     // })
@@ -187,5 +188,5 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
 }
 
-export { getCurrentReader, getCurrentPage, navigateToPage, getSelectedText, getCurrentItem, addSelectionChangeListener, getSelectedTextAsTextSelection };
+export { getCurrentReader, getCurrentPage, navigateToPage, getSelectedText, getCurrentItem, addSelectionChangeListener, getSelectedTextAsTextSelection, navigateToPageInCurrentReader, navigateToAnnotation };
 
