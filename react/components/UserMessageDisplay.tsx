@@ -8,6 +8,7 @@ import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { InputSource } from '../types/sources';
 import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
+import { currentReaderAttachmentKeyAtom } from '../atoms/input';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -18,10 +19,11 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
 }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const threadSources = useAtomValue(threadSourcesAtom);
+    const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const messageSources: InputSource[] = useMemo(() => {
-        const messageSources = threadSources.filter(r => r.messageId === message.id);
+        const messageSources = threadSources.filter(r => r.messageId === message.id && r.itemKey !== currentReaderAttachmentKey);
         const organizedSources = organizeSourcesByRegularItems(messageSources);
         return organizedSources;
     }, [threadSources]);
