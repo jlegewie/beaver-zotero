@@ -9,6 +9,7 @@ import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { InputSource } from '../types/sources';
 import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
 import { currentReaderAttachmentKeyAtom } from '../atoms/input';
+import { AnnotationButton } from './AnnotationButton';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -23,10 +24,11 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const messageSources: InputSource[] = useMemo(() => {
-        const messageSources = threadSources.filter(r => r.messageId === message.id && r.itemKey !== currentReaderAttachmentKey);
+        const messageSources = threadSources
+            .filter(s => s.messageId === message.id && s.itemKey !== currentReaderAttachmentKey);
         const organizedSources = organizeSourcesByRegularItems(messageSources);
         return organizedSources;
-    }, [threadSources]);
+    }, [threadSources, currentReaderAttachmentKey]);
 
     const {
         isMenuOpen: isSelectionMenuOpen, 
@@ -43,15 +45,23 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             {messageSources.length > 0 && (
                 <div className="display-flex flex-wrap gap-3 mb-2">
                     {messageSources.map((source, index) => (
-                        <SourceButton
-                            key={index}
-                            source={source}
-                            // disabled={true}
-                            canEdit={false}
-                        />
+                        source.type === "annotation" ? (
+                            <AnnotationButton
+                                key={index}
+                                source={source}
+                                canEdit={false}
+                            />
+                        ) : (
+                            <SourceButton
+                                key={index}
+                                source={source}
+                                canEdit={false}
+                            />
+                        )
                     ))}
                 </div>
             )}
+            
 
             {/* Message content */}
             <div className="-ml-1 user-select-text" ref={contentRef} onContextMenu={handleContextMenu}>
