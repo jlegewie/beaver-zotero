@@ -3,6 +3,15 @@
  * Mirrors the pydantic models SourceAttachment, AnnotationAttachment, NoteAttachment
  */
 
+
+// Valid annotation types
+export const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"] as const;
+export type ValidAnnotationType = typeof VALID_ANNOTATION_TYPES[number];
+
+export function isValidAnnotationType(type: _ZoteroTypes.Annotations.AnnotationType): type is ValidAnnotationType {
+    return VALID_ANNOTATION_TYPES.includes(type as ValidAnnotationType);
+}
+
 export type MessageAttachment =
     | SourceAttachment
     | AnnotationAttachment
