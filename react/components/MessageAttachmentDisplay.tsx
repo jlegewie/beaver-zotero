@@ -67,10 +67,17 @@ const MessageAttachmentDisplay = ({
             {currentSources
                 .filter((attachment) => !currentReaderAttachment || attachment.itemKey !== currentReaderAttachment.itemKey)
                 .map((source, index) => (
-                    <SourceButton
-                        key={index}
-                        source={source}
-                    />
+                    source.type === "annotation" ? (
+                        <AnnotationButton
+                            key={index}
+                            source={source}
+                        />
+                    ) : (
+                        <SourceButton
+                            key={index}
+                            source={source}
+                        />
+                    )
                 ))
             }
 
