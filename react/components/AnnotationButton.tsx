@@ -1,12 +1,15 @@
-import React, { forwardRef } from 'react'
+import React, { forwardRef, useEffect, useState } from 'react'
 import { CSSIcon, Icon } from "./icons"
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { useSetAtom } from 'jotai'
-import { activePreviewAtom } from '../atoms/ui'
+import { ActivePreview, activePreviewAtom } from '../atoms/ui'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { readerAnnotationsAtom } from '../atoms/input';
 import { Annotation } from '../types/attachments/apiTypes';
 import { navigateToPage } from '../utils/readerUtils';
+import { InputSource } from '../types/sources';
+import { toAnnotation } from '../types/attachments/converters';
+import { getZoteroItem } from '../utils/sourceUtils';
 
 export const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
@@ -24,7 +27,8 @@ export const ANNOTATION_ICON_BY_TYPE = {
 }
 
 interface AnnotationButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'content'> {
-    annotation: Annotation
+    annotation?: Annotation
+    source?: InputSource
     canEdit?: boolean
     disabled?: boolean
     onRemove?: (annotationKey: string) => void; // Optional callback for removal
@@ -33,28 +37,58 @@ interface AnnotationButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButt
 export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonProps>(
     function AnnotationButton(props: AnnotationButtonProps, ref: React.ForwardedRef<HTMLButtonElement>) {
         const {
-            annotation,
+            annotation: annotationProp,
+            source,
             className,
             disabled = false,
             canEdit = true,
             ...rest
         } = props
-
-        // States/Atoms needed for non-preview logic
+        
         const setActivePreview = useSetAtom(activePreviewAtom)
         const setReaderAnnotationsAtom = useSetAtom(readerAnnotationsAtom);
+        const [derivedAnnotation, setDerivedAnnotation] = useState<Annotation | null>(null);
+
+        // Define preview content
+        const previewContent = derivedAnnotation 
+            ? { type: 'annotation', content: derivedAnnotation } as ActivePreview
+            : null;
 
         // Use the custom hook for hover preview logic
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            { type: 'annotation', content: annotation }, // Preview content for annotation
-            { isEnabled: !disabled && canEdit } // Options: Disable if button disabled or not editable
+            previewContent,
+            // Options: Disable if derivedAnnotation undefined orbutton disabled or not editable
+            { isEnabled: !disabled && canEdit && !!derivedAnnotation }
         )
+
+        useEffect(() => {
+            // When annotation prop is provided directly, use it
+            if (annotationProp) {
+                setDerivedAnnotation(annotationProp);
+                return;
+            }
+            
+            // Otherwise try to derive from source
+            if (source) {
+                const item = getZoteroItem(source);
+                if (item) {
+                    setDerivedAnnotation(toAnnotation(item));
+                } else {
+                    setDerivedAnnotation(null);
+                }
+            } else {
+                setDerivedAnnotation(null);
+            }
+        }, [annotationProp, source]);
+
+        // Early return if no annotation is available
+        if (!derivedAnnotation) return null;
 
         // Handle removal: Use the provided callback if available
         const handleRemove = () => {
             cancelTimers() // Cancel preview timers
             setActivePreview(null) // Ensure preview is explicitly closed
-            setReaderAnnotationsAtom((prev) => prev.filter((a) => a.zotero_key !== annotation.zotero_key))
+            setReaderAnnotationsAtom((prev) => prev.filter((a) => a.zotero_key !== derivedAnnotation.zotero_key))
         }
 
         // Update getIconElement to use isHovered from the hook
@@ -74,12 +108,12 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
             }
             // Use Zotero annotation icons
             return (
-                <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14}/>
+                <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[derivedAnnotation.annotation_type]} size={14}/>
             )
         }
 
         // Determine display text
-        const displayText = ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation';
+        const displayText = ANNOTATION_TEXT_BY_TYPE[derivedAnnotation.annotation_type] || 'Annotation';
 
         return (
             <button
@@ -95,7 +129,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 onClick={(e) => {
                     e.stopPropagation();
                     // TODO: Implement navigation to annotation using `navigateToAnnotation`
-                    navigateToPage(null, annotation.position.page_index + 1);
+                    navigateToPage(null, derivedAnnotation.position.page_index + 1);
                 }}
                 {...rest}
             >
