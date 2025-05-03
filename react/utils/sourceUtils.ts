@@ -102,8 +102,8 @@ export function organizeSourcesByRegularItems(sources: InputSource[]): InputSour
         // If the source is not a regular item, skip it (already in regularItemSources)
         if(source.type === "regularItem") return acc;
 
-        // If the source has no parent, add it to the accumulator
-        if(!source.parentKey) {
+        // If the source has no parent or is an annotation, add it to the accumulator
+        if(!source.parentKey || source.type === "annotation") {
             acc.push(source);
             return acc;
         }
