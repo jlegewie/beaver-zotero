@@ -27,6 +27,8 @@ import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
 import { toMessageAttachment, toThreadSource } from '../types/attachments/converters';
+import { logger } from '../../src/utils/logger';
+import { uint8ArrayToBase64 } from '../utils/fileUtils';
 
 const MODE = getPref('mode');
 
@@ -87,6 +89,47 @@ export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | n
             (a.annotation_type === 'note' && (a.text || a.comment)) ||
             (a.annotation_type === 'image')
         );
+    
+    // Process image annotations to add base64 data
+    const processedAnnotations = await Promise.all(
+        annotations.map(async (annotation) => {
+            // Only process image annotations
+            if (annotation.annotation_type !== 'image') {
+                return annotation;
+            }
+
+            // Create a reference to the Zotero item
+            const item = {
+                libraryID: annotation.library_id,
+                key: annotation.zotero_key
+            };
+
+            // Check if image exists in cache
+            const hasCachedImage = await Zotero.Annotations.hasCacheImage(item);
+            if (!hasCachedImage) {
+                logger(`getCurrentReaderAttachment: No cached image found for annotation ${annotation.zotero_key}`);
+                return annotation;
+            }
+
+            try {
+                // Get image path
+                const imagePath = Zotero.Annotations.getCacheImagePath(item);
+                
+                // Read the image file and convert to base64
+                const imageData = await IOUtils.read(imagePath);
+                const image_base64 = uint8ArrayToBase64(imageData);
+                
+                // Return annotation with image data
+                return {
+                    ...annotation,
+                    image_base64: image_base64
+                };
+            } catch (error) {
+                logger(`getCurrentReaderAttachment: Failed to process image for annotation ${annotation.zotero_key}: ${error}`);
+                return annotation;
+            }
+        })
+    );
 
     // ReaderAttachment
     return {
@@ -95,7 +138,7 @@ export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | n
         zotero_key: readerSource.itemKey,
         current_page: getCurrentPage() || 0,
         ...(currentTextSelection && { text_selection: currentTextSelection }),
-        annotations: annotations
+        annotations: processedAnnotations
     } as ReaderAttachment;
 }
 
