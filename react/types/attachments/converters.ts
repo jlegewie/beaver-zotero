@@ -10,7 +10,8 @@ import {
     Annotation,
     AnnotationPosition,
     isSourceAttachment,
-    isReaderAttachment
+    isReaderAttachment,
+    isAnnotationAttachment
 } from './apiTypes';
 
 export function getAnnotationsFromItem(item: Zotero.Item): Annotation[] {
@@ -126,6 +127,15 @@ export async function toThreadSource(attachment: MessageAttachment, messageId?: 
             ...(await createSourceFromItem(item)),
             ...(messageId && { messageId: messageId }),
             type: "reader"
+        } as ThreadSource;
+    }
+    if (isAnnotationAttachment(attachment)) {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
+        if (!item) return null;
+        return {
+            ...(await createSourceFromItem(item)),
+            ...(messageId && { messageId: messageId }),
+            type: "annotation"
         } as ThreadSource;
     }
     return null;
