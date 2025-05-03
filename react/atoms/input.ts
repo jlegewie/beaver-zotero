@@ -49,7 +49,7 @@ export const resetCurrentSourcesAtom = atom(
 */
 export const updateSourcesFromZoteroItemsAtom = atom(
     null,
-    async (get, set, selectedItems: Zotero.Item[]) => {
+    async (get, set, items: Zotero.Item[]) => {
         const currentSources = get(currentSourcesAtom);
         const threadSourceKeys = get(threadSourceKeysAtom);
         
@@ -67,7 +67,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         ]);
     
         // Create new sources from selected items
-        const newSourcesPromises = selectedItems
+        const newSourcesPromises = items
             .filter((item) => !excludedKeys.has(item.key))
             .map(async (item) => {
                 if (existingMap.has(item.key)) {
