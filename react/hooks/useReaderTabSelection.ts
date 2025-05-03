@@ -3,10 +3,7 @@ import { useSetAtom } from 'jotai';
 import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroItemsAtom, currentSourcesAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
-import { toAnnotation } from '../types/attachments/converters';
-import { TextSelection } from '../types/attachments/apiTypes';
-
-const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"];
+import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -172,7 +169,7 @@ export function useReaderTabSelection() {
                     // Add events
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
-                        if(!item.isAnnotation() || !VALID_ANNOTATION_TYPES.includes(item.annotationType)) return;
+                        if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                         await updateSourcesFromZoteroItems([item], true);
                     }
                     // Delete events
