@@ -49,7 +49,7 @@ export const resetCurrentSourcesAtom = atom(
 */
 export const updateSourcesFromZoteroItemsAtom = atom(
     null,
-    async (get, set, items: Zotero.Item[]) => {
+    async (get, set, items: Zotero.Item[], pinned: boolean = false) => {
         const currentSources = get(currentSourcesAtom);
         const threadSourceKeys = get(threadSourceKeysAtom);
         
@@ -73,7 +73,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
                 if (existingMap.has(item.key)) {
                     return existingMap.get(item.key)!;
                 }
-                return await createSourceFromItem(item, false, threadSourceKeys);
+                return await createSourceFromItem(item, pinned, threadSourceKeys);
             });
         
         // Wait for all sources to be created
