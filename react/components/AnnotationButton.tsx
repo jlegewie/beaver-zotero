@@ -1,10 +1,10 @@
 import React, { forwardRef, useEffect, useState } from 'react'
-import { CSSIcon, Icon } from "./icons"
+import { CSSIcon, Icon, ArrowUpRightIcon } from "./icons"
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { useSetAtom } from 'jotai'
+import { useSetAtom, useAtomValue } from 'jotai'
 import { ActivePreview, activePreviewAtom } from '../atoms/ui'
 import { usePreviewHover } from '../hooks/usePreviewHover'
-import { readerAnnotationsAtom } from '../atoms/input';
+import { currentReaderAttachmentKeyAtom, readerAnnotationsAtom } from '../atoms/input';
 import { Annotation } from '../types/attachments/apiTypes';
 import { navigateToPage } from '../utils/readerUtils';
 import { InputSource } from '../types/sources';
@@ -47,6 +47,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         
         const setActivePreview = useSetAtom(activePreviewAtom)
         const setReaderAnnotationsAtom = useSetAtom(readerAnnotationsAtom);
+        const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
         const [derivedAnnotation, setDerivedAnnotation] = useState<Annotation | null>(null);
 
         // Define preview content
@@ -137,6 +138,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 <span className={`truncate`}>
                     {displayText}
                 </span>
+                {currentReaderAttachmentKey !== derivedAnnotation.parent_key && <Icon icon={ArrowUpRightIcon} className="scale-11" /> }
             </button>
         )
     }
