@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { InputSource, ThreadSource } from '../types/sources';
-import { createZoteroURI } from './zoteroURI';
 import { truncateText } from './stringUtils';
 import { syncingItemFilter } from '../../src/utils/sync';
+import { isValidAnnotationType } from '../types/attachments/apiTypes';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -211,6 +211,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
     }
     // Annotation item parent have to pass the syncing filter and exist
     else if (item.isAnnotation()) {
+        if (!isValidAnnotationType(item.annotationType)) return false;
         const parent = item.parentItem;
         if (!parent || !parent.isAttachment()) return false;
         if (!syncingItemFilter(parent)) return false;
