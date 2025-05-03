@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
-import { readerAnnotationsAtom } from '../../atoms/input';
+import { currentSourcesAtom } from '../../atoms/input';
 import { navigateToPage } from '../../utils/readerUtils';
 import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
 import Button from '../button';
 import IconButton from '../IconButton';
-import { CancelIcon, Icon } from '../icons';
+import { CancelIcon } from '../icons';
 import { InputSource } from '../../types/sources';
 import { toAnnotation } from '../../types/attachments/converters';
 import { getZoteroItem } from '../../utils/sourceUtils';
@@ -28,7 +28,7 @@ interface AnnotationPreviewContentProps {
 
 const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ attachment, maxContentHeight }) => {
     const setActivePreview = useSetAtom(activePreviewAtom);
-    const setReaderAnnotations = useSetAtom(readerAnnotationsAtom);
+    const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
     const [imagePath, setImagePath] = useState<string | null>(null);
     const [imageError, setImageError] = useState<boolean>(false);
     const [annotation, setAnnotation] = useState<Annotation | null>(null);
@@ -89,8 +89,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
     if (!annotation || !annotationIcon || !annotationText) return null;
 
     const handleRemove = () => {
-        // Remove annotation state and close preview
-        setReaderAnnotations((prev) => prev.filter((a) => a.zotero_key !== annotation.zotero_key));
+        setCurrentSourcesAtom((prev) => prev.filter((a) => a.itemKey !== annotation.zotero_key))
         setActivePreview(null);
     };
 

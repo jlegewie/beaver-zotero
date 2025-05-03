@@ -2,9 +2,9 @@ import React, { forwardRef, useEffect, useState } from 'react'
 import { CSSIcon, Icon, ArrowUpRightIcon } from "./icons"
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { useSetAtom, useAtomValue } from 'jotai'
-import { ActivePreview, activePreviewAtom } from '../atoms/ui'
+import { activePreviewAtom } from '../atoms/ui'
 import { usePreviewHover } from '../hooks/usePreviewHover'
-import { currentReaderAttachmentKeyAtom, readerAnnotationsAtom } from '../atoms/input';
+import { currentReaderAttachmentKeyAtom, currentSourcesAtom } from '../atoms/input';
 import { Annotation } from '../types/attachments/apiTypes';
 import { navigateToPage } from '../utils/readerUtils';
 import { InputSource } from '../types/sources';
@@ -46,7 +46,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         } = props
         
         const setActivePreview = useSetAtom(activePreviewAtom)
-        const setReaderAnnotationsAtom = useSetAtom(readerAnnotationsAtom);
+        const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
         const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
         const [derivedAnnotation, setDerivedAnnotation] = useState<Annotation | null>(null);
 
@@ -84,7 +84,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         const handleRemove = () => {
             cancelTimers() // Cancel preview timers
             setActivePreview(null) // Ensure preview is explicitly closed
-            setReaderAnnotationsAtom((prev) => prev.filter((a) => a.zotero_key !== derivedAnnotation.zotero_key))
+            setCurrentSourcesAtom((prev) => prev.filter((a) => a.itemKey !== derivedAnnotation.zotero_key))
         }
 
         // Update getIconElement to use isHovered from the hook

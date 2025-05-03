@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, readerAnnotationsAtom } from '../atoms/input';
+import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, readerAnnotationsAtom, updateSourcesFromZoteroItemsAtom, currentSourcesAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { toAnnotation } from '../types/attachments/converters';
@@ -19,6 +19,8 @@ export function useReaderTabSelection() {
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAnnotations = useSetAtom(readerAnnotationsAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
+    const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
+    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -172,22 +174,11 @@ export function useReaderTabSelection() {
                 }
                 // Annotation events
                 if (type === 'item') {
-                    // Add/modify events
-                    if (event === 'add' || event === 'modify') {
+                    // Add events
+                    if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !VALID_ANNOTATION_TYPES.includes(item.annotationType)) return;
-                        const eventAnnotation = toAnnotation(item);
-                        if (event === 'add' && eventAnnotation) {
-                            setReaderAnnotations((prev) => [...prev, eventAnnotation]);
-                        } else if (event === 'modify' && eventAnnotation) {
-                            setReaderAnnotations((prevAnnotations) => 
-                                prevAnnotations.map((annotation) => {
-                                    return annotation.zotero_key === eventAnnotation.zotero_key
-                                    ? eventAnnotation
-                                    : annotation;
-                                })
-                            );
-                        }
+                        await updateSourcesFromZoteroItems([item], true);
                     }
                     // Delete events
                     if (event === 'delete') {
@@ -195,8 +186,8 @@ export function useReaderTabSelection() {
                             if (extraData && extraData[id]) {
                                 const { libraryID, key } = extraData[id];
                                 if (libraryID && key) {
-                                    setReaderAnnotations((prev) =>
-                                        prev.filter((annotation) => !(annotation.library_id === libraryID && annotation.zotero_key === key)
+                                    setCurrentSourcesAtom((prev) =>
+                                        prev.filter((s) => !(s.libraryID === libraryID && s.itemKey === key)
                                     ));
                                 }
                             }
