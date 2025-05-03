@@ -211,9 +211,9 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
 }
 
 export async function isSourceValid(source: InputSource): Promise<boolean> {
-        const item = getZoteroItem(source);
-        if (!item) return false;
-        return await isValidZoteroItem(item);
+    const item = getZoteroItem(source);
+    if (!item) return false;
+    return await isValidZoteroItem(item);
 }
 
 export function revealSource(source: InputSource) {
