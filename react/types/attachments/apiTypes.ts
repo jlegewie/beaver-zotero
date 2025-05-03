@@ -33,7 +33,7 @@ export interface SourceAttachment extends BaseMessageAttachment {
 export interface AnnotationAttachment extends BaseMessageAttachment {
     type: "annotation";
     parent_key: string;
-    annotation_type: "highlight" | "underline" | "note" | "image";
+    annotation_type: ValidAnnotationType;
     text?: string;
     comment?: string;
     color: string;
@@ -82,7 +82,7 @@ export interface Annotation {
     zotero_key: string;
     parent_key: string;
     // annotation_type: "ink" | "highlight" | "underline" | "note" | "image" | "text";
-    annotation_type: "highlight" | "underline" | "note" | "image";
+    annotation_type: ValidAnnotationType;
     text?: string;
     comment?: string;
     color: string;
