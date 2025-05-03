@@ -10,7 +10,7 @@ import { getPref } from '../../src/utils/prefs';
 import { QuickPrompt } from "./PreferencePage";
 import { isStreamingAtom } from '../atoms/threads';
 import { generateResponseAtom } from '../atoms/generateMessages';
-import { currentSourcesAtom } from "../atoms/input";
+import { currentReaderAttachmentAtom, currentSourcesAtom } from "../atoms/input";
 import { planFeaturesAtom } from "../atoms/profile";
 
 const getQuickPromptPreferences = (): QuickPrompt[] => {
@@ -90,6 +90,7 @@ const WelcomePage: React.FC = () => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
+    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
 
     // Realtime listening for file status updates
@@ -132,12 +133,12 @@ const WelcomePage: React.FC = () => {
                         key={index}
                         variant="surface-light"
                         onClick={() => handleQuickPrompt(prompt)}
-                        disabled={prompt.requiresAttachment && currentSources.length === 0}
+                        disabled={prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
                     >
-                        <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                        <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                             {`${shortcutKey}${prompt.index}`}
                         </span>
-                        <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                        <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-tertiary' : 'font-color-secondary'}`}>
                             {prompt.title}
                         </span>
                     </Button>
