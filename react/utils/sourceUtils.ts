@@ -211,10 +211,22 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
     }
     // Annotation item parent have to pass the syncing filter and exist
     else if (item.isAnnotation()) {
+        // Check if the annotation type is valid
         if (!isValidAnnotationType(item.annotationType)) return false;
+
+        // Check if annotation is empty
+        if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return false;
+        if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return false;
+        if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return false;
+
+        // Check if the parent exists and is an attachment
         const parent = item.parentItem;
         if (!parent || !parent.isAttachment()) return false;
+
+        // Check if the parent exists and is syncing
         if (!syncingItemFilter(parent)) return false;
+
+        // Check if the parent file exists
         return await parent.fileExists();
     }
     // Notes are invalid (NoteAttachments are not yet supported)
