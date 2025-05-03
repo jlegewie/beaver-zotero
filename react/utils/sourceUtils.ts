@@ -67,6 +67,7 @@ export function getSourceTypeFromItem(item: Zotero.Item): InputSource["type"] {
     if (item.isRegularItem()) return "regularItem";
     if (item.isAttachment()) return "attachment";
     if (item.isNote()) return "note";
+    if (item.isAnnotation()) return "annotation";
     throw new Error("Invalid item type");
 }
 
