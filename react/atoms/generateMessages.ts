@@ -18,7 +18,7 @@ import {
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerAnnotationsAtom, readerTextSelectionAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
@@ -81,56 +81,6 @@ export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | n
     // Text selection
     const currentTextSelection = store.get(readerTextSelectionAtom);
     
-    // Annotations from readerAnnotationsAtom
-    const annotations = store.get(readerAnnotationsAtom)
-        .filter((a) => 
-            (a.annotation_type === 'underline' && (a.text || a.comment)) ||
-            (a.annotation_type === 'highlight' && (a.text || a.comment)) ||
-            (a.annotation_type === 'note' && (a.text || a.comment)) ||
-            (a.annotation_type === 'image')
-        );
-    
-    // Process image annotations to add base64 data
-    const processedAnnotations = await Promise.all(
-        annotations.map(async (annotation) => {
-            // Only process image annotations
-            if (annotation.annotation_type !== 'image') {
-                return annotation;
-            }
-
-            // Create a reference to the Zotero item
-            const item = {
-                libraryID: annotation.library_id,
-                key: annotation.zotero_key
-            };
-
-            // Check if image exists in cache
-            const hasCachedImage = await Zotero.Annotations.hasCacheImage(item);
-            if (!hasCachedImage) {
-                logger(`getCurrentReaderAttachment: No cached image found for annotation ${annotation.zotero_key}`);
-                return annotation;
-            }
-
-            try {
-                // Get image path
-                const imagePath = Zotero.Annotations.getCacheImagePath(item);
-                
-                // Read the image file and convert to base64
-                const imageData = await IOUtils.read(imagePath);
-                const image_base64 = uint8ArrayToBase64(imageData);
-                
-                // Return annotation with image data
-                return {
-                    ...annotation,
-                    image_base64: image_base64
-                };
-            } catch (error) {
-                logger(`getCurrentReaderAttachment: Failed to process image for annotation ${annotation.zotero_key}: ${error}`);
-                return annotation;
-            }
-        })
-    );
-
     // ReaderAttachment
     return {
         type: "reader",
@@ -138,7 +88,7 @@ export async function getCurrentReaderAttachment(): Promise<ReaderAttachment | n
         zotero_key: readerSource.itemKey,
         current_page: getCurrentPage() || 0,
         ...(currentTextSelection && { text_selection: currentTextSelection }),
-        annotations: processedAnnotations
+        annotations: []
     } as ReaderAttachment;
 }
 
