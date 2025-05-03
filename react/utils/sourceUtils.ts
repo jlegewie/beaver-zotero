@@ -198,14 +198,27 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 * Source method: Check if a source is valid
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
-    if (!syncingItemFilter(item)) return false;
-    if (item.isNote()) return true;
-    if (item.isAttachment()) {
-        return await item.fileExists();
-    }
+    // Regular items have to pass the syncingItemFilter and have attachments or notes
     if (item.isRegularItem()) {
+        if (!syncingItemFilter(item)) return false;
         if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
         return true;
+    } 
+    // Attachments have to pass the syncingItemFilter and exist
+    else if (item.isAttachment()) {
+        if (!syncingItemFilter(item)) return false;
+        if (item.isAttachment()) return await item.fileExists();
+    }
+    // Annotation item parent have to pass the syncing filter and exist
+    else if (item.isAnnotation()) {
+        const parent = item.parentItem;
+        if (!parent || !parent.isAttachment()) return false;
+        if (!syncingItemFilter(parent)) return false;
+        return await parent.fileExists();
+    }
+    // Notes are invalid (NoteAttachments are not yet supported)
+    else if (item.isNote()) {
+        return false;
     }
     return false;
 }
