@@ -40,6 +40,7 @@ export interface AnnotationAttachment extends BaseMessageAttachment {
     page_label: string;
     position: AnnotationPosition;
     date_modified: string;
+    image_base64?: string;
 }
 
 // "note" type attachment (Zotero note item)
