@@ -81,14 +81,6 @@ const MessageAttachmentDisplay = ({
                 ))
             }
 
-            {/* Current annotations */}
-            {readerAnnotations.map((annotation, index) => (
-                <AnnotationButton
-                    key={index}
-                    annotation={annotation}
-                />
-            ))}
-
             {/* Current text selection */}
             {readerTextSelection && (
                 <TextSelectionButton selection={readerTextSelection} />

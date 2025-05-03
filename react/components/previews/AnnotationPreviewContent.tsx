@@ -9,6 +9,9 @@ import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
 import Button from '../button';
 import IconButton from '../IconButton';
 import { CancelIcon, Icon } from '../icons';
+import { InputSource } from '../../types/sources';
+import { toAnnotation } from '../../types/attachments/converters';
+import { getZoteroItem } from '../../utils/sourceUtils';
 
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlighted Text',
@@ -19,21 +22,42 @@ const ANNOTATION_TEXT_BY_TYPE = {
 
 
 interface AnnotationPreviewContentProps {
-    annotation: Annotation;
+    attachment: InputSource;
     maxContentHeight: number;
 }
 
-const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ annotation, maxContentHeight }) => {
+const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ attachment, maxContentHeight }) => {
     const setActivePreview = useSetAtom(activePreviewAtom);
     const setReaderAnnotations = useSetAtom(readerAnnotationsAtom);
     const [imagePath, setImagePath] = useState<string | null>(null);
     const [imageError, setImageError] = useState<boolean>(false);
+    const [annotation, setAnnotation] = useState<Annotation | null>(null);
+    const [annotationIcon, setAnnotationIcon] = useState<string | null>(null);
+    const [annotationText, setAnnotationText] = useState<string | null>(null);
 
-    const annotationIcon = ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATE_TEXT;
-    const annotationText = ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation';
+    useEffect(() => {
+        const item = getZoteroItem(attachment);
+        if (item) {
+            const annotation = toAnnotation(item);
+            if (annotation) {
+                setAnnotation(annotation);
+                setAnnotationIcon(ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATE_TEXT);
+                setAnnotationText(ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation');
+            } else {
+                setAnnotation(null);
+                setAnnotationIcon(null);
+                setAnnotationText(null);
+            }
+        } else {
+            setAnnotation(null);
+            setAnnotationIcon(null);
+            setAnnotationText(null);
+        }
+    }, [attachment, setAnnotation, setAnnotationIcon, setAnnotationText]);
 
     // Fetch image path for image annotations
     useEffect(() => {
+        if (!annotation || annotation.annotation_type !== 'image') return;
         let isMounted = true;
         const fetchImagePath = async () => {
             if (annotation.annotation_type === 'image') {
@@ -62,6 +86,8 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ann
         return () => { isMounted = false }; // Cleanup function to prevent state updates on unmounted component
     }, [annotation]);
 
+    if (!annotation || !annotationIcon || !annotationText) return null;
+
     const handleRemove = () => {
         // Remove annotation state and close preview
         setReaderAnnotations((prev) => prev.filter((a) => a.zotero_key !== annotation.zotero_key));
@@ -88,14 +114,14 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ann
                                 <p className="text-base">{annotation.comment}</p>
                             </div>
                         )}
-                        {!annotation.text && !annotation.comment && <p className="font-color-secondary italic">No text or comment</p>}
+                        {!annotation.text && !annotation.comment && <p className="font-color-tertiary italic">No text or comment</p>}
                     </>
                 );
             case 'note':
-                return annotation.comment ? <p className="text-base">{annotation.comment}</p> : <p className="font-color-secondary italic">No comment</p>;
+                return annotation.comment ? <p className="text-base">{annotation.comment}</p> : <p className="font-color-tertiary italic">Empty note</p>;
             case 'image':
                 if (imageError) {
-                    return <p className="font-color-error italic">Could not load image preview.</p>;
+                    return <p className="font-color-tertiary italic">Could not load image preview.</p>;
                 }
                 if (imagePath) {
                     return (

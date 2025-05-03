@@ -28,7 +28,7 @@ export const ANNOTATION_ICON_BY_TYPE = {
 
 interface AnnotationButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'content'> {
     annotation?: Annotation
-    source?: InputSource
+    source: InputSource
     canEdit?: boolean
     disabled?: boolean
     onRemove?: (annotationKey: string) => void; // Optional callback for removal
@@ -50,14 +50,9 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
         const [derivedAnnotation, setDerivedAnnotation] = useState<Annotation | null>(null);
 
-        // Define preview content
-        const previewContent = derivedAnnotation 
-            ? { type: 'annotation', content: derivedAnnotation } as ActivePreview
-            : null;
-
         // Use the custom hook for hover preview logic
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            previewContent,
+            { type: 'annotation', content: source },
             // Options: Disable if derivedAnnotation undefined orbutton disabled or not editable
             { isEnabled: !disabled && canEdit && !!derivedAnnotation }
         )

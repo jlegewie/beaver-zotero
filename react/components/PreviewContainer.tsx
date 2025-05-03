@@ -112,7 +112,7 @@ const PreviewContainer: React.FC = () => {
             case 'textSelection':
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'annotation':
-                return <AnnotationPreviewContent annotation={activePreview.content} maxContentHeight={maxContentHeight} />;
+                return <AnnotationPreviewContent attachment={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }

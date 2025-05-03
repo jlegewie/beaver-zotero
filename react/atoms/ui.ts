@@ -99,7 +99,7 @@ export const fileStatusStatsAtom = atom(
 export type ActivePreview = 
     | { type: 'source'; content: InputSource }
     | { type: 'textSelection'; content: TextSelection }
-    | { type: 'annotation'; content: Annotation }
+    | { type: 'annotation'; content: InputSource }
     | null;
 
 export const activePreviewAtom = atom<ActivePreview>(null);
