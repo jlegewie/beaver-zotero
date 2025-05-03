@@ -600,23 +600,25 @@ export class BeaverDB {
             itemDeleted: false,
             attachmentDeleted: false
         };
-        
+
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
-            const itemResult = await this.conn.queryAsync(
+            // Explicitly type the results to allow for potential undefined/null returns
+            const itemResult: { changes?: number } | null | undefined = await this.conn.queryAsync(
                 `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
-            
-            const attachmentResult = await this.conn.queryAsync(
+
+            const attachmentResult: { changes?: number } | null | undefined = await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
-            
-            result.itemDeleted = itemResult.changes > 0;
-            result.attachmentDeleted = attachmentResult.changes > 0;
+
+            // Check if result exists and has changes > 0 before setting to true
+            result.itemDeleted = (!!itemResult && itemResult.changes && itemResult.changes > 0) || false;
+            result.attachmentDeleted = (!!attachmentResult && attachmentResult.changes && attachmentResult.changes > 0) || false;
         });
-        
+
         return result;
     }
 
