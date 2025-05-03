@@ -1,7 +1,7 @@
 import React from 'react'
 import { SourceButton } from './SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, readerAnnotationsAtom } from '../atoms/input';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/input';
 import { TextSelectionButton } from './TextSelectionButton';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from './AddSourcesMenu';
@@ -23,7 +23,6 @@ const MessageAttachmentDisplay = ({
 }) => {
     const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-    const readerAnnotations = useAtomValue(readerAnnotationsAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const threadSourceCount = useAtomValue(threadSourceCountAtom)
 

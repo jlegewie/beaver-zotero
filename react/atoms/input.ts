@@ -23,10 +23,9 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
 });
 
 /**
- * Current reader text selection and annotations
+ * Current reader text selection
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
-export const readerAnnotationsAtom = atom<Annotation[]>([]);
 
 /**
 * Cache to track removed item keys to prevent them from reappearing

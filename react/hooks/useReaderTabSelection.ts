@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, readerAnnotationsAtom, updateSourcesFromZoteroItemsAtom, currentSourcesAtom } from '../atoms/input';
+import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroItemsAtom, currentSourcesAtom } from '../atoms/input';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { toAnnotation } from '../types/attachments/converters';
@@ -17,7 +17,6 @@ const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"];
 export function useReaderTabSelection() {
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-    const setReaderAnnotations = useSetAtom(readerAnnotationsAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
     const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
@@ -73,7 +72,6 @@ export function useReaderTabSelection() {
         if (!reader) {
             logger("useReaderTabSelection:setupReader: No reader provided.");
             setReaderTextSelection(null);
-            setReaderAnnotations([]);
             return;
         }
 
@@ -133,7 +131,6 @@ export function useReaderTabSelection() {
         } else {
              logger("useReaderTabSelection: No active reader on mount.");
              setReaderTextSelection(null); // Ensure selection is null if no reader
-             setReaderAnnotations([]);
         }
 
         // Set up tab change listener
@@ -156,7 +153,6 @@ export function useReaderTabSelection() {
                             selectionCleanupRef.current = null;
                             currentReaderIdRef.current = null;
                             setReaderTextSelection(null);
-                            setReaderAnnotations([]);
                         }
                         // If newReader is the same as current, do nothing - already handled
                     } else {
@@ -168,7 +164,6 @@ export function useReaderTabSelection() {
                         }
                         currentReaderIdRef.current = null;
                         setReaderTextSelection(null);
-                        setReaderAnnotations([]);
                         setReaderAttachment(null);
                     }
                 }
@@ -224,7 +219,6 @@ export function useReaderTabSelection() {
             currentReaderIdRef.current = null;
             // Reset atom state on unmount
             setReaderTextSelection(null);
-            setReaderAnnotations([]);
         };
     }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader]);
 
