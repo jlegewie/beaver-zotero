@@ -24,8 +24,8 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const messageSources: InputSource[] = useMemo(() => {
-        const messageSources = threadSources
-            .filter(s => s.messageId === message.id && s.itemKey !== currentReaderAttachmentKey);
+        const messageSources = threadSources.filter(s => s.messageId === message.id);
+            // .filter(s => s.messageId === message.id && s.itemKey !== currentReaderAttachmentKey);
         const organizedSources = organizeSourcesByRegularItems(messageSources);
         return organizedSources;
     }, [threadSources, currentReaderAttachmentKey]);

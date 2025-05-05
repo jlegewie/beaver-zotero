@@ -15,8 +15,7 @@ export function isValidAnnotationType(type: _ZoteroTypes.Annotations.AnnotationT
 export type MessageAttachment =
     | SourceAttachment
     | AnnotationAttachment
-    | NoteAttachment
-    | ReaderAttachment;
+    | NoteAttachment;
 
 interface BaseMessageAttachment {
     library_id: number;
@@ -26,6 +25,7 @@ interface BaseMessageAttachment {
 // "source" type attachment (Zotero attachment item)
 export interface SourceAttachment extends BaseMessageAttachment {
     type: "source";
+    annotations?: Annotation[];
     chunk_ids?: string[]; // UUIDs as strings
 }
 
@@ -51,13 +51,16 @@ export interface NoteAttachment extends BaseMessageAttachment {
     date_modified?: string; // ISO string
 }
 
-// "reader" type attachment (Zotero reader item)
-export interface ReaderAttachment extends BaseMessageAttachment {
-    type: "reader";
+/**
+ * ReaderState represents the state of a reader.
+ */
+export interface ReaderState {
+    library_id: number;
+    zotero_key: string;
     current_page: number;
     text_selection?: TextSelection;
-    annotations: Annotation[];
-}
+    annotations?: Annotation[];
+}    
 
 /**
  * TextSelection represents a text selection in a reader.
@@ -107,10 +110,6 @@ export function isAnnotationAttachment(attachment: MessageAttachment): attachmen
 
 export function isNoteAttachment(attachment: MessageAttachment): attachment is NoteAttachment {
     return attachment.type === "note";
-}
-
-export function isReaderAttachment(attachment: MessageAttachment): attachment is ReaderAttachment {
-    return attachment.type === "reader";
 }
 
 /**

@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageModel } from '../../react/types/chat/apiTypes';
-import { MessageAttachment } from '../../react/types/attachments/apiTypes';
+import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
 import { Model, ProviderType } from '../../react/atoms/models';
 
 export interface ToolRequest {
@@ -11,6 +11,7 @@ export interface ToolRequest {
 
 export const search_tool_request: ToolRequest = {
     function: "hybrid_search",
+    // function: "related_items_search",
     parameters: {}
 }
 
@@ -25,6 +26,7 @@ export interface ChatCompletionRequestBody {
     custom_instructions?: string;       // Custom instructions for the assistant
     attachments: MessageAttachment[];   // The attachments to include in the request
     tool_request: ToolRequest | null;   // User tool request, if any
+    reader_state: ReaderState | null;   // Reader state, if any
 }
 
 export interface SSECallbacks {

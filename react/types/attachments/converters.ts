@@ -1,16 +1,13 @@
 import { InputSource, ThreadSource } from '../sources';
 import { createSourceFromItem, getZoteroItem } from '../../utils/sourceUtils';
-import { getCurrentPage } from '../../utils/readerUtils';
 import {
     MessageAttachment,
     SourceAttachment,
     AnnotationAttachment,
     NoteAttachment,
-    ReaderAttachment,
     Annotation,
     AnnotationPosition,
     isSourceAttachment,
-    isReaderAttachment,
     isAnnotationAttachment
 } from './apiTypes';
 
@@ -85,26 +82,10 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
             ...toAnnotation(item)
         }] as AnnotationAttachment[];
     } else if (source.type === "reader" && item.isAttachment()) {
-        // Text selection
-        const currentTextSelection = source.textSelection;
-        
-        // Annotations from child items
-        const annotations = await Promise.all(
-            source.childItemKeys.map(async (key) => {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, key);
-                if(!item || !item.isAnnotation()) return null;
-                return toAnnotation(item);
-            })
-        ).then((items) => items.filter(Boolean) as Annotation[]);
-        
-        // ReaderAttachment
         return [{
-            type: "reader",
             ...zoteroIdentifiers,
-            current_page: getCurrentPage() || 0,
-            ...(currentTextSelection && { text_selection: currentTextSelection }),
-            annotations: annotations
-        }] as ReaderAttachment[];
+            type: "source"
+        }] as SourceAttachment[];
     } else {
         return [];
     }
@@ -118,15 +99,6 @@ export async function toThreadSource(attachment: MessageAttachment, messageId?: 
         return {
             ...(await createSourceFromItem(item)),
             ...(messageId && { messageId: messageId }),
-        } as ThreadSource;
-    }
-    if (isReaderAttachment(attachment)) {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
-        if (!item) return null;
-        return {
-            ...(await createSourceFromItem(item)),
-            ...(messageId && { messageId: messageId }),
-            type: "reader"
         } as ThreadSource;
     }
     if (isAnnotationAttachment(attachment)) {
