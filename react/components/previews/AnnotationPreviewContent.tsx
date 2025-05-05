@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { currentSourcesAtom } from '../../atoms/input';
-import { navigateToPage } from '../../utils/readerUtils';
+import { navigateToAnnotation } from '../../utils/readerUtils';
 import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
@@ -94,10 +94,9 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
     };
 
     const handleGoToAnnotation = async () => {
-        // TODO: implement navigation or selection function
-        const itemId = Zotero.Items.getIDFromLibraryAndKey(annotation.library_id, annotation.parent_key);
-        if (itemId) {
-            navigateToPage(itemId, annotation.position.page_index + 1);
+        const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(annotation.library_id, annotation.zotero_key);
+        if (annotationItem) {
+            navigateToAnnotation(annotationItem);
         }
     };
 

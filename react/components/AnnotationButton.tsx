@@ -6,7 +6,7 @@ import { activePreviewAtom } from '../atoms/ui'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { currentReaderAttachmentKeyAtom, currentSourcesAtom } from '../atoms/input';
 import { Annotation } from '../types/attachments/apiTypes';
-import { navigateToPage } from '../utils/readerUtils';
+import { navigateToAnnotation } from '../utils/readerUtils';
 import { InputSource } from '../types/sources';
 import { toAnnotation } from '../types/attachments/converters';
 import { getZoteroItem, isValidZoteroItem } from '../utils/sourceUtils';
@@ -138,15 +138,11 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
                 `}
                 // Disable button click if invalid
                 disabled={disabled || !isValid}
-                onClick={(e) => {
+                onClick={async (e) => {
                     e.stopPropagation();
-                    // TODO: Implement navigation to annotation using `navigateToAnnotation`
-                    // Only navigate if valid
-                    if (isValid) {
-                        const parentItemId = Zotero.Items.getIDFromLibraryAndKey(derivedAnnotation.library_id, derivedAnnotation.parent_key);
-                        if (parentItemId) {
-                            navigateToPage(parentItemId, derivedAnnotation.position.page_index + 1);
-                        }
+                    const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(derivedAnnotation.library_id, derivedAnnotation.zotero_key);
+                    if (annotationItem) {
+                        navigateToAnnotation(annotationItem);
                     }
                 }}
                 {...rest}

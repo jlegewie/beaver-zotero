@@ -26,22 +26,30 @@ async function navigateToPage(itemID: number, page: number) {
 async function navigateToPageInCurrentReader(page: number) {
     const reader = getCurrentReader();
     if (!reader) return;
-    await Zotero.Reader.open(reader.itemID, {pageIndex: page - 1})
-    // TODO: Use smooth scroll to page
-    // const window = Zotero.getMainWindow();
-    // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
-    // await reader._internalReader._primaryView.navigate({
-    //     pageIndex: page  // Zero-based, so this will go to page 1
-    // })
+    reader.navigate({pageIndex: page - 1})
 }
 
-async function navigateToAnnotation(reader: any, annotation: Zotero.Item) {
-    // const window = Zotero.getMainWindow();
-    // const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
-    // return await reader.navigate({annotationID: reader.annotationItemIDs[2]})
-    reader.navigate({annotationID: annotation.id});
-    // reader.setSelectedAnnotations([annotations[0].id])
-    // await Zotero.Reader.open(reader.itemID, {annotationID: reader.annotationItemIDs[0]})
+/**
+ * Navigates to an annotation in the current reader.
+ * 
+ * @param annotation - The annotation to navigate to.
+ * @param reader - The reader instance.
+ */
+async function navigateToAnnotation(annotationItem: Zotero.Item) {
+    if (!annotationItem.isAnnotation()) return;
+    // Get reader
+    const reader = getCurrentReader();
+    
+    // Navigate to annotation if reader is open and current item is the annotation's parent
+    if (reader && reader.itemID === annotationItem.parentID) {
+        reader.navigate({annotationID: annotationItem.key});
+        return;
+    }
+
+    // Open reader if not open
+    if (annotationItem.parentID) {
+        await Zotero.Reader.open(annotationItem.parentID, {pageLabel: annotationItem.annotationPageLabel});
+    }
 }
 
 
