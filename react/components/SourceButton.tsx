@@ -91,7 +91,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Use isHovered from the hook
         const getIconElement = () => {
             // Use isHovered from the hook
-            if (isHovered && currentReaderAttachmentKey != source.itemKey && canEdit && isValid) {
+            if (isHovered && currentReaderAttachmentKey != source.itemKey) {
                 return (<span
                     role="button"
                     className="source-remove"

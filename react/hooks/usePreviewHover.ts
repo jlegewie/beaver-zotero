@@ -57,9 +57,8 @@ export function usePreviewHover(
     }, []);
 
     const handleMouseEnter = useCallback(() => {
-        if (!isEnabled || !previewContent) return; // Check if enabled and content exists
-
         setIsHovered(true);
+        if (!isEnabled || !previewContent) return; // Check if enabled and content exists
         cancelCloseTimer();
         cancelShowPreviewTimer();
 
@@ -73,9 +72,8 @@ export function usePreviewHover(
     }, [isEnabled, previewContent, cancelCloseTimer, cancelShowPreviewTimer, setActivePreview, showDelay]);
 
     const handleMouseLeave = useCallback(() => {
-        if (!isEnabled) return;
-
         setIsHovered(false);
+        if (!isEnabled) return;
         cancelShowPreviewTimer();
         startCloseTimer();
     }, [isEnabled, cancelShowPreviewTimer, startCloseTimer]);
