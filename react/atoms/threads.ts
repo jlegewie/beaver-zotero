@@ -19,6 +19,10 @@ export const threadSourceKeysAtom = atom((get) => {
     return sources.map((source) => source.itemKey);
 });
 
+// True after a chat request is sent and before the first assistant response arrives.
+// Used to show a spinner during initial LLM response loading.
+export const isChatRequestPendingAtom = atom<boolean>(false);
+
 // Derived atom for source citations
 export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) => {
     const sources = get(threadSourcesAtom);
@@ -46,10 +50,16 @@ export const threadSourceCountAtom = atom((get) => {
     return get(threadSourcesAtom).length;
 });
 
-// Derived atoms for thread status
+// Indicates if the thread is currently streaming a response
 export const isStreamingAtom = atom((get) => {
+    // If a chat request is pending, set streaming to true
+    const isChatRequestPending = get(isChatRequestPendingAtom);
+    if (isChatRequestPending) return true;
+    // Otherwise, use status of last message
     const messages = get(threadMessagesAtom);
-    return messages.some((message) => ['searching', 'thinking', 'in_progress'].includes(message.status));
+    if(messages.length === 0) return false;
+    const lastMessage = messages[messages.length - 1];
+    return ['searching', 'thinking', 'in_progress'].includes(lastMessage.status);
 });
 
 // Atom for the current canceller

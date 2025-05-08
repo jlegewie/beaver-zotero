@@ -5,6 +5,9 @@ import AssistantMessageDisplay from "./AssistantMessageDisplay"
 import { scrollToBottom } from "../utils/scrollToBottom";
 import { ChatMessage } from "../types/chat/uiTypes";
 import ToolMessageDisplay from "./ToolMessageDisplay";
+import { isChatRequestPendingAtom } from "../atoms/threads";
+import { useAtomValue } from "jotai";
+import GeneratingButton from "./GeneratingButton";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
@@ -18,6 +21,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         ref: React.ForwardedRef<HTMLDivElement>
     ) {
         const lastScrollTopRef = useRef(0);
+        const isChatRequestPending = useAtomValue(isChatRequestPendingAtom);
 
         // Scroll to bottom when messages change
         useEffect(() => {
@@ -49,36 +53,47 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         return (
             <div 
                 id="beaver-messages"
-                className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0"
+                className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 mb-2"
                 onScroll={handleScroll}
                 ref={ref}
             >
                 {messages.map((message, index) => (
-                    <div key={index} className={`${message.role === 'user' ? 'px-3' : 'px-4'}`}>
+                    <>
                         {/* User message */}
                         {message.role === 'user' && (
                             <UserMessageDisplay
+                                key={message.id}
                                 message={message}
                             />
                         )}
                         {/* Assistant message without tool calls */}
-                        {message.role === 'assistant' && (!message.tool_calls || message.tool_calls.length === 0) && (
+                        {message.role === 'assistant' && message.content !== '' && (!message.tool_calls || message.tool_calls.length === 0) && (
                             <AssistantMessageDisplay
+                                key={message.id}
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
-                                toolCallInProgress={
-                                    messages
-                                        .filter(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0)
-                                        .some(m => m.status == "in_progress")
-                                }
                             />
                         )}
                         {/* Assistant message with tool calls */}
                         {message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0 && (
-                            <ToolMessageDisplay message={message} />
+                            <ToolMessageDisplay
+                                key={message.id}
+                                message={message}
+                            />
                         )}
-                    </div>
+                    </>
                 ))}
+                {/* Generating button */}
+                {
+                    messages.length > 0 &&
+                    (
+                        (messages[messages.length - 1].role === 'user' && isChatRequestPending) ||
+                        (messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].status === 'in_progress' && messages[messages.length - 1].content === '' && !messages[messages.length - 1].tool_calls)
+                    )
+                    && (
+                        <GeneratingButton />
+                    )
+                }
             </div>
         );
     }

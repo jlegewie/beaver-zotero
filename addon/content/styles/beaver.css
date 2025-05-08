@@ -112,7 +112,7 @@ attachment-box .metadata-table #beaver-status {
 }
 
 [id^="beaver-pane-"] .user-message-display {
-    margin: 0 auto;
+    /* margin: 0 auto; */
     padding-left: 0.65rem;
     padding-right: 0.65rem;
     padding-top: 0.65rem;

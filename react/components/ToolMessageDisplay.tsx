@@ -89,7 +89,7 @@ const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
     }
 
     return (
-        <div className="py-1">
+        <div id={`tool-${message.id}`} className="py-1 px-4">
             {message.content && <MarkdownRenderer className="markdown" content={message.content} />}
             <Button
                 variant="ghost"

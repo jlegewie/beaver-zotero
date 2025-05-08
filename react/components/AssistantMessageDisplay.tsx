@@ -1,10 +1,10 @@
 import React from 'react';
 // @ts-ignore no idea why
 import { useState, useRef, useMemo } from 'react';
-import { ChatMessage, Warning } from '../types/chat/uiTypes';
+import { ChatMessage } from '../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import { RepeatIcon, Spinner, ShareIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
-import { isStreamingAtom, sourceCitationsAtom } from '../atoms/threads';
+import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowUpIcon, ArrowRightIcon } from './icons';
+import { sourceCitationsAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
@@ -22,15 +22,12 @@ import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 interface AssistantMessageDisplayProps {
     message: ChatMessage;
     isLastMessage: boolean;
-    toolCallInProgress: boolean;
 }
 
 const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     message,
-    isLastMessage,
-    toolCallInProgress,
+    isLastMessage
 }) => {
-    const isStreaming = useAtomValue(isStreamingAtom);
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const sourceCitations = useAtomValue(sourceCitationsAtom);
@@ -123,26 +120,10 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     }
 
     return (
-        <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
+        <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
             {message.warnings?.map((warning) => (
                 <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
             ))}
-            {/* Show spinner if message is in_progress, content is empty, and tool call is not in progress */}
-            {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
-                <div className="py-1">
-                    <Button
-                        variant="ghost"
-                        className="text-base scale-105 disabled-but-styled"
-                        iconClassName="scale-12"
-                        icon={Spinner}
-                        disabled={true}
-                    >
-                        <span style={{ marginLeft: '-2px' }}>
-                            Generating...
-                        </span>
-                    </Button>
-                </div>
-            }
             <div 
                 className="user-select-text"
                 ref={contentRef}
@@ -159,7 +140,8 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
                 className={`
                     display-flex flex-row items-center pt-2 mr-4 ml-1
                     ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
-                    ${isStreaming && isLastMessage ? 'hidden' : ''}`}
+                    ${message.status === 'in_progress' ? 'hidden' : ''}
+                `}
             >
                 <div className="flex-1">
                     {citedSources.length > 0 && (

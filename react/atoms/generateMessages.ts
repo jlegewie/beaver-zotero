@@ -14,7 +14,8 @@ import {
     cancellerHolder,
     isCancellableAtom,
     isCancellingAtom,
-    cancelStreamingMessageAtom
+    cancelStreamingMessageAtom,
+    isChatRequestPendingAtom
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -177,6 +178,8 @@ export const generateResponseAtom = atom(
         sources: InputSource[];
         isLibrarySearch: boolean;
     }) => {
+        set(isChatRequestPendingAtom, true);
+
         // Get current model
         const model = get(selectedModelAtom);
 
@@ -394,6 +397,7 @@ function _processChatCompletionViaBackend(
             },
             onMessage: (data: MessageModel) => {
                 logger(`event 'onMessage': ${JSON.stringify(data)}`, 1);
+                set(isChatRequestPendingAtom, false);
                 if (!data) return;
                 const message = toMessageUI(data);
                 set(addOrUpdateMessageAtom, { message });
@@ -404,6 +408,7 @@ function _processChatCompletionViaBackend(
             },
             onDone: (messageId: string | null) => {
                 logger(`event 'onDone': ${messageId}`, 1);
+                set(isChatRequestPendingAtom, false);
                 // Mark the assistant as completed
                 if (messageId) {
                     set(setMessageStatusAtom, { id: messageId, status: 'completed' });
@@ -415,6 +420,7 @@ function _processChatCompletionViaBackend(
             },
             onError: (messageId: string | null, errorType: string) => {
                 logger(`event 'onError': ${messageId} - ${errorType}`, 1);
+                set(isChatRequestPendingAtom, false);
                 // If the message ID is not provided, use the last assistant message or create a new one
                 if (!messageId) {
                     const messages = get(threadMessagesAtom);
