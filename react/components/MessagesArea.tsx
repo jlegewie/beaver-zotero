@@ -66,18 +66,18 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                                 message={message}
                             />
                         )}
-                        {/* Assistant message without tool calls */}
+                        {/* Assistant message content */}
                         {message.role === 'assistant' && message.content !== '' && (
                             <AssistantMessageContent
-                                key={message.id}
+                                key={`content-${message.id}`}
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
                             />
                         )}
-                        {/* Assistant message with tool calls */}
+                        {/* Assistant message tools */}
                         {message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0 && (
                             <AssistantMessageTools
-                                key={message.id}
+                                key={`tools-${message.id}`}
                                 message={message}
                             />
                         )}
