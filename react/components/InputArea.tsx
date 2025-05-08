@@ -185,7 +185,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
-                    <ModelSelectionButton />
+                    <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} />
                     <div className="flex-1" />
                     <div className="display-flex gap-2">
                         <Button

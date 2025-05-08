@@ -25,7 +25,7 @@ const REFETCH_INTERVAL_MS = REFETCH_INTERVAL_HOURS * 60 * 60 * 1000;
  * Button component for selecting the AI model to use for chat completions.
  * Displays available models based on configured API keys.
  */
-const ModelSelectionButton: React.FC = () => {
+const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom);
     const supportedModels = useAtomValue(supportedModelsAtom);
@@ -132,6 +132,12 @@ const ModelSelectionButton: React.FC = () => {
             : selectedModel.name;
     };
 
+    const handleAfterClose = () => {
+        if (inputRef?.current) {
+            inputRef.current.focus();
+        }
+    };
+
     return (
         <MenuButton
             menuItems={menuItems}
@@ -147,6 +153,7 @@ const ModelSelectionButton: React.FC = () => {
             tooltipContent={isButtonDisabled ? 'Add your own API keys to select a model' : 'Choose AI model'}
             showArrow={false}
             disabled={isLoading || isButtonDisabled}
+            onAfterClose={handleAfterClose}
         />
     );
 };
