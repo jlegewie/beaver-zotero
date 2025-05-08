@@ -67,7 +67,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             />
                         )}
                         {/* Assistant message content */}
-                        {message.role === 'assistant' && message.content !== '' && (
+                        {message.role === 'assistant' && (message.content !== '' || message.status == "error" || message.warnings) && (
                             <AssistantMessageContent
                                 key={`content-${message.id}`}
                                 message={message}
