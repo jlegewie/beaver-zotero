@@ -35,3 +35,4 @@ export { default as BrainIcon } from './icons/BrainIcon';
 export { default as TextAlignLeftIcon } from './icons/TextAlignLeftIcon';
 export { default as SearchIcon } from './icons/SearchIcon';
 export { default as ArrowUpRightIcon } from './icons/ArrowUpRightIcon';
+export { default as AiMagicIcon } from './icons/AiMagicIcon';
