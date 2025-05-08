@@ -203,7 +203,14 @@ export const addOrUpdateMessageAtom = atom(
         const existingMessage = get(threadMessagesAtom).find(m => m.id === message.id);
         if (existingMessage) {
             set(threadMessagesAtom, get(threadMessagesAtom).map(m =>
-                m.id === message.id ? { ...message } : m
+                m.id === message.id
+                    ? {
+                        ...m,
+                        ...(message.content && { content: message.content }),
+                        ...(message.tool_calls && { tool_calls: message.tool_calls }),
+                        ...(message.status && { status: message.status })
+                    }
+                    : m
             ));
         } else {
             if (beforeId) {
