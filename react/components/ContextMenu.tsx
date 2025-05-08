@@ -331,7 +331,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const menuElement = (
         <div
             ref={menuRef}
-            className={`bg-quaternary border-quinary rounded-md p-1 overflow-y-auto scrollbar outline-none z-1000 shadow-md ${className}`}
+            className={`bg-quaternary border-popup rounded-md p-1 overflow-y-auto scrollbar outline-none z-1000 shadow-md ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,
