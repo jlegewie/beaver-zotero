@@ -7,11 +7,11 @@ import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, Lib
 import Button from './button';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
-interface ToolMessageDisplayProps {
+interface AssistantMessageToolsProps {
     message: ChatMessage;
 }
 
-const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
+const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     message
 }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
@@ -142,4 +142,4 @@ const ToolMessageDisplay: React.FC<ToolMessageDisplayProps> = ({
     );
 };
 
-export default ToolMessageDisplay;
+export default AssistantMessageTools;

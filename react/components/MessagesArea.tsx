@@ -4,7 +4,7 @@ import UserMessageDisplay from "./UserMessageDisplay"
 import AssistantMessageContent from "./AssistantMessageContent"
 import { scrollToBottom } from "../utils/scrollToBottom";
 import { ChatMessage } from "../types/chat/uiTypes";
-import ToolMessageDisplay from "./ToolMessageDisplay";
+import AssistantMessageTools from "./AssistantMessageTools";
 import { isChatRequestPendingAtom } from "../atoms/threads";
 import { useAtomValue } from "jotai";
 import GeneratingButton from "./GeneratingButton";
@@ -67,7 +67,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             />
                         )}
                         {/* Assistant message without tool calls */}
-                        {message.role === 'assistant' && message.content !== '' && (!message.tool_calls || message.tool_calls.length === 0) && (
+                        {message.role === 'assistant' && message.content !== '' && (
                             <AssistantMessageContent
                                 key={message.id}
                                 message={message}
@@ -76,7 +76,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                         )}
                         {/* Assistant message with tool calls */}
                         {message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0 && (
-                            <ToolMessageDisplay
+                            <AssistantMessageTools
                                 key={message.id}
                                 message={message}
                             />
