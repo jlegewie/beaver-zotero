@@ -30,11 +30,23 @@ export interface ChatCompletionRequestBody {
 }
 
 export interface SSECallbacks {
+    // Callback for "thread" event: called when a new thread is created or resumed.
+    //      Sets currentThreadIdAtom to the new thread ID.
     onThread: (threadId: string) => void;
+    // Callback for "token" event: receives partial text as it comes in.
+    //      Appends chunk to the assistant message with id=assistantMessageId.
     onToken: (token: string) => void;
-    onToolcall: (data: any) => void;
+    // Callback for "message" event: adds or updates message of type MessageModel.
+    //    When completed, adds attachments from tool responses (if any) to the thread sources.
+    onMessage: (data: MessageModel) => void;
+    // Callback for "toolcall" event (obsolete): adds or updates message of type MessageModel.
+    //    When completed, adds attachments from tool responses (if any) to the thread sources.
+    onToolcall: (data: MessageModel) => void;
+    // Callback for "done" event: called when the assistant is done.
     onDone: () => void;
+    // Callback for "error" event: called when an error occurs.
     onError: (errorType: string) => void;
+    // Callback for "warning" event: called when a warning occurs.
     onWarning: (warningType: string, data: any) => void;
 }
 
@@ -150,7 +162,7 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onToken, onToolcall, onDone, onError, onWarning } = callbacks;
+        const { onThread, onToken, onMessage, onToolcall, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -185,6 +197,7 @@ export class ChatService extends ApiService {
                                 this.parseAndHandleEvent(rawEvent, {
                                     onThread,
                                     onToken,
+                                    onMessage,
                                     onToolcall,
                                     onDone: () => {
                                         doneReceived = true;
@@ -244,6 +257,7 @@ export class ChatService extends ApiService {
         {
             onThread,
             onToken,
+            onMessage,
             onToolcall,
             onDone,
             onError,
@@ -251,6 +265,7 @@ export class ChatService extends ApiService {
         }: {
             onThread: (threadId: string) => void;
             onToken: (token: string) => void;
+            onMessage: (data: MessageModel) => void;
             onToolcall: (data: MessageModel) => void;
             onDone: () => void;
             onError: (errorType: string) => void;
@@ -297,6 +312,12 @@ export class ChatService extends ApiService {
                 // e.g. data: {"content": "some partial text"}
                 if (parsedData?.content) {
                     onToken(parsedData.content);
+                }
+                break;
+            case 'message':
+                if (parsedData?.message) {
+                    const message = JSON.parse(parsedData.message) as MessageModel;
+                    onMessage(message);
                 }
                 break;
             case 'toolcall':

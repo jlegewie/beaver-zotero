@@ -383,7 +383,6 @@ function _processChatCompletionViaBackend(
         payload,
         {
             onThread: (newThreadId) => {
-                console.log('Current thread ID:', newThreadId);
                 set(currentThreadIdAtom, newThreadId);
             },
             onToken: (partial) => {
@@ -392,6 +391,15 @@ function _processChatCompletionViaBackend(
                     id: assistantMessageId,
                     chunk: partial
                 });
+            },
+            onMessage: (data: MessageModel) => {
+                if (!data) return;
+                const message = toMessageUI(data);
+                set(addOrUpdateMessageAtom, { message });
+                // Add the tool call sources to the thread sources (if any)
+                if (message.status === 'completed' && message.tool_calls) {
+                    set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
+                }
             },
             onToolcall: async (data: MessageModel) => {
                 if (!data) return;
