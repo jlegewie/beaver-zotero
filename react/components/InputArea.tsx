@@ -11,6 +11,7 @@ import Button from './button';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
 import MessageAttachmentDisplay from './MessageAttachmentDisplay';
+import { isAgentModelAtom } from '../atoms/models';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -19,6 +20,7 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
+    const isAgentModel = useAtomValue(isAgentModelAtom);
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
@@ -82,7 +84,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if ((Zotero.isMac && e.key === 'Meta') || (!Zotero.isMac && e.key === 'Control')) {
+        if (!isAgentModel && ((Zotero.isMac && e.key === 'Meta') || (!Zotero.isMac && e.key === 'Control'))) {
             setIsCommandPressed(true);
         }
         
@@ -188,19 +190,21 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} />
                     <div className="flex-1" />
                     <div className="display-flex gap-2">
-                        <Button
-                            type={(isCommandPressed && !isStreaming && messageContent.length > 0) ? "button" : undefined}
-                            variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
-                            // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
-                            className="mr-1"
-                            onClick={(e) => handleSubmit(e as any, true)}
-                            disabled={isStreaming || messageContent.length === 0}
-                        >
-                            Library Search
-                            <span className="opacity-50">
-                                {Zotero.isMac ? '⌘' : '⌃'}⏎
-                            </span>
-                        </Button>
+                        {!isAgentModel && 
+                            <Button
+                                type={(isCommandPressed && !isStreaming && messageContent.length > 0) ? "button" : undefined}
+                                variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
+                                // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
+                                className="mr-1"
+                                onClick={(e) => handleSubmit(e as any, true)}
+                                disabled={isStreaming || messageContent.length === 0}
+                            >
+                                Library Search
+                                <span className="opacity-50">
+                                    {Zotero.isMac ? '⌘' : '⌃'}⏎
+                                </span>
+                            </Button>
+                        }
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
                             type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
