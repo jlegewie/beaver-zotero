@@ -111,9 +111,9 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     // If the message is a placeholder, show the warnings and error only
     if (message.isPlaceholder) {
         return (
-            <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
+            <div>
                 {message.warnings?.map((warning) => (
-                    <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
+                    <WarningDisplay key={message.id} messageId={message.id} warning={warning} isPlaceholder={true}/>
                 ))}
                 {message.status === 'error' &&
                     <ErrorDisplay errorType={message.errorType || 'unknown'} />
