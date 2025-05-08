@@ -31,6 +31,8 @@ interface MenuButtonProps {
     footer?: ReactNode;
     /** Optional callback to toggle the menu */
     toggleCallback?: (isOpen: boolean) => void;
+    /** Optional callback to execute after the menu closes */
+    onAfterClose?: () => void;
 }
 
 /**
@@ -56,6 +58,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     showArrow = false,
     footer,
     toggleCallback,
+    onAfterClose,
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -130,6 +133,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 maxWidth={maxWidth}
                 maxHeight={maxHeight}
                 onClose={() => setIsMenuOpen(false)}
+                onAfterClose={onAfterClose}
                 position={menuPosition}
                 useFixedPosition={true}
                 positionAdjustment={positionAdjustment}
