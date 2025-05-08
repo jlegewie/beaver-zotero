@@ -3,7 +3,7 @@ import React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
-import { BrainIcon, ArrowDownIcon, Icon } from './icons';
+import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from './icons';
 import { getPref } from '../../src/utils/prefs';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { 
@@ -14,7 +14,8 @@ import {
   initModelsAtom,
   fetchModelsAtom, 
   updateSelectedModelAtom,
-  validateSelectedModelAtom
+  validateSelectedModelAtom,
+  isAgentModelAtom
 } from '../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 17;
@@ -27,6 +28,7 @@ const REFETCH_INTERVAL_MS = REFETCH_INTERVAL_HOURS * 60 * 60 * 1000;
  */
 const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
     const [isLoading, setIsLoading] = useState(true);
+    const isAgentModel = useAtomValue(isAgentModelAtom);
     const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom);
     const supportedModels = useAtomValue(supportedModelsAtom);
     const availableModels = useAtomValue(availableModelsAtom);
@@ -35,7 +37,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
 
-    // Add this new useEffect to watch for API key changes
+    // Watch for api key changes
     useEffect(() => {
         validateSelectedModel();
     }, [availableModels, validateSelectedModel]);
@@ -105,12 +107,18 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
                     <span className="display-flex items-center gap-2 min-w-0">
-                        <span className={`display-flex text-sm truncate ${selectedModel.model_id === model.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+                        <span className={`display-flex text-sm truncate ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                             {model.name}
                         </span>
                         {model.reasoning_model
-                            ? <Icon icon={BrainIcon} className={`-ml-015 ${selectedModel.model_id === model.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
+                            ? <Icon icon={BrainIcon} className={`-ml-015 ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
                             : undefined
+                        }
+                        {model.is_agent &&
+                            <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
+                                <Icon icon={AiMagicIcon} />
+                                <span className="text-xs">Agent</span>
+                            </div>
                         }
                     </span>
                 )
@@ -138,15 +146,35 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         }
     };
 
+    const agentComponent = (
+        <div className="display-flex items-center gap-1">
+            {selectedModel.reasoning_model && <Icon icon={BrainIcon} />}
+            {getButtonLabel()}
+            <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
+                <Icon icon={AiMagicIcon} />
+                <span>Agent</span>
+            </div>
+            <Icon icon={ArrowDownIcon} className="scale-11 -ml-1" />
+        </div>
+    );
+
+    const dynamicStyle = {
+        padding: '2px 0px',
+        fontSize: '0.80rem',
+        maxWidth: isAgentModel ? '250px' : '120px',
+    };
+
+
     return (
         <MenuButton
             menuItems={menuItems}
             variant="ghost-secondary"
+            customContent={isAgentModel ? agentComponent : undefined}
             buttonLabel={getButtonLabel()}
             icon={selectedModel.reasoning_model ? BrainIcon : undefined}
             rightIcon={ArrowDownIcon}
             className="truncate"
-            style={{padding: '2px 0px', fontSize: '0.80rem', maxWidth: '120px'}}
+            style={dynamicStyle}
             iconClassName="scale-11 -mr-015"
             rightIconClassName="scale-11 -ml-1"
             ariaLabel="Select AI Model"

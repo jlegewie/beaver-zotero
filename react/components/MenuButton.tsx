@@ -18,6 +18,7 @@ interface MenuButtonProps {
     iconClassName?: string;
     rightIconClassName?: string;
     buttonLabel?: string;
+    customContent?: ReactNode;
     disabled?: boolean;
     ariaLabel?: string;
     tooltipContent?: string;
@@ -51,6 +52,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     iconClassName = '',
     rightIconClassName = '',
     buttonLabel,
+    customContent,
     ariaLabel,
     disabled = false,
     positionAdjustment,
@@ -107,9 +109,16 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             aria-expanded={isMenuOpen}
             disabled={disabled}
         >
-            {icon && <Icon icon={icon} className={iconClassName} />}
-            {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
-            {rightIcon && <Icon icon={rightIcon} className={rightIconClassName} />}
+            {customContent ?
+                customContent
+            :
+                <>
+                    {icon && <Icon icon={icon} className={iconClassName} />}
+                    {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
+                    {rightIcon && <Icon icon={rightIcon} className={rightIconClassName} />}
+                </>
+            }
+            
         </button>
     );
 
