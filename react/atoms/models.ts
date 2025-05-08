@@ -8,6 +8,7 @@ export interface Model {
     provider: ProviderType;
     name: string;
     model_id: string;
+    is_agent: boolean;
     reasoning_model?: boolean;
     kwargs?: Record<string, any>;
     app_key: boolean;
@@ -18,6 +19,7 @@ export const DEFAULT_MODEL: Model = {
     provider: 'google',
     name: 'Gemini 2.0 Flash',
     model_id: 'gemini-2.0-flash-001',
+    is_agent: false,
     reasoning_model: false,
     app_key: true
 } as Model;
@@ -27,6 +29,9 @@ export const DEFAULT_MODEL: Model = {
 */
 export const supportedModelsAtom = atom<Model[]>([]);
 export const selectedModelAtom = atom<Model>(DEFAULT_MODEL);
+
+// Derived atom to get if the selected model is an agent model
+export const isAgentModelAtom = atom((get) => get(selectedModelAtom).is_agent);
 
 // Derived atom to get available models based on API keys
 export const availableModelsAtom = atom(
@@ -89,7 +94,7 @@ export const initModelsAtom = atom(
     }
 );
 
-// Add this new atom to input.ts
+// Validate selected model
 export const validateSelectedModelAtom = atom(
     null,
     (get, set) => {
@@ -148,7 +153,7 @@ export const fetchModelsAtom = atom(
 // Atom to update selected model
 export const updateSelectedModelAtom = atom(
     null,
-    (get, set, model: Model) => {
+    (_, set, model: Model) => {
         set(selectedModelAtom, model);
         setPref('lastUsedModel', JSON.stringify(model));
     }
