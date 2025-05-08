@@ -19,12 +19,12 @@ import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 
-interface AssistantMessageDisplayProps {
+interface AssistantMessageContentProps {
     message: ChatMessage;
     isLastMessage: boolean;
 }
 
-const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
+const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     message,
     isLastMessage
 }) => {
@@ -204,4 +204,4 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
     );
 };
 
-export default AssistantMessageDisplay;
+export default AssistantMessageContent;

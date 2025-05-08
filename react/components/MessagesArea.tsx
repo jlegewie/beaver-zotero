@@ -1,7 +1,7 @@
 // @ts-ignore no idea
 import React, { useEffect, useRef, forwardRef } from "react";
 import UserMessageDisplay from "./UserMessageDisplay"
-import AssistantMessageDisplay from "./AssistantMessageDisplay"
+import AssistantMessageContent from "./AssistantMessageContent"
 import { scrollToBottom } from "../utils/scrollToBottom";
 import { ChatMessage } from "../types/chat/uiTypes";
 import ToolMessageDisplay from "./ToolMessageDisplay";
@@ -68,7 +68,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                         )}
                         {/* Assistant message without tool calls */}
                         {message.role === 'assistant' && message.content !== '' && (!message.tool_calls || message.tool_calls.length === 0) && (
-                            <AssistantMessageDisplay
+                            <AssistantMessageContent
                                 key={message.id}
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
