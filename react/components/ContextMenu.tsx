@@ -80,6 +80,8 @@ export interface ContextMenuProps {
     maxHeight?: string;
     /** Callback when menu should close */
     onClose: () => void;
+    /** Optional callback to execute after the menu closes */
+    onAfterClose?: () => void;
     /** Position coordinates for menu placement */
     position: MenuPosition;
     /** Optional CSS class name */
@@ -106,6 +108,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     menuItems, 
     isOpen, 
     onClose, 
+    onAfterClose,
     position,
     width = undefined,
     maxWidth = undefined,
@@ -243,12 +246,14 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 onClose();
+                if (onAfterClose) onAfterClose();
             }
         };
         
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 onClose();
+                if (onAfterClose) onAfterClose();
             }
         };
         
@@ -259,7 +264,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             Zotero.getMainWindow().document.removeEventListener('mousedown', handleClickOutside);
             Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
         };
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, onAfterClose]);
     
     // Handle keyboard navigation
     useEffect(() => {
@@ -296,6 +301,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         !menuItems[focusedIndex].isGroupHeader && !menuItems[focusedIndex].isDivider) {
                         menuItems[focusedIndex].onClick();
                         onClose();
+                        if (onAfterClose) onAfterClose();
                     }
                     break;
                     default:
@@ -305,7 +311,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         Zotero.getMainWindow().document.addEventListener('keydown', handleKeyNav);
         return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose]);
+    }, [isOpen, menuItems, focusedIndex, onClose, onAfterClose]);
     
     // Set initial focus
     useEffect(() => {
@@ -360,10 +366,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     `}
                     style={!item.isDivider && !item.isGroupHeader ? { maxWidth: '100%', minWidth: 0 } : undefined}
                     onClick={(e) => {
-                        e.stopPropagation(); // Prevent click from reaching parent elements
+                        e.stopPropagation();
                         if (!item.isGroupHeader && !item.isDivider && !item.disabled) {
                             item.onClick();
                             onClose();
+                            if (onAfterClose) onAfterClose();
                         }
                     }}
                     onMouseEnter={() => {
