@@ -253,14 +253,16 @@ function findLastUserMessageIndexBefore(messages: ChatMessage[], beforeIndex: nu
 export const regenerateFromMessageAtom = atom(
     null,
     async (get, set, assistantMessageId: string) => {
-        // Get current messages and sources
-        const threadMessages = get(threadMessagesAtom);
-        const threadSources = get(threadSourcesAtom);
-        const currentThreadId = get(currentThreadIdAtom);
-        const model = get(selectedModelAtom);
-        if (!currentThreadId) return null;
 
+        // Get current model
+        const model = get(selectedModelAtom);
+        
+        // Get current thread ID
+        const currentThreadId = get(currentThreadIdAtom);
+        if (!currentThreadId) return null;
+        
         // Find the index of the last user message
+        const threadMessages = get(threadMessagesAtom);
         const messageIndex = threadMessages.findIndex(m => m.id === assistantMessageId);
         if (messageIndex < 0) return null; // Message not found
         const lastUserMessageIndex = findLastUserMessageIndexBefore(threadMessages, messageIndex);
@@ -269,40 +271,31 @@ export const regenerateFromMessageAtom = atom(
         
         // Truncate messages
         const truncatedMessages = threadMessages.slice(0, lastUserMessageIndex + 1);
-        
-        // New assistant message
-        const assistantMsg = createAssistantMessage();
-
-        // Add the assistant message to the new messages
-        const newMessages = [...truncatedMessages, assistantMsg];
 
         // Update messages atom
-        set(threadMessagesAtom, newMessages);
+        set(threadMessagesAtom, truncatedMessages);
 
         // Update sources
-        // TODO: tool calls sources missing (and app state??)
+        const threadSources = get(threadSourcesAtom);
         const messageIds = truncatedMessages.map(m => m.id);
         const newThreadSources = threadSources.filter(r => r.messageId && messageIds.includes(r.messageId));
         set(threadSourcesAtom, newThreadSources);
         
         // Execute chat completion
-        if (MODE === 'local') {
-            console.error('Local mode not supported for regenerateFromMessage');
-        } else {
-            _processChatCompletionViaBackend(
-                currentThreadId,
-                userMessageId,      // existing user message ID
-                "",                 // content remains unchanged
-                [],                 // sources remain unchanged
-                null,               // readerState remains unchanged
-                false,              // isLibrarySearch remains unchanged
-                model,
-                set,
-                get
-            );
-        }
+        set(isChatRequestPendingAtom, true);
+        _processChatCompletionViaBackend(
+            currentThreadId,
+            userMessageId,      // existing user message ID
+            "",                 // content remains unchanged
+            [],                 // sources remain unchanged
+            null,               // readerState remains unchanged
+            false,              // isLibrarySearch remains unchanged
+            model,
+            set,
+            get
+        );
         
-        return assistantMsg.id;
+        return;
     }
 );
 
