@@ -108,11 +108,26 @@ const AssistantMessageDisplay: React.FC<AssistantMessageDisplayProps> = ({
         return citations;
     }, [message.status, message.content, sourceCitations]);
 
+    // If the message is a placeholder, show the warnings and error only
+    if (message.isPlaceholder) {
+        return (
+            <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
+                {message.warnings?.map((warning) => (
+                    <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
+                ))}
+                {message.status === 'error' &&
+                    <ErrorDisplay errorType={message.errorType || 'unknown'} />
+                }
+            </div>
+        );
+    }
+
     return (
         <div className={`hover-trigger ${isLastMessage ? 'pb-3' : ''}`}>
             {message.warnings?.map((warning) => (
                 <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
             ))}
+            {/* Show spinner if message is in_progress, content is empty, and tool call is not in progress */}
             {message.status === 'in_progress' && message.content == '' && !toolCallInProgress &&
                 <div className="py-1">
                     <Button

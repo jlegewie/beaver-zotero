@@ -29,6 +29,7 @@ export interface ChatMessage {
     status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error' | 'canceled';
     errorType?: string;
     warnings?: Warning[];
+    isPlaceholder?: boolean;
 }
 
 // Factory functions for creating messages

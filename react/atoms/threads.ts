@@ -157,6 +157,15 @@ export const removeWarningFromMessageAtom = atom(
         ));
     }
 );
+
+export const removeMessageAtom = atom(
+    null,
+    (get, set, { id }: { id: string }) => {
+        set(threadMessagesAtom, get(threadMessagesAtom).filter(message => message.id !== id));
+    }
+);
+
+
 export const addToolCallSourcesToThreadSourcesAtom = atom(
     null,
     async (get, set, { messages }: { messages: ChatMessage[] }) => {

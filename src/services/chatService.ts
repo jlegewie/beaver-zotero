@@ -19,7 +19,6 @@ export const search_tool_request: ToolRequest = {
 export interface ChatCompletionRequestBody {
     thread_id: string | null;           // If continuing an existing thread, else null
     user_message_id: string;            // The UUID from the frontend
-    assistant_message_id: string;       // The in-progress assistant UUID
     content: string;                    // The user's input text
     user_api_key: string | null;        // The user's API key, if provided
     model: Model;                       // The model to use for the request
@@ -29,25 +28,49 @@ export interface ChatCompletionRequestBody {
     reader_state: ReaderState | null;   // Reader state, if any
 }
 
+export type DeltaType = "reasoning" | "content";
+
 export interface SSECallbacks {
-    // Callback for "thread" event: called when a new thread is created or resumed.
-    //      Sets currentThreadIdAtom to the new thread ID.
+    /**
+     * Handles "thread" event when a new thread is created or resumed
+     * @param threadId The new thread ID to set in currentThreadIdAtom
+     */
     onThread: (threadId: string) => void;
-    // Callback for "token" event: receives partial text as it comes in.
-    //      Appends chunk to the assistant message with id=assistantMessageId.
-    onToken: (message_id: string, token: string) => void;
-    // Callback for "message" event: adds or updates message of type MessageModel.
-    //    When completed, adds attachments from tool responses (if any) to the thread sources.
+    
+    /**
+     * Handles "token" event with partial text as it streams in
+     * @param messageId ID of the assistant message to append the token to
+     * @param delta Text chunk to append to the assistant message
+     * @param type Type of delta (e.g. "text", "citation", "image")
+     */
+    onDelta: (messageId: string, delta: string, type: DeltaType) => void;
+    
+    /**
+     * Handles "message" event to add or update a complete message
+     * @param data The complete message object to add or update
+     */
     onMessage: (data: MessageModel) => void;
-    // Callback for "toolcall" event (obsolete): adds or updates message of type MessageModel.
-    //    When completed, adds attachments from tool responses (if any) to the thread sources.
-    onToolcall: (data: MessageModel) => void;
-    // Callback for "done" event: called when the assistant is done.
-    onDone: () => void;
-    // Callback for "error" event: called when an error occurs.
-    onError: (errorType: string) => void;
-    // Callback for "warning" event: called when a warning occurs.
-    onWarning: (warningType: string, data: any) => void;
+    
+    /**
+     * Handles "done" event when the assistant completes its response
+     * @param messageId ID of the completed message, or null
+     */
+    onDone: (messageId: string | null) => void;
+    
+    /**
+     * Handles "error" event when an error occurs during processing
+     * @param messageId ID of the message to mark as error, or null to create a temporary error message
+     * @param errorType Type of error that occurred
+     */
+    onError: (messageId: string | null, errorType: string) => void;
+    
+    /**
+     * Handles "warning" event when a non-fatal issue occurs
+     * @param messageId ID of the message to mark with warning, or null to create a temporary warning
+     * @param warningType Type of warning that occurred
+     * @param data Additional data related to the warning
+     */
+    onWarning: (messageId: string | null, warningType: string, data: any) => void;
 }
 
 
@@ -162,7 +185,7 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onToken, onMessage, onToolcall, onDone, onError, onWarning } = callbacks;
+        const { onThread, onDelta, onMessage, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -174,7 +197,7 @@ export class ChatService extends ApiService {
                 // Buffer incoming data, parse chunk by chunk
                 let buffer = '';
                 let lastPosition = 0;
-                let doneReceived = false;
+                const doneReceived = false;
 
                 // XHR observer for Zotero
                 const requestObserver = (xhr: XMLHttpRequest) => {
@@ -196,13 +219,9 @@ export class ChatService extends ApiService {
                                 // parse it
                                 this.parseAndHandleEvent(rawEvent, {
                                     onThread,
-                                    onToken,
+                                    onDelta,
                                     onMessage,
-                                    onToolcall,
-                                    onDone: () => {
-                                        doneReceived = true;
-                                        onDone();
-                                    },
+                                    onDone,
                                     onError,
                                     onWarning
                                 });
@@ -234,13 +253,13 @@ export class ChatService extends ApiService {
                     cancellerReceiver: setCanceller // Pass the canceller function to the caller
                 }).catch((err: unknown) => {
                     // If the request fails to even start (network error)
-                    onError('network');
+                    onError(null, 'network');
                     reject(err);
                 });
 
             } catch (outerErr) {
                 // Some error in constructing the request
-                onError('bad_request');
+                onError(null, 'bad_request');
                 reject(outerErr);
             }
         });
@@ -256,20 +275,18 @@ export class ChatService extends ApiService {
         rawEvent: string,
         {
             onThread,
-            onToken,
+            onDelta,
             onMessage,
-            onToolcall,
             onDone,
             onError,
             onWarning
         }: {
             onThread: (threadId: string) => void;
-            onToken: (message_id: string, token: string) => void;
+            onDelta: (messageId: string, delta: string, type: DeltaType) => void;
             onMessage: (data: MessageModel) => void;
-            onToolcall: (data: MessageModel) => void;
-            onDone: () => void;
-            onError: (errorType: string) => void;
-            onWarning: (type: string, data: any) => void;
+            onDone: (messageId: string | null) => void;
+            onError: (messageId: string | null, errorType: string) => void;
+            onWarning: (messageId: string | null, warningType: string, data: any) => void;
         }
     ): void {
         let eventName = 'message';
@@ -296,22 +313,22 @@ export class ChatService extends ApiService {
                 parsedData = JSON.parse(eventData);
             } catch (error) {
                 // If we cannot parse the data, treat as an error
-                onError('server_error');
+                onError(null, 'server_error');
                 return;
             }
         }
 
         switch (eventName) {
             case 'thread':
-                // e.g. data: {"thread_id": "uuid"}
-                if (parsedData?.thread_id) {
-                    onThread(parsedData.thread_id);
+                // e.g. data: {"threadId": "uuid"}
+                if (parsedData?.threadId) {
+                    onThread(parsedData.threadId);
                 }
                 break;
-            case 'token':
-                // e.g. data: {"id": "uuid", "content": "some partial text"}
-                if (parsedData?.message_id && parsedData?.content) {
-                    onToken(parsedData.message_id, parsedData.content);
+            case 'delta':
+                // e.g. data: {"messageId": "uuid", "token": "some partial text"}
+                if (parsedData?.messageId && parsedData?.delta && parsedData?.type) {
+                    onDelta(parsedData.messageId, parsedData.delta, parsedData.type);
                 }
                 // if (parsedData?.id && parsedData?.reasoning)
                 break;
@@ -321,27 +338,16 @@ export class ChatService extends ApiService {
                     onMessage(message);
                 }
                 break;
-            case 'toolcall':
-                // e.g.
-                //  data: {"id": "...", "function": "search", "status": "start"}
-                //  data: {"id": "...", "function": "search", "status": "results", "results": [...]}
-                //  data: {"id": "...", "function": "search", "status": "complete"}
-                //  data: {"id": "...", "function": "search", "status": "error", "error": "..."}
-                if (parsedData?.message) {
-                    const message = JSON.parse(parsedData.message) as MessageModel;
-                    onToolcall(message);
-                }
-                break;
             case 'done':
                 // e.g. data: null
-                onDone();
+                onDone(parsedData?.messageId || null);
                 break;
             case 'error':
-                onError(parsedData.type || 'server_error');
+                onError(parsedData?.messageId || null, parsedData?.type || 'server_error');
                 break;
             case 'warning':
                 if (parsedData?.type) {
-                    onWarning(parsedData.type, parsedData?.data || null);
+                    onWarning(parsedData?.messageId || null, parsedData?.type, parsedData?.data || null);
                 }
                 break;
             default:
@@ -355,7 +361,7 @@ export class ChatService extends ApiService {
      * 
      * Classify an XHR error code into a known errorType, then call onError.
      */
-    private handleXHRError(xhr: XMLHttpRequest, onError: (err: string) => void) {
+    private handleXHRError(xhr: XMLHttpRequest, onError: (messageId: string | null, errorType: string) => void) {
         let errorType = 'unknown';
         const status = xhr.status;
         if (status === 0) {
@@ -371,7 +377,7 @@ export class ChatService extends ApiService {
         } else if (status >= 400) {
             errorType = 'bad_request';
         }
-        onError(errorType);
+        onError(null, errorType);
     }
 
     /**

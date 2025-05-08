@@ -4,7 +4,7 @@ import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { removeWarningFromMessageAtom } from '../atoms/threads';
+import { removeMessageAtom, removeWarningFromMessageAtom } from '../atoms/threads';
 import IconButton from './IconButton';
 import ZoteroItemsList from './ZoteroItemsList';
 
@@ -85,9 +85,10 @@ const getWarning = (type: string) => {
   }
 };
 
-export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> = ({ messageId, warning }) => {
+export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isPlaceholder?: boolean }> = ({ messageId, warning, isPlaceholder }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const removeWarningFromMessage = useSetAtom(removeWarningFromMessageAtom);
+    const removeMessage = useSetAtom(removeMessageAtom);
     const showSettingsIcon = warning.type === 'user_key_failed_unexpected' || warning.type === 'user_key_rate_limit_exceeded' || warning.type === 'user_key_failed';
     
     return (
@@ -113,7 +114,12 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning }> =
                             icon={CancelIcon}
                             className="mr-1 scale-90"
                             onClick={() => {
-                                removeWarningFromMessage({ id: messageId, warningId: warning.id });                                
+                                if (!isPlaceholder) {
+                                    removeWarningFromMessage({ id: messageId, warningId: warning.id });                                
+                                } else {
+                                    removeMessage({ id: messageId });
+                                }
+                                
                             }}
                         />
                     </div>

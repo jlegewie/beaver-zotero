@@ -21,7 +21,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
-import { chatService, search_tool_request, ChatCompletionRequestBody } from '../../src/services/chatService';
+import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { Model, selectedModelAtom, DEFAULT_MODEL } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
@@ -182,11 +182,10 @@ export const generateResponseAtom = atom(
 
         // Create user and assistant messages
         const userMsg = createUserMessage(payload.content);
-        const assistantMsg = createAssistantMessage();
 
         // Update thread messages atom
         const threadMessages = get(threadMessagesAtom);
-        const newMessages = [...threadMessages, userMsg, assistantMsg];
+        const newMessages = [...threadMessages, userMsg];
         set(threadMessagesAtom, newMessages);
 
         // Prepare sources
@@ -222,7 +221,6 @@ export const generateResponseAtom = atom(
         _processChatCompletionViaBackend(
             get(currentThreadIdAtom),
             userMsg.id,         // the ID from createUserMessage
-            assistantMsg.id,    // the ID from createAssistantMessage
             userMsg.content,
             messageAttachments,
             readerState,
@@ -232,7 +230,7 @@ export const generateResponseAtom = atom(
             get
         );
         
-        return assistantMsg.id;
+        return;
     }
 );
 
@@ -291,7 +289,6 @@ export const regenerateFromMessageAtom = atom(
             _processChatCompletionViaBackend(
                 currentThreadId,
                 userMessageId,      // existing user message ID
-                assistantMsg.id,    // new assistant message ID
                 "",                 // content remains unchanged
                 [],                 // sources remain unchanged
                 null,               // readerState remains unchanged
@@ -340,7 +337,6 @@ function _processChatCompletion(
 function _processChatCompletionViaBackend(
     currentThreadId: string | null,
     userMessageId: string,
-    assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
     readerState: ReaderState | null,
@@ -368,7 +364,6 @@ function _processChatCompletionViaBackend(
     const payload = {
         thread_id: currentThreadId,
         user_message_id: userMessageId,
-        assistant_message_id: assistantMessageId,
         content: content,
         attachments: attachments,
         reader_state: readerState,
@@ -382,17 +377,20 @@ function _processChatCompletionViaBackend(
     chatService.requestChatCompletion(
         payload,
         {
-            onThread: (newThreadId: string) => {
-                logger(`event 'onThread': ${newThreadId}`, 1);
-                set(currentThreadIdAtom, newThreadId);
+            onThread: (threadId: string) => {
+                logger(`event 'onThread': ${threadId}`, 1);
+                set(currentThreadIdAtom, threadId);
             },
-            onToken: (message_id: string, partial: string) => {
-                logger(`event 'onToken': ${message_id} - ${partial}`, 1);
+            onDelta: (messageId: string, delta: string, type: DeltaType) => {
+                logger(`event 'onDelta': ${messageId} - ${delta} - ${type}`, 1);
                 // SSE partial chunk → append to the assistant message
-                set(streamToMessageAtom, {
-                    id: message_id,
-                    chunk: partial
-                });
+                if (type === "content") {
+                    set(streamToMessageAtom, {
+                        id: messageId,
+                        chunk: delta
+                    });
+                }
+                // if (type === "reasoning")
             },
             onMessage: (data: MessageModel) => {
                 logger(`event 'onMessage': ${JSON.stringify(data)}`, 1);
@@ -404,37 +402,39 @@ function _processChatCompletionViaBackend(
                     set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
                 }
             },
-            onToolcall: async (data: MessageModel) => {
-                logger(`event 'onToolcall': ${JSON.stringify(data)}`, 1);
-                if (!data) return;
-
-                const message = toMessageUI(data);
-                // Add the message to the thread
-                set(addOrUpdateMessageAtom, {message, beforeId: assistantMessageId});
-                // Add the tool call sources to the thread sources
-                if (message.status === 'completed') {
-                    set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
+            onDone: (messageId: string | null) => {
+                logger(`event 'onDone': ${messageId}`, 1);
+                // Mark the assistant as completed
+                if (messageId) {
+                    set(setMessageStatusAtom, { id: messageId, status: 'completed' });
+                } else {
+                    // Clear the holder and the cancellable state
+                    cancellerHolder.current = null;
+                    set(isCancellableAtom, false);
                 }
             },
-            onDone: () => {
-                logger("event 'onDone'", 1);
-                // Mark the assistant as completed
-                set(setMessageStatusAtom, { id: assistantMessageId, status: 'completed' });
-                // Clear the holder and the cancellable state
-                cancellerHolder.current = null;
-                set(isCancellableAtom, false);
-            },
-            onError: (errorType: string) => {
-                logger(`event 'onError': ${errorType}`, 1);
+            onError: (messageId: string | null, errorType: string) => {
+                logger(`event 'onError': ${messageId} - ${errorType}`, 1);
+                // If the message ID is not provided, use the last assistant message or create a new one
+                if (!messageId) {
+                    const messages = get(threadMessagesAtom);
+                    if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+                        messageId = messages[messages.length - 1].id;
+                    } else {
+                        const assistantMsg = createAssistantMessage({status: 'error', errorType, isPlaceholder: true});
+                        set(threadMessagesAtom, (prev: ChatMessage[]) => [...prev, assistantMsg]);
+                        messageId = assistantMsg.id;
+                    }
+                }
                 const isCancelling = get(isCancellingAtom);
                 if (isCancelling) {
                     // Cancel the message
-                    set(cancelStreamingMessageAtom, { assistantMessageId });
+                    set(cancelStreamingMessageAtom, { messageId });
                 } else {
                     // Mark the assistant message as error
                     set(setMessageStatusAtom, {
-                        id: assistantMessageId,
-                    status: 'error',
+                        id: messageId,
+                        status: 'error',
                         errorType
                     });
                 }
@@ -442,8 +442,19 @@ function _processChatCompletionViaBackend(
                 cancellerHolder.current = null;
                 set(isCancellableAtom, false);
             },
-            onWarning: (type: string, data: any) => {
-                logger(`event 'onWarning': ${type} - ${JSON.stringify(data)}`, 1);
+            onWarning: (messageId: string | null, type: string, data: any) => {
+                logger(`event 'onWarning': ${messageId} - ${type} - ${JSON.stringify(data)}`, 1);
+                // If the message ID is not provided, use the last assistant message or exit
+                if (!messageId) {
+                    const messages = get(threadMessagesAtom);
+                    if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+                        messageId = messages[messages.length - 1].id;
+                    } else {
+                        const assistantMsg = createAssistantMessage({status: 'completed', isPlaceholder: true});
+                        set(threadMessagesAtom, (prev: ChatMessage[]) => [...prev, assistantMsg]);
+                        messageId = assistantMsg.id;
+                    }
+                }
                 // Warning
                 const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
@@ -451,7 +462,7 @@ function _processChatCompletionViaBackend(
                 }
                 // Add the warning message for the assistant message
                 set(setMessageStatusAtom, {
-                    id: assistantMessageId,
+                    id: messageId,
                     warnings: [warning]
                 });
             }
