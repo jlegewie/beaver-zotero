@@ -385,10 +385,11 @@ function _processChatCompletionViaBackend(
             onThread: (newThreadId) => {
                 set(currentThreadIdAtom, newThreadId);
             },
-            onToken: (partial) => {
+            onToken: (message_id: string, partial: string) => {
+                logger(`event 'onToken': ${message_id} - ${partial}`, 1);
                 // SSE partial chunk → append to the assistant message
                 set(streamToMessageAtom, {
-                    id: assistantMessageId,
+                    id: message_id,
                     chunk: partial
                 });
             },

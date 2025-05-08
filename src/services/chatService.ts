@@ -35,7 +35,7 @@ export interface SSECallbacks {
     onThread: (threadId: string) => void;
     // Callback for "token" event: receives partial text as it comes in.
     //      Appends chunk to the assistant message with id=assistantMessageId.
-    onToken: (token: string) => void;
+    onToken: (message_id: string, token: string) => void;
     // Callback for "message" event: adds or updates message of type MessageModel.
     //    When completed, adds attachments from tool responses (if any) to the thread sources.
     onMessage: (data: MessageModel) => void;
@@ -264,7 +264,7 @@ export class ChatService extends ApiService {
             onWarning
         }: {
             onThread: (threadId: string) => void;
-            onToken: (token: string) => void;
+            onToken: (message_id: string, token: string) => void;
             onMessage: (data: MessageModel) => void;
             onToolcall: (data: MessageModel) => void;
             onDone: () => void;
@@ -309,10 +309,11 @@ export class ChatService extends ApiService {
                 }
                 break;
             case 'token':
-                // e.g. data: {"content": "some partial text"}
-                if (parsedData?.content) {
-                    onToken(parsedData.content);
+                // e.g. data: {"id": "uuid", "content": "some partial text"}
+                if (parsedData?.message_id && parsedData?.content) {
+                    onToken(parsedData.message_id, parsedData.content);
                 }
+                // if (parsedData?.id && parsedData?.reasoning)
                 break;
             case 'message':
                 if (parsedData?.message) {
