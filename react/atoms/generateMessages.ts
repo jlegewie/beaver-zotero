@@ -382,7 +382,8 @@ function _processChatCompletionViaBackend(
     chatService.requestChatCompletion(
         payload,
         {
-            onThread: (newThreadId) => {
+            onThread: (newThreadId: string) => {
+                logger(`event 'onThread': ${newThreadId}`, 1);
                 set(currentThreadIdAtom, newThreadId);
             },
             onToken: (message_id: string, partial: string) => {
@@ -394,6 +395,7 @@ function _processChatCompletionViaBackend(
                 });
             },
             onMessage: (data: MessageModel) => {
+                logger(`event 'onMessage': ${JSON.stringify(data)}`, 1);
                 if (!data) return;
                 const message = toMessageUI(data);
                 set(addOrUpdateMessageAtom, { message });
@@ -403,6 +405,7 @@ function _processChatCompletionViaBackend(
                 }
             },
             onToolcall: async (data: MessageModel) => {
+                logger(`event 'onToolcall': ${JSON.stringify(data)}`, 1);
                 if (!data) return;
 
                 const message = toMessageUI(data);
@@ -414,13 +417,15 @@ function _processChatCompletionViaBackend(
                 }
             },
             onDone: () => {
+                logger("event 'onDone'", 1);
                 // Mark the assistant as completed
                 set(setMessageStatusAtom, { id: assistantMessageId, status: 'completed' });
                 // Clear the holder and the cancellable state
                 cancellerHolder.current = null;
                 set(isCancellableAtom, false);
             },
-            onError: (errorType) => {
+            onError: (errorType: string) => {
+                logger(`event 'onError': ${errorType}`, 1);
                 const isCancelling = get(isCancellingAtom);
                 if (isCancelling) {
                     // Cancel the message
@@ -438,6 +443,7 @@ function _processChatCompletionViaBackend(
                 set(isCancellableAtom, false);
             },
             onWarning: (type: string, data: any) => {
+                logger(`event 'onWarning': ${type} - ${JSON.stringify(data)}`, 1);
                 // Warning
                 const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
@@ -448,8 +454,6 @@ function _processChatCompletionViaBackend(
                     id: assistantMessageId,
                     warnings: [warning]
                 });
-                console.log(type)
-                console.log(data)
             }
         },
         // Store the canceller function directly in the holder
