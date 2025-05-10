@@ -154,7 +154,12 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
 function extractPrimaryCreators(item: Zotero.Item): any[] {
     const itemCreators = item.getCreators();
     const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
-    return itemCreators.filter(creator => creator.creatorTypeID == primaryCreatorTypeID);
+    return itemCreators
+        .filter(creator => creator.creatorTypeID == primaryCreatorTypeID)
+        .map(creator => ({
+            ...creator,
+            type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+        }));
 }
 
 /**
