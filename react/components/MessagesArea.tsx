@@ -79,6 +79,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             <AssistantMessageTools
                                 key={`tools-${message.id}`}
                                 message={message}
+                                isFirstAssistantMessage={messages[index - 1]?.role === 'user'}
                             />
                         )}
                     </>

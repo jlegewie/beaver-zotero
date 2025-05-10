@@ -9,6 +9,7 @@ import ZoteroItemsList from './ZoteroItemsList';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
+    isFirstAssistantMessage: boolean;
 }
 
 interface ToolCallDisplayProps {
@@ -125,14 +126,18 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
 };
 
 const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
-    message
+    message,
+    isFirstAssistantMessage,
 }) => {
     if (!message.tool_calls || message.tool_calls.length === 0) {
         return null;
     }
 
     return (
-        <div id={`message-tools-${message.id}`} className="display-flex flex-col py-1 px-3 gap-3">
+        <div
+            id={`message-tools-${message.id}`}
+            className={`display-flex flex-col py-1 px-3 gap-3 ${!isFirstAssistantMessage && message.content === ''? '-mt-3' : ''}`}
+        >
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
             ))}
