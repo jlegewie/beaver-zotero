@@ -70,13 +70,13 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
     if (!item.isAttachment() || !(await item.fileExists())) return null;
 
     try {
-        const fileName = item.attachmentFilename;
+        // const fileName = item.attachmentFilename;
         const file_hash = await item.attachmentHash; // File content hash
         const size = await Zotero.Attachments.getTotalFileSize(item);
         const mimeType = item.attachmentContentType || 'application/octet-stream';
 
         return {
-            filename: fileName,
+            // filename: fileName,
             file_hash: file_hash,
             size: size,
             mime_type: mimeType
@@ -120,6 +120,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
         // @ts-ignore - Add runtime check or proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
+        filename: item.attachmentFilename,
     };
 
     // 4. Calculate hash from the prepared hashed fields object
@@ -134,6 +135,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
         is_primary: hashedFields.is_primary,
         deleted: hashedFields.deleted,
         title: hashedFields.title,
+        filename: hashedFields.filename,
         // Add non-hashed fields
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
