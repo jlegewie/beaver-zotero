@@ -379,7 +379,7 @@ function _processChatCompletionViaBackend(
                 set(currentThreadIdAtom, threadId);
             },
             onDelta: (messageId: string, delta: string, type: DeltaType) => {
-                logger(`event 'onDelta': ${messageId} - ${delta} - ${type}`, 1);
+                // logger(`event 'onDelta': ${messageId} - ${delta} - ${type}`, 1);
                 // SSE partial chunk → append to the assistant message
                 if (type === "content") {
                     set(streamToMessageAtom, {
