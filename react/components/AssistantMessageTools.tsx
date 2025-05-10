@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import { ToolCall } from '../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, SearchIcon, Icon } from './icons';
+import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, SearchIcon, ViewIcon, Icon } from './icons';
 import Button from './button';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
@@ -19,6 +19,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const [loadingDots, setLoadingDots] = useState(1);
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
     const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+    const [isButtonHovered, setIsButtonHovered] = useState(false);
 
     console.log('toolCall display', toolCall);
 
@@ -80,10 +81,17 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
         if (toolCall.status === 'in_progress') return Spinner;
         if (toolCall.status === 'error') return AlertIcon;
         if (toolCall.status === 'completed') {
-            if (numResults === 0 && !toolCall.response?.content) return AlertIcon; // Show alert if truly no output
-            if (numResults > 0) return resultsVisible ? ArrowDownIcon : ArrowRightIcon;
+            if (resultsVisible) return ArrowDownIcon;
+            if (isButtonHovered && numResults > 0) return ArrowRightIcon;
+            if(toolCall.function.name === 'related_items_search') return SearchIcon;
+            if(toolCall.function.name === 'hybrid_search') return SearchIcon;
+            if(toolCall.function.name === 'search_zotero_library') return SearchIcon;
+            if(toolCall.function.name === 'search_references_by_topic') return SearchIcon;
+            if(toolCall.function.name === 'get_fulltext_content') return ViewIcon;
+            if(toolCall.function.name === 'search_metadata') return SearchIcon;
+            return SearchIcon;
         }
-        return undefined; // Default no icon if just content
+        return undefined; // Default no icon
     };
 
     const getButtonText = () => {
@@ -107,25 +115,27 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div className="mb-2 last:mb-0">
+        <div id={`tool-${toolCall.id}`} className="mb-2 last:mb-0">
+            {/* {toolCall.response?.content && (
+                <MarkdownRenderer className="markdown px-4 py-1 text-sm" content={toolCall.response.content} />
+            )} */}
             {(toolCall.label || toolCall.status !== 'completed' || hasAttachmentsToShow) && (
                  <Button
                     variant="ghost"
                     onClick={toggleResults}
+                    onMouseEnter={() => setIsButtonHovered(true)}
+                    onMouseLeave={() => setIsButtonHovered(false)}
                     className={`text-base scale-105 ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''} ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}`}
-                    iconClassName="scale-12"
+                    iconClassName="scale-11"
                     icon={getIcon()}
                     disabled={isButtonDisabled && !canToggleResults}
                 >
-                    <span style={{ marginLeft: getIcon() ? '-2px' : '0px' }}>
+                    <span>
                         {getButtonText()}
                     </span>
                 </Button>
             )}
 
-            {toolCall.response?.content && (
-                <MarkdownRenderer className="markdown px-4 py-1 text-sm" content={toolCall.response.content} />
-            )}
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
                 <div className="px-4 py-1 text-sm text-red-600">
                      <MarkdownRenderer className="markdown" content={toolCall.response.error} />
@@ -175,7 +185,7 @@ const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     }
 
     return (
-        <div id={`tools-for-message-${message.id}`} className="py-1 px-4">
+        <div id={`tools-${message.id}`} className="py-1 px-4 gap-1">
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
             ))}
