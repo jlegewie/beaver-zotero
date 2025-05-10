@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel } from '../../react/types/chat/apiTypes';
+import { MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
 import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
 import { Model, ProviderType } from '../../react/atoms/models';
 
@@ -50,6 +50,14 @@ export interface SSECallbacks {
      * @param data The complete message object to add or update
      */
     onMessage: (data: MessageModel) => void;
+    
+    /**
+     * Handles "toolcall" event when a tool call is received
+     * @param messageId ID of the assistant message
+     * @param toolcallId ID of the tool call
+     * @param toolCall The tool call object
+     */
+    onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
     
     /**
      * Handles "done" event when the assistant completes its response
@@ -185,7 +193,7 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onDelta, onMessage, onDone, onError, onWarning } = callbacks;
+        const { onThread, onDelta, onMessage, onToolcall, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -221,6 +229,7 @@ export class ChatService extends ApiService {
                                     onThread,
                                     onDelta,
                                     onMessage,
+                                    onToolcall,
                                     onDone,
                                     onError,
                                     onWarning
@@ -277,6 +286,7 @@ export class ChatService extends ApiService {
             onThread,
             onDelta,
             onMessage,
+            onToolcall,
             onDone,
             onError,
             onWarning
@@ -284,6 +294,7 @@ export class ChatService extends ApiService {
             onThread: (threadId: string) => void;
             onDelta: (messageId: string, delta: string, type: DeltaType) => void;
             onMessage: (data: MessageModel) => void;
+            onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
             onWarning: (messageId: string | null, warningType: string, data: any) => void;
@@ -336,6 +347,12 @@ export class ChatService extends ApiService {
                 if (parsedData?.message) {
                     const message = JSON.parse(parsedData.message) as MessageModel;
                     onMessage(message);
+                }
+                break;
+            case 'toolcall':
+                // e.g. data: {"messageId": "uuid", "toolcallId": "uuid", "toolCall": {...}}
+                if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolCall) {
+                    onToolcall(parsedData.messageId, parsedData.toolcallId, parsedData.toolCall as ToolCall);
                 }
                 break;
             case 'done':

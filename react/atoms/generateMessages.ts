@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel } from '../types/chat/apiTypes';
+import { MessageModel, ToolCall } from '../types/chat/apiTypes';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
@@ -10,6 +10,7 @@ import {
     threadSourcesAtom,
     currentThreadIdAtom,
     addOrUpdateMessageAtom,
+    addOrUpdateToolcallAtom,
     addToolCallSourcesToThreadSourcesAtom,
     cancellerHolder,
     isCancellableAtom,
@@ -398,6 +399,10 @@ function _processChatCompletionViaBackend(
                 if (message.status === 'completed' && message.tool_calls) {
                     set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
                 }
+            },
+            onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => {
+                logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolCall: ${JSON.stringify(toolCall)}`, 1);
+                set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolCall });
             },
             onDone: (messageId: string | null) => {
                 logger(`event 'onDone': ${messageId}`, 1);

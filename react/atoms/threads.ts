@@ -5,8 +5,9 @@ import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentMessageContentAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
-import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
+import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
+import { ToolCall } from "../types/chat/apiTypes";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -231,6 +232,30 @@ export const addOrUpdateMessageAtom = atom(
                 set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
             }
         }
+    }
+);
+
+export const addOrUpdateToolcallAtom = atom(
+    null,
+    (get, set, { messageId, toolcallId, toolCall }: { messageId: string; toolcallId: string; toolCall: ToolCall }) => {
+        set(threadMessagesAtom, (prevMessages) =>
+            prevMessages.map((message) => {
+                if (message.id === messageId) {
+                    const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
+                    const existingToolCallIndex = toolCalls.findIndex(tc => tc.id === toolcallId);
+
+                    if (existingToolCallIndex !== -1) {
+                        // Replace existing tool call
+                        toolCalls[existingToolCallIndex] = toolCall;
+                    } else {
+                        // Append new tool call
+                        toolCalls.push(toolCall);
+                    }
+                    return { ...message, tool_calls: toolCalls };
+                }
+                return message;
+            })
+        );
     }
 );
 
