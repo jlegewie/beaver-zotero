@@ -359,9 +359,10 @@ export class ChatService extends ApiService {
                 }
                 break;
             case 'toolcall':
-                // e.g. data: {"messageId": "uuid", "toolcallId": "uuid", "toolCall": {...}}
-                if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolCall) {
-                    onToolcall(parsedData.messageId, parsedData.toolcallId, parsedData.toolCall as ToolCall);
+                // e.g. data: {"messageId": "uuid", "toolcallId": "uuid", "toolcall": {...}}
+                if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolcall) {
+                    const toolcall = JSON.parse(parsedData.toolcall) as ToolCall;
+                    onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
                 }
                 break;
             case 'complete':
