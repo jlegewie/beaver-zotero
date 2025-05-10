@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import { ToolCall } from '../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSItemTypeIcon, SearchIcon, ViewIcon, Icon } from './icons';
+import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon } from './icons';
 import Button from './button';
-import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import ZoteroItemsList from './ZoteroItemsList';
 
 interface AssistantMessageToolsProps {
@@ -83,11 +82,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
 
     return (
         <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1 min-w-0`}>
-            {/* {toolCall.response?.content && (
-                <MarkdownRenderer className="markdown px-4 py-1 text-sm" content={toolCall.response.content} />
-            )} */}
             {(toolCall.label || toolCall.status !== 'completed' || hasAttachmentsToShow) && (
-                // <div>
                 <Button
                     variant="ghost-secondary"
                     onClick={toggleResults}
@@ -110,7 +105,6 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
                         {getButtonText()}
                     </span>
                 </Button>
-                // </div>
             )}
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
