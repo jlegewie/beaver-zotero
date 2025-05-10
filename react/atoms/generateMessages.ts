@@ -400,9 +400,9 @@ function _processChatCompletionViaBackend(
                     set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
                 }
             },
-            onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => {
-                logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolCall: ${JSON.stringify(toolCall)}`, 1);
-                set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolCall });
+            onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
+                logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
+                set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
             onComplete: (messageId: string) => {
                 logger(`event 'onComplete': ${messageId}`, 1);

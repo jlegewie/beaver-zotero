@@ -237,7 +237,7 @@ export const addOrUpdateMessageAtom = atom(
 
 export const addOrUpdateToolcallAtom = atom(
     null,
-    (get, set, { messageId, toolcallId, toolCall }: { messageId: string; toolcallId: string; toolCall: ToolCall }) => {
+    (get, set, { messageId, toolcallId, toolcall }: { messageId: string; toolcallId: string; toolcall: ToolCall }) => {
         set(threadMessagesAtom, (prevMessages) =>
             prevMessages.map((message) => {
                 if (message.id === messageId) {
@@ -246,10 +246,10 @@ export const addOrUpdateToolcallAtom = atom(
 
                     if (existingToolCallIndex !== -1) {
                         // Replace existing tool call
-                        toolCalls[existingToolCallIndex] = toolCall;
+                        toolCalls[existingToolCallIndex] = toolcall;
                     } else {
                         // Append new tool call
-                        toolCalls.push(toolCall);
+                        toolCalls.push(toolcall);
                     }
                     return { ...message, tool_calls: toolCalls };
                 }
