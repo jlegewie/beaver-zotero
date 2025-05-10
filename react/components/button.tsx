@@ -15,6 +15,10 @@ interface ButtonProps {
     rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Click handler */
     onClick?: (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => void;
+    /** Mouse enter handler */
+    onMouseEnter?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+    /** Mouse leave handler */
+    onMouseLeave?: (e: React.MouseEvent<HTMLButtonElement>) => void;
     /** Additional class names */
     className?: string;
     /** Additional class names for the icon */
@@ -44,6 +48,8 @@ const Button: React.FC<ButtonProps> = ({
     icon,
     rightIcon,
     onClick,
+    onMouseEnter,
+    onMouseLeave,
     className = '',
     iconClassName = '',
     style,
@@ -71,6 +77,8 @@ const Button: React.FC<ButtonProps> = ({
         <button
             className={classes}
             onClick={onClick}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
             aria-label={ariaLabel}
             disabled={disabled || loading}
             title={title}
