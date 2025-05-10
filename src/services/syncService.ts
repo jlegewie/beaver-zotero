@@ -74,7 +74,7 @@ export interface ItemData extends ItemDataHashedFields {
 // --- Attachment & File Types ---
 
 export interface FileData {
-    filename: string;
+    // filename: string;
     file_hash: string;
     size: number;
     mime_type: string;
@@ -90,6 +90,7 @@ export interface AttachmentDataHashedFields {
     is_primary: boolean | null;
     deleted: boolean;
     title: string;
+    filename: string;
 }
 
 export interface AttachmentData {
