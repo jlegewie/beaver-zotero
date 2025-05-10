@@ -82,7 +82,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1`}>
+        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1 min-w-0`}>
             {/* {toolCall.response?.content && (
                 <MarkdownRenderer className="markdown px-4 py-1 text-sm" content={toolCall.response.content} />
             )} */}
@@ -94,7 +94,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
                     onMouseEnter={() => setIsButtonHovered(true)}
                     onMouseLeave={() => setIsButtonHovered(false)}
                     className={`
-                        text-base scale-105 ml-2
+                        text-base scale-105 ml-2 w-full min-w-0 align-start text-left
                         ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                         ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
                         ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
@@ -103,7 +103,10 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
                     icon={getIcon()}
                     disabled={isButtonDisabled && !canToggleResults}
                 >
-                    <span className={`${resultsVisible ? 'font-color-primary' : ''}`}>
+                    <span
+                        className={`truncate min-w-0 flex-1 ${resultsVisible ? 'font-color-primary' : ''}`}
+                        style={{ maxWidth: 'calc(100% - 2.5rem)' }}
+                    >
                         {getButtonText()}
                     </span>
                 </Button>
