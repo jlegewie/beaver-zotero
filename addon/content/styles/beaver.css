@@ -291,6 +291,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .gap-5 { column-gap: 1.25rem; row-gap: 1.2rem; }
 [id^="beaver-pane-"] .p-0 { padding: 0.1rem; }
 [id^="beaver-pane-"] .p-1 { padding: 0.25rem; }
+[id^="beaver-pane-"] .p-15 { padding: 0.375rem; }
 [id^="beaver-pane-"] .p-2 { padding: 0.5rem; }
 [id^="beaver-pane-"] .p-3 { padding: 0.75rem; }
 [id^="beaver-pane-"] .p-4 { padding: 1rem; }
@@ -461,6 +462,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
+[id^="beaver-pane-"] .border-transparent { border: 1px solid transparent; }
 [id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-secondary); }
 
 /* Shadows */

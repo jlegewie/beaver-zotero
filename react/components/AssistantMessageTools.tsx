@@ -81,18 +81,19 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div id={`tool-${toolCall.id}`}>
+        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1`}>
             {/* {toolCall.response?.content && (
                 <MarkdownRenderer className="markdown px-4 py-1 text-sm" content={toolCall.response.content} />
             )} */}
             {(toolCall.label || toolCall.status !== 'completed' || hasAttachmentsToShow) && (
+                // <div>
                 <Button
-                    variant="ghost"
+                    variant="ghost-secondary"
                     onClick={toggleResults}
                     onMouseEnter={() => setIsButtonHovered(true)}
                     onMouseLeave={() => setIsButtonHovered(false)}
                     className={`
-                        text-base scale-105
+                        text-base scale-105 ml-2
                         ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                         ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
                         ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
@@ -105,6 +106,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
                         {getButtonText()}
                     </span>
                 </Button>
+                // </div>
             )}
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
@@ -114,7 +116,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
             )}
 
             {resultsVisible && hasAttachmentsToShow && toolCall.response && toolCall.response.attachments && (
-                <div className="px-4 py-2">
+                <div className={`px-15 py-2 ${resultsVisible ? 'border-top-quinary' : ''} mt-1`}>
                     <ZoteroItemsList messageAttachments={toolCall.response.attachments} />
                 </div>
             )}
@@ -130,7 +132,7 @@ const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     }
 
     return (
-        <div id={`message-tools-${message.id}`} className="display-flex flex-col py-1 px-4 gap-4">
+        <div id={`message-tools-${message.id}`} className="display-flex flex-col py-1 px-3 gap-3">
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
             ))}
