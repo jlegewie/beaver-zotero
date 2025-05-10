@@ -60,6 +60,12 @@ export interface SSECallbacks {
     onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
     
     /**
+     * Handles "complete" event when a message processing is fully complete.
+     * @param messageId ID of the completed message.
+     */
+    onComplete: (messageId: string) => void;
+    
+    /**
      * Handles "done" event when the assistant completes its response
      * @param messageId ID of the completed message, or null
      */
@@ -193,7 +199,7 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onDelta, onMessage, onToolcall, onDone, onError, onWarning } = callbacks;
+        const { onThread, onDelta, onMessage, onToolcall, onComplete, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/chat/completions`;
         
@@ -230,6 +236,7 @@ export class ChatService extends ApiService {
                                     onDelta,
                                     onMessage,
                                     onToolcall,
+                                    onComplete,
                                     onDone,
                                     onError,
                                     onWarning
@@ -287,6 +294,7 @@ export class ChatService extends ApiService {
             onDelta,
             onMessage,
             onToolcall,
+            onComplete,
             onDone,
             onError,
             onWarning
@@ -295,6 +303,7 @@ export class ChatService extends ApiService {
             onDelta: (messageId: string, delta: string, type: DeltaType) => void;
             onMessage: (data: MessageModel) => void;
             onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
+            onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
             onWarning: (messageId: string | null, warningType: string, data: any) => void;
@@ -353,6 +362,12 @@ export class ChatService extends ApiService {
                 // e.g. data: {"messageId": "uuid", "toolcallId": "uuid", "toolCall": {...}}
                 if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolCall) {
                     onToolcall(parsedData.messageId, parsedData.toolcallId, parsedData.toolCall as ToolCall);
+                }
+                break;
+            case 'complete':
+                // e.g. data: {"messageId": "uuid"}
+                if (parsedData?.messageId) {
+                    onComplete(parsedData.messageId);
                 }
                 break;
             case 'done':

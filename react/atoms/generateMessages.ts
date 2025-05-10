@@ -404,6 +404,10 @@ function _processChatCompletionViaBackend(
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolCall: ${JSON.stringify(toolCall)}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolCall });
             },
+            onComplete: (messageId: string) => {
+                logger(`event 'onComplete': ${messageId}`, 1);
+                set(setMessageStatusAtom, { id: messageId, status: 'completed' });
+            },
             onDone: (messageId: string | null) => {
                 logger(`event 'onDone': ${messageId}`, 1);
                 set(isChatRequestPendingAtom, false);
