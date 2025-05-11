@@ -53,7 +53,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
             if(toolCall.function.name === 'hybrid_search') return SearchIcon;
             if(toolCall.function.name === 'search_zotero_library') return SearchIcon;
             if(toolCall.function.name === 'search_references_by_topic') return SearchIcon;
-            if(toolCall.function.name === 'get_fulltext_content') return ViewIcon;
+            if(toolCall.function.name === 'get_fulltext_content') return numResults ? ViewIcon : AlertIcon;
             if(toolCall.function.name === 'search_metadata') return SearchIcon;
             return SearchIcon;
         }
