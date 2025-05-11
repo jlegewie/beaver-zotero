@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolCall } from './apiTypes';
-import { SourceAttachment } from '../attachments/apiTypes';
+import { ToolCall, ZoteroItemReference } from './apiTypes';
 
 
 // Warning messages
@@ -8,7 +7,7 @@ export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_ex
 export interface Warning {
     id: string;
     type: WarningType;
-    attachments?: SourceAttachment[];
+    attachments?: ZoteroItemReference[];
 }
 
 
