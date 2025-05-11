@@ -82,30 +82,30 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
 
     return (
         <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1 min-w-0`}>
-            {(toolCall.label || toolCall.status !== 'completed' || hasAttachmentsToShow) && (
-                <Button
-                    variant="ghost-secondary"
-                    onClick={toggleResults}
-                    onMouseEnter={() => setIsButtonHovered(true)}
-                    onMouseLeave={() => setIsButtonHovered(false)}
-                    className={`
-                        text-base scale-105 ml-2 w-full min-w-0 align-start text-left
-                        ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                        ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
-                        ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
-                    `}
-                    iconClassName={`scale-11 ${resultsVisible ? 'font-color-primary' : ''}`}
-                    icon={getIcon()}
-                    disabled={isButtonDisabled && !canToggleResults}
+            
+            <Button
+                variant="ghost-secondary"
+                onClick={toggleResults}
+                onMouseEnter={() => setIsButtonHovered(true)}
+                onMouseLeave={() => setIsButtonHovered(false)}
+                className={`
+                    text-base scale-105 ml-2 w-full min-w-0 align-start text-left
+                    ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
+                    ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
+                    ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
+                `}
+                iconClassName={`scale-11 ${resultsVisible ? 'font-color-primary' : ''}`}
+                icon={getIcon()}
+                disabled={isButtonDisabled && !canToggleResults}
+            >
+                <span
+                    className={`truncate min-w-0 flex-1 ${resultsVisible ? 'font-color-primary' : ''}`}
+                    style={{ maxWidth: 'calc(100% - 2.5rem)' }}
                 >
-                    <span
-                        className={`truncate min-w-0 flex-1 ${resultsVisible ? 'font-color-primary' : ''}`}
-                        style={{ maxWidth: 'calc(100% - 2.5rem)' }}
-                    >
-                        {getButtonText()}
-                    </span>
-                </Button>
-            )}
+                    {getButtonText()}
+                </span>
+            </Button>
+            
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
                 <div className="px-4 py-1 text-sm text-red-600">
