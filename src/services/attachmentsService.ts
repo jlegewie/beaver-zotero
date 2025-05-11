@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ZoteroItemIdentifier } from '../../react/types/chat/apiTypes';
+import { ZoteroItemReference } from '../../react/types/chat/apiTypes';
 import { FileStatus } from '../../react/types/fileStatus';
 
 // processing_status from backend
@@ -63,10 +63,10 @@ export class AttachmentsService extends ApiService {
 
     /**
      * Fetches the processing status for multiple attachments.
-     * @param attachments An array of ZoteroItemIdentifier objects.
+     * @param attachments An array of ZoteroItemReference objects.
      * @returns Promise with an array of attachment status responses.
      */
-    async getMultipleAttachmentsStatus(attachments: ZoteroItemIdentifier[]): Promise<AttachmentStatusResponse[]> {
+    async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[]): Promise<AttachmentStatusResponse[]> {
         return this.post<AttachmentStatusResponse[]>('/attachments/status/batch', attachments);
     }
 

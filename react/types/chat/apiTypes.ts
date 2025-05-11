@@ -43,7 +43,7 @@ export interface MessageModel {
 }
 
 
-export interface ZoteroItemIdentifier {
+export interface ZoteroItemReference {
     zotero_key: string;
     library_id: number;
 }
