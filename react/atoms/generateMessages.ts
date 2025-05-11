@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel, ToolCall } from '../types/chat/apiTypes';
+import { MessageModel, ToolCall, ZoteroItemReference } from '../types/chat/apiTypes';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
@@ -205,10 +205,12 @@ export const generateResponseAtom = atom(
         const currentThreadAttachments = get(threadSourcesAtom).map(s => `${s.libraryID}-${s.itemKey}`);
         if(readerState && !currentThreadAttachments.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
             logger(`generateResponseAtom: Adding reader state to message attachments: ${readerState.library_id}-${readerState.zotero_key}`);
+            // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
             messageAttachments.push({
                 library_id: readerState.library_id,
                 zotero_key: readerState.zotero_key,
-                type: "source"
+                type: "source",
+                include: "fulltext"
             } as SourceAttachment);
         }
 
@@ -466,7 +468,7 @@ function _processChatCompletionViaBackend(
                 // Warning
                 const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
-                    warning.attachments = data.attachments as SourceAttachment[];
+                    warning.attachments = data.attachments as ZoteroItemReference[];
                 }
                 // Add the warning message for the assistant message
                 set(setMessageStatusAtom, {

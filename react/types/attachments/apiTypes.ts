@@ -23,10 +23,13 @@ interface BaseMessageAttachment {
 }
 
 // "source" type attachment (Zotero attachment item)
+export type SourceAttachmentInclude = "none"| "metadata" | "fulltext" | "chunks" | "custom";
 export interface SourceAttachment extends BaseMessageAttachment {
     type: "source";
-    annotations?: Annotation[];
+    include: SourceAttachmentInclude;
+
     chunk_ids?: string[]; // UUIDs as strings
+    custom_content?: string;
 }
 
 // "annotation" type attachment (Zotero annotation item)

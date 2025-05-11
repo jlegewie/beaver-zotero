@@ -27,6 +27,7 @@ function isSourceAttachment(obj: any): obj is SourceAttachment {
         typeof obj.library_id === 'number' &&
         typeof obj.zotero_key === 'string' &&
         typeof obj.type === 'string' &&
+        typeof obj.include === 'string' &&
         obj.type === 'source'
     );
 }
@@ -47,6 +48,7 @@ export function getResultAttachmentsFromToolcall(toolCall: ToolCall): SourceAtta
                 type: 'source',
                 library_id: typeof att.library_id === 'number' ? att.library_id : 0,
                 zotero_key: typeof att.zotero_key === 'string' ? att.zotero_key : '',
+                include: 'fulltext',
             };
         }
     });

@@ -10,6 +10,7 @@ import {
     isSourceAttachment,
     isAnnotationAttachment
 } from './apiTypes';
+import { ZoteroItemReference } from '../chat/apiTypes';
 
 export function getAnnotationsFromItem(item: Zotero.Item): Annotation[] {
     if(!item.isAttachment()) return [];
@@ -48,10 +49,10 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
     if(!item) return [];
 
     // Convert to MessageAttachment (backend models)
-    const zoteroIdentifiers = {
+    const zoteroItemReference = {
         library_id: source.libraryID,
         zotero_key: source.itemKey
-    }
+    } as ZoteroItemReference;
     
     if(source.type === "regularItem" && item.isRegularItem()) {
         return source.childItemKeys.map((key) => {
@@ -59,6 +60,7 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
             if(!item) return null;
             return {
                 type: "source",
+                include: "fulltext",
                 library_id: source.libraryID,
                 zotero_key: key,
             } as SourceAttachment;
@@ -66,12 +68,13 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
     } else if (source.type === "attachment" && item.isAttachment()) {
         return [{
             type: "source",
-            ...zoteroIdentifiers
+            include: "fulltext",
+            ...zoteroItemReference
         }] as SourceAttachment[];
     } else if (source.type === "note" && item.isNote()) {
         return [{
             type: "note",
-            ...zoteroIdentifiers,
+            ...zoteroItemReference,
             ...(source.parentKey && { parent_key: source.parentKey }),
             note_content: item.getField("content"),
             date_modified: item.getField("dateModified")
@@ -79,12 +82,14 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
     } else if (source.type === "annotation" && item.isAnnotation()) {
         return [{
             type: "annotation",
+            ...zoteroItemReference,
             ...toAnnotation(item)
         }] as AnnotationAttachment[];
     } else if (source.type === "reader" && item.isAttachment()) {
         return [{
-            ...zoteroIdentifiers,
-            type: "source"
+            ...zoteroItemReference,
+            type: "source",
+            include: "fulltext"
         }] as SourceAttachment[];
     } else {
         return [];
