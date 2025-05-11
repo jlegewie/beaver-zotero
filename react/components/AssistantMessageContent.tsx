@@ -22,11 +22,13 @@ import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 interface AssistantMessageContentProps {
     message: ChatMessage;
     isLastMessage: boolean;
+    showActionButtons: boolean;
 }
 
 const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     message,
-    isLastMessage
+    isLastMessage,
+    showActionButtons
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
@@ -136,60 +138,64 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
             </div>
 
             {/* Copy, repeat, and share buttons - visible on hover */}
-            <div
-                className={`
-                    display-flex flex-row items-center pt-2 mr-4 ml-1
-                    ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
-                    ${message.status === 'in_progress' ? 'hidden' : ''}
-                `}
-            >
-                <div className="flex-1">
-                    {citedSources.length > 0 && (
-                        <Button
-                            variant="ghost"
-                            onClick={toggleSources}
-                            // rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
-                            icon={sourcesVisible ? ArrowDownIcon : ArrowRightIcon}
-                            iconClassName="mr-0 scale-12"
-                            // className="text-sm"
-                        >
-                            <span style={{ marginLeft: '-3px' }}>
-                                {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
-                                {/* Sources ({citedSources.length}) */}
-                            </span>
-                        </Button>
-                    )}
-                </div>
-                <div className="display-flex gap-4">
-                    {message.status !== 'error' &&
-                        <MenuButton
-                            icon={ShareIcon}
-                            menuItems={shareMenuItems}
+            {showActionButtons && (
+                <>
+                <div
+                    className={`
+                        display-flex flex-row items-center pt-2 mr-4 ml-1
+                        ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
+                        ${message.status === 'in_progress' ? 'hidden' : ''}
+                    `}
+                >
+                    <div className="flex-1">
+                        {citedSources.length > 0 && (
+                            <Button
+                                variant="ghost"
+                                onClick={toggleSources}
+                                // rightIcon={sourcesVisible ? ArrowUpIcon : ArrowDownIcon}
+                                icon={sourcesVisible ? ArrowDownIcon : ArrowRightIcon}
+                                iconClassName="mr-0 scale-12"
+                                // className="text-sm"
+                            >
+                                <span style={{ marginLeft: '-3px' }}>
+                                    {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
+                                    {/* Sources ({citedSources.length}) */}
+                                </span>
+                            </Button>
+                        )}
+                    </div>
+                    <div className="display-flex gap-4">
+                        {message.status !== 'error' &&
+                            <MenuButton
+                                icon={ShareIcon}
+                                menuItems={shareMenuItems}
+                                className="scale-12"
+                                ariaLabel="Share"
+                                variant="ghost"
+                                positionAdjustment={{ x: 0, y: 0 }}
+                            />
+                        }
+                        <IconButton
+                            icon={RepeatIcon}
+                            onClick={handleRepeat}
                             className="scale-12"
-                            ariaLabel="Share"
-                            variant="ghost"
-                            positionAdjustment={{ x: 0, y: 0 }}
+                            ariaLabel="Regenerate response"
                         />
-                    }
-                    <IconButton
-                        icon={RepeatIcon}
-                        onClick={handleRepeat}
-                        className="scale-12"
-                        ariaLabel="Regenerate response"
-                    />
-                    {message.status !== 'error' &&
-                        <CopyButton
-                            content={message.content}
-                            formatContent={renderToMarkdown}
-                            className="scale-12"
-                        />
-                    }
+                        {message.status !== 'error' &&
+                            <CopyButton
+                                content={message.content}
+                                formatContent={renderToMarkdown}
+                                className="scale-12"
+                            />
+                        }
+                    </div>
                 </div>
-            </div>
 
-            {/* Sources section */}
-            {sourcesVisible && citedSources.length > 0 && (
-                <CitedSourcesList sources={citedSources} saveAsNote={saveAsNote} />
+                {/* Sources section */}
+                {sourcesVisible && citedSources.length > 0 && (
+                    <CitedSourcesList sources={citedSources} saveAsNote={saveAsNote} />
+                )}
+                </>
             )}
 
             {/* Text selection context menu */}
