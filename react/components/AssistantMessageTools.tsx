@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import { ToolCall } from '../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon } from './icons';
+import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon, Icon } from './icons';
 import Button from './button';
 import ZoteroItemsList from './ZoteroItemsList';
 
@@ -57,7 +57,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
             if(toolCall.function.name === 'search_metadata') return SearchIcon;
             return SearchIcon;
         }
-        return undefined; // Default no icon
+        return SearchIcon;
     };
 
     const getButtonText = () => {
@@ -81,31 +81,32 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md py-1 min-w-0`}>
-            
+        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0`}>
             <Button
                 variant="ghost-secondary"
                 onClick={toggleResults}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
                 className={`
-                    text-base scale-105 ml-2 w-full min-w-0 align-start text-left
+                    text-base scale-105 w-full min-w-0 align-start text-left
                     ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                     ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
                     ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
                 `}
-                iconClassName={`scale-11 ${resultsVisible ? 'font-color-primary' : ''}`}
-                icon={getIcon()}
+                style={{ maxHeight: '5rem', padding: '4px 6px' }}
                 disabled={isButtonDisabled && !canToggleResults}
             >
-                <span
-                    className={`truncate min-w-0 flex-1 ${resultsVisible ? 'font-color-primary' : ''}`}
-                    style={{ maxWidth: 'calc(100% - 2.5rem)' }}
-                >
-                    {getButtonText()}
-                </span>
+                <div className="display-flex flex-row px-3 gap-2">
+                    <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                        <Icon icon={getIcon()} />
+                    </div>
+                    
+                    <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
+                        {getButtonText()}
+                    </div>
+                    
+                </div>
             </Button>
-            
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
                 <div className="px-4 py-1 text-sm text-red-600">
@@ -114,7 +115,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
             )}
 
             {resultsVisible && hasAttachmentsToShow && toolCall.response && toolCall.response.attachments && (
-                <div className={`px-15 py-2 ${resultsVisible ? 'border-top-quinary' : ''} mt-1`}>
+                <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}>
                     <ZoteroItemsList messageAttachments={toolCall.response.attachments} />
                 </div>
             )}
