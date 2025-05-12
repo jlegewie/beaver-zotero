@@ -110,7 +110,8 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     // If the message is a placeholder, show the warnings and error only
     if (message.isPlaceholder) {
         return (
-            <div>
+            <>
+            <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
                 {message.warnings?.map((warning) => (
                     <WarningDisplay key={message.id} messageId={message.id} warning={warning} isPlaceholder={true}/>
                 ))}
@@ -118,8 +119,22 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
                     <ErrorDisplay errorType={message.errorType || 'unknown'} />
                 }
             </div>
+            <div className="display-flex flex-row items-center pt-2 mr-4 ml-1">
+                <div className="flex-1"/>
+                <div className="display-flex gap-4">
+                    <IconButton
+                        icon={RepeatIcon}
+                        onClick={handleRepeat}
+                        className="scale-12"
+                        ariaLabel="Regenerate response"
+                    />
+                </div>
+            </div>
+            </>
         );
     }
+
+    
 
     return (
         <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
