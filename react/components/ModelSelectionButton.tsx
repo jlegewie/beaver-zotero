@@ -23,6 +23,32 @@ const REFETCH_INTERVAL_HOURS = 6;
 const REFETCH_INTERVAL_MS = REFETCH_INTERVAL_HOURS * 60 * 60 * 1000;
 
 /**
+ * Component for displaying a model menu item
+ */
+const ModelMenuItemContent: React.FC<{
+    model: any;
+    isSelected: boolean;
+}> = ({ model, isSelected }) => {
+    return (
+        <span className="display-flex items-center gap-2 min-w-0">
+            <span className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+                {model.name}
+            </span>
+            {model.reasoning_model
+                ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
+                : undefined
+            }
+            {model.is_agent &&
+                <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
+                    <Icon icon={AiMagicIcon} />
+                    <span className="text-xs">Agent</span>
+                </div>
+            }
+        </span>
+    );
+};
+
+/**
  * Button component for selecting the AI model to use for chat completions.
  * Displays available models based on configured API keys.
  */
@@ -74,22 +100,29 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
+        const byok_models = availableModels.filter((model) => !model.app_key);
+        const included_models = availableModels.filter((model) => model.app_key) || [DEFAULT_MODEL];
+
         items.push({
             label: 'Included Models',
             isGroupHeader: true,
             onClick: () => {},
         });
 
-        items.push({
-            label: `${DEFAULT_MODEL.name}`,
-            onClick: () => {
-                updateSelectedModel(DEFAULT_MODEL);
-            },
-            customContent: (
-                <span className={`flex-1 text-sm truncate ${selectedModel.model_id === DEFAULT_MODEL.model_id ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
-                    {DEFAULT_MODEL.name}
-                </span>
-            )
+        (included_models.length ? included_models : [DEFAULT_MODEL]).forEach((model) => {
+            items.push({
+                label: model.name,
+                onClick: () => {
+                    updateSelectedModel(model);
+                },
+                icon: model.reasoning_model ? BrainIcon : undefined,
+                customContent: (
+                    <ModelMenuItemContent 
+                        model={model} 
+                        isSelected={selectedModel.model_id === model.model_id}
+                    />
+                )
+            });
         });
 
         items.push({
@@ -98,7 +131,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             onClick: () => {},
         });
 
-        availableModels.forEach((model) => {
+        byok_models.forEach((model) => {
             items.push({
                 label: model.name,
                 onClick: () => {
@@ -106,21 +139,10 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 },
                 icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
-                    <span className="display-flex items-center gap-2 min-w-0">
-                        <span className={`display-flex text-sm truncate ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
-                            {model.name}
-                        </span>
-                        {model.reasoning_model
-                            ? <Icon icon={BrainIcon} className={`-ml-015 ${selectedModel === model ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
-                            : undefined
-                        }
-                        {model.is_agent &&
-                            <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
-                                <Icon icon={AiMagicIcon} />
-                                <span className="text-xs">Agent</span>
-                            </div>
-                        }
-                    </span>
+                    <ModelMenuItemContent 
+                        model={model} 
+                        isSelected={selectedModel.model_id === model.model_id}
+                    />
                 )
             });
         });
