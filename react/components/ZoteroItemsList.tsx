@@ -54,7 +54,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                 return (
                     <div
                         key={itemId} 
-                        className={`display-flex flex-row gap-1 items-start min-w-0 p-1 last:border-0 rounded-md cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
+                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
                         onClick={() => handleItemClick(selectionItemId)}
                         onMouseEnter={() => setHoveredItemId(itemId)}
                         onMouseLeave={() => setHoveredItemId(null)}
