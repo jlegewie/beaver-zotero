@@ -18,7 +18,7 @@ export interface Model {
 export const DEFAULT_MODEL: Model = {
     provider: 'google',
     name: 'Gemini 2.0 Flash',
-    model_id: 'gemini-2.0-flash-001',
+    model_id: 'gemini/gemini-2.0-flash-001',
     is_agent: false,
     reasoning_model: false,
     app_key: true
