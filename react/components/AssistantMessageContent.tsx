@@ -119,7 +119,7 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
                     <ErrorDisplay errorType={message.errorType || 'unknown'} />
                 }
             </div>
-            <div className="display-flex flex-row items-center ml-1">
+            <div className="display-flex flex-row items-center mr-3 ml-1">
                 <div className="flex-1"/>
                 <div className="display-flex gap-4">
                     <IconButton
