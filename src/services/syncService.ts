@@ -61,6 +61,7 @@ export interface ItemDataHashedFields {
     identifiers?: any;
     tags?: any[];
     deleted: boolean;
+    url?: string;
 }
 
 /** Full Item data */
@@ -87,7 +88,8 @@ export interface AttachmentDataHashedFields {
     library_id: number;
     zotero_key: string;
     parent_key: string | null;
-    is_primary: boolean | null;
+    attachment_url: string | null;
+    link_mode: number | null;
     deleted: boolean;
     title: string;
     filename: string;
@@ -98,7 +100,8 @@ export interface AttachmentData {
     library_id: number;
     zotero_key: string;
     parent_key: string | null;
-    is_primary: boolean | null;
+    attachment_url: string | null;
+    link_mode: number | null;
     deleted: boolean;
     title: string;
     date_added: string;

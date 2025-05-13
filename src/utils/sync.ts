@@ -40,6 +40,7 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
         // @ts-ignore Beaver exists
         reference: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
         identifiers: extractIdentifiers(item),
+        url: item.getField('url'),
         tags: item.getTags(),
         // @ts-ignore - Add proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
@@ -99,47 +100,37 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
     const fileData: FileData | null = await extractFileData(item);
     if (!fileData) return null;
 
-    // 2. Determine 'is_primary' status
-    let is_primary = null;
-    if (item.parentItem) {
-        is_primary = false;
-        try {
-            const bestAttachment = await item.parentItem.getBestAttachment();
-            is_primary = !!bestAttachment && bestAttachment.key === item.key;
-        } catch (error) {
-            logger(`Beaver Sync: Error getting best attachment for parent of ${item.key}`, 2);
-        }
-    }
-
-    // 3. Prepare the object containing only fields for hashing
+    // 2. Prepare the object containing only fields for hashing
     const hashedFields: AttachmentDataHashedFields = {
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
-        is_primary: is_primary,
+        attachment_url: item.getField('url'),
+        link_mode: item.attachmentLinkMode,
         // @ts-ignore - Add runtime check or proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
         filename: item.attachmentFilename,
     };
 
-    // 4. Calculate hash from the prepared hashed fields object
+    // 3. Calculate hash from the prepared hashed fields object
     const metadataHash = await calculateObjectHash(hashedFields);
 
-    // 5. Construct final AttachmentData object
+    // 4. Construct final AttachmentData object
     const attachmentData: AttachmentData = {
         // Include base fields
         library_id: hashedFields.library_id,
         zotero_key: hashedFields.zotero_key,
         parent_key: hashedFields.parent_key,
-        is_primary: hashedFields.is_primary,
         deleted: hashedFields.deleted,
         title: hashedFields.title,
-        filename: hashedFields.filename,
+        attachment_url: hashedFields.attachment_url,
+        link_mode: hashedFields.link_mode,
         // Add non-hashed fields
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // File data
+        filename: hashedFields.filename,
         ...(fileData || {}),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
@@ -197,9 +188,6 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
     
     const archiveID = item.getField('archiveID');
     if (archiveID) identifiers.archiveID = archiveID;
-    
-    const url = item.getField('url');
-    if (url) identifiers.url = url;
     
     return identifiers;
 }
