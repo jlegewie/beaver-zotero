@@ -45,7 +45,7 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
     
     return (
         <div
-            className="display-flex flex-col gap-0 rounded-md border-quinary mb-3"
+            className="display-flex flex-col gap-0 rounded-md border-quinary mb-3 mt-3"
             style={{ borderColor: 'var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
         >
             <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">

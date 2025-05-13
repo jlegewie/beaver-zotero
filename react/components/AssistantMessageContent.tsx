@@ -18,15 +18,18 @@ import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
+import { AssistantMessageTools} from './AssistantMessageTools';
 
 interface AssistantMessageContentProps {
     message: ChatMessage;
+    isFirstAssistantMessage: boolean;
     isLastMessage: boolean;
     showActionButtons: boolean;
 }
 
 const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     message,
+    isFirstAssistantMessage,
     isLastMessage,
     showActionButtons
 }) => {
@@ -107,44 +110,29 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
         return citations;
     }, [message.status, message.content, sourceCitations]);
 
-    // If the message is a placeholder, show the warnings and error only
-    if (message.isPlaceholder) {
-        return (
-            <>
-            <div id={`placeholder-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
-                {message.warnings?.map((warning) => (
-                    <WarningDisplay key={message.id} messageId={message.id} warning={warning} isPlaceholder={true}/>
-                ))}
-                {message.status === 'error' &&
-                    <ErrorDisplay errorType={message.errorType || 'unknown'} />
-                }
-            </div>
-            <div className="display-flex flex-row items-center mr-3 ml-1">
-                <div className="flex-1"/>
-                <div className="display-flex gap-4">
-                    <IconButton
-                        icon={RepeatIcon}
-                        onClick={handleRepeat}
-                        className="scale-12"
-                        ariaLabel="Regenerate response"
-                    />
-                </div>
-            </div>
-            </>
-        );
-    }
-
     return (
         <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
-            {message.warnings?.map((warning) => (
-                <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
-            ))}
             <div 
                 className="user-select-text"
                 ref={contentRef}
                 onContextMenu={handleContextMenu}
             >
-                <MarkdownRenderer className="markdown" content={message.content} />
+                {/* Warnings */}
+                {message.warnings?.map((warning) => (
+                    <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
+                ))}
+                
+                {/* Content */}
+                {message.content && (
+                    <MarkdownRenderer className="markdown" content={message.content} />
+                )}
+
+                {/* Toolcalls */}
+                {message.tool_calls && message.tool_calls.length > 0 && (
+                    <AssistantMessageTools key={`tools-${message.id}`} message={message} isFirstAssistantMessage={isFirstAssistantMessage} />
+                )}
+
+                {/* Error */}
                 {message.status === 'error' &&
                     <ErrorDisplay errorType={message.errorType || 'unknown'} />
                 }

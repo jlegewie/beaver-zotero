@@ -67,24 +67,17 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             />
                         )}
                         {/* Assistant message content */}
-                        {message.role === 'assistant' && (message.content !== '' || message.status == "error" || message.warnings) && (
+                        {message.role === 'assistant' && (
                             <AssistantMessageContent
                                 key={`content-${message.id}`}
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
+                                isFirstAssistantMessage={index > 0 && messages[index - 1]?.role === 'user'}
                                 // Show buttons if last message or next message is a user message
                                 showActionButtons={
                                     index === messages.length - 1 ||
                                     messages[index + 1]?.role === 'user'
                                 }
-                            />
-                        )}
-                        {/* Assistant message tools */}
-                        {message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0 && (
-                            <AssistantMessageTools
-                                key={`tools-${message.id}`}
-                                message={message}
-                                isFirstAssistantMessage={messages[index - 1]?.role === 'user'}
                             />
                         )}
                     </>

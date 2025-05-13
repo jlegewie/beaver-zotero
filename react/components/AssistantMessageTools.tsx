@@ -16,7 +16,7 @@ interface ToolCallDisplayProps {
     toolCall: ToolCall;
 }
 
-const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
+export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
     const [loadingDots, setLoadingDots] = useState(1);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -124,7 +124,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
     );
 };
 
-const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
+export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     message,
     isFirstAssistantMessage,
 }) => {
@@ -134,12 +134,9 @@ const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
 
     return (
         <div
-            id={`message-tools-${message.id}`}
-            className={`display-flex flex-col py-1 px-3 gap-3 ${!isFirstAssistantMessage && message.content === ''? '-mt-3' : ''}`}
+            id={`tools-${message.id}`}
+            className={`display-flex flex-col py-1 gap-3 ${message.content == '' && !isFirstAssistantMessage ? '-mt-3' : '-mt-1'}`}
         >
-            {(message.warnings || message.status === 'error') &&
-                <MessageErrorWarningDisplay message={message} />
-            }
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
             ))}
@@ -147,4 +144,4 @@ const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     );
 };
 
-export default AssistantMessageTools; 
+export default AssistantMessageTools;
