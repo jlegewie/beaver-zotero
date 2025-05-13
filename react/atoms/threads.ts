@@ -140,7 +140,17 @@ export const streamToMessageAtom = atom(
 export const setMessageStatusAtom = atom(
     null,
     (get, set, { id, status, errorType, warnings }: { id: string; status?: ChatMessage['status']; errorType?: string; warnings?: Warning[] }) => {
-        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
+        const messages = get(threadMessagesAtom);
+        const message = messages.find(message => message.id === id);
+        if (!message) return;
+        const toolcalls = message.tool_calls?.map((toolcall) => {
+            return {
+                ...toolcall,
+                status: status === 'error' || status === 'canceled' ? 'error' : toolcall.status
+            }
+        }) as ToolCall[];
+
+        set(threadMessagesAtom, messages.map(message =>
             message.id === id
                 ? {
                     ...message,
@@ -151,7 +161,8 @@ export const setMessageStatusAtom = atom(
                             ...(message.warnings || []), // Spread existing warnings or empty array if undefined
                             ...warnings                  // Spread new warnings
                         ]
-                    })
+                    }),
+                    ...(toolcalls && { tool_calls: toolcalls })
                 }
                 : message
         ));
