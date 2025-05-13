@@ -111,7 +111,7 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     if (message.isPlaceholder) {
         return (
             <>
-            <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
+            <div id={`placeholder-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
                 {message.warnings?.map((warning) => (
                     <WarningDisplay key={message.id} messageId={message.id} warning={warning} isPlaceholder={true}/>
                 ))}
@@ -133,8 +133,6 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
             </>
         );
     }
-
-    
 
     return (
         <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>

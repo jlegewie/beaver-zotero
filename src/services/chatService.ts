@@ -19,6 +19,7 @@ export const search_tool_request: ToolRequest = {
 export interface ChatCompletionRequestBody {
     thread_id: string | null;           // If continuing an existing thread, else null
     user_message_id: string;            // The UUID from the frontend
+    assistant_message_id: string;       // The UUID from the frontend
     content: string;                    // The user's input text
     user_api_key: string | null;        // The user's API key, if provided
     model: Model;                       // The model to use for the request

@@ -11,6 +11,7 @@ import { ToolCall } from "../types/chat/apiTypes";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
+export const currentAssistantMessageIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
 export const threadSourcesAtom = atom<ThreadSource[]>([]);
 
@@ -86,7 +87,13 @@ export const cancelStreamingMessageAtom = atom(
                 currentThreadId,
                 streamingMessage.content || ''
             );
-            set(setMessageStatusAtom, { id: streamingMessage.id, status: 'canceled' });
+            const toolcalls = streamingMessage.tool_calls?.map((toolcall) => {
+                return {
+                    ...toolcall,
+                    status: 'error'
+                }
+            }) as ToolCall[];
+            set(updateMessageAtom, { id: streamingMessage.id, updates: {status: 'canceled', ...(toolcalls && { tool_calls: toolcalls }) } });
         }
     }
 );
@@ -146,6 +153,17 @@ export const setMessageStatusAtom = atom(
                         ]
                     })
                 }
+                : message
+        ));
+    }
+);
+
+export const updateMessageAtom = atom(
+    null,
+    (get, set, { id, updates }: { id: string; updates: Partial<ChatMessage> }) => {
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
+            message.id === id
+                ? { ...message, ...updates }
                 : message
         ));
     }

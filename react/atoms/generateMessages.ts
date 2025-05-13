@@ -16,7 +16,8 @@ import {
     isCancellableAtom,
     isCancellingAtom,
     cancelStreamingMessageAtom,
-    isChatRequestPendingAtom
+    isChatRequestPendingAtom,
+    currentAssistantMessageIdAtom
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -186,11 +187,13 @@ export const generateResponseAtom = atom(
 
         // Create user and assistant messages
         const userMsg = createUserMessage(payload.content);
+        const assistantMsg = createAssistantMessage({status: 'in_progress'});
 
         // Update thread messages atom
         const threadMessages = get(threadMessagesAtom);
-        const newMessages = [...threadMessages, userMsg];
+        const newMessages = [...threadMessages, userMsg, assistantMsg];
         set(threadMessagesAtom, newMessages);
+        set(currentAssistantMessageIdAtom, assistantMsg.id);
 
         // Prepare sources
         const flattenedSources = flattenSources(payload.sources);
@@ -227,6 +230,7 @@ export const generateResponseAtom = atom(
         _processChatCompletionViaBackend(
             get(currentThreadIdAtom),
             userMsg.id,         // the ID from createUserMessage
+            assistantMsg.id,
             userMsg.content,
             messageAttachments,
             readerState,
@@ -275,8 +279,12 @@ export const regenerateFromMessageAtom = atom(
         // Truncate messages
         const truncatedMessages = threadMessages.slice(0, lastUserMessageIndex + 1);
 
+        // create assistant message id
+        const assistantMsg = createAssistantMessage({status: 'in_progress'});
+        
         // Update messages atom
-        set(threadMessagesAtom, truncatedMessages);
+        set(threadMessagesAtom, [...truncatedMessages, assistantMsg]);
+        set(currentAssistantMessageIdAtom, assistantMsg.id);
 
         // Update sources
         const threadSources = get(threadSourcesAtom);
@@ -288,11 +296,12 @@ export const regenerateFromMessageAtom = atom(
         set(isChatRequestPendingAtom, true);
         _processChatCompletionViaBackend(
             currentThreadId,
-            userMessageId,      // existing user message ID
-            "",                 // content remains unchanged
-            [],                 // sources remain unchanged
-            null,               // readerState remains unchanged
-            false,              // isLibrarySearch remains unchanged
+            userMessageId,         // existing user message ID
+            assistantMsg.id,       // new assistant message ID
+            "",                    // content remains unchanged
+            [],                    // sources remain unchanged
+            null,                  // readerState remains unchanged
+            false,                 // isLibrarySearch remains unchanged
             model,
             set,
             get
@@ -336,6 +345,7 @@ function _processChatCompletion(
 function _processChatCompletionViaBackend(
     currentThreadId: string | null,
     userMessageId: string,
+    assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
     readerState: ReaderState | null,
@@ -363,6 +373,7 @@ function _processChatCompletionViaBackend(
     const payload = {
         thread_id: currentThreadId,
         user_message_id: userMessageId,
+        assistant_message_id: assistantMessageId,
         content: content,
         attachments: attachments,
         reader_state: readerState,
@@ -391,11 +402,12 @@ function _processChatCompletionViaBackend(
                 }
                 // if (type === "reasoning")
             },
-            onMessage: (data: MessageModel) => {
-                logger(`event 'onMessage': ${JSON.stringify(data)}`, 1);
+            onMessage: (msg: MessageModel) => {
+                logger(`event 'onMessage': ${JSON.stringify(msg)}`, 1);
+                set(currentAssistantMessageIdAtom, msg.id);
                 set(isChatRequestPendingAtom, false);
-                if (!data) return;
-                const message = toMessageUI(data);
+                if (!msg) return;
+                const message = toMessageUI(msg);
                 set(addOrUpdateMessageAtom, { message });
                 // Add the tool call sources to the thread sources (if any)
                 if (message.status === 'completed' && message.tool_calls) {
@@ -425,25 +437,17 @@ function _processChatCompletionViaBackend(
             onError: (messageId: string | null, errorType: string) => {
                 logger(`event 'onError': ${messageId} - ${errorType}`, 1);
                 set(isChatRequestPendingAtom, false);
-                // If the message ID is not provided, use the last assistant message or create a new one
-                if (!messageId) {
-                    const messages = get(threadMessagesAtom);
-                    if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                        messageId = messages[messages.length - 1].id;
-                    } else {
-                        const assistantMsg = createAssistantMessage({status: 'error', errorType, isPlaceholder: true});
-                        set(threadMessagesAtom, (prev: ChatMessage[]) => [...prev, assistantMsg]);
-                        messageId = assistantMsg.id;
-                    }
-                }
+                // If the message ID is not provided, use the current assistant message ID
+                const currentMessageId = messageId || get(currentAssistantMessageIdAtom);
+                if (!currentMessageId) return;
                 const isCancelling = get(isCancellingAtom);
                 if (isCancelling) {
                     // Cancel the message
-                    set(cancelStreamingMessageAtom, { messageId });
+                    set(cancelStreamingMessageAtom, { assistantMessageId: currentMessageId });
                 } else {
                     // Mark the assistant message as error
                     set(setMessageStatusAtom, {
-                        id: messageId,
+                        id: currentMessageId,
                         status: 'error',
                         errorType
                     });
@@ -454,17 +458,9 @@ function _processChatCompletionViaBackend(
             },
             onWarning: (messageId: string | null, type: string, data: any) => {
                 logger(`event 'onWarning': ${messageId} - ${type} - ${JSON.stringify(data)}`, 1);
-                // If the message ID is not provided, use the last assistant message or exit
-                if (!messageId) {
-                    const messages = get(threadMessagesAtom);
-                    if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                        messageId = messages[messages.length - 1].id;
-                    } else {
-                        const assistantMsg = createAssistantMessage({status: 'completed', isPlaceholder: true});
-                        set(threadMessagesAtom, (prev: ChatMessage[]) => [...prev, assistantMsg]);
-                        messageId = assistantMsg.id;
-                    }
-                }
+                // If the message ID is not provided, use the current assistant message ID
+                const currentMessageId = messageId || get(currentAssistantMessageIdAtom);
+                if (!currentMessageId) return;
                 // Warning
                 const warning = {id: uuidv4(), type: type} as Warning;
                 if (data && data.attachments) {
@@ -472,7 +468,7 @@ function _processChatCompletionViaBackend(
                 }
                 // Add the warning message for the assistant message
                 set(setMessageStatusAtom, {
-                    id: messageId,
+                    id: currentMessageId,
                     warnings: [warning]
                 });
             }

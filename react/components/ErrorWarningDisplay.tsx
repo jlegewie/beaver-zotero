@@ -1,5 +1,5 @@
 import React from 'react';
-import { Warning } from '../types/chat/uiTypes';
+import { ChatMessage, Warning } from '../types/chat/uiTypes';
 import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import Button from './button';
@@ -131,6 +131,23 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
                     </div>
                 </div>
             </div>
+        </div>
+    );
+};
+
+
+export const MessageErrorWarningDisplay: React.FC<{ message: ChatMessage }> = ({ message }) => {
+
+    if (!!message.warnings && message.status !== 'error') return null;
+    
+    return (
+        <div>
+            {message.warnings?.map((warning) => (
+                <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
+            ))}
+            {message.status === 'error' &&
+                <ErrorDisplay errorType={message.errorType || 'unknown'} />
+            }
         </div>
     );
 };

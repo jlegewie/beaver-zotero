@@ -5,6 +5,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon, Icon } from './icons';
 import Button from './button';
 import ZoteroItemsList from './ZoteroItemsList';
+import { MessageErrorWarningDisplay } from './ErrorWarningDisplay';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
@@ -136,6 +137,9 @@ const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
             id={`message-tools-${message.id}`}
             className={`display-flex flex-col py-1 px-3 gap-3 ${!isFirstAssistantMessage && message.content === ''? '-mt-3' : ''}`}
         >
+            {(message.warnings || message.status === 'error') &&
+                <MessageErrorWarningDisplay message={message} />
+            }
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
             ))}
