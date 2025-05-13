@@ -1,5 +1,8 @@
 # Beaver 🦫
 
+[![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
+
 Welcome to Beaver! Beaver is your AI plugin for Zotero. What, another AI plugin for Zotero? Yes, indeed! But I think the feature set makes it compelling. There are other options and you should explore them all. They are great. Here is what makes Beaver special:
 
 1. Seamlessly **integration into Zotero UI** as a side panel. Beaver is right there in Zotero and always knows what you are doing. Adding documents to Beaver is as easy as selecting them in the Zotero library. Reading an article in Zotero? Beaver knows which one it is and can even see the page you are on. This seamless integration makes it easy to ask question about your reference and allows for natural queries such as "Can you explain with super-duper complicated equation to me?" and Beaver knows what you are talking about.
