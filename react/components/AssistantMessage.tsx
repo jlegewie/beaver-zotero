@@ -6,6 +6,7 @@ import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';
 import AssistantMessageFooter from './AssistantMessageFooter';
+import GeneratingButton from './GeneratingButton';
 
 interface AssistantMessageProps {
     message: ChatMessage;
@@ -50,6 +51,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 {/* Toolcalls */}
                 {message.tool_calls && message.tool_calls.length > 0 && (
                     <AssistantMessageTools key={`tools-${message.id}`} message={message} isFirstAssistantMessage={isFirstAssistantMessage} />
+                )}
+
+                {/* Generating button */}
+                {message.status === 'in_progress' && message.content === '' && (
+                    <GeneratingButton />
                 )}
 
                 {/* Error */}

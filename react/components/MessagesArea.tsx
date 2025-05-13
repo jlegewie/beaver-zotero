@@ -82,17 +82,6 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                         )}
                     </>
                 ))}
-                {/* Generating button */}
-                {
-                    messages.length > 0 &&
-                    (
-                        (messages[messages.length - 1].role === 'user' && isChatRequestPending) ||
-                        (messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].status === 'in_progress' && messages[messages.length - 1].content === '' && !messages[messages.length - 1].tool_calls)
-                    )
-                    && (
-                        <GeneratingButton />
-                    )
-                }
             </div>
         );
     }
