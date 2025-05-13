@@ -20,14 +20,14 @@ import CopyButton from './CopyButton';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';
 
-interface AssistantMessageContentProps {
+interface AssistantMessageProps {
     message: ChatMessage;
     isFirstAssistantMessage: boolean;
     isLastMessage: boolean;
     showActionButtons: boolean;
 }
 
-const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
+const AssistantMessage: React.FC<AssistantMessageProps> = ({
     message,
     isFirstAssistantMessage,
     isLastMessage,
@@ -211,4 +211,4 @@ const AssistantMessageContent: React.FC<AssistantMessageContentProps> = ({
     );
 };
 
-export default AssistantMessageContent;
+export default AssistantMessage;
