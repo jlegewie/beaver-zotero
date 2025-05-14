@@ -54,7 +54,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 )}
 
                 {/* Generating button */}
-                {message.status === 'in_progress' && message.content === '' && (
+                {message.status === 'in_progress' && message.content === '' && isLastMessage && !message.tool_calls && (
                     <GeneratingButton />
                 )}
 
