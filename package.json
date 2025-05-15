@@ -22,13 +22,16 @@
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
-        "build": "zotero-plugin build && tsc --noEmit",
+        "build": "NODE_ENV=production npm run build-react:prod && zotero-plugin build && tsc --noEmit",
+        "build:dev": "NODE_ENV=development npm run build-react:dev && zotero-plugin build && tsc --noEmit",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",
         "test": "echo \"Error: no test specified\" && exit 1",
         "update-deps": "npm update --save",
         "build-react": "webpack --config webpack.config.js",
+        "build-react:dev": "webpack --config webpack.config.js --mode=development",
+        "build-react:prod": "webpack --config webpack.config.js --mode=production",
         "watch-react": "webpack --config webpack.config.js --watch"
     },
     "dependencies": {
