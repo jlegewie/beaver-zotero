@@ -25,7 +25,7 @@ export default (env, argv) => {
         mode,
         target: 'web',
         entry: './react/index.tsx',
-        devtool: 'inline-source-map',
+        devtool: mode === 'production' ? false : 'inline-source-map',
         output: {
             path: path.resolve(__dirname, 'addon', 'content'),
             filename: 'reactBundle.js',
