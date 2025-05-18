@@ -12,7 +12,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
 
     return (
         <div 
-            id="beaver-welcome"
+            id="login-page"
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 p-4"
         >
             <div style={{ height: '5vh' }}></div>

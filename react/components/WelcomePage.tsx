@@ -117,7 +117,7 @@ const WelcomePage: React.FC = () => {
 
     return (
         <div 
-            id="beaver-welcome"
+            id="welcome-page"
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 p-4"
         >
             {/* <div className="flex-1"/> */}
