@@ -13,6 +13,7 @@ import { useSetAtom } from 'jotai';
 import { chatService, ErrorType } from '../../src/services/chatService';
 import { ProviderType } from '../atoms/models';
 import { profileWithPlanAtom } from "../atoms/profile";
+import { logger } from "../../src/utils/logger";
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -213,7 +214,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
             if (result.valid) {
                 setVerificationStatus('success');
                 savePref(currentValue);
-                console.log(`API Key for ${provider} verified and saved.`);
+                logger(`API Key for ${provider} verified and saved.`);
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');
@@ -308,7 +309,7 @@ const PreferencePage: React.FC = () => {
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
         if (value !== getPref(key)) {
             setPref(key, value);
-            console.log(`Saved pref ${key}`);
+            logger(`Saved pref ${key}`);
         }
     };
 
