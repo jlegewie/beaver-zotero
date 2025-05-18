@@ -25,7 +25,7 @@ import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttach
 import { chatCompletion } from '../../src/services/chatCompletion';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
-import { Model, selectedModelAtom, DEFAULT_MODEL } from './models';
+import { Model, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
@@ -364,8 +364,11 @@ function _processChatCompletionViaBackend(
         } else if (model.provider === 'anthropic') {
             userApiKey = getPref('anthropicApiKey') || undefined;
         }
+        
+        // If no API key available, find default model from supported models
         if (!userApiKey) {
-            model = DEFAULT_MODEL;
+            const supportedModels = get(supportedModelsAtom);
+            model = supportedModels.find((m: Model) => m.default) || DEFAULT_MODEL;
         }
     }
 
