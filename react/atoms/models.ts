@@ -5,6 +5,7 @@ import { getPref, setPref } from '../../src/utils/prefs';
 // Add this interface to the existing interfaces
 export type ProviderType = "anthropic" | "google" | "openai";
 export interface Model {
+    id: string;
     provider: ProviderType;
     name: string;
     model_id: string;
