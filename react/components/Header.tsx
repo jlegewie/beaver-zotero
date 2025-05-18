@@ -42,19 +42,23 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         ariaLabel="Close chat"
                     />
                 </Tooltip>
-                <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
-                    <IconButton
-                        icon={PlusSignIcon}
-                        onClick={handleNewThread}
+                {isAuthenticated && (
+                    <>
+                    <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                        <IconButton
+                            icon={PlusSignIcon}
+                            onClick={handleNewThread}
+                            className="scale-14"
+                            ariaLabel="New thread"
+                            disabled={threadMessages.length === 0 && !isPreferencePageVisible}
+                        />
+                    </Tooltip>
+                    <ThreadsMenu
                         className="scale-14"
-                        ariaLabel="New thread"
-                        disabled={threadMessages.length === 0 && !isPreferencePageVisible}
+                        ariaLabel="Show chat history"
                     />
-                </Tooltip>
-                <ThreadsMenu
-                    className="scale-14"
-                    ariaLabel="Show chat history"
-                />
+                    </>
+                )}
             </div>
             {isAuthenticated && (
                 <div className="display-flex gap-4">
