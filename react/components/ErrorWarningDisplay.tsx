@@ -14,6 +14,8 @@ const getErrorMessage = (errorType: string) => {
         // Error types based on error codes
         case 'service_unavailable':
             return "AI service down. Please try again later.";
+        case 'invalid_model':
+            return "Invalid model. Please select a different model.";
         case 'rate_limit':
             return "Usage limit reached. Please try again later.";
         case 'auth':
