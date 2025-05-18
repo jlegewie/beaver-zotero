@@ -14,6 +14,7 @@ import { chatService, ErrorType } from '../../src/services/chatService';
 import { ProviderType } from '../atoms/models';
 import { profileWithPlanAtom } from "../atoms/profile";
 import { logger } from "../../src/utils/logger";
+import { validateSelectedModelAtom, fetchModelsAtom } from '../atoms/models';
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -184,6 +185,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
+    const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
 
     useEffect(() => {
         setCurrentValue(value);
@@ -197,6 +199,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         onChange(newValue);
         if (newValue === '') {
             savePref(newValue);
+            validateSelectedModel();
         }
         if (verificationStatus !== 'idle') {
             setVerificationStatus('idle');
@@ -215,6 +218,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 setVerificationStatus('success');
                 savePref(currentValue);
                 logger(`API Key for ${provider} verified and saved.`);
+                validateSelectedModel();
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');
