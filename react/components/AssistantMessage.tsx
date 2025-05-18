@@ -11,6 +11,7 @@ import GeneratingButton from './GeneratingButton';
 interface AssistantMessageProps {
     message: ChatMessage;
     isFirstAssistantMessage: boolean;
+    previousMessageHasToolCalls: boolean;
     isLastMessage: boolean;
     showActionButtons: boolean;
 }
@@ -18,6 +19,7 @@ interface AssistantMessageProps {
 const AssistantMessage: React.FC<AssistantMessageProps> = ({
     message,
     isFirstAssistantMessage,
+    previousMessageHasToolCalls,
     isLastMessage,
     showActionButtons
 }) => {
@@ -50,7 +52,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
 
                 {/* Toolcalls */}
                 {message.tool_calls && message.tool_calls.length > 0 && (
-                    <AssistantMessageTools key={`tools-${message.id}`} message={message} isFirstAssistantMessage={isFirstAssistantMessage} />
+                    <AssistantMessageTools
+                        key={`tools-${message.id}`}
+                        message={message}
+                        isFirstAssistantMessage={isFirstAssistantMessage}
+                        previousMessageHasToolCalls={previousMessageHasToolCalls}
+                    />
                 )}
 
                 {/* Generating button */}

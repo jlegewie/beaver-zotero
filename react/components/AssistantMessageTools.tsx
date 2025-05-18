@@ -10,6 +10,7 @@ import { MessageErrorWarningDisplay } from './ErrorWarningDisplay';
 interface AssistantMessageToolsProps {
     message: ChatMessage;
     isFirstAssistantMessage: boolean;
+    previousMessageHasToolCalls: boolean;
 }
 
 interface ToolCallDisplayProps {
@@ -127,15 +128,25 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
 export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     message,
     isFirstAssistantMessage,
+    previousMessageHasToolCalls,
 }) => {
     if (!message.tool_calls || message.tool_calls.length === 0) {
         return null;
     }
 
+    const getTopMargin = function() {
+        if (message.content == '' && previousMessageHasToolCalls) return '-mt-3';
+        if (message.content == '' && isFirstAssistantMessage) return '-mt-1';
+        return 'mt-1';
+    }
+
     return (
         <div
             id={`tools-${message.id}`}
-            className={`display-flex flex-col py-1 gap-3 ${message.content == '' && !isFirstAssistantMessage ? '-mt-3' : '-mt-1'}`}
+            className={
+                `display-flex flex-col py-1 gap-3
+                ${getTopMargin()}`
+            }
         >
             {message.tool_calls.map((toolCall) => (
                 <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />

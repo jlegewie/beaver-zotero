@@ -73,6 +73,9 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
                                 isFirstAssistantMessage={index > 0 && messages[index - 1]?.role === 'user'}
+                                previousMessageHasToolCalls={
+                                    index > 0 && (messages[index - 1]?.tool_calls || []).length > 0
+                                }
                                 // Show buttons if last message or next message is a user message
                                 showActionButtons={
                                     index === messages.length - 1 ||
