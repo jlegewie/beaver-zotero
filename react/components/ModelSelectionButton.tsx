@@ -119,7 +119,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel.model_id === model.model_id}
+                        isSelected={selectedModel === model}
                     />
                 )
             });
@@ -141,7 +141,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel.model_id === model.model_id}
+                        isSelected={selectedModel === model}
                     />
                 )
             });
