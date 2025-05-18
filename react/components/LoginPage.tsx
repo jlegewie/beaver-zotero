@@ -15,42 +15,39 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
             id="beaver-welcome"
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 p-4"
         >
-            <div className="display-flex flex-col items-center justify-center max-w-md mx-auto w-full">
-                {/* Logo and header section */}
-                <div className="display-flex flex-col items-center mb-4 mt-6">
-                    <div className="mb-2">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="var(--fill-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 17L12 22L22 17" stroke="var(--fill-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 12L12 17L22 12" stroke="var(--fill-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                    </div>
-                    <h1 className="text-lg font-semibold">Beaver for Zotero</h1>
-                    {/* <p className="text-sm font-color-tertiary mt-1">Sign in to access advanced features</p> */}
+            <div style={{ height: '5vh' }}></div>
+            <div className="display-flex flex-col justify-center max-w-md mx-auto w-full">
+                {/* Header section */}
+                <div className="display-flex flex-col items-start mb-4">
+                    <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
+                    <p className="text-base font-color-secondary -mt-2">Your AI plugin for Zotero.</p>
                 </div>
                 
                 {/* Form container with subtle background */}
                 <div className="w-90 rounded-lg border-quinary p-4 bg-quaternary">
                     <SignInForm setErrorMsg={setErrorMsg} emailInputRef={emailInputRef} />
                     
-                    {/* Additional links */}
-                    {/* <div className="display-flex flex-col items-center gap-2 mt-4 text-sm">
-                        <a href="#" className="font-color-tertiary hover:font-color-primary transition">Forgot password?</a>
-                        <div className="display-flex items-center gap-1">
-                            <span className="font-color-tertiary">Don't have an account?</span>
-                            <a href="#" className="font-color-secondary hover:font-color-primary transition">Register</a>
-                        </div>
-                    </div> */}
+                </div>
+                {/* Additional links */}
+                <div className="display-flex flex-col gap-2 mt-4 text-sm">
+                    {/* <a href="#" className="font-color-tertiary hover:font-color-primary transition">Forgot password?</a> */}
+                    <div className="display-flex gap-1">
+                        <span className="font-color-tertiary">Don't have an account?</span>
+                        <a
+                            href="#"
+                            className="font-color-secondary hover:font-color-primary transition"
+                            style={{textDecoration: 'none'}}
+                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                            Sign up
+                        </a>
+                    </div>
                 </div>
 
                 {errorMsg && (
                     <p className="text-sm font-color-red text-center">{errorMsg}</p>
                 )}
-                
-                {/* Footer */}
-                {/* <div className="mt-4 text-xs font-color-tertiary text-center">
-                    <p>Beaver ...</p>
-                </div> */}
             </div>
         </div>
     );

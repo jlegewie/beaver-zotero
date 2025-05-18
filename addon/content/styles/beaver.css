@@ -333,6 +333,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .mr-3 { margin-right: 0.75rem; }
 [id^="beaver-pane-"] .mr-4 { margin-right: 1rem; }
 [id^="beaver-pane-"] .mr-5 { margin-right: 1.25rem; }
+[id^="beaver-pane-"] .ml-05 { margin-left: 0.125rem; }
 [id^="beaver-pane-"] .ml-1 { margin-left: 0.25rem; }
 [id^="beaver-pane-"] .ml-2 { margin-left: 0.5rem; }
 [id^="beaver-pane-"] .ml-3 { margin-left: 0.75rem; }
@@ -346,6 +347,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .mt-4 { margin-top: 1rem; }
 [id^="beaver-pane-"] .mt-5 { margin-top: 1.25rem; }
 [id^="beaver-pane-"] .mt-6 { margin-top: 1.5rem; }
+[id^="beaver-pane-"] .mt-7 { margin-top: 1.75rem; }
+[id^="beaver-pane-"] .mt-8 { margin-top: 2rem; }
 [id^="beaver-pane-"] .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; }
 [id^="beaver-pane-"] .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
@@ -356,6 +359,7 @@ attachment-box .metadata-table #beaver-status {
 
 [id^="beaver-pane-"] .-ml-015 { margin-left: -0.15rem; }
 [id^="beaver-pane-"] .-ml-020 { margin-left: -0.20rem; }
+[id^="beaver-pane-"] .-ml-05 { margin-left: -0.125rem; }
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }

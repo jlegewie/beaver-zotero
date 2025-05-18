@@ -51,10 +51,10 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
     
     return (
         <>
-        <form onSubmit={handleSignIn} className="display-flex flex-col gap-3 w-full">
-            {/* <h2 className="text-lg font-semibold text-center mb-2">Sign In</h2> */}
+        <form onSubmit={handleSignIn} className="display-flex flex-col gap-5 w-full my-2">
+            {/* <div className="text-2xl font-semibold text-center mb-2">Login</div> */}
             
-            <div className="display-flex flex-col gap-1">
+            <div className="display-flex flex-col gap-2">
                 <label htmlFor="signInEmail" className="text-sm font-medium">Email</label>
                 <input
                     id="signInEmail"
@@ -62,21 +62,35 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="border-quinary rounded-md p-2 bg-quaternary focus:border-tertiary transition outline-none"
+                    className="border-quinary rounded-md -ml-05 p-2 bg-quaternary focus:border-tertiary transition outline-none"
                     placeholder="your.email@example.com"
                     ref={emailInputRef}
                 />
             </div>
             
-            <div className="display-flex flex-col gap-1">
-                <label htmlFor="signInPassword" className="text-sm font-medium">Password</label>
+            <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-row gap-2 flex-1">
+                    <label htmlFor="signInPassword" className="text-sm font-medium">Password</label>
+                    <div className="flex-1" />
+                    <div className="text-sm font-color-tertiary">
+                        <a
+                            href="#"
+                            className="font-color-tertiary hover:font-color-primary transition"
+                            style={{textDecoration: 'none'}}
+                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                            Forgot password?
+                        </a>
+                    </div>
+                </div>
                 <input
                     id="signInPassword"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="border-quinary rounded-md p-2 bg-quaternary transition outline-none"
+                    className="border-quinary rounded-md -ml-05 p-2 bg-quaternary transition outline-none"
                     placeholder="••••••••"
                 />
             </div>
@@ -85,10 +99,11 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                 <Button 
                     type="submit" 
                     variant="solid" 
-                    className="mt-2 mb-2"
+                    className="scale-11 ml-05"
                     loading={isLoading}
+                    disabled={email=="" || password==""}
                 >
-                    Sign In
+                    Login
                 </Button>
             </div>
         </form>
