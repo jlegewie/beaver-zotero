@@ -3,8 +3,22 @@ import { chatService } from '../../src/services/chatService';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
 
-// Add this interface to the existing interfaces
+/**
+ * Supported AI model provider types
+ */
 export type ProviderType = "anthropic" | "google" | "openai";
+
+/**
+ * Model interface representing an AI model for chat completion
+ * @property id - Unique identifier for the model
+ * @property provider - The provider of the model (anthropic, google, openai)
+ * @property model_id - The provider's model identifier used in API calls
+ * @property is_agent - Whether the model supports agent capabilities
+ * @property reasoning_model - Whether the model provides reasoning capabilities
+ * @property kwargs - Additional provider-specific parameters
+ * @property app_key - Whether the model is available with the app's API key (no user key needed)
+ * @property default - Whether this is the default model for fallback situations
+ */
 export interface Model {
     id: string;
     provider: ProviderType;
@@ -17,7 +31,10 @@ export interface Model {
     default?: boolean;
 }
 
-// DEFAULT MODEL
+/**
+ * Default model used when no models are available or when a previously
+ * selected model becomes unavailable. This serves as a fallback option.
+ */
 export const DEFAULT_MODEL: Model = {
     id: "6c750f70",
     provider: 'google',
@@ -30,15 +47,25 @@ export const DEFAULT_MODEL: Model = {
 } as Model;
 
 /**
-* Models and selection state
-*/
+ * Core atoms for model state management
+ */
+// Stores all models supported by the backend
 export const supportedModelsAtom = atom<Model[]>([]);
+
+// Stores the currently selected model
 export const selectedModelAtom = atom<Model>(DEFAULT_MODEL);
 
-// Derived atom to get if the selected model is an agent model
+/**
+ * Derived atom that indicates if the selected model has agent capabilities
+ */
 export const isAgentModelAtom = atom((get) => get(selectedModelAtom).is_agent);
 
-// Derived atom to get available models based on API keys
+/**
+ * Derived atom that filters supported models based on available API keys
+ * Models are available if they:
+ * 1. Use the app's API key (app_key: true), or
+ * 2. Have a matching user-provided API key for their provider
+ */
 export const availableModelsAtom = atom(
     get => {
         const supportedModels = get(supportedModelsAtom);
@@ -58,7 +85,14 @@ export const availableModelsAtom = atom(
     }
 );
 
-// Initialization atom to load models and selected model from preferences
+/**
+ * Initialization atom that loads models and selected model from preferences
+ * This is called when the application starts up and:
+ * 1. Loads cached models from preferences
+ * 2. Finds the default model from the cached list
+ * 3. Loads the last used model if it's still available
+ * 4. Falls back to the default model if needed
+ */
 export const initModelsAtom = atom(
     null,
     async (get, set) => {
@@ -108,17 +142,23 @@ export const initModelsAtom = atom(
     }
 );
 
-// Validate selected model
+/**
+ * Validation atom that ensures the selected model is still available
+ * This is called when API keys change to verify the selected model is valid:
+ * - If current model is invalid, switches to an available model
+ * - If no models are available, falls back to DEFAULT_MODEL
+ */
 export const validateSelectedModelAtom = atom(
     null,
     (get, set) => {
         const selectedModel = get(selectedModelAtom);
         const availableModels = get(availableModelsAtom);
+        const defaultModel = availableModels.find(model => model.default) || DEFAULT_MODEL;
 
         // Check if the selected model is still valid with current API keys
         const isModelAvailable = 
-            selectedModel.model_id === DEFAULT_MODEL.model_id || 
-            availableModels.some(m => m.model_id === selectedModel.model_id);
+            selectedModel.id === defaultModel.id || 
+            availableModels.some(m => m.id === selectedModel.id);
 
         // If not valid, revert to default or first available model
         if (!isModelAvailable) {
@@ -126,14 +166,18 @@ export const validateSelectedModelAtom = atom(
                 set(selectedModelAtom, availableModels[0]);
                 setPref('lastUsedModel', JSON.stringify(availableModels[0]));
             } else {
-                set(selectedModelAtom, DEFAULT_MODEL);
-                setPref('lastUsedModel', JSON.stringify(DEFAULT_MODEL));
+                set(selectedModelAtom, defaultModel);
+                setPref('lastUsedModel', JSON.stringify(defaultModel));
             }
         }
     }
 );
 
-// Atom to update models from API
+/**
+ * API fetch atom that retrieves models from the backend
+ * This updates the list of supported models and ensures the
+ * selected model is still valid after the update
+ */
 export const fetchModelsAtom = atom(
     null,
     async (get, set) => {
@@ -148,16 +192,18 @@ export const fetchModelsAtom = atom(
             // Ensure selected model is still available
             const availableModels = get(availableModelsAtom);
             const selectedModel = get(selectedModelAtom);
+            const defaultModel = models.find(model => model.default) || DEFAULT_MODEL;
+            
             const isSelectedModelAvailable = 
-                selectedModel.id === DEFAULT_MODEL.id || 
+                selectedModel.id === defaultModel.id || 
                 availableModels.some(m => m.id === selectedModel.id);
             
             if (!isSelectedModelAvailable && availableModels.length > 0) {
                 set(selectedModelAtom, availableModels[0]);
                 setPref('lastUsedModel', JSON.stringify(availableModels[0]));
             } else if (!isSelectedModelAvailable) {
-                set(selectedModelAtom, DEFAULT_MODEL);
-                setPref('lastUsedModel', JSON.stringify(DEFAULT_MODEL));
+                set(selectedModelAtom, defaultModel);
+                setPref('lastUsedModel', JSON.stringify(defaultModel));
             }
         } catch (error) {
             console.error("Failed to fetch model list:", error);
