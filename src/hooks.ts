@@ -1,18 +1,12 @@
 import {
-	BasicExampleFactory,
 	HelperExampleFactory,
 	KeyExampleFactory,
-	PromptExampleFactory,
-	UIExampleFactory,
 } from "./modules/examples";
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverUIFactory } from "./ui/ui";
-import { VectorStoreDB } from "./services/vectorStore";
-import { VoyageClient } from "./services/voyage";
 import { getPref } from "./utils/prefs";
-import { ItemService } from "./services/ItemService";
 import eventBus from "../react/eventBus";
 import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
@@ -32,14 +26,6 @@ async function onStartup() {
 
 	ztoolkit.log("Startup");
 
-	// Initialize database and vector store
-	const dbConnectionVectorStore = new Zotero.DBConnection("beaverVectorStore");
-	const vectorStore = new VectorStoreDB(dbConnectionVectorStore);
-	
-	// Test connection and initialize schema
-	await dbConnectionVectorStore.test();
-	await vectorStore.initDatabase();
-
 	// Initialize database
 	const dbConnection = new Zotero.DBConnection("beaver");
 	const beaverDB = new BeaverDB(dbConnection);
@@ -49,13 +35,6 @@ async function onStartup() {
 	await dbConnection.test();
 	await beaverDB.initDatabase();
 	
-	// Initialize Voyage client
-	const voyageApiKey = getPref("voyageApiKey");
-	const voyageClient = voyageApiKey ? new VoyageClient({apiKey: voyageApiKey}) : null;
-	
-	if(!voyageApiKey)
-		ztoolkit.log("Voyage client not initialized. Please set the API key in the preferences.");
-
 	// Initialize Generative AI provider
 	let provider;
 	if (getPref("googleGenerativeAiApiKey")) {
@@ -70,11 +49,6 @@ async function onStartup() {
 	addon.citationService = citationService;
 	ztoolkit.log("CitationService initialized successfully");
 	
-	// Instantiate item service and store reference
-	const itemService = new ItemService(vectorStore, voyageClient, 'local');
-	addon.itemService = itemService;
-	ztoolkit.log("itemService initialized successfully");
-
 	BeaverUIFactory.registerShortcuts();
 
 	// Register preference pane
@@ -126,7 +100,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 	// Register Beaver UI elements
 	// BeaverUIFactory.registerMenuItems();
-	// BeaverUIFactory.registerInfoRow();
 
 	// Create (or reuse) an EventTarget for this window
 	if (!win.__beaverEventBus) {
@@ -224,9 +197,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
-	// Remove Beaver menu items
-	ztoolkit.Menu.unregister("zotero-itemmenu-beaver-upsert");
-	Zotero.ItemPaneManager.unregisterInfoRow('beaver-item-pane-status');
 }
 
 function loadStylesheet() {
@@ -282,12 +252,6 @@ function unloadKatexStylesheet() {
 
 async function onShutdown(): Promise<void> {
 	try {
-		// Close database connection if it exists
-		if (addon.itemService) {
-			await addon.itemService.closeDatabase();
-		}
-		// Clear item service
-		addon.itemService = undefined;
 
 		// Dispose CitationService if it exists
 		if (addon.citationService) {

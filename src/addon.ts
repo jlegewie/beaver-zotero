@@ -4,9 +4,6 @@ import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverDB } from "./services/database";
-import { VectorStoreDB } from "./services/vectorStore";
-import { VoyageClient } from "./services/voyage";
-import { ItemService } from "./services/ItemService";
 import { AIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 
@@ -28,7 +25,6 @@ class Addon {
         dialog?: DialogHelper;
         _itemStatuses: Map<number, string>;
     };
-    public itemService?: ItemService;
     public aiProvider?: AIProvider;
     public citationService?: CitationService;
     public db?: BeaverDB;
