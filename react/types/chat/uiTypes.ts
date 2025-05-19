@@ -20,12 +20,13 @@ export interface Thread {
 }
 
 // Message types
+export type MessageStatus = "searching" | "thinking" | "in_progress" | "completed" | "error" | "canceled";
 export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
     tool_calls?: ToolCall[];
-    status: 'searching' | 'thinking' | 'in_progress' | 'completed' | 'error' | 'canceled';
+    status: MessageStatus;
     errorType?: string;
     warnings?: Warning[];
 }
