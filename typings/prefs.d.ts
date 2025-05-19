@@ -11,7 +11,6 @@ declare namespace _ZoteroTypes {
       "input": string;
       "userId": string;
       "userEmail": string;
-      "voyageApiKey": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
       "anthropicApiKey": string;

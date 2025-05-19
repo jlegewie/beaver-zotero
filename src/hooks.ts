@@ -1,10 +1,7 @@
 import { initLocale } from "./utils/locale";
-import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverUIFactory } from "./ui/ui";
-import { getPref } from "./utils/prefs";
 import eventBus from "../react/eventBus";
-import { GeminiProvider, OpenAIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttachmentPane'
 import { BeaverDB } from "./services/database";
@@ -30,14 +27,14 @@ async function onStartup() {
 	await dbConnection.test();
 	await beaverDB.initDatabase();
 	
-	// Initialize Generative AI provider
-	let provider;
-	if (getPref("googleGenerativeAiApiKey")) {
-		provider = new GeminiProvider(getPref("googleGenerativeAiApiKey"));
-	} else if (getPref("openAiApiKey")) {
-		provider = new OpenAIProvider(getPref("openAiApiKey"));
-	}
-	addon.aiProvider = provider;
+	// Initialize Generative AI provider for direct API calls
+	// let provider;
+	// if (getPref("googleGenerativeAiApiKey")) {
+	// 	provider = new GeminiProvider(getPref("googleGenerativeAiApiKey"));
+	// } else if (getPref("openAiApiKey")) {
+	// 	provider = new OpenAIProvider(getPref("openAiApiKey"));
+	// }
+	// addon.aiProvider = provider;
 	
 	// Initialize Citation Service with caching
 	const citationService = new CitationService(ztoolkit);
@@ -45,15 +42,6 @@ async function onStartup() {
 	ztoolkit.log("CitationService initialized successfully");
 	
 	BeaverUIFactory.registerShortcuts();
-
-	// Register preference pane
-	// Zotero.PreferencePanes.register({
-	// 	pluginID: addon.data.config.addonID,
-	// 	src: rootURI + "content/preferences.xhtml",
-	// 	label: "Beaver",
-	// 	image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
-	// });
-	// ztoolkit.log("Preference pane registered");
 
 	// Add event bus to window
 	Zotero.getMainWindow().__beaverEventBus = eventBus;
@@ -268,27 +256,10 @@ async function onNotify(
 	}
 }
 
-/**
-* This function is just an example of dispatcher for Preference UI events.
-* Any operations should be placed in a function to keep this funcion clear.
-* @param type event type
-* @param data event data
-*/
-async function onPrefsEvent(type: string, data: { [key: string]: any }) {
-	switch (type) {
-		case "load":
-		registerPrefsScripts(data.window);
-		break;
-		default:
-		return;
-	}
-}
-
 export default {
 	onStartup,
 	onShutdown,
 	onMainWindowLoad,
 	onMainWindowUnload,
-	onNotify,
-	onPrefsEvent
+	onNotify
 };
