@@ -72,7 +72,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                 <div className="display-flex flex-row gap-2 flex-1">
                     <label htmlFor="signInPassword" className="text-sm font-medium">Password</label>
                     <div className="flex-1" />
-                    <div className="text-sm font-color-tertiary">
+                    {/* <div className="text-sm font-color-tertiary">
                         <a
                             href="#"
                             className="font-color-tertiary hover:font-color-primary transition"
@@ -82,7 +82,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                         >
                             Forgot password?
                         </a>
-                    </div>
+                    </div> */}
                 </div>
                 <input
                     id="signInPassword"
