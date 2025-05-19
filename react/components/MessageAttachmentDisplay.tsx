@@ -3,7 +3,7 @@ import { SourceButton } from './SourceButton';
 import { useAtomValue } from 'jotai';
 import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/input';
 import { TextSelectionButton } from './TextSelectionButton';
-import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+// import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from './AddSourcesMenu';
 import { threadSourceCountAtom } from '../atoms/threads';
 import { AnnotationButton } from './AnnotationButton';
@@ -29,7 +29,8 @@ const MessageAttachmentDisplay = ({
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
-                showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
+                // showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
+                showText={currentSources.length == 0 && !currentReaderAttachment}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -39,7 +40,7 @@ const MessageAttachmentDisplay = ({
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
             />
-            {threadSourceCount > 0 && (
+            {/* {threadSourceCount > 0 && (
                 <button
                     className="sources-info"
                     disabled={true}
@@ -53,7 +54,7 @@ const MessageAttachmentDisplay = ({
                     />
                     {threadSourceCount}
                 </button>
-            )}
+            )} */}
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
