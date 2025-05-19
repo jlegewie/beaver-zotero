@@ -1,8 +1,8 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.0.1",
-    "description": "Beaver is a Zotero plugin that...",
+    "version": "0.1.0",
+    "description": "Beaver chews through your research powered by AI, seamlessly integrates with Zotero, finds exactly what you need with smart search, and answers questions about whatever you're reading.",
     "config": {
         "addonName": "Beaver",
         "addonID": "beaver@jlegewie.com",
@@ -36,6 +36,7 @@
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
+        "@szhsin/react-menu": "^4.4.0",
         "date-fns": "^4.1.0",
         "date-fns-tz": "^3.2.0",
         "deepmerge": "^4.3.1",
