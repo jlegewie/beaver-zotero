@@ -58,18 +58,14 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                 ref={ref}
             >
                 {messages.map((message, index) => (
-                    <>
+                    <React.Fragment key={message.id}>
                         {/* User message */}
                         {message.role === 'user' && (
-                            <UserMessageDisplay
-                                key={message.id}
-                                message={message}
-                            />
+                            <UserMessageDisplay message={message} />
                         )}
                         {/* Assistant message content */}
                         {message.role === 'assistant' && (
                             <AssistantMessage
-                                key={`content-${message.id}`}
                                 message={message}
                                 isLastMessage={index === messages.length - 1}
                                 isFirstAssistantMessage={index > 0 && messages[index - 1]?.role === 'user'}
@@ -83,7 +79,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                                 }
                             />
                         )}
-                    </>
+                    </React.Fragment>
                 ))}
             </div>
         );
