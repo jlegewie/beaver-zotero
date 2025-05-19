@@ -37,3 +37,7 @@ export { default as SearchIcon } from './icons/SearchIcon';
 export { default as ArrowUpRightIcon } from './icons/ArrowUpRightIcon';
 export { default as AiMagicIcon } from './icons/AiMagicIcon';
 export { default as ViewIcon } from './icons/ViewIcon';
+export { default as OneIcon } from './icons/OneIcon';
+export { default as TwoIcon } from './icons/TwoIcon';
+export { default as ThreeIcon } from './icons/ThreeIcon';
+export { default as FourIcon } from './icons/FourIcon';
