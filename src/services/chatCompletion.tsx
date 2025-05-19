@@ -1,8 +1,7 @@
 import { ChatMessage } from "../../react/types/chat/uiTypes";
-import { APIMessage, ContentPart } from "./OpenAIProvider";
+import { APIMessage } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
-import { getZoteroItem } from "../../react/utils/sourceUtils";
-import { InputSource, ThreadSource } from "../../react/types/sources";
+import { ThreadSource } from "../../react/types/sources";
 import { ReaderContext } from "../../react/utils/readerUtils";
 import Handlebars from 'handlebars';
 

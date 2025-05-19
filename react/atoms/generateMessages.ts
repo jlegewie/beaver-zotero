@@ -314,37 +314,6 @@ export const regenerateFromMessageAtom = atom(
     }
 );
 
-// Helper function to process chat completion
-function _processChatCompletion(
-    messages: ChatMessage[],
-    sources: ThreadSource[],
-    assistantMsgId: string,
-    context: ReaderContext | undefined,
-    set: any
-) {
-    // Filter out empty assistant messages
-    const filteredMessages = messages.filter(
-        m => !(m.role === 'assistant' && m.content === '')
-    );
-    
-    chatCompletion(
-        filteredMessages,
-        sources,
-        context,
-        (chunk: string) => {
-            set(streamToMessageAtom, { id: assistantMsgId, chunk });
-        },
-        () => {
-            set(setMessageStatusAtom, { id: assistantMsgId, status: 'completed' });
-        },
-        (error: Error) => {
-            // @ts-ignore - Custom error properties
-            const errorType = error.errorType || 'unknown';
-            set(setMessageStatusAtom, { id: assistantMsgId, status: 'error', errorType });
-        }
-    );
-}
-
 function _processChatCompletionViaBackend(
     currentThreadId: string | null,
     userMessageId: string,
