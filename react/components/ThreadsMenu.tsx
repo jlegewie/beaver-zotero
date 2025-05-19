@@ -15,6 +15,7 @@ import { getDateGroup } from '../utils/dateUtils';
 import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import { currentSourcesAtom } from '../atoms/input';
 import { currentMessageContentAtom } from '../atoms/input';
+import { updateSourceCitationsAtom } from '../atoms/citations';
 
 const MAX_THREADS = 10;
 
@@ -55,6 +56,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
     const setUserAddedSources = useSetAtom(userAddedSourcesAtom);
+    const updateSourceCitations = useSetAtom(updateSourceCitationsAtom);
     const setCurrentSources = useSetAtom(currentSourcesAtom);
     const setMessageContent = useSetAtom(currentMessageContentAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
@@ -139,6 +141,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             
             // Update the thread messages and sources state
             setThreadMessages(messages);
+            await updateSourceCitations();
             setUserAddedSources(userSources);
             // setToolCallSources(toolCallSources);
             addToolCallSourcesToThreadSources({messages: messages});

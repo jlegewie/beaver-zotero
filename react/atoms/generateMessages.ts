@@ -33,6 +33,7 @@ import { store } from '../index';
 import { toMessageAttachment, toThreadSource } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
+import { updateSourceCitationsAtom } from './citations';
 
 const MODE = getPref('mode');
 
@@ -404,6 +405,11 @@ function _processChatCompletionViaBackend(
                         id: messageId,
                         chunk: delta
                     });
+                    // Update source citations if the delta contains the closing '>' of
+                    // a citation (or other) tag
+                    if (delta.includes('>')) {
+                        set(updateSourceCitationsAtom);
+                    }
                 }
                 // if (type === "reasoning")
             },
@@ -417,6 +423,12 @@ function _processChatCompletionViaBackend(
                 // Add the tool call sources to the thread sources (if any)
                 if (message.status === 'completed' && message.tool_calls) {
                     set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
+                }
+
+                // Update source citations if the message contains the closing '>' of
+                // a citation (or other) tag
+                if (message.role === 'assistant' && message.content && message.content.includes('>')) {
+                    set(updateSourceCitationsAtom);
                 }
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
