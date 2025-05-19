@@ -11,7 +11,7 @@ import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
-import { sourceCitationsAtom } from '../atoms/threads';
+import { sourceCitationsAtom } from '../atoms/citations';
 
 interface AssistantMessageFooterProps {
     message: ChatMessage;

@@ -1,7 +1,7 @@
 import React from 'react';
 import Tooltip from './Tooltip';
 import { useAtomValue } from 'jotai';
-import { sourceCitationsAtom } from '../atoms/threads';
+import { sourceCitationsAtom } from '../atoms/citations';
 import { getPref } from '../../src/utils/prefs';
 import { parseZoteroURI } from '../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../utils/sourceUtils';

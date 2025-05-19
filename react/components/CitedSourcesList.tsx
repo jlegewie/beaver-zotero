@@ -6,7 +6,7 @@ import IconButton from './IconButton';
 import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 import { getPref } from '../../src/utils/prefs';
-import { sourceCitationsAtom } from '../atoms/threads';
+import { sourceCitationsAtom } from '../atoms/citations';
 import { useAtomValue } from 'jotai';
 
 interface CitedSourcesListProps {
