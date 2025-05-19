@@ -85,7 +85,7 @@ type Prompt = {
 }
 
 const WelcomePage: React.FC = () => {
-    const [showFileStatus, setShowFileStatus] = useState(true);
+    const [showFileStatus, setShowFileStatus] = useState(false);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
@@ -157,12 +157,12 @@ const WelcomePage: React.FC = () => {
                 <>
                 <div className="display-flex flex-row justify-between items-center mt-4">
                     <Button
-                        variant="ghost"
+                        variant="ghost-secondary"
                         onClick={() => setShowFileStatus(!showFileStatus)}
                         rightIcon={showFileStatus ? ArrowDownIcon : ArrowRightIcon}
                         iconClassName="mr-0 scale-14"
                     >
-                        <span className="font-semibold text-lg mb-1 font-color-primary" style={{ marginLeft: '-3px' }}>
+                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
                             File Status
                         </span>
                     </Button>

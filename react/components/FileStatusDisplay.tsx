@@ -76,7 +76,7 @@ const FileStatusDisplay: React.FC<{
 
     return (
         <Button
-            variant="ghost"
+            variant="ghost-secondary"
             className={`display-flex fit-content items-center ${animationClass} ${className}`}
             ariaLabel="File processing status"
             title="File Processing Status"
