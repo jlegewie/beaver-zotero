@@ -43,32 +43,32 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         {source.name}
                                     </span>
                                 </div>
-                                <div className="display-flex gap-2 flex-shrink-0">
+                                <div className="display-flex gap-4 flex-shrink-0 p-2">
                                     {source.parentKey &&
                                         <IconButton
                                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={10} />}
-                                            variant="outline"
+                                            variant="ghost-secondary"
                                             onClick={() => saveAsNote(source)}
                                             ariaLabel="Save as Item Note"
                                             title="Save as Item Note"
-                                            className="scale-90 display-flex"
+                                            className="display-flex scale-11"
                                         />
                                     }
                                     <IconButton
                                         icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                                        variant="outline"
+                                        variant="ghost-secondary"
                                         onClick={() => revealSource(source)}
                                         ariaLabel="Reveal source"
-                                        title="Reveal"
-                                        className="scale-90 display-flex"
+                                        title="Reveal in Zotero"
+                                        className="display-flex scale-11"
                                     />
                                     <IconButton
                                         icon={() => <ZoteroIcon icon={ZOTERO_ICONS.OPEN} size={10} />}
-                                        variant="outline"
+                                        variant="ghost-secondary"
                                         onClick={() => openSource(source)}
                                         ariaLabel="Open source"
                                         title="Open"
-                                        className="scale-90 display-flex"
+                                        className="display-flex scale-12"
                                     />
                                 </div>
                             </div>
