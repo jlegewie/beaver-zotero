@@ -422,6 +422,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
 [id^="beaver-pane-"] .scale-85 { transform: scale(0.85); }
 [id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
+[id^="beaver-pane-"] .scale-95 { transform: scale(0.95); }
+[id^="beaver-pane-"] .scale-100 { transform: scale(1); }
 [id^="beaver-pane-"] .scale-105 { transform: scale(1.05); }
 [id^="beaver-pane-"] .scale-11 { transform: scale(1.1); }
 [id^="beaver-pane-"] .scale-115 { transform: scale(1.15); }
