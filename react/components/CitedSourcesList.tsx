@@ -5,6 +5,7 @@ import { CSSItemTypeIcon } from './icons';
 import IconButton from './IconButton';
 import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
+import { getPref } from '../../src/utils/prefs';
 
 interface CitedSourcesListProps {
     sources: SourceCitation[];
@@ -15,6 +16,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     sources,
     saveAsNote
 }) => {
+    const authorYearFormat = getPref("citationFormat") !== "numeric";
     
     return (
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
@@ -22,11 +24,13 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 {sources.map((source, index) => (
                     <div key={index} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
-                        <div className="p-2">
-                            <div className="source-citation text-sm">
-                                {source.numericCitation}
+                        {!authorYearFormat &&
+                            <div className="p-2">
+                                <div className="source-citation text-sm">
+                                    {source.numericCitation}
+                                </div>
                             </div>
-                        </div>
+                        }
 
                         {/* Right column */}
                         <div className="display-flex flex-col justify-between w-full min-w-0">
