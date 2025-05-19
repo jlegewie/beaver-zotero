@@ -120,25 +120,33 @@ const WelcomePage: React.FC = () => {
             id="welcome-page"
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 p-4"
         >
-            {/* <div className="flex-1"/> */}
-            {/* <div style={{height: "10%"}}/> */}
+            {/* Top spacing */}
+            <div style={{ height: '5vh' }}></div>
+
+            {/* Quick Prompt */}
             {prompts.length > 0 && (
                 <>
                 <div className="display-flex flex-row justify-between items-center">
-                    <div className="font-semibold text-lg mb-1">Quick Prompts</div>
+                    {/* <div className="font-semibold text-lg mb-1">Quick Prompts</div> */}
+                    <div className="text-xl font-semibold">Quick Prompts</div>
                     <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
                 </div>
+                {/* <div className="display-flex flex-col items-start mb-4">
+                    <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
+                </div> */}
                 {prompts.map((prompt, index) => (
                     <Button
                         key={index}
-                        variant="surface-light"
+                        variant="ghost-secondary"
                         onClick={() => handleQuickPrompt(prompt)}
                         disabled={prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
                     >
-                        <span className={`text-base ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                        <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                             {`${shortcutKey}${prompt.index}`}
                         </span>
-                        <span className={`text-base truncate ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                        <span
+                            className={`text-base truncate
+                                `}>
                             {prompt.title}
                         </span>
                     </Button>
