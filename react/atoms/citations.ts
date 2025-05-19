@@ -18,7 +18,6 @@ export const sourceCitationsAtom = atom<SourceCitation[]>([]);
 export const updateSourceCitationsAtom = atom(
     null,
     async (get, set) => {
-        console.log('updateSourceCitationsAtom');
         const messages = get(threadMessagesAtom);
 
         // Extract all citation IDs from the message content
