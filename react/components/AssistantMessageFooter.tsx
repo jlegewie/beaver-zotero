@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from './icons';
-import { citedSourcesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
@@ -12,6 +11,7 @@ import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
 import CopyButton from './CopyButton';
+import { sourceCitationsAtom } from '../atoms/threads';
 
 interface AssistantMessageFooterProps {
     message: ChatMessage;
@@ -24,7 +24,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const citedSources = useAtomValue(citedSourcesAtom);
+    const citations = useAtomValue(sourceCitationsAtom);
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -77,7 +77,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             >
                 {/* Sources button */}
                 <div className="flex-1">
-                    {citedSources.length > 0 && (
+                    {citations.length > 0 && (
                         <Button
                             variant="ghost"
                             onClick={toggleSources}
@@ -87,8 +87,8 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                             // className="text-sm"
                         >
                             <span>
-                                {citedSources.length} Source{citedSources.length === 1 ? '' : 's'}
-                                {/* Sources ({citedSources.length}) */}
+                                {citations.length} Source{citations.length === 1 ? '' : 's'}
+                                {/* Sources ({citations.length}) */}
                             </span>
                         </Button>
                     )}
@@ -122,7 +122,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             </div>
 
             {/* Sources section */}
-            {sourcesVisible && citedSources.length > 0 && (
+            {sourcesVisible && citations.length > 0 && (
                 <CitedSourcesList saveAsNote={saveAsNote} />
             )}
         </>

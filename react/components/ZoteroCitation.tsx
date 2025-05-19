@@ -37,7 +37,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const libraryID = parseInt(libraryIDString) || 1;
 
     // Find the source in the available sources
-    const source = sourceCitations[id];
+    const source = sourceCitations.find(source => source.libraryID === libraryID && source.itemKey === itemKey);
 
     // Get citation data
     let reference = '';
