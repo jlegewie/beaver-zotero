@@ -63,10 +63,6 @@ attachment-box .metadata-table #beaver-status {
     opacity: .5;
 }
 
-[id^="beaver-pane-"] .sidebar-container {
-    background-color: var(--material-sidepane);
-}
-
 [id^="beaver-pane-"] .sources-info {
     display: inline-flex;
     align-items: center;
@@ -453,6 +449,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 
 /* Background colors */
+[id^="beaver-pane-"] .bg-sidepane { background-color: var(--material-sidepane); }
 [id^="beaver-pane-"] .bg-primary { background-color: var(--fill-primary); }
 [id^="beaver-pane-"] .bg-secondary { background-color: var(--fill-secondary); }
 [id^="beaver-pane-"] .bg-tertiary { background-color: var(--fill-tertiary); }

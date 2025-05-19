@@ -51,7 +51,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Preference page */}
     if (isPreferencePageVisible) {
         return (
-            <div className="sidebar-container h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
                 <Header settingsPage={true}/>
                 <PreferencePage />
             </div>
@@ -60,7 +60,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
     {/* Main page */}
     return (
-        <div className="sidebar-container h-full display-flex flex-col min-w-0">
+        <div className="bg-sidepane h-full display-flex flex-col min-w-0">
             
             {/* Header */}
             <Header />
