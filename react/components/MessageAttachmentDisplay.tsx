@@ -5,7 +5,6 @@ import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAto
 import { TextSelectionButton } from './TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from './AddSourcesMenu';
-import { threadSourceCountAtom } from '../atoms/threads';
 import { AnnotationButton } from './AnnotationButton';
 
 const MessageAttachmentDisplay = ({
@@ -24,7 +23,6 @@ const MessageAttachmentDisplay = ({
     const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
-    const threadSourceCount = useAtomValue(threadSourceCountAtom)
 
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">

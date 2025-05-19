@@ -3,7 +3,7 @@ import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/chat/uiTypes';
-import { threadSourcesAtom } from '../atoms/threads';
+import { userAddedSourcesAtom } from '../atoms/threads';
 import ContextMenu from './ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { InputSource } from '../types/sources';
@@ -18,16 +18,16 @@ interface UserMessageDisplayProps {
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     message
 }) => {
-    const threadSources = useAtomValue(threadSourcesAtom);
+    const userAddedSources = useAtomValue(userAddedSourcesAtom);
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const messageSources: InputSource[] = useMemo(() => {
-        const messageSources = threadSources.filter(s => s.messageId === message.id);
+        const messageSources = userAddedSources.filter(s => s.messageId === message.id);
             // .filter(s => s.messageId === message.id && s.itemKey !== currentReaderAttachmentKey);
         const organizedSources = organizeSourcesByRegularItems(messageSources);
         return organizedSources;
-    }, [threadSources, currentReaderAttachmentKey]);
+    }, [userAddedSources, currentReaderAttachmentKey]);
 
     const {
         isMenuOpen: isSelectionMenuOpen, 

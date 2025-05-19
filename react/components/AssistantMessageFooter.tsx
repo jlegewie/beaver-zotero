@@ -1,7 +1,7 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from './icons';
-import { sourceCitationsAtom } from '../atoms/threads';
+import { citedSourcesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
@@ -24,8 +24,8 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const sourceCitations = useAtomValue(sourceCitationsAtom);
-    
+    const citedSources = useAtomValue(citedSourcesAtom);
+
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
         
@@ -65,31 +65,6 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         // @ts-ignore selectItem exists
         Zotero.getActiveZoteroPane().itemsView.selectItem(newNote.id);
     }
-
-    // Extract citation IDs from message content to get the source citations
-    const citedSources: SourceCitation[] = useMemo(() => {
-        if (!(message.status == 'completed' || message.status == 'canceled') || !message.content) {
-            return [];
-        }
-
-        // Extract all citation IDs from the message content
-        const citationIdSet = new Set<string>();
-        const citationRegex = /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)\s*(?:\/>|><\/citation>)/g;
-        
-        let match;
-        while ((match = citationRegex.exec(message.content)) !== null) {
-            if (match[1]) {
-                citationIdSet.add(match[1]);
-            }
-        }
-
-        // Filter sourceCitations to only include those with IDs in citationIdSet
-        const citations = Object.entries(sourceCitations)
-            .filter(([key, _]) => citationIdSet.has(key))
-            .map(([_, citation]) => citation);
-
-        return citations;
-    }, [message.status, message.content, sourceCitations]);
 
     return (
         <>
@@ -148,7 +123,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
             {/* Sources section */}
             {sourcesVisible && citedSources.length > 0 && (
-                <CitedSourcesList sources={citedSources} saveAsNote={saveAsNote} />
+                <CitedSourcesList saveAsNote={saveAsNote} />
             )}
         </>
     );

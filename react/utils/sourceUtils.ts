@@ -96,6 +96,22 @@ export async function createSourceFromItem(
     } as InputSource;
 }
 
+export function createThreadSourceFromItem(item: Zotero.Item): ThreadSource {
+    const type = getSourceTypeFromItem(item);
+
+    return {
+        id: uuidv4(),
+        type: type,
+        libraryID: item.libraryID,
+        itemKey: item.key,
+        pinned: false,
+        parentKey: item.parentKey || null,
+        childItemKeys: [],
+        timestamp: Date.now(),
+    } as ThreadSource;
+}
+
+
 export function organizeSourcesByRegularItems(sources: InputSource[]): InputSource[] {
     const regularItemSources = sources.filter((s) => s.type === "regularItem");
     return sources.reduce((acc, source) => {

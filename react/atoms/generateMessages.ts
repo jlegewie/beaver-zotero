@@ -7,7 +7,6 @@ import {
     threadMessagesAtom,
     setMessageStatusAtom,
     streamToMessageAtom,
-    threadSourcesAtom,
     currentThreadIdAtom,
     addOrUpdateMessageAtom,
     addOrUpdateToolcallAtom,
@@ -17,7 +16,9 @@ import {
     isCancellingAtom,
     cancelStreamingMessageAtom,
     isChatRequestPendingAtom,
-    currentAssistantMessageIdAtom
+    currentAssistantMessageIdAtom,
+    userAddedSourcesAtom,
+    toolCallSourcesAtom
 } from './threads';
 import { InputSource, ThreadSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -205,8 +206,8 @@ export const generateResponseAtom = atom(
 
         // Get current reader state and add to message attachments if not already in the thread
         const readerState = getCurrentReaderState();
-        const currentThreadAttachments = get(threadSourcesAtom).map(s => `${s.libraryID}-${s.itemKey}`);
-        if(readerState && !currentThreadAttachments.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
+        const currentUserAddedSources = get(userAddedSourcesAtom).map(s => `${s.libraryID}-${s.itemKey}`);
+        if(readerState && !currentUserAddedSources.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
             logger(`generateResponseAtom: Adding reader state to message attachments: ${readerState.library_id}-${readerState.zotero_key}`);
             // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
             messageAttachments.push({
@@ -218,9 +219,9 @@ export const generateResponseAtom = atom(
         }
 
         // Update thread sources
-        const newThreadSources = await Promise.all(messageAttachments.map(a => toThreadSource(a, userMsg.id)));
-        set(threadSourcesAtom, (prev) => 
-            [...prev, ...newThreadSources.filter(Boolean) as ThreadSource[]]);
+        const newUserAddedSources = await Promise.all(messageAttachments.map(a => toThreadSource(a, userMsg.id)));
+        set(userAddedSourcesAtom, (prev) => 
+            [...prev, ...newUserAddedSources.filter(Boolean) as ThreadSource[]]);
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
@@ -287,10 +288,11 @@ export const regenerateFromMessageAtom = atom(
         set(currentAssistantMessageIdAtom, assistantMsg.id);
 
         // Update sources
-        const threadSources = get(threadSourcesAtom);
         const messageIds = truncatedMessages.map(m => m.id);
-        const newThreadSources = threadSources.filter(r => r.messageId && messageIds.includes(r.messageId));
-        set(threadSourcesAtom, newThreadSources);
+        const newUserAddedSources = get(userAddedSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(userAddedSourcesAtom, newUserAddedSources);
+        const newToolCallSources = get(toolCallSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(toolCallSourcesAtom, newToolCallSources);
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);

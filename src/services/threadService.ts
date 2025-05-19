@@ -56,24 +56,27 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread
      * @returns Promise with an array of messages
      */
-    async getThreadMessages(threadId: string): Promise<{ messages: ChatMessage[], sources: ThreadSource[] }> {
+    async getThreadMessages(threadId: string): Promise<{ messages: ChatMessage[], userSources: ThreadSource[], toolCallSources: ThreadSource[] }> {
         const messages = await this.get<MessageModel[]>(`/threads/${threadId}/messages`);
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
 
-        const sources: ThreadSource[] = [];
+        const userSources: ThreadSource[] = [];
+        const toolCallSources: ThreadSource[] = [];
         
         for (const message of messages) {
-            for (const attachment of message.attachments || []) {
-                const source = await toThreadSource(attachment, message.id);
-                if (source) {
-                    sources.push(source);
+            if (message.role === 'user') {
+                for (const attachment of message.attachments || []) {
+                    const source = await toThreadSource(attachment, message.id);
+                    if (source) {
+                        userSources.push(source);
+                    }
                 }
             }
         }
 
-        return { messages: chatMessages, sources: sources };
+        return { messages: chatMessages, userSources: userSources, toolCallSources: toolCallSources };
     }
 
     /**

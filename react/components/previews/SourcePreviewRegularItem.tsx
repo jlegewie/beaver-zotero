@@ -9,7 +9,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { InputSource } from '../../types/sources';
 import SourcePreviewHeading from './SourcePreviewHeading';
-import { threadSourceKeysAtom } from '../../atoms/threads';
+import { userAddedSourceKeysAtom } from '../../atoms/threads';
 
 interface SourcePreviewRegularItemProps {
     source: InputSource;
@@ -22,7 +22,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     const [attachmentNumber, setAttachmentNumber] = useState<number>(0);
     const [noteNumber, setNoteNumber] = useState<number>(0);
     const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
-    const threadSourceKeys = useAtomValue(threadSourceKeysAtom);
+    const userAddedSourceKeys = useAtomValue(userAddedSourceKeysAtom);
 
     // Fetch attachments and notes
     useEffect(() => {
@@ -108,17 +108,17 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
                         <div 
                             key={`att-${child.id}`}
                             className={validItemIds[child.id]
-                                ? `display-flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${threadSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
+                                ? `display-flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${userAddedSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
                                 : `display-flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
                             }
-                            onClick={() => validItemIds[child.id] && !threadSourceKeys.includes(child.key) ? handleToggleItem(child.key) : null}
+                            onClick={() => validItemIds[child.id] && !userAddedSourceKeys.includes(child.key) ? handleToggleItem(child.key) : null}
                         >
                             <input 
                                 type="checkbox" 
                                 className="mr-2"
                                 checked={isItemSelected(child.key)}
                                 onChange={() => {}} // React requires this for controlled components
-                                disabled={!validItemIds[child.id] || threadSourceKeys.includes(child.key)}
+                                disabled={!validItemIds[child.id] || userAddedSourceKeys.includes(child.key)}
                             />
                             
                             <span className="mr-1 fit-content">

@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, threadSourceCountAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
+import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';
 import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
@@ -25,7 +25,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
-    const threadSourceCount = useAtomValue(threadSourceCountAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);

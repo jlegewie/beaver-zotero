@@ -2,7 +2,7 @@ import React  from 'react';
 // @ts-ignore useEffect is defined in React
 import { useEffect, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, threadSourcesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom } from '../atoms/threads';
+import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { threadService } from '../../src/services/threadService';
@@ -54,7 +54,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const user = useAtomValue(userAtom);
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
-    const setThreadSources = useSetAtom(threadSourcesAtom);
+    const setUserAddedSources = useSetAtom(userAddedSourcesAtom);
     const setCurrentSources = useSetAtom(currentSourcesAtom);
     const setMessageContent = useSetAtom(currentMessageContentAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
@@ -135,11 +135,12 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setIsPreferencePageVisible(false);
 
             // Use the thread service to fetch messages
-            const { messages, sources } = await threadService.getThreadMessages(threadId);
+            const { messages, userSources, toolCallSources } = await threadService.getThreadMessages(threadId);
             
             // Update the thread messages and sources state
             setThreadMessages(messages);
-            setThreadSources(sources);
+            setUserAddedSources(userSources);
+            // setToolCallSources(toolCallSources);
             addToolCallSourcesToThreadSources({messages: messages});
             
             // Clear sources for now

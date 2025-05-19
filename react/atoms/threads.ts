@@ -1,25 +1,66 @@
 import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/chat/uiTypes";
 import { ThreadSource, SourceCitation, InputSource } from "../types/sources";
-import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem } from "../utils/sourceUtils";
+import { getZoteroItem, getCitationFromItem, getReferenceFromItem, getParentItem, getIdentifierFromSource, getDisplayNameFromItem, createSourceFromItem, createThreadSourceFromItem } from "../utils/sourceUtils";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { currentMessageContentAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
+import { createZoteroItemReference } from "../types/chat/apiTypes";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
 export const currentAssistantMessageIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
-export const threadSourcesAtom = atom<ThreadSource[]>([]);
 
-// Derived atom for thread source keys
-export const threadSourceKeysAtom = atom((get) => {
-    const sources = get(threadSourcesAtom);
-    return sources.map((source) => source.itemKey);
+/*
+ * Thread sources and source keys by source
+ *
+ * Thread sources are added from three sources:
+ * 1. User message attachments
+ * 2. Responses from tool calls
+ * 3. Cited sources
+ */
+export const userAddedSourcesAtom = atom<ThreadSource[]>([]);
+export const toolCallSourcesAtom = atom<ThreadSource[]>([]);
+// Cited sources derived from message content
+export const citedSourcesAtom = atom<ThreadSource[]>((get) => {
+    const messages = get(threadMessagesAtom);
+    // Extract all citation IDs from the message content
+    const citationIds: string[] = [];
+    const citationRegex = /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)\s*(?:\/>|><\/citation>)/g;
+    for (const message of messages) {
+        if (message.role === 'assistant' && message.content !== null) {
+            let match;
+            while ((match = citationRegex.exec(message.content)) !== null) {
+                if (match[1] && !citationIds.includes(match[1])) {
+                    citationIds.push(match[1]);
+                }
+            }
+        }
+    }
+    // Derive cited sources from citation IDs
+    const citedSources: ThreadSource[] = citationIds
+        .map(createZoteroItemReference)
+        .filter(itemRef => itemRef !== null)
+        .map(itemRef => Zotero.Items.getByLibraryAndKey(itemRef.library_id, itemRef.zotero_key))
+        .filter(item => item !== null)
+        .map(item => createThreadSourceFromItem(item as Zotero.Item));
+
+    return citedSources;
 });
+
+// User added source keys
+export const userAddedSourceKeysAtom = atom((get) => {
+    return get(userAddedSourcesAtom).map((source) => source.itemKey);
+});
+
+// Combined thread sources and keys
+// export const threadSourcesAtom = atom<ThreadSource[]>((get) => {
+//     return [...get(userAddedSourcesAtom), ...get(toolCallSourcesAtom), ...get(citedSourcesAtom)];
+// });
 
 // True after a chat request is sent and before the first assistant response arrives.
 // Used to show a spinner during initial LLM response loading.
@@ -27,7 +68,7 @@ export const isChatRequestPendingAtom = atom<boolean>(false);
 
 // Derived atom for source citations
 export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) => {
-    const sources = get(threadSourcesAtom);
+    const sources = get(citedSourcesAtom);
     return sources.reduce((acc, source) => {
         const identifier = getIdentifierFromSource(source);
         const item = getZoteroItem(source);
@@ -45,11 +86,6 @@ export const sourceCitationsAtom = atom<Record<string, SourceCitation>>((get) =>
         };
         return acc;
     }, {} as Record<string, SourceCitation>);
-});
-
-// Derived atom for thread source count
-export const threadSourceCountAtom = atom((get) => {
-    return get(threadSourcesAtom).length;
 });
 
 // Indicates if the thread is currently streaming a response
@@ -105,7 +141,8 @@ export const newThreadAtom = atom(
         const isLibraryTab = get(isLibraryTabAtom);
         set(currentThreadIdAtom, null);
         set(threadMessagesAtom, []);
-        set(threadSourcesAtom, []);
+        set(userAddedSourcesAtom, []);
+        set(toolCallSourcesAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
@@ -223,7 +260,7 @@ export const addToolCallSourcesToThreadSourcesAtom = atom(
                 }
             }
         }
-        set(threadSourcesAtom, (prevSources: ThreadSource[]) => [...prevSources, ...sources]);
+        set(toolCallSourcesAtom, (prevSources: ThreadSource[]) => [...prevSources, ...sources]);
     }
 );
 
@@ -292,7 +329,6 @@ export const rollbackChatToMessageIdAtom = atom(
     null,
     (get, set, messageId: string) => {
         const threadMessages = get(threadMessagesAtom);
-        const threadSources = get(threadSourcesAtom);
 
         // Find the index of the message to continue from
         const messageIndex = threadMessages.findIndex(m => m.id === messageId);
@@ -311,8 +347,10 @@ export const rollbackChatToMessageIdAtom = atom(
         set(threadMessagesAtom, newMessages);
 
         // Remove sources for messages after the specified message
-        const newThreadSources = threadSources.filter(r => r.messageId && messageIds.includes(r.messageId));
-        set(threadSourcesAtom, newThreadSources);
+        const newUserAddedSources = get(userAddedSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(userAddedSourcesAtom, newUserAddedSources);
+        const newToolCallSources = get(toolCallSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
+        set(toolCallSourcesAtom, newToolCallSources);
 
         // return new messages
         return newMessages;

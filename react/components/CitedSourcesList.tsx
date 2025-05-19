@@ -6,23 +6,24 @@ import IconButton from './IconButton';
 import { ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { ZoteroIcon } from './icons/ZoteroIcon';
 import { getPref } from '../../src/utils/prefs';
+import { sourceCitationsAtom } from '../atoms/threads';
+import { useAtomValue } from 'jotai';
 
 interface CitedSourcesListProps {
-    sources: SourceCitation[];
     saveAsNote: (source?: SourceCitation) => Promise<void>;
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
-    sources,
     saveAsNote
 }) => {
+    const sources = useAtomValue(sourceCitationsAtom);
     const authorYearFormat = getPref("citationFormat") !== "numeric";
     
     return (
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
-                {sources.map((source, index) => (
-                    <div key={index} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                {Object.entries(sources).map(([key, source], index) => (
+                    <div key={key} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         {!authorYearFormat &&
                             <div className="p-2">

@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
-import { threadSourceKeysAtom } from "./threads";
+import { userAddedSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
@@ -50,7 +50,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
     null,
     async (get, set, items: Zotero.Item[], pinned: boolean = false) => {
         const currentSources = get(currentSourcesAtom);
-        const threadSourceKeys = get(threadSourceKeysAtom);
+        const userAddedSourceKeys = get(userAddedSourceKeysAtom);
         
         // Map of existing Zotero sources by item key
         const existingMap = new Map(currentSources.map((res) => [res.itemKey, res]));
@@ -61,7 +61,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         // Excluded keys
         const excludedKeys = new Set([
             ...removedItemKeysCache,
-            ...threadSourceKeys,
+            ...userAddedSourceKeys,
             ...pinnedSources.map((res) => res.itemKey)
         ]);
     
@@ -72,7 +72,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
                 if (existingMap.has(item.key)) {
                     return existingMap.get(item.key)!;
                 }
-                return await createSourceFromItem(item, pinned, threadSourceKeys);
+                return await createSourceFromItem(item, pinned, userAddedSourceKeys);
             });
         
         // Wait for all sources to be created
