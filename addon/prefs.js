@@ -5,7 +5,6 @@ pref("input", "This is input");
 pref("userId", "");
 pref("userEmail", "");
 // API keys
-pref("voyageApiKey", "");
 pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
 pref("anthropicApiKey", "");
