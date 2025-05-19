@@ -52,7 +52,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     if (isPreferencePageVisible) {
         return (
             <div className="sidebar-container h-full display-flex flex-col min-w-0">
-                <Header />
+                <Header settingsPage={true}/>
                 <PreferencePage />
             </div>
         );

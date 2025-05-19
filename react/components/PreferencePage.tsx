@@ -346,7 +346,7 @@ const PreferencePage: React.FC = () => {
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
                 </h1>
-                <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button>
+                {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
             {/* --- Account Section --- */}
             <SectionHeader>Account</SectionHeader>

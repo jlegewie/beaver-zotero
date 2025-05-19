@@ -1,5 +1,5 @@
 import React from 'react';
-import { CancelIcon, PlusSignIcon, UserIcon } from './icons';
+import { CancelIcon, PlusSignIcon, SettingsIcon, UserIcon } from './icons';
 import DatabaseStatusIndicator from './DatabaseStatusIndicator';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
@@ -11,17 +11,20 @@ import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom } from '../atoms/profile';
+import Button from './button';
 
 interface HeaderProps {
     onClose?: () => void;
+    settingsPage?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ onClose }) => {
+const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
+    const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
 
     const handleNewThread = async () => {
         await newThread();
@@ -60,7 +63,7 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                     </>
                 )}
             </div>
-            {isAuthenticated && (
+            {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
                     {planFeatures.databaseSync && <DatabaseStatusIndicator />}
                     <UserAccountMenuButton
@@ -68,6 +71,16 @@ const Header: React.FC<HeaderProps> = ({ onClose }) => {
                         ariaLabel="User settings"
                     />
                 </div>
+            )}
+            {isAuthenticated && settingsPage && (
+                <Button
+                    variant="outline"
+                    rightIcon={SettingsIcon}
+                    onClick={() => setPreferencePageVisible((prev) => !prev)}
+                    iconClassName="scale-12"
+                >
+                    <span className="text-base">Close</span>
+                </Button>
             )}
         </div>
     );
