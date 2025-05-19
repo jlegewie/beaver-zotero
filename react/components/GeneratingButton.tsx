@@ -1,12 +1,14 @@
 import React from 'react';
 import Button from './button';
-import { Icon, Spinner } from './icons';
+import { Icon, Spinner, BrainIcon } from './icons';
+import { MessageStatus } from '../types/chat/uiTypes';
 
 interface GeneratingButtonProps {
-    label?: string;
+    status: MessageStatus;
 }
 
-const GeneratingButton: React.FC<GeneratingButtonProps> = ({ label = "Generating..." }) => {
+const GeneratingButton: React.FC<GeneratingButtonProps> = ({ status }) => {
+    const label = status === "thinking" ? "Thinking..." : "Generating...";
     
     return (
         // Matching style of AssistantMessageTools
@@ -22,7 +24,7 @@ const GeneratingButton: React.FC<GeneratingButtonProps> = ({ label = "Generating
             >
                 <div className="display-flex flex-row px-3 gap-2">
                     <div className="flex-1 display-flex mt-020">
-                        <Icon icon={Spinner} />
+                        <Icon icon={status === "thinking" ? BrainIcon : Spinner} />
                     </div>
                     
                     <div className="display-flex">
