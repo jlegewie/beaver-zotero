@@ -18,7 +18,7 @@ async function onStartup() {
 	initLocale();
 	ztoolkit.log("Startup");
 
-	// Initialize database
+	// -------- Initialize database --------
 	const dbConnection = new Zotero.DBConnection("beaver");
 	const beaverDB = new BeaverDB(dbConnection);
 	addon.db = beaverDB;
@@ -27,7 +27,7 @@ async function onStartup() {
 	await dbConnection.test();
 	await beaverDB.initDatabase();
 	
-	// Initialize Generative AI provider for direct API calls
+	// -------- Initialize Generative AI provider for direct API calls --------
 	// let provider;
 	// if (getPref("googleGenerativeAiApiKey")) {
 	// 	provider = new GeminiProvider(getPref("googleGenerativeAiApiKey"));
@@ -36,16 +36,18 @@ async function onStartup() {
 	// }
 	// addon.aiProvider = provider;
 	
-	// Initialize Citation Service with caching
+	// -------- Initialize Citation Service with caching --------
 	const citationService = new CitationService(ztoolkit);
 	addon.citationService = citationService;
 	ztoolkit.log("CitationService initialized successfully");
 	
+	// -------- Register keyboard shortcuts --------
 	BeaverUIFactory.registerShortcuts();
 
-	// Add event bus to window
+	// -------- Add event bus to window --------
 	Zotero.getMainWindow().__beaverEventBus = eventBus;
 	
+	// -------- Load UI for all windows --------
 	await Promise.all(
 		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
 	);
@@ -54,8 +56,7 @@ async function onStartup() {
 async function onMainWindowLoad(win: Window): Promise<void> {
 	// Create ztoolkit for every window
 	addon.data.ztoolkit = createZToolkit();
-	
-	// @ts-ignore This is a moz feature
+
 	win.MozXULElement.insertFTLIfNeeded(
 		`${addon.data.config.addonRef}-mainWindow.ftl`,
 	);
@@ -67,17 +68,12 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 		Zotero.uiReadyPromise,
 	]);
 
-	// Register Beaver UI elements
-	// BeaverUIFactory.registerMenuItems();
-
 	// Create (or reuse) an EventTarget for this window
 	if (!win.__beaverEventBus) {
 		win.__beaverEventBus = new EventTarget();
 	}
 
 	BeaverUIFactory.registerChatPanel(win);
-	// BeaverUIFactory.registerExtraColumn();
-	// BeaverUIFactory.registerSearchCommand();
 
 	// Initialize Beaver attachment info row for this window
 	if (!attachmentPanes.has(win)) { // Check if already initialized for this window
@@ -117,8 +113,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 	}
 	// Clean up Chat Panel for this window
 	BeaverUIFactory.removeChatPanel(win);
-	// Unregister keyboard shortcuts
-	// BeaverUIFactory.unregisterShortcuts();
+
 	// Unload the stylesheet
 	unloadKatexStylesheet();
 	unloadStylesheet();
