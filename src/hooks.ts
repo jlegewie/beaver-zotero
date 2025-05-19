@@ -68,10 +68,9 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 		Zotero.uiReadyPromise,
 	]);
 
-	// Create (or reuse) an EventTarget for this window
-	if (!win.__beaverEventBus) {
-		win.__beaverEventBus = new EventTarget();
-	}
+	// Assign the global eventBus instance to this window.
+	// This ensures all windows share the same event bus.
+	win.__beaverEventBus = eventBus;
 
 	BeaverUIFactory.registerChatPanel(win);
 
@@ -120,11 +119,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 	ztoolkit.unregisterAll();
 	addon.data.dialog?.window?.close();
+
+	// Clean up event bus for this window
+	if (win.__beaverEventBus) {
+		win.__beaverEventBus = null;
+	}
 }
 
 function loadStylesheet() {
 	// Load the stylesheet
-	const styleURI = `chrome://beaver/content/styles/beaver.css`;
+	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
@@ -175,6 +179,17 @@ function unloadKatexStylesheet() {
 
 async function onShutdown(): Promise<void> {
 	try {
+		// Close database connection if it exists
+		if (addon.db) {
+			await addon.db.closeDatabase();
+			addon.db = undefined;
+		}
+
+		// Clean up main window event bus
+		const mainWin = Zotero.getMainWindow();
+		if (mainWin && mainWin.__beaverEventBus) {
+			mainWin.__beaverEventBus = null;
+		}
 
 		// Dispose CitationService if it exists
 		if (addon.citationService) {
