@@ -525,7 +525,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .markdown a.zotero-citation {
     cursor: pointer;
     font-size: 0.8em;
-    margin-left: 0.25em;
+    margin-left: 0.15em;
     text-decoration: none;
     background: var(--fill-quarternary);
     padding-right: 0.35em;
