@@ -3,10 +3,10 @@ import { APIMessage } from "./OpenAIProvider";
 import { sourceToContentParts } from "../../react/utils/contentPartUtils";
 import { ThreadSource } from "../../react/types/sources";
 import { ReaderContext } from "../../react/utils/readerUtils";
-import Handlebars from 'handlebars';
+// import Handlebars from 'handlebars';
 
 // Handlebars helpers
-Handlebars.registerHelper('arrayLength', function(array) {
+/*Handlebars.registerHelper('arrayLength', function(array) {
     if (Array.isArray(array)) {
         return array.length;
     } else {
@@ -20,7 +20,7 @@ Handlebars.registerHelper('identifiers', function(array) {
     } else {
         return '';
     }
-});
+});*/
 
 // System prompt path
 const SYSTEM_PROMPT_PATH = `chrome://beaver/content/prompts/chatbot.prompt`
@@ -56,11 +56,12 @@ export const chatCompletion = async (
     console.log('context', context);
     
     // Compile system prompt
-    const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
+    /* const systemPromptTemplate = await Zotero.File.getResourceAsync(SYSTEM_PROMPT_PATH);
     const compiledTemplate = Handlebars.compile(systemPromptTemplate, { noEscape: true });
     const attachments = sources.filter(source => source.type === "attachment");
     const notes = sources.filter(source => source.type === "note");
-    const systemPrompt = compiledTemplate({ context, attachments, notes });
+    const systemPrompt = compiledTemplate({ context, attachments, notes });*/
+    const systemPrompt = "Hello, world!";
     console.log('systemPrompt', systemPrompt);
 
     // Create request messages

@@ -39,7 +39,6 @@
         "date-fns": "^4.1.0",
         "date-fns-tz": "^3.2.0",
         "deepmerge": "^4.3.1",
-        "handlebars": "^4.7.8",
         "jotai": "^2.12.1",
         "p-queue": "^8.1.0",
         "react": "^18.3.1",
