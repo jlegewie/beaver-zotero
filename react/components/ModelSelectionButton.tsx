@@ -100,7 +100,8 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
-        const byok_models = availableModels.filter((model) => !model.app_key);
+        const byok_models = availableModels.filter((model) => !model.app_key && !model.is_agent);
+        const byok_models_agent = availableModels.filter((model) => !model.app_key && model.is_agent);
         const included_models = availableModels.filter((model) => model.app_key) || [DEFAULT_MODEL];
 
         items.push({
@@ -125,27 +126,53 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
         });
 
-        items.push({
-            label: 'Bring Your Own Key',
-            isGroupHeader: true,
-            onClick: () => {},
-        });
-
-        byok_models.forEach((model) => {
+        if (byok_models.length > 0) {
             items.push({
-                label: model.name,
-                onClick: () => {
-                    updateSelectedModel(model);
-                },
-                icon: model.reasoning_model ? BrainIcon : undefined,
-                customContent: (
-                    <ModelMenuItemContent 
-                        model={model} 
-                        isSelected={selectedModel.id === model.id}
-                    />
-                )
+                label: 'Your API Keys',
+                isGroupHeader: true,
+                onClick: () => {},
             });
-        });
+
+            byok_models.forEach((model) => {
+                items.push({
+                    label: model.name,
+                    onClick: () => {
+                        updateSelectedModel(model);
+                    },
+                    icon: model.reasoning_model ? BrainIcon : undefined,
+                    customContent: (
+                        <ModelMenuItemContent 
+                            model={model} 
+                            isSelected={selectedModel.id === model.id}
+                        />
+                    )
+                });
+            });
+        }
+
+        if (byok_models_agent.length > 0) {
+            items.push({
+                label: 'Your API Keys: Agents',
+                isGroupHeader: true,
+                onClick: () => {},
+            });
+
+            byok_models_agent.forEach((model) => {
+                items.push({
+                    label: model.name,
+                    onClick: () => {
+                        updateSelectedModel(model);
+                    },
+                    icon: model.reasoning_model ? BrainIcon : undefined,
+                    customContent: (
+                        <ModelMenuItemContent 
+                            model={model} 
+                            isSelected={selectedModel.id === model.id}
+                        />
+                    )
+                });
+            });
+        }
 
         return items;
     }, [availableModels, updateSelectedModel, selectedModel]);
