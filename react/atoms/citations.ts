@@ -4,6 +4,7 @@ import { SourceCitation } from '../types/sources';
 import { createThreadSourceFromItem, getParentItem, getCitationFromItem, getReferenceFromItem, getDisplayNameFromItem } from '../utils/sourceUtils';
 import { createZoteroItemReference } from "../types/chat/apiTypes";
 import { createZoteroURI } from "../utils/zoteroURI";
+import { logger } from '../../src/utils/logger';
 
 /*
  * Source citations
@@ -19,6 +20,7 @@ export const updateSourceCitationsAtom = atom(
     null,
     async (get, set) => {
         const messages = get(threadMessagesAtom);
+        logger(`updateSourceCitationsAtom: Starting with ${messages.length} messages`);
 
         // Extract all citation IDs from the message content
         const citationIds: string[] = [];
@@ -34,12 +36,16 @@ export const updateSourceCitationsAtom = atom(
             }
         }
 
+        logger(`updateSourceCitationsAtom: Found ${citationIds.length} citation IDs (${citationIds.join(', ')})`);
+
         // Get all items
         const items = await Promise.all(citationIds
             .map((citationId) => createZoteroItemReference(citationId))
             .filter((itemRef) => itemRef !== null)
             .map(async (itemRef) => await Zotero.Items.getByLibraryAndKeyAsync(itemRef.library_id, itemRef.zotero_key))
         );
+
+        logger(`updateSourceCitationsAtom: Found ${items.length} items for ${citationIds.length} citations`);
 
         // Create SourceCitation objects
         const citations: SourceCitation[] = [];
@@ -64,6 +70,7 @@ export const updateSourceCitationsAtom = atom(
             }
         });
 
+        logger(`updateSourceCitationsAtom: Setting sourceCitationsAtom with ${citations.length} citations`);
         set(sourceCitationsAtom, citations);
     }
 );
