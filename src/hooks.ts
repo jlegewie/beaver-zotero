@@ -210,51 +210,9 @@ async function onShutdown(): Promise<void> {
 	delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
 }
 
-/**
-* This function is just an example of dispatcher for Notify events.
-* Any operations should be placed in a function to keep this funcion clear.
-*/
-async function onNotify(
-	event: string,
-	type: string,
-	ids: Array<string | number>,
-	extraData: { [key: string]: any },
-) {
-	// Skip if addon is not alive
-	if (!addon?.data.alive) return;
-	ztoolkit.log("notify", event, type, ids, extraData);
-
-	
-	// Get all main windows
-	const windows = Zotero.getMainWindows();
-	
-	// Handle different notification types
-	switch (type) {
-		case "item":
-			// Dispatch itemSelected event to all windows
-			if (event === "select") {
-				windows.forEach(win => {
-					if (win.__beaverEventBus) {
-						win.__beaverEventBus.dispatchEvent(
-							new win.CustomEvent("itemSelected", { 
-								detail: { itemIDs: ids } 
-							})
-						);
-					}
-				});
-			}
-			break;
-			
-		// Add other notification types as needed
-		default:
-			break;
-	}
-}
-
 export default {
 	onStartup,
 	onShutdown,
 	onMainWindowLoad,
-	onMainWindowUnload,
-	onNotify
+	onMainWindowUnload
 };
