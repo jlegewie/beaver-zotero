@@ -18,3 +18,10 @@ archive
 # compiled files
 reactBundle.js
 reactBundle.js.map
+
+
+# Build files
+/build
+/dist
+*.js.LICENSE.txt
+*.reactBundle.js
