@@ -30,6 +30,9 @@ export interface AttachmentStatusResponse {
     // error codes
     md_error_code?: string
     docling_error_code?: string
+
+    // upload url
+    upload_url?: string;
 }
 
 
@@ -66,8 +69,11 @@ export class AttachmentsService extends ApiService {
      * @param attachments An array of ZoteroItemReference objects.
      * @returns Promise with an array of attachment status responses.
      */
-    async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[]): Promise<AttachmentStatusResponse[]> {
-        return this.post<AttachmentStatusResponse[]>('/attachments/status/batch', attachments);
+    async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[], includeUploadUrl: boolean = false): Promise<AttachmentStatusResponse[]> {
+        return this.post<AttachmentStatusResponse[]>('/attachments/status/batch', {
+            attachments,
+            include_upload_url: includeUploadUrl
+        });
     }
 
     /**
@@ -76,8 +82,9 @@ export class AttachmentsService extends ApiService {
      * @param zoteroKey Zotero key of the attachment.
      * @returns Promise with the attachment status response.
      */
-    async getAttachmentStatus(libraryId: number, zoteroKey: string): Promise<AttachmentStatusResponse> {
-        return this.get<AttachmentStatusResponse>(`/attachments/status/${libraryId}/${zoteroKey}`);
+    async getAttachmentStatus(libraryId: number, zoteroKey: string, includeUploadUrl: boolean = false): Promise<AttachmentStatusResponse> {
+        const url = `/attachments/status/${libraryId}/${zoteroKey}${includeUploadUrl ? '?include_upload_url=true' : ''}`;
+        return this.get<AttachmentStatusResponse>(url);
     }
 
     /**
