@@ -6,7 +6,7 @@ import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { useAttachmentStatusInfoRow } from '../hooks/useAttachmentStatusInfoRow';
 import { useToggleSidebar } from '../hooks/useToggleSidebar';
-import { updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
+import { resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { getPref } from '../../src/utils/prefs';
 
 // LibrarySidebarContent handles library-specific features
@@ -18,7 +18,9 @@ const LibrarySidebarContent = () => {
         useZoteroSelection();
     } else {
         // Only update sources based on current selection
+        const resetCurrentSources = useSetAtom(resetCurrentSourcesAtom);
         const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
+        resetCurrentSources();
         updateSourcesFromZoteroSelection(true);
     }
 
