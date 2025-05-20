@@ -13,6 +13,7 @@ import LoginPage from './LoginPage';
 import PreferencePage from './PreferencePage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './PreviewContainer';
+import DragDropWrapper from './DragDropWrapper';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -85,7 +86,9 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     </div>
                 </div>
                 <PreviewContainer />
-                <InputArea inputRef={inputRef} />
+                <DragDropWrapper>
+                    <InputArea inputRef={inputRef} />
+                </DragDropWrapper>
             </div>
         </div>
     );
