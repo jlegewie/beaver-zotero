@@ -281,8 +281,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     )}
                     <div className="text-lg">
                         {dragType === 'annotation' 
-                            ? `Drop to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
-                            : `Drop to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
+                            ? `Drop here to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
+                            : `Drop here to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
                     </div>
                 </div>
             </div>
