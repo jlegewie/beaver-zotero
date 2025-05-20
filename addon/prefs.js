@@ -20,8 +20,6 @@ pref("citationFormat", "author-year");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
 pref("keyboardShortcut", "l");
-// Operation mode: 'cloud' or 'local'
-pref("mode", "cloud");
 // Custom instructions for chat
 pref("customInstructions", "");
 

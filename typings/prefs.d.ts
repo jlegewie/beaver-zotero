@@ -22,7 +22,6 @@ declare namespace _ZoteroTypes {
       "citationStyle": string;
       "citationLocale": string;
       "keyboardShortcut": string;
-      "mode": string;
       "customInstructions": string;
       "quickPrompt1_title": string;
       "quickPrompt1_text": string;

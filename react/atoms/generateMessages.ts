@@ -35,8 +35,6 @@ import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { updateSourceCitationsAtom } from './citations';
 
-const MODE = getPref('mode');
-
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
  * 
