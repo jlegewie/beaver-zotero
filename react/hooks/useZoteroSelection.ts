@@ -5,8 +5,8 @@ import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms
 import { updateSourcesFromZoteroSelectionAtom } from "../atoms/input";
 
 /**
-* Listens to changes in the Zotero item selection and updates
-* the selectedItemsAtom only when the selection differs from the previous one.
+* Listens to changes in the Zotero item selection and update
+* currentSourcesAtom when the selection differs from the previous one.
 */
 export function useZoteroSelection() {
     const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
