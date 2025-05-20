@@ -33,6 +33,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
         agenticSearch: profile?.plan.agentic_search || false,
         deepResearch: profile?.plan.deep_research || false,
         byok: profile?.plan.allows_byok || false,
+        maxUserAttachments: profile?.plan.max_chat_attachments_per_message || 2,
     } as PlanFeatures;
 });
 

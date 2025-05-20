@@ -41,6 +41,7 @@ export interface PlanFeatures {
     agenticSearch: boolean;
     deepResearch: boolean;
     byok: boolean;
+    maxUserAttachments: number;
 }
 
 export interface ProfileBalance {
