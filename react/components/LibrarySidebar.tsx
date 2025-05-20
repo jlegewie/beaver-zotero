@@ -19,7 +19,7 @@ const LibrarySidebarContent = () => {
     } else {
         // Only update sources based on current selection
         const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
-        updateSourcesFromZoteroSelection();
+        updateSourcesFromZoteroSelection(true);
     }
 
     // Watch for pane collapse
