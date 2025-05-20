@@ -93,7 +93,11 @@ const AddSourcesMenu: React.FC<{
 
                 // Current sources
                 const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
-                const items = await Promise.all(sources.map(async (source) => await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, source.itemKey)));
+                const items = await Promise.all(
+                    sources
+                        .filter((s) => s.type !== "annotation")
+                        .map(async (source) => await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, source.itemKey))
+                    );
                 const menuItemsCurrentSources = await Promise.all(
                     items
                         .filter((item): item is Zotero.Item => Boolean(item))
