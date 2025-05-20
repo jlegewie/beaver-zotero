@@ -10,6 +10,8 @@ interface DragDropWrapperProps {
     children: React.ReactNode;
 }
 
+const SUPPORTED_ANNOTATION_TYPES = ["highlight", "underline", "note", "text", "image"];
+
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
     children
 }) => {
@@ -60,14 +62,20 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         // Check if either files or Zotero items
         // if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('zotero/item')) {
         if (e.dataTransfer.types.includes('zotero/annotation')) {
-            e.dataTransfer.dropEffect = 'copy';
-            setIsDragging(true);
+            e.dataTransfer.dropEffect = 'copy';            
             
             // Get the annotation data and set the object icon
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
-            console.log('annotationData', annotationData)
             if (annotationData && annotationData.length > 0) {
-                setObjectIcon(getObjectIcon(annotationData[0].type));
+                const annotationType = annotationData[0].type;
+                if(isValidAnnotationType(annotationType)) {
+                    setObjectIcon(getObjectIcon(annotationType));
+                    setIsDragging(true);
+                }
+                else {
+                    setObjectIcon(ZOTERO_ICONS.ANNOTATION);
+                    setDragError("Annotation type not supported");
+                }
             }
         }
     };
@@ -79,13 +87,19 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         // Check if either files or Zotero items
         // if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('zotero/item')) {
         if (e.dataTransfer.types.includes('zotero/annotation')) {
-            setIsDragging(true);
 
             // Get the annotation data and set the object icon
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
             if (annotationData && annotationData.length > 0) {
-                const annotationType = annotationData[0].annotationType;
-                setObjectIcon(getObjectIcon(annotationType));
+                const annotationType = annotationData[0].type;
+                if(isValidAnnotationType(annotationType)) {
+                    setObjectIcon(getObjectIcon(annotationType));
+                    setIsDragging(true);
+                }
+                else {
+                    setObjectIcon(ZOTERO_ICONS.ANNOTATION);
+                    setDragError("Annotation type not supported");
+                }
             }
         }
     };
@@ -98,6 +112,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         if (!e.currentTarget.contains(e.relatedTarget as Node)) {
             setIsDragging(false);
             setObjectIcon(null);
+            setDragError(null);
         }
     };
 
@@ -105,6 +120,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
+        setObjectIcon(null);
+        setDragError(null);
 
         // Check for Zotero items (disabled because sources are updated on selection)
         /*if (e.dataTransfer.types.includes('zotero/item')) {
@@ -215,10 +232,16 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             {dragError && (
                 <div
                     className="absolute inset-0 display-flex items-center justify-center z-10"
-                    style={{ background: 'var(--color-background)', opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}
+                    style={{ background: 'var(--color-background)', opacity: 0.6, borderRadius: '6px', transition: 'all 0.3s ease' }}
                 >
                     <div className="text-center p-4 font-color-red">
-                        {dragError}
+                        {/* <ZoteroIcon 
+                            icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
+                            size={20}
+                            color="--fill-red"
+                            className="mb-2 mx-auto"
+                        /> */}
+                        <div className="font-medium">{dragError}</div>
                     </div>
                 </div>
             )}
