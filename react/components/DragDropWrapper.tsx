@@ -1,14 +1,18 @@
-// @ts-ignore no idea
 import React, { useState, useRef } from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { CSSItemTypeIcon, CSSIcon } from './icons/zotero';
 import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../utils/sourceUtils';
 import { isValidAnnotationType } from '../types/attachments/apiTypes';
 import { updateSourcesFromZoteroItemsAtom } from '../atoms/input';
 import { store } from '../index';
+import { getPref } from '../../src/utils/prefs';
+import { useSetAtom } from 'jotai';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
 }
+
+const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
     children
@@ -17,7 +21,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const [objectIcon, setObjectIcon] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragError, setDragError] = useState<string | null>(null);
+    const [dragCount, setDragCount] = useState<number>(0);
+    const [dragType, setDragType] = useState<'item' | 'annotation' | null>(null);
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
 
     // Show error message temporarily
     const showErrorMessage = (message: string) => {
@@ -57,23 +64,55 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         e.preventDefault();
         e.stopPropagation();
         
-        // Check if either files or Zotero items
-        // if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('zotero/item')) {
-        if (e.dataTransfer.types.includes('zotero/annotation')) {
-            e.dataTransfer.dropEffect = 'copy';            
+        // Set appropriate drop effect
+        if (e.dataTransfer.types.includes('zotero/annotation') || 
+            e.dataTransfer.types.includes('zotero/item')) {
+            e.dataTransfer.dropEffect = 'copy';
+        }
             
-            // Get the annotation data and set the object icon
-            const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
-            if (annotationData && annotationData.length > 0) {
-                const annotationType = annotationData[0].type;
-                if(isValidAnnotationType(annotationType)) {
-                    setObjectIcon(getObjectIcon(annotationType));
-                    setIsDragging(true);
+        // Handle Zotero annotations
+        if (e.dataTransfer.types.includes('zotero/annotation')) {
+            try {
+                const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
+                if (annotationData && annotationData.length > 0) {
+                    const annotationType = annotationData[0].type;
+                    if(isValidAnnotationType(annotationType)) {
+                        setObjectIcon(getObjectIcon(annotationType));
+                        setIsDragging(true);
+                        setDragType('annotation');
+                        setDragCount(annotationData.length);
+                    }
+                    else {
+                        setObjectIcon(ZOTERO_ICONS.ANNOTATION);
+                        setDragError("Annotation type not supported");
+                    }
                 }
-                else {
-                    setObjectIcon(ZOTERO_ICONS.ANNOTATION);
-                    setDragError("Annotation type not supported");
+            } catch (error) {
+                console.error("Error parsing annotation data:", error);
+            }
+        }
+        
+        // Handle Zotero items
+        else if (e.dataTransfer.types.includes('zotero/item')) {
+            try {
+                const itemIDs = e.dataTransfer.getData('zotero/item');
+                if (itemIDs) {
+                    const ids = itemIDs.split(',').map(id => parseInt(id));
+                    setDragCount(ids.length);
+                    
+                    // Set icon based on first item
+                    if (ids.length > 0) {
+                        const item = Zotero.Items.get(ids[0]);
+                        if (item) {
+                            const iconName = item.getItemTypeIconName();
+                            setObjectIcon(iconName || ZOTERO_ICONS.ATTACHMENTS);
+                            setIsDragging(true);
+                            setDragType('item');
+                        }
+                    }
                 }
+            } catch (error) {
+                console.error("Error handling item data:", error);
             }
         }
     };
@@ -82,22 +121,49 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         e.preventDefault();
         e.stopPropagation();
         
-        // Check if either files or Zotero items
-        // if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('zotero/item')) {
+        // Handle Zotero annotations
         if (e.dataTransfer.types.includes('zotero/annotation')) {
-
-            // Get the annotation data and set the object icon
-            const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
-            if (annotationData && annotationData.length > 0) {
-                const annotationType = annotationData[0].type;
-                if(isValidAnnotationType(annotationType)) {
-                    setObjectIcon(getObjectIcon(annotationType));
-                    setIsDragging(true);
+            try {
+                const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
+                if (annotationData && annotationData.length > 0) {
+                    const annotationType = annotationData[0].type;
+                    if(isValidAnnotationType(annotationType)) {
+                        setObjectIcon(getObjectIcon(annotationType));
+                        setIsDragging(true);
+                        setDragType('annotation');
+                        setDragCount(annotationData.length);
+                    }
+                    else {
+                        setObjectIcon(ZOTERO_ICONS.ANNOTATION);
+                        setDragError("Annotation type not supported");
+                    }
                 }
-                else {
-                    setObjectIcon(ZOTERO_ICONS.ANNOTATION);
-                    setDragError("Annotation type not supported");
+            } catch (error) {
+                console.error("Error parsing annotation data:", error);
+            }
+        }
+        
+        // Handle Zotero items
+        else if (e.dataTransfer.types.includes('zotero/item')) {
+            try {
+                const itemIDs = e.dataTransfer.getData('zotero/item');
+                if (itemIDs) {
+                    const ids = itemIDs.split(',').map(id => parseInt(id));
+                    setDragCount(ids.length);
+                    
+                    // Set icon based on first item
+                    if (ids.length > 0) {
+                        const item = Zotero.Items.get(ids[0]);
+                        if (item) {
+                            const iconName = item.getItemTypeIconName();
+                            setObjectIcon(iconName || ZOTERO_ICONS.ATTACHMENTS);
+                            setIsDragging(true);
+                            setDragType('item');
+                        }
+                    }
                 }
+            } catch (error) {
+                console.error("Error handling item data:", error);
             }
         }
     };
@@ -111,6 +177,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             setIsDragging(false);
             setObjectIcon(null);
             setDragError(null);
+            setDragType(null);
+            setDragCount(0);
         }
     };
 
@@ -120,45 +188,24 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         setIsDragging(false);
         setObjectIcon(null);
         setDragError(null);
+        setDragType(null);
+        setDragCount(0);
 
-        // Check for Zotero items (disabled because sources are updated on selection)
-        /*if (e.dataTransfer.types.includes('zotero/item')) {
+        // Handle Zotero items
+        if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
             const itemIDs = e.dataTransfer.getData('zotero/item');
             if (itemIDs) {
                 // Convert comma-separated IDs to an array of integers
                 const ids = itemIDs.split(',').map(id => parseInt(id));
+                const items = await Zotero.Items.getAsync(ids);
                 
-                try {
-                    // Get the Zotero items
-                    const items = Zotero.Items.get(ids);
-                    
-                    // Create ZoteroSources for each item
-                    for (const item of items) {
-                        // Create a source with pinned set to true
-                        const source = await createSourceFromItem(item, true);
-                        // Add source directly to the sources atom
-                        const currentSources = [...sources];
-                        // Check if source already exists
-                        const exists = currentSources.some(
-                            (res) => res.type === 'zotero_item' && 
-                                res.libraryID === source.libraryID && 
-                                res.itemKey === source.itemKey
-                        );
-                        if (!exists) {
-                            currentSources.push(source);
-                            // Update sources atom
-                            setSources(currentSources);
-                        }
-                        // if (!exists) {
-                    }
-                } catch (error) {
-                    console.error('Error processing Zotero items:', error);
-                }
+                // Update sources from Zotero items
+                await updateSourcesFromZoteroItems(items, true);
             }
             return;
-        }*/
+        }
 
-        // Check for Zotero annotation
+        // Handle Zotero annotations
         if (e.dataTransfer.types.includes("zotero/annotation")) {
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
             console.log('annotationData', annotationData[0])
@@ -210,18 +257,29 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             {/* Drag overlay */}
             {isDragging && (
                 <div
-                    className="absolute inset-0 display-flex items-center justify-center z-10"
-                    style={{ background: 'var(--color-background)', opacity: 0.6, borderRadius: '6px', transition: 'all 0.3s ease' }}
+                    className="absolute inset-0 display-flex items-center justify-center z-10 bg-quaternary border-popup"
+                    style={{ opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}
                 >
-                    <div className="text-center p-4">
-                        <ZoteroIcon 
-                            icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
-                            size={20}
-                            color="--fill-primary"
-                            className="mb-2 mx-auto"
-                        />
-                        <div className="font-medium">Drop to add annotations</div>
-                        {/* <div className="text-sm font-color-tertiary">Supported file types: PDF, PNG</div> */}
+                    <div className="display-flex flex-row items-start p-4 gap-4 ml-3">
+                        {dragType === 'item' && objectIcon ? (
+                            <div className="scale-12 mb-2">
+                                <CSSItemTypeIcon itemType={objectIcon} />
+                            </div>
+                        ) : (
+                            <div>
+                                <ZoteroIcon 
+                                    icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
+                                    size={20}
+                                    color="--fill-primary"
+                                    // className=""
+                                />
+                            </div>
+                        )}
+                        <div className="text-lg">
+                            {dragType === 'annotation' 
+                                ? `Drop to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
+                                : `Drop to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
+                        </div>
                     </div>
                 </div>
             )}
@@ -233,12 +291,6 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     style={{ background: 'var(--color-background)', opacity: 0.6, borderRadius: '6px', transition: 'all 0.3s ease' }}
                 >
                     <div className="text-center p-4 font-color-red">
-                        {/* <ZoteroIcon 
-                            icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
-                            size={20}
-                            color="--fill-red"
-                            className="mb-2 mx-auto"
-                        /> */}
                         <div className="font-medium">{dragError}</div>
                     </div>
                 </div>
@@ -249,4 +301,4 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     );
 };
 
-export default DragDropWrapper; 
+export default DragDropWrapper;
