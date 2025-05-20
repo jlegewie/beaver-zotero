@@ -10,8 +10,6 @@ interface DragDropWrapperProps {
     children: React.ReactNode;
 }
 
-const SUPPORTED_ANNOTATION_TYPES = ["highlight", "underline", "note", "text", "image"];
-
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
     children
 }) => {
