@@ -12,6 +12,10 @@ import { getCurrentPage } from '../../utils/readerUtils';
 import { getZoteroItem } from '../../utils/sourceUtils';
 import Button from '../button';
 import IconButton from '../IconButton';
+import { getPref } from '../../../src/utils/prefs';
+
+// Get the updateSourcesFromZoteroSelection preference
+const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 interface SourcePreviewContentProps {
     source: InputSource;
@@ -88,16 +92,18 @@ const SourcePreviewContent: React.FC<SourcePreviewContentProps> = ({ source, max
             <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 {currentReaderAttachmentKey != source.itemKey && (
                     <div className="gap-3 display-flex">
-                        <Button
-                            variant="ghost"
-                            onClick={handlePin}
-                        >
-                            <ZoteroIcon 
-                                icon={currentSource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
-                                size={12}
-                            />
-                            <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
-                        </Button>
+                        {updateSourcesFromZoteroSelection && (
+                            <Button
+                                variant="ghost"
+                                onClick={handlePin}
+                            >
+                                <ZoteroIcon 
+                                    icon={currentSource.pinned ? ZOTERO_ICONS.PIN_REMOVE : ZOTERO_ICONS.PIN} 
+                                    size={12}
+                                />
+                                <span>{currentSource.pinned ? 'Unpin' : 'Pin'}</span>
+                            </Button>
+                        )}
                         <Button
                             variant="ghost"
                             onClick={handleOpen}

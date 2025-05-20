@@ -6,6 +6,9 @@ import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
 import { Annotation } from "../types/attachments/apiTypes";
+import { getPref } from "../../src/utils/prefs";
+
+const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 /**
 * Current user message and sources
@@ -153,7 +156,7 @@ export const removeSourceAtom = atom(
     null,
     (get, set, source: InputSource) => {
         const currentSources = get(currentSourcesAtom);
-        removedItemKeysCache.add(source.itemKey);
+        if(updateSourcesFromZoteroSelection) removedItemKeysCache.add(source.itemKey);
         set(
             currentSourcesAtom,
             currentSources.filter((res) => res.id !== source.id)

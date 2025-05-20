@@ -10,8 +10,10 @@ import { BookmarkIcon, Icon } from './icons'
 import MissingSourceButton from './MissingSourceButton'
 import { usePreviewHover } from '../hooks/usePreviewHover'
 import { activePreviewAtom } from '../atoms/ui'
+import { getPref } from '../../src/utils/prefs'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
+const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
     source: InputSource
@@ -75,16 +77,14 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             removeSource(source);
         }
 
-        const handlePinClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
-            if (isValid && canEdit) {
+            if (isValid && canEdit && updateSourcesFromZoteroSelection) {
                 togglePinSource(source.id);
-                 // cancelTimers(); // Optional: Cancel preview timers on pin click?
-                 // setActivePreview(null); // Optional: Close preview on pin click?
             }
-            if (!canEdit && item) {
-                 // @ts-ignore selectItem exists
-                 Zotero.getActiveZoteroPane().itemsView.selectItem(item.id);
+            else if (item) {
+                // @ts-ignore selectItem exists
+                Zotero.getActiveZoteroPane().itemsView.selectItem(item.id);
             }
         }
 
@@ -125,7 +125,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     ${!isValid ? 'border-red' : ''}
                 `}
                 disabled={disabled}
-                onClick={handlePinClick} // Use updated handler
+                onClick={handleButtonClick} // Use updated handler
                 {...rest}
             >
                 {getIconElement()}
@@ -133,7 +133,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     {displayName || '...'}
                 </span>
                 {currentReaderAttachmentKey == source.itemKey && <Icon icon={BookmarkIcon} className="scale-11" /> }
-                {!disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
+                {updateSourcesFromZoteroSelection && !disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
             </button>
         )
     }
