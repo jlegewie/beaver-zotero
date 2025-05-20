@@ -6,6 +6,7 @@ pref("userEmail", "");
 
 // App settings
 pref("keyboardShortcut", "l");
+pref("updateSourcesFromZoteroSelection", false);
 
 // AI settings
 pref("customInstructions", "");

@@ -10,6 +10,7 @@ declare namespace _ZoteroTypes {
       "userId": string;
       "userEmail": string;
       "keyboardShortcut": string;
+      "updateSourcesFromZoteroSelection": boolean;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
