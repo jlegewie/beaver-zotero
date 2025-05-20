@@ -17,7 +17,12 @@ export const addPopupMessageAtom = atom(
             ...newMessage,
         };
         // Add to the beginning to show on top
-        set(popupMessagesAtom, (prevMessages) => [messageWithDefaults, ...prevMessages]);
+        set(popupMessagesAtom, (prevMessages) => {
+            // if (prevMessages.length > 0 && prevMessages.some((msg) => msg.text === messageWithDefaults.text && msg.title === messageWithDefaults.title)) {
+            //     return prevMessages;
+            // }
+            return [messageWithDefaults, ...prevMessages];
+        });
     }
 );
 
