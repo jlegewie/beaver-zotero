@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../types/popupMessage';
-import { Icon, CancelIcon, AlertCircleIcon, InformationCircleIcon } from './icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../utils/popupMessageUtils';
 import IconButton from './IconButton';
@@ -34,8 +34,9 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const getDefaultIcon = () => {
         switch (message.type) {
             case 'warning':
+                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-yellow" />;
             case 'error':
-                return <Icon icon={AlertCircleIcon} className="scale-12 mt-020 text-red-500" />;
+                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-blue" />;
@@ -47,12 +48,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         : message.type === 'info'
             ? 'font-color-blue'
             : 'font-color-yellow';
-    const backgroundColor = message.type === 'warning' || message.type === 'error'
+    const backgroundColor = message.type === 'error'
         ? 'var(--tag-red-quinary)'
         : message.type === 'info'
             ? 'var(--tag-blue-quinary)'
             : 'var(--tag-yellow-quinary)';
-    const borderColor = message.type === 'warning' || message.type === 'error'
+    const borderColor = message.type === 'error'
         ? 'var(--tag-red-quarternary)'
         : message.type === 'info'
             ? 'var(--tag-blue-quarternary)'
@@ -73,10 +74,9 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                     <div className="flex-shrink-0">
                         {message.icon || getDefaultIcon()}
                     </div>
-                    <div className="flex-1">
-                        <div className={`text-base font-medium ${fontColor}`}>{message.title}</div>
+                    <div className={`flex-1 text-base font-medium ${fontColor}`}>
+                        {message.title}
                     </div>
-                    <div className="flex-1"/>
                     <div className="flex-shrink-0">
                         <IconButton
                             icon={CancelIcon}
