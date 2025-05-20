@@ -1,4 +1,4 @@
-export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
+export const POPUP_MESSAGE_DURATION = 2000; // 2 seconds
 
 export type PopupMessageType = 'info' | 'warning' | 'error';
 
