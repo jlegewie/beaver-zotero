@@ -36,7 +36,6 @@
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
-        "@szhsin/react-menu": "^4.4.0",
         "date-fns": "^4.1.0",
         "date-fns-tz": "^3.2.0",
         "deepmerge": "^4.3.1",
