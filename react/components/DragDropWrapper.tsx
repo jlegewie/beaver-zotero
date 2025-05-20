@@ -241,8 +241,6 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 addFileSource(file);
             }
         }*/
-
-        // Check for Zotero annotations
     };
 
     return (
@@ -254,47 +252,55 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             className="relative"
             style={{ height: '100%', width: '100%' }}
         >
-            {/* Drag overlay */}
-            {isDragging && (
-                <div
-                    className="absolute inset-0 display-flex items-center justify-center z-10 bg-quaternary border-popup"
-                    style={{ opacity: 0.8, borderRadius: '6px', transition: 'all 0.3s ease' }}
-                >
-                    <div className="display-flex flex-row items-start p-4 gap-4 ml-3">
-                        {dragType === 'item' && objectIcon ? (
-                            <div className="scale-12 mb-2">
-                                <CSSItemTypeIcon itemType={objectIcon} />
-                            </div>
-                        ) : (
-                            <div>
-                                <ZoteroIcon 
-                                    icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
-                                    size={20}
-                                    color="--fill-primary"
-                                    // className=""
-                                />
-                            </div>
-                        )}
-                        <div className="text-lg">
-                            {dragType === 'annotation' 
-                                ? `Drop to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
-                                : `Drop to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
+            {/* Drag overlay - always render but control visibility with opacity/transform */}
+            <div
+                className="absolute inset-0 display-flex items-center justify-center z-10 bg-quaternary border-popup"
+                style={{ 
+                    opacity: isDragging ? 0.8 : 0, 
+                    borderRadius: '6px', 
+                    transition: 'opacity 0.3s ease',
+                    pointerEvents: isDragging ? 'auto' : 'none',
+                    visibility: isDragging ? 'visible' : 'hidden'
+                }}
+            >
+                <div className="display-flex flex-row items-start p-4 gap-4 ml-3">
+                    {dragType === 'item' && objectIcon ? (
+                        <div className="scale-12 mb-2">
+                            <CSSItemTypeIcon itemType={objectIcon} />
                         </div>
+                    ) : (
+                        <div>
+                            <ZoteroIcon 
+                                icon={objectIcon || ZOTERO_ICONS.ATTACHMENTS} 
+                                size={20}
+                                color="--fill-primary"
+                            />
+                        </div>
+                    )}
+                    <div className="text-lg">
+                        {dragType === 'annotation' 
+                            ? `Drop to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
+                            : `Drop to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
                     </div>
                 </div>
-            )}
+            </div>
 
-            {/* Error message */}
-            {dragError && (
-                <div
-                    className="absolute inset-0 display-flex items-center justify-center z-10"
-                    style={{ background: 'var(--color-background)', opacity: 0.6, borderRadius: '6px', transition: 'all 0.3s ease' }}
-                >
-                    <div className="text-center p-4 font-color-red">
-                        <div className="font-medium">{dragError}</div>
-                    </div>
+            {/* Error message - also always render but control visibility */}
+            <div
+                className="absolute inset-0 display-flex items-center justify-center z-10"
+                style={{ 
+                    background: 'var(--color-background)', 
+                    opacity: dragError ? 0.6 : 0, 
+                    borderRadius: '6px', 
+                    transition: 'opacity 0.3s ease',
+                    pointerEvents: dragError ? 'auto' : 'none',
+                    visibility: dragError ? 'visible' : 'hidden'
+                }}
+            >
+                <div className="text-center p-4 font-color-red">
+                    <div className="font-medium">{dragError || ''}</div>
                 </div>
-            )}
+            </div>
 
             {children}
         </div>
