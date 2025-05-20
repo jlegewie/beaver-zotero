@@ -1,10 +1,14 @@
 /* eslint-disable no-undef */
-pref("enable", true);
-pref("input", "This is input");
-// User ID
+
+// User ID and email
 pref("userId", "");
 pref("userEmail", "");
-// API keys
+
+// App settings
+pref("keyboardShortcut", "l");
+
+// AI settings
+pref("customInstructions", "");
 pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
 pref("anthropicApiKey", "");
@@ -19,9 +23,6 @@ pref("recentItems", "[]");
 pref("citationFormat", "author-year");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
-pref("keyboardShortcut", "l");
-// Custom instructions for chat
-pref("customInstructions", "");
 
 // Quick Prompts (up to 6)
 pref("quickPrompt1_title", "Detailed summary");

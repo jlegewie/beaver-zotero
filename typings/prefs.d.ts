@@ -7,10 +7,10 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
-      "enable": boolean;
-      "input": string;
       "userId": string;
       "userEmail": string;
+      "keyboardShortcut": string;
+      "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
       "anthropicApiKey": string;
@@ -21,8 +21,6 @@ declare namespace _ZoteroTypes {
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
-      "keyboardShortcut": string;
-      "customInstructions": string;
       "quickPrompt1_title": string;
       "quickPrompt1_text": string;
       "quickPrompt1_librarySearch": boolean;
