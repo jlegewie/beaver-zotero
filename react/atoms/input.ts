@@ -97,9 +97,9 @@ export const updateSourcesFromZoteroItemsAtom = atom(
 */
 export const updateSourcesFromZoteroSelectionAtom = atom(
     null,
-    async (get, set) => {
+    async (get, set, pinned: boolean = false) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        await set(updateSourcesFromZoteroItemsAtom, items);
+        await set(updateSourcesFromZoteroItemsAtom, items, pinned);
     }
 );
 
