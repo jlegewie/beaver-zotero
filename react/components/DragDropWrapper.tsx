@@ -65,8 +65,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         e.stopPropagation();
         
         // Set appropriate drop effect
-        if (e.dataTransfer.types.includes('zotero/annotation') || 
-            e.dataTransfer.types.includes('zotero/item')) {
+        if (
+            e.dataTransfer.types.includes('zotero/annotation') || 
+            (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item'))
+        ) {
             e.dataTransfer.dropEffect = 'copy';
         }
             
@@ -93,7 +95,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
         
         // Handle Zotero items
-        else if (e.dataTransfer.types.includes('zotero/item')) {
+        else if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
             try {
                 const itemIDs = e.dataTransfer.getData('zotero/item');
                 if (itemIDs) {
@@ -144,7 +146,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
         
         // Handle Zotero items
-        else if (e.dataTransfer.types.includes('zotero/item')) {
+        else if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
             try {
                 const itemIDs = e.dataTransfer.getData('zotero/item');
                 if (itemIDs) {
