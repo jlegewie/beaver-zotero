@@ -2,14 +2,16 @@ import React from 'react';
 // @ts-ignore no idea why this is needed
 import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { updateSourceChildItemKeysAtom } from '../../atoms/input';
+import { inputAttachmentCountAtom, updateSourceChildItemKeysAtom } from '../../atoms/input';
 import { isValidZoteroItem } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { InputSource } from '../../types/sources';
 import SourcePreviewHeading from './SourcePreviewHeading';
-import { userAddedSourceKeysAtom } from '../../atoms/threads';
+import { threadAttachmentCountAtom, userAddedSourceKeysAtom } from '../../atoms/threads';
+import { planFeaturesAtom } from '../../atoms/profile';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 
 interface SourcePreviewRegularItemProps {
     source: InputSource;
@@ -23,6 +25,10 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     const [noteNumber, setNoteNumber] = useState<number>(0);
     const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
     const userAddedSourceKeys = useAtomValue(userAddedSourceKeysAtom);
+    const setPopupMessage = useSetAtom(addPopupMessageAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
+    const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
+    const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
 
     // Fetch attachments and notes
     useEffect(() => {
@@ -58,8 +64,21 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     }, [source]);
 
     const handleToggleItem = (itemKey: string) => {
+        const availableAttachments = planFeatures.maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);        
         const currentChildItemKeys = source.childItemKeys || [];
-        const newChildItemKeys = currentChildItemKeys.includes(itemKey)
+        const isCurrentlySelected = currentChildItemKeys.includes(itemKey);
+
+        if (!isCurrentlySelected && availableAttachments <= 0) {
+            setPopupMessage({
+                type: 'warning',
+                title: 'Attachment Limit Exceeded',
+                text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                expire: true
+            });
+            return;
+        }
+
+        const newChildItemKeys = isCurrentlySelected
             ? currentChildItemKeys.filter(key => key !== itemKey)
             : [...currentChildItemKeys, itemKey];
         updateSourceChildItemKeys({

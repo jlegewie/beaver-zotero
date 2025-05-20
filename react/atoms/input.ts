@@ -1,12 +1,13 @@
 import { atom } from "jotai";
 import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
-import { userAddedSourceKeysAtom } from "./threads";
+import { threadAttachmentCountAtom, userAddedSourceKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
-import { Annotation } from "../types/attachments/apiTypes";
 import { getPref } from "../../src/utils/prefs";
+import { planFeaturesAtom } from "./profile";
+import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
@@ -24,6 +25,31 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
     const source = get(currentReaderAttachmentAtom);
     return source?.itemKey || null;
 });
+
+/**
+* Count of input attachments
+* 
+* Counts the number of attachments in the current sources and reader attachment.
+* The reader attachment is only counted if it's not already in the user-added sources.
+* 
+*/
+export const inputAttachmentCountAtom = atom<number>((get) => {
+    // Input attachments
+    const inputAttachmentKeys = get(currentSourcesAtom)
+        .filter((s => s.type === "attachment" || s.type === "regularItem"))
+        .flatMap((s) => s.childItemKeys && s.childItemKeys.length > 0 ? s.childItemKeys : [s.itemKey]);
+    // Reader attachment
+    const readerAttachmentKey = get(currentReaderAttachmentKeyAtom);
+    if (readerAttachmentKey) {
+        inputAttachmentKeys.push(readerAttachmentKey);
+    }
+    // Exclude user-added sources already in thread
+    const userAddedSourceKeys = get(userAddedSourceKeysAtom);
+    const filteredInputAttachmentKeys = inputAttachmentKeys.filter((key) => !userAddedSourceKeys.includes(key));
+    // Return total of attachments
+    return [...new Set(filteredInputAttachmentKeys)].length;
+});
+
 
 /**
  * Current reader text selection
@@ -48,6 +74,14 @@ export const resetCurrentSourcesAtom = atom(
 
 /**
 * Update sources based on Zotero items
+* 
+* Ensures proper handeling of update when sources are constantly updated based on
+* current zotero selection by keeping track of removed item keys, pinned sources and 
+* user added keys.
+* 
+* When updateSourcesFromZoteroSelection is disabled (default), this could be much simpler.
+* For example, all sources are pinned and existingMap is never updated.
+* 
 */
 export const updateSourcesFromZoteroItemsAtom = atom(
     null,
@@ -85,12 +119,26 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         const newSources = [
             ...pinnedSources,
             ...newItemSources
-        ];
-        
+        ].sort((a, b) => a.timestamp - b.timestamp);
+
+        // Enforce limit on number of attachments
+        const userAttachmentCount = get(threadAttachmentCountAtom);
+        const maxUserAttachments = get(planFeaturesAtom).maxUserAttachments;
+        const availableAttachments = maxUserAttachments - userAttachmentCount;
+
+        const newSourcesFiltered = newSources.slice(0, availableAttachments);
+        if (newSourcesFiltered.length < newSources.length) {
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Attachment Limit Exceeded',
+                text: `Maximum of ${get(planFeaturesAtom).maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                expire: true
+            });
+        }
         // Update state: merge and sort by timestamp
         set(
             currentSourcesAtom,
-            newSources.sort((a, b) => a.timestamp - b.timestamp)
+            newSourcesFiltered
         );
     }
 );

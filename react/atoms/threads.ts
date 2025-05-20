@@ -2,12 +2,14 @@ import { atom } from "jotai";
 import { ChatMessage, createAssistantMessage, Thread, Warning } from "../types/chat/uiTypes";
 import { ThreadSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
-import { currentMessageContentAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { currentMessageContentAtom, currentReaderAttachmentKeyAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { sourceCitationsAtom } from "./citations";
+import { planFeaturesAtom } from "./profile";
+import { currentSourcesAtom } from "./input";
 
 // Thread messages and sources
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -15,19 +17,28 @@ export const currentAssistantMessageIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
 
 /*
- * Thread sources and source keys by source
- *
- * Thread sources are added from three sources:
- * 1. User message attachments
- * 2. Responses from tool calls
+ * User added sources are sources added by the user to the 
+ * thread. Either from existing messages with role "user"
+ * Or when the user submits a completion request.
  */
 export const userAddedSourcesAtom = atom<ThreadSource[]>([]);
-export const toolCallSourcesAtom = atom<ThreadSource[]>([]);
-
-// User added source keys
 export const userAddedSourceKeysAtom = atom((get) => {
     return get(userAddedSourcesAtom).map((source) => source.itemKey);
 });
+
+// Thread attachment count
+export const threadAttachmentCountAtom = atom<number>((get) => {
+    const userAddedKeys = get(userAddedSourcesAtom)
+        .filter((s => s.type === "attachment"))
+        .flatMap((s) => s.childItemKeys && s.childItemKeys.length > 0 ? s.childItemKeys : [s.itemKey]);
+    // Return total of attachments
+    return [...new Set(userAddedKeys)].length;
+});
+
+/*
+ * Toolcall sources are sources from tool call responses
+ */
+export const toolCallSourcesAtom = atom<ThreadSource[]>([]);
 
 // Combined thread sources and keys
 // export const threadSourcesAtom = atom<ThreadSource[]>((get) => {

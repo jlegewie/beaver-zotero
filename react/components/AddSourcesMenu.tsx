@@ -5,13 +5,16 @@ import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from 
 import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
 import { createSourceFromItem } from '../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { currentSourcesAtom } from '../atoms/input';
-import { useAtom } from 'jotai';
+import { currentSourcesAtom, inputAttachmentCountAtom } from '../atoms/input';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { InputSource } from '../types/sources';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { getRecentAsync } from '../utils/zotero';
 import { searchTitleCreatorYear } from '../utils/search';
 import { logger } from '../../src/utils/logger';
+import { planFeaturesAtom } from '../atoms/profile';
+import { threadAttachmentCountAtom } from '../atoms/threads';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -85,6 +88,10 @@ const AddSourcesMenu: React.FC<{
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
+    const planFeatures = useAtomValue(planFeaturesAtom);
+    const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
+    const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
+    const setPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // Set initial menu items
     useEffect(() => {
@@ -225,7 +232,21 @@ const AddSourcesMenu: React.FC<{
             const exists = sources.some(
                 (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
             );
+            
             if (!exists) {
+                // Check attachment limit before adding
+                const availableAttachments = planFeatures.maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);
+                
+                if (availableAttachments <= 0) {
+                    setPopupMessage({
+                        type: 'warning',
+                        title: 'Attachment Limit Exceeded',
+                        text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                        expire: true
+                    });
+                    return;
+                }
+                
                 // Add source to sources atom
                 updateRecentItems([{ zotero_key: source.itemKey, library_id: source.libraryID }]);
                 setSources((prevSources) => [...prevSources, source]);
@@ -270,7 +291,7 @@ const AddSourcesMenu: React.FC<{
                 </div>
             ),
         };
-    }, []);
+    }, [planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage]);
 
     // Search
     useEffect(() => {
