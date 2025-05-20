@@ -42,7 +42,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Login page */}
     if (!isAuthenticated) {
         return (
-            <div className="sidebar-container h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
                 <Header />
                 <LoginPage emailInputRef={loginEmailRef} />
             </div>
