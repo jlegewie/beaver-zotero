@@ -3,6 +3,7 @@ import { currentSourcesAtom } from './input';
 import { InputSource } from '../types/sources';
 import { FileStatus } from '../types/fileStatus';
 import { TextSelection, Annotation } from '../types/attachments/apiTypes';
+import { PopupMessage } from '../types/popupMessage';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -103,3 +104,6 @@ export type ActivePreview =
     | null;
 
 export const activePreviewAtom = atom<ActivePreview>(null);
+
+// Popup Messages
+export const popupMessagesAtom = atom<PopupMessage[]>([]);

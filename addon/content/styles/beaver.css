@@ -1,10 +1,24 @@
 :root {
+    --tag-blue-primary: #2ea8e5;
+    --tag-blue-secondary: #2ea8e58c;
+    --tag-blue-tertiary: #2ea8e54d;
+    --tag-blue-quarternary: #2ea8e51f;
+    --tag-blue-quinary: #2ea8e50f;
+    --tag-blue-senary: #2ea8e508;
+
     --tag-yellow-primary: #ffd400e5;
     --tag-yellow-secondary: #ffd4008c;
     --tag-yellow-tertiary: #ffd4004d;
     --tag-yellow-quarternary: #ffd4001f;
     --tag-yellow-quinary: #ffd4000f;
     --tag-yellow-senary: #ffd40008;
+
+    --tag-red-primary: #ff6666e5;
+    --tag-red-secondary: #ff66668c;
+    --tag-red-tertiary: #ff66664d;
+    --tag-red-quarternary: #ff66661f;
+    --tag-red-quinary: #ff66660f;
+    --tag-red-senary: #ff666608;
     --tag-red-primary: #ff6666e5;
     --tag-red-secondary: #ff66668c;
     --tag-red-tertiary: #ff66664d;
@@ -390,6 +404,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .font-color-red { color: var(--tag-red); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-green { color: var(--tag-green); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
+[id^="beaver-pane-"] .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-yellow { color: var(--tag-yellow); opacity: 0.8; }
 [id^="beaver-pane-"] .user-select-none { user-select: none; }
 [id^="beaver-pane-"] .user-select-text { user-select: text; }

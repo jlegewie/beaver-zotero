@@ -14,6 +14,7 @@ import PreferencePage from './PreferencePage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './PreviewContainer';
 import DragDropWrapper from './DragDropWrapper';
+import PopupMessageContainer from './PopupMessageContainer';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -80,6 +81,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                <PopupMessageContainer />
                 <div className="relative w-full h-0">
                     <div className={`transition-opacity duration-300 ${userScrolled && !activePreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         <ScrollDownButton onClick={handleScrollToBottom} />
