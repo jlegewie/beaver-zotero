@@ -1,9 +1,9 @@
 // @ts-ignore: Not sure why this is needed
 import { useEffect, useRef } from 'react';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { fileUploader } from '../../src/services/FileUploader';
-import { profileWithPlanAtom } from '../atoms/profile';
+import { isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { supabase } from '../../src/services/supabaseClient';
@@ -28,6 +28,7 @@ const toSafeProfileModel = (profile: ProfileModel): SafeProfileModel => {
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
+    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
     const channelRef = useRef<RealtimeChannel | null>(null);
@@ -36,10 +37,11 @@ export const useProfileSync = () => {
         const syncProfileData = async (userId: string) => {
             logger(`useProfileSync: User ${userId} authenticated. Fetching profile and plan.`);
             try {
-                // 1. Fetch initial ProfileWithPlan
-                const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
-                setProfileWithPlan(fetchedProfileWithPlan);
-                logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+                // 1. Fetch initial ProfileWithPlan (fetching now done at login)
+                // const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
+                // setProfileWithPlan(fetchedProfileWithPlan);
+                // setIsProfileLoaded(true);
+                // logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
                 // --- Realtime Setup ---
                 if (channelRef.current) {
@@ -145,11 +147,11 @@ export const useProfileSync = () => {
         };
 
         // --- Effect Logic ---
-        if (isAuthenticated && user) {
+        if (isAuthenticated && user && isProfileLoaded) {
             syncProfileData(user.id);
         } else {
-            logger(`useProfileSync: User not authenticated or user data unavailable. Clearing profile.`);
-            setProfileWithPlan(null);
+            logger(`useProfileSync: User not authenticated, user data unavailable, or profile not loaded.`);
+            // setProfileWithPlan(null);
             if (channelRef.current) {
                 const userIdForUnsub = channelRef.current.topic.split(':').pop();
                 logger(`useProfileSync: Unsubscribing from channel due to logout/auth change for user ${userIdForUnsub}.`);

@@ -12,11 +12,12 @@
  * @returns {{ loading: boolean, signOut: () => Promise<{ error: AuthError | null }> }} An object containing the authentication loading state and the signOut function. Session and user data should be accessed directly via their respective Jotai atoms (`sessionAtom`, `userAtom`).
  */
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import { sessionAtom, userAtom, AuthUser } from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
 
 // Track if auth listener has been initialized globally
 let authListenerInitialized = false;
@@ -29,6 +30,8 @@ export function useAuth() {
     // useRef for current atom values to avoid re-rendering
     const sessionRef = useRef(session);
     const userRef = useRef(user);
+    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
+    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     
     // Keep refs updated with the latest atom values
     useEffect(() => {
@@ -172,6 +175,8 @@ export function useAuth() {
     const signOut = async () => {
         setLoading(true);
         const { error } = await supabase.auth.signOut();
+        setProfileWithPlan(null);
+        setIsProfileLoaded(false);
         if (error) {
             logger(`auth: sign out error: ${error.message}`);
             setLoading(false);

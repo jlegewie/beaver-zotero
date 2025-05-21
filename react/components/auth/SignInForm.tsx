@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../button'
 import { getPref, setPref } from '../../../src/utils/prefs'
+import { accountService } from '../../../src/services/accountService'
+import { isProfileLoadedAtom, profileWithPlanAtom } from '../../atoms/profile'
+import { useSetAtom } from 'jotai'
 
 interface SignInFormProps {
     setErrorMsg: (errorMsg: string | null) => void;
@@ -14,6 +17,8 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
+    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
+    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
 
     useEffect(() => {
         emailInputRef?.current?.focus();
@@ -41,6 +46,23 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
             else {
                 setPref("userId", data.user.id);
                 setPref("userEmail", data.user.email ?? "");
+                
+                // Fetch user profile
+                try {
+                    const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
+                    if(!fetchedProfileWithPlan) {
+                        supabase.auth.signOut();
+                        setErrorMsg('Failed to load profile data. Try again later.');
+                        return;
+                    }
+                    setProfileWithPlan(fetchedProfileWithPlan);
+                    setIsProfileLoaded(true);
+                } catch (profileError) {
+                    setErrorMsg('Failed to load profile data. Try again later.');
+                    supabase.auth.signOut();
+                } finally {
+                    setIsLoading(false);
+                }
             }
         } catch (err) {
             setErrorMsg('An unexpected error occurred')

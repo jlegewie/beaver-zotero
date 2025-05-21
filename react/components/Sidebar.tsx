@@ -26,6 +26,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const isInitialDataImportComplete = useAtomValue(isInitialDataImportCompleteAtom);
+    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
 
     useEffect(() => {
         if (messagesContainerRef.current) {
@@ -41,7 +42,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     };
 
     {/* Login page */}
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !isProfileLoaded) {
         return (
             <div className="bg-sidepane h-full display-flex flex-col min-w-0">
                 <Header />

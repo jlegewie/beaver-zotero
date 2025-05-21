@@ -12,7 +12,7 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
 import { chatService, ErrorType } from '../../src/services/chatService';
 import { ProviderType } from '../atoms/models';
-import { profileWithPlanAtom } from "../atoms/profile";
+import { isProfileLoadedAtom, profileWithPlanAtom } from "../atoms/profile";
 import { logger } from "../../src/utils/logger";
 import { validateSelectedModelAtom, fetchModelsAtom } from '../atoms/models';
 
@@ -307,7 +307,8 @@ const PreferencePage: React.FC = () => {
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
-    const profileWithPlan = useAtomValue(profileWithPlanAtom);
+    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
 
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
@@ -335,6 +336,8 @@ const PreferencePage: React.FC = () => {
 
     const handleLogout = () => {
         supabase.auth.signOut();
+        setProfileWithPlan(null);
+        setIsProfileLoaded(false);
     };
 
     return (

@@ -7,6 +7,7 @@ import { getPref } from "../../src/utils/prefs";
 export const userAuthorizationAtom = atom<boolean>(getPref('userAuthorization'));
 export const isInitialDataImportCompleteAtom = atom(getPref("isInitialDataImportComplete"));
 
+export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 
 export const planNameAtom = atom<string>((get) => {
@@ -20,6 +21,7 @@ export const fetchProfileWithPlanAtom = atom(
         try {
             const profileFetched = await accountService.getProfileWithPlan();
             set(profileWithPlanAtom, profileFetched);
+            set(isProfileLoadedAtom, true);
         } catch (error: any) {
             Zotero.debug('Error fetching profile:', error, 3);
         }
