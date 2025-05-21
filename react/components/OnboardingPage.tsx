@@ -63,7 +63,7 @@ const ProcessItem: React.FC<{
     );
 };
 
-const InitialDataImportPage: React.FC = () => {
+const OnboardingPage: React.FC = () => {
     // User authorization state
     const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
     
@@ -270,4 +270,4 @@ const InitialDataImportPage: React.FC = () => {
     );
 };
 
-export default InitialDataImportPage;
+export default OnboardingPage;
