@@ -95,6 +95,15 @@ export class AttachmentsService extends ApiService {
     async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<Record<string, number>> {
         return this.get<Record<string, number>>(`/attachments/error-code-stats/${type}`);
     }
+
+    /**
+     * Gets signed upload URLs for a list of file hashes.
+     * @param fileHashes Array of file hash strings
+     * @returns Promise with a dictionary mapping file hashes to their signed upload URLs
+     */
+    async getUploadUrls(fileHashes: string[]): Promise<Record<string, string>> {
+        return this.post<Record<string, string>>('/attachments/upload-urls', fileHashes);
+    }
 }
 
 // Export attachmentsService instance
