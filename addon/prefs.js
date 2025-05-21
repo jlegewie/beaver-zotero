@@ -20,6 +20,7 @@ pref("supportedModels","[]");
 
 // Initial onboarding process
 pref("userAuthorization", false);
+pref("isInitialDataImportComplete", false);
 
 
 // Search

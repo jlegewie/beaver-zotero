@@ -1,6 +1,11 @@
 import { atom } from "jotai";
 import { ProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 import { accountService } from "../../src/services/accountService";
+import { getPref } from "../../src/utils/prefs";
+
+
+export const userAuthorizationAtom = atom<boolean>(getPref('userAuthorization'));
+export const isInitialDataImportCompleteAtom = atom(getPref("isInitialDataImportComplete"));
 
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 

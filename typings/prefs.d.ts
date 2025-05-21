@@ -20,6 +20,7 @@ declare namespace _ZoteroTypes {
       "supportedModelsLastFetched": string;
       "supportedModels": string;
       "userAuthorization": boolean;
+      "isInitialDataImportComplete": boolean;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;
