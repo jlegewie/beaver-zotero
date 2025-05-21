@@ -9,6 +9,7 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "userId": string;
       "userEmail": string;
+      "selectedLibraryIds": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
       "customInstructions": string;
@@ -18,6 +19,7 @@ declare namespace _ZoteroTypes {
       "lastUsedModel": string;
       "supportedModelsLastFetched": string;
       "supportedModels": string;
+      "userAuthorization": boolean;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;

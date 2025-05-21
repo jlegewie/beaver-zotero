@@ -5,6 +5,7 @@ pref("userId", "");
 pref("userEmail", "");
 
 // App settings
+pref("selectedLibraryIds", "");
 pref("keyboardShortcut", "l");
 pref("updateSourcesFromZoteroSelection", false);
 
@@ -16,6 +17,10 @@ pref("anthropicApiKey", "");
 pref("lastUsedModel", "");
 pref("supportedModelsLastFetched", "");
 pref("supportedModels","[]");
+
+// Initial onboarding process
+pref("userAuthorization", false);
+
 
 // Search
 pref("recentItems", "[]");
