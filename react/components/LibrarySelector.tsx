@@ -163,10 +163,10 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) 
                                     </div>
                                     
                                     {/* Statistics or loading spinner */}
-                                    <div className="display-flex flex-row gap-4 font-color-secondary text-sm ml-11">
+                                    <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
                                         {isLoading ? (
                                             <>
-                                                <Spinner className="mt-020" size={14} />
+                                                <Spinner className="" size={14} />
                                                 <span>Loading library statistics...</span>
                                             </>
                                         ) : statistics ? (
