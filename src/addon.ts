@@ -1,4 +1,4 @@
-import { config } from "../package.json";
+import { config, version } from "../package.json";
 import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTable";
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
@@ -28,6 +28,7 @@ class Addon {
     public aiProvider?: AIProvider;
     public citationService?: CitationService;
     public db?: BeaverDB;
+    public pluginVersion?: typeof version;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

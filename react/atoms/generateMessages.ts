@@ -353,7 +353,9 @@ function _processChatCompletionViaBackend(
         tool_request: isLibrarySearch ? search_tool_request : null,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
-        model: model
+        model: model,
+        // @ts-ignore Beaver exists
+        frontend_version: Zotero.Beaver.pluginVersion || ''
     } as ChatCompletionRequestBody;
 
     // request chat completion

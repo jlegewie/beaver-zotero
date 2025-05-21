@@ -27,6 +27,7 @@ export interface ChatCompletionRequestBody {
     attachments: MessageAttachment[];   // The attachments to include in the request
     tool_request: ToolRequest | null;   // User tool request, if any
     reader_state: ReaderState | null;   // Reader state, if any
+    frontend_version: string;           // The version of the frontend
 }
 
 export type DeltaType = "reasoning" | "content";

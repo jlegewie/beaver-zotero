@@ -1,3 +1,4 @@
+import { version } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverUIFactory } from "./ui/ui";
@@ -17,6 +18,9 @@ async function onStartup() {
 	
 	initLocale();
 	ztoolkit.log("Startup");
+
+	// -------- Store plugin version --------
+	addon.pluginVersion = version;
 
 	// -------- Initialize database --------
 	const dbConnection = new Zotero.DBConnection("beaver");
