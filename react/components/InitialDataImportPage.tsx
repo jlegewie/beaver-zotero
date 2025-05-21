@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, OneIcon as OneCircleIcon, TwoIcon as TwoCircleIcon, ThreeIcon as ThreeCircleIcon, CSSItemTypeIcon, CSSIcon } from "./icons";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { 
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
@@ -13,6 +13,7 @@ import {
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
+import { getPref, setPref } from "../../src/utils/prefs";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
@@ -55,11 +56,6 @@ const ProcessItem: React.FC<{
                                 {rightText || ""}
                             </div>
                         </div>
-                        {/* <div className="font-color-tertiary text-sm w-full text-right">
-                            {status === 'in_progress' && current !== undefined && total !== undefined
-                                ? `${current} of ${total} files (${Math.round(progress)}%)`
-                                : status === 'completed' ? `Completed` : ""}
-                        </div> */}
                     </div>
                 )}
             </div>
@@ -68,6 +64,9 @@ const ProcessItem: React.FC<{
 };
 
 const InitialDataImportPage: React.FC = () => {
+    // User authorization state
+    const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
+    
     // Database sync state
     const syncType = useAtomValue(syncTypeAtom);
     const syncStatus = useAtomValue(syncStatusAtom);
@@ -78,10 +77,9 @@ const InitialDataImportPage: React.FC = () => {
     const fileTotal = useAtomValue(fileUploadTotalAtom);
     const fileCurrent = useAtomValue(fileUploadCurrentAtom);
 
-    const userAuthorization = useAtomValue(userAuthorizationAtom);
-
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
+    const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
 
     // Realtime listening for file status updates
     useFileStatus();
@@ -100,7 +98,6 @@ const InitialDataImportPage: React.FC = () => {
     };
     
     const syncProgress = calculateProgress(syncCurrent, syncTotal);
-    // const uploadProgress = calculateProgress(fileCurrent, fileTotal);
     const uploadProgress = calculateProgress(fileStats.uploadCompletedCount, fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount);
     const indexingProgress = fileStats.progress;
 
@@ -157,6 +154,18 @@ const InitialDataImportPage: React.FC = () => {
     // Handle library selection change
     const handleLibrarySelectionChange = (libraryIds: number[]) => {
         setSelectedLibraryIds(libraryIds);
+        setIsLibrarySelectionValid(libraryIds.length > 0);
+    };
+    
+    // Handle authorization
+    const handleAuthorize = () => {
+        if (selectedLibraryIds.length > 0) {
+            // Save the selected libraries for the sync process
+            setPref('selectedLibraryIds', JSON.stringify(selectedLibraryIds));
+            // Update authorization status
+            setUserAuthorization(true);
+            setPref('userAuthorization', true);
+        }
     };
     
     return (
@@ -167,71 +176,96 @@ const InitialDataImportPage: React.FC = () => {
             {/* Top spacing */}
             <div style={{ height: '5vh' }}></div>
 
-            {/* Header section */}
+            {/* Header section - always shown */}
             <div className="display-flex flex-col items-start mb-4">
                 <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
-                <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
+                <p className="text-base font-color-secondary -mt-2">
+                    {!userAuthorization 
+                        ? "Let's set up your Beaver environment by connecting to your Zotero library."
+                        : "Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min."
+                    }
+                </p>
             </div>
 
-            {/* Library Selector Component */}
-            <LibrarySelector onSelectionChange={handleLibrarySelectionChange} />
-            
-            {/* Syncing your library */}
-            <ProcessItem 
-                status={syncStatus}
-                icon={getSyncIcon()}
-                title="Syncing Zotero database"
-                // description={getSyncDescription()}
-                progress={syncProgress}
-                leftText={initialSyncItemCount > 0
-                    ? `Syncing ${initialSyncItemCount.toLocaleString()} items`
-                    : undefined
-                }
-                rightText={`${calculateProgress(syncCurrent, syncTotal)}%`}
-                // current={syncCurrent}
-                // total={syncTotal}
-            />
-            
-            {/* Uploading files */}
-            <ProcessItem 
-                status={fileStatus}
-                icon={CheckmarkIcon}
-                title={`Uploading ${fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount} files`}
-                leftText={fileStats.uploadFailedCount > 0
-                    ? `${fileStats.uploadFailedCount.toLocaleString()} failed`
-                    : undefined
-                }
-                rightText={`${uploadProgress}%`}
-                progress={uploadProgress}
-                // current={fileCurrent}
-                // total={fileTotal}
-            />
-            
-            {/* Indexing files */}
-            <ProcessItem 
-                status={getIndexingStatus()}
-                icon={CheckmarkIcon}
-                title="Indexing files"
-                // description={getIndexingDescription()}
-                progress={indexingProgress}
-                // current={fileStats.completedFiles}
-                // total={fileStats.totalFiles}
-            />
+            {/* Step 1: Library Selection & Authorization */}
+            {!userAuthorization ? (
+                <div className="display-flex flex-col gap-3">
+                    <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
+                    <div className="text-base font-color-secondary">
+                        Select the libraries you want to sync with Beaver. By continuing, you authorize 
+                        Beaver to access your selected libraries, upload your PDFs, and index your files 
+                        for enhanced search capabilities.
+                    </div>
+                    
+                    {/* Library Selector Component */}
+                    <LibrarySelector onSelectionChange={handleLibrarySelectionChange} />
+                    
+                    {/* Button */}
+                    <div className="display-flex flex-row mt-6">
+                        <div className="flex-1" />
+                        <Button
+                            variant="solid"
+                            rightIcon={ArrowRightIcon}
+                            className="scale-11"
+                            onClick={handleAuthorize}
+                            disabled={!isLibrarySelectionValid}
+                        >
+                            Authorize & Continue
+                        </Button>
+                    </div>
+                </div>
+            ) : (
+                // Step 2: Syncing Process
+                <div className="display-flex flex-col gap-3">
+                    {/* Syncing your library */}
+                    <ProcessItem 
+                        status={syncStatus}
+                        icon={getSyncIcon()}
+                        title="Syncing Zotero database"
+                        progress={syncProgress}
+                        leftText={initialSyncItemCount > 0
+                            ? `Syncing ${initialSyncItemCount.toLocaleString()} items`
+                            : undefined
+                        }
+                        rightText={`${calculateProgress(syncCurrent, syncTotal)}%`}
+                    />
+                    
+                    {/* Uploading files */}
+                    <ProcessItem 
+                        status={fileStatus}
+                        icon={CheckmarkIcon}
+                        title={`Uploading ${fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount} files`}
+                        leftText={fileStats.uploadFailedCount > 0
+                            ? `${fileStats.uploadFailedCount.toLocaleString()} failed`
+                            : undefined
+                        }
+                        rightText={`${uploadProgress}%`}
+                        progress={uploadProgress}
+                    />
+                    
+                    {/* Indexing files */}
+                    <ProcessItem 
+                        status={getIndexingStatus()}
+                        icon={CheckmarkIcon}
+                        title="Indexing files"
+                        progress={indexingProgress}
+                    />
 
-            <div className="flex-1"/>
+                    <div className="flex-1"/>
 
-            {/* Button */}
-            <div className="display-flex flex-row mb-1">
-                <div className="flex-1" />
-                <Button
-                    variant="solid"
-                    rightIcon={ArrowRightIcon}
-                    className="scale-11"
-                >
-                    Complete
-                </Button>
-            </div>
-            
+                    {/* Button */}
+                    <div className="display-flex flex-row mb-1">
+                        <div className="flex-1" />
+                        <Button
+                            variant="solid"
+                            rightIcon={ArrowRightIcon}
+                            className="scale-11"
+                        >
+                            Complete
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
