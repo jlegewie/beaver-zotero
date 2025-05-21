@@ -253,5 +253,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 processEvents();
             }
         };
-    }, [isAuthenticated, filterFunction, debounceMs, planFeatures.databaseSync]);
+    }, [isAuthenticated, filterFunction, debounceMs, planFeatures.databaseSync, isAuthorized]);
 }
