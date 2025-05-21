@@ -30,6 +30,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             canEdit = true,
             ...rest
         } = props
+
         // States
         const [isValid, setIsValid] = useState(true);
         const [displayName, setDisplayName] = useState<string>('');
@@ -48,7 +49,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const item = getZoteroItem(source);
         if (!item) return <MissingSourceButton source={source} />;
 
-        // Moved item null check after hooks, before useEffects that depend on item
+        // Update the display name when the item changes
         useEffect(() => {
             if (!item) {
                 setDisplayName('Missing Source');
@@ -63,6 +64,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             setDisplayName(truncatedName);
         }, [item, source.childItemKeys.length]);
 
+        // Update the validation status when the source changes
         useEffect(() => {
             const checkSourceValidity = async () => {
                 setIsValid(await isSourceValid(source));
@@ -70,13 +72,14 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             checkSourceValidity();
         }, [source])
 
-        // Update handleRemove to use cancelTimers from the hook
+        // Remove the source
         const handleRemove = () => {
             cancelTimers(); // Cancel preview timers before removing
             setActivePreview(null); // Explicitly close any active preview
             removeSource(source);
         }
 
+        // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
             if (isValid && canEdit && updateSourcesFromZoteroSelection) {
@@ -88,9 +91,9 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             }
         }
 
-        // Use isHovered from the hook
+        // Get the icon element
         const getIconElement = () => {
-            // Use isHovered from the hook
+            // Remove icon on hover if not the current reader attachment
             if (isHovered && currentReaderAttachmentKey != source.itemKey) {
                 return (<span
                     role="button"
@@ -103,6 +106,15 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
             }
+
+            // Show spinner when validation is in progress
+            // if (source.validationState === 'loading') {
+            //     return <CSSIcon name="spinner" className="icon-16 scale-11" >
+            //         <Spinner className="mt-020" />
+            //     </CSSIcon>
+            // }
+
+            // Show item type icon
             const iconName = item.getItemTypeIconName();
             const iconElement = iconName ? (
                 <span className="scale-80">
@@ -115,7 +127,6 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         return (
             <button
                 ref={ref}
-                // Spread the event handlers from the hook
                 {...hoverEventHandlers}
                 className={
                     `variant-outline source-button
@@ -125,7 +136,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                     ${!isValid ? 'border-red' : ''}
                 `}
                 disabled={disabled}
-                onClick={handleButtonClick} // Use updated handler
+                onClick={handleButtonClick}
                 {...rest}
             >
                 {getIconElement()}
