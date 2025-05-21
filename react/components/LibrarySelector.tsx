@@ -21,8 +21,10 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) 
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
     // Loading state
     const [isLoading, setIsLoading] = useState(true);
-    // Plan features
-    const [isExpanded, setIsExpanded] = useState(false);
+
+    useEffect(() => {
+        onSelectionChange?.(selectedLibraryIds);
+    }, [isLoading]);
 
     // Load basic library info immediately
     useEffect(() => {
@@ -123,11 +125,11 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) 
 
     return (
         <div className="display-flex flex-col gap-3 mb-6">
-            <div className="text-lg font-semibold">Step 1: Select Libraries</div>
+            {/* <div className="text-lg font-semibold">Step 1: Select Libraries</div> */}
 
-            <div className="text-base font-color-secondary">
+            {/* <div className="text-base font-color-secondary">
                 Select the libraries you want to sync. Beaver will sync your Zotero library, upload your PDFs, and index your files for search. This process can take 60 minutes or more.
-            </div>
+            </div> */}
             
             {/* Library list */}
             <div className="display-flex flex-col gap-2">
@@ -188,7 +190,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) 
             <div className="mt-4 display-flex flex-col gap-3">
                 {/* Basic Processing - Show when user has basic plan */}
                 {!planFeatures.advancedProcessing && (
-                    <div className="p-3 rounded-md bg-senary">
+                    <div className={`p-3 rounded-md bg-senary ${!planFeatures.advancedProcessing ? "border-popup" : ''}`}>
                         <div className="display-flex flex-row justify-between items-center mb-1">
                             <span className="font-medium">Basic Processing</span>
                             {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
@@ -205,7 +207,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) 
                 {/* Advanced Processing */}
                 {planFeatures.advancedProcessing ? (
                     /* When user has advanced plan, show advanced processing with balance */
-                    <div className="p-3 rounded-md bg-senary">
+                    <div className="p-3 rounded-md bg-senary border-popup">
                         <div className="display-flex flex-row justify-between items-center mb-1">
                             <span className="font-medium">Advanced Processing</span>
                             {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
