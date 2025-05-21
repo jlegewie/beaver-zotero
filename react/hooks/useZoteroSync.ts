@@ -5,7 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader, UploadProgressInfo } from "../../src/services/FileUploader";
-import { planFeaturesAtom } from "../atoms/profile";
+import { planFeaturesAtom, userAuthorizationAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
@@ -32,6 +32,7 @@ interface CollectedEvents {
  */
 export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFilter, debounceMs: number = DEBOUNCE_MS) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const isAuthorized = useAtomValue(userAuthorizationAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const setSyncTotal = useSetAtom(syncTotalAtom);
@@ -154,6 +155,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
 
     useEffect(() => {
         if (!isAuthenticated) return;
+        if (!isAuthorized) return;
         if (!planFeatures.databaseSync) return;
 
         logger("useZoteroSync: Setting up Zotero sync", 3);
