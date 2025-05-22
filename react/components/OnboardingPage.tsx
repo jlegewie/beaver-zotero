@@ -24,14 +24,13 @@ const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
 );
 
 const ProcessItem: React.FC<{
-    status: SyncStatus,
     icon: React.ReactNode,
     title: string,
     description?: string,
     progress?: number,
     leftText?: string,
     rightText?: string,
-}> = ({ status, icon, title, description, progress, leftText, rightText }) => {
+}> = ({ icon, title, description, progress, leftText, rightText }) => {
     return (
         <div className="display-flex flex-row gap-4">
             <div className="mt-1">
@@ -243,7 +242,6 @@ const OnboardingPage: React.FC = () => {
                 <div className="display-flex flex-col gap-5">
                     {/* Syncing your library */}
                     <ProcessItem 
-                        status={syncStatus}
                         icon={getSyncIcon()}
                         title="Syncing Zotero database"
                         progress={librarySyncProgress.progress}
@@ -256,7 +254,6 @@ const OnboardingPage: React.FC = () => {
                     
                     {/* Uploading files */}
                     <ProcessItem 
-                        status={fileStatus}
                         icon={CheckmarkIcon}
                         title={`Uploading ${fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount} files`}
                         leftText={fileStats.uploadFailedCount > 0
@@ -269,7 +266,6 @@ const OnboardingPage: React.FC = () => {
                     
                     {/* Indexing files */}
                     <ProcessItem 
-                        status={getIndexingStatus()}
                         icon={CheckmarkIcon}
                         title="Indexing files"
                         progress={indexingProgress}
