@@ -39,6 +39,27 @@ export interface AttachmentRecord {
     docling_error_code: string | null;
 }
 
+/* 
+ * Interface for the 'upload_queue' table row
+ * 
+ * Table stores upload queue for each unique file hash with visibility,
+ * attempt count, file metadata and reference to representative attachment record.
+ * 
+ */
+export interface UploadQueueRecord {
+    file_hash: string;
+    user_id: string;
+    page_count: number | null;
+    file_size: number | null;
+    queue_visibility: string; 
+    attempt_count: number;
+    
+    // Reference to representative attachment record
+    library_id: number;
+    zotero_key: string;
+}
+
+
 /**
  * Manages the beaver SQLite database using Zotero's DBConnection.
  */
@@ -85,6 +106,21 @@ export class BeaverDB {
                 md_error_code            TEXT,
                 docling_error_code       TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS upload_queue (
+                file_hash                TEXT NOT NULL,
+                user_id                  TEXT(36) NOT NULL,
+                page_count               INTEGER,
+                file_size                INTEGER,
+                queue_visibility         TEXT, 
+                attempt_count            INTEGER DEFAULT 0 NOT NULL,
+                library_id               INTEGER NOT NULL,
+                zotero_key               TEXT NOT NULL,
+                PRIMARY KEY (user_id, file_hash),
+                UNIQUE(user_id, file_hash)
             );
         `);
     }
@@ -437,6 +473,35 @@ export class BeaverDB {
     }
 
     /**
+     * Retrieve an upload queue record by its user_id, library_id and zotero_key.
+     * @param user_id The user_id of the queue item.
+     * @param libraryId The library_id of the representative attachment.
+     * @param zoteroKey The zotero_key of the representative attachment.
+     * @returns The UploadQueueRecord if found, otherwise null.
+     */
+    public async getUploadQueueRecordByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<UploadQueueRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM upload_queue WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
+            [user_id, libraryId, zoteroKey]
+        );
+        return rows.length === 0 ? null : BeaverDB.rowToUploadQueueRecord(rows[0]);
+    }
+
+    /**
+     * Retrieve an upload queue record by its user_id and file_hash.
+     * @param user_id The user_id of the queue item.
+     * @param file_hash The file_hash of the queue item.
+     * @returns The UploadQueueRecord if found, otherwise null.
+     */
+    public async getUploadQueueRecordByFileHash(user_id: string, file_hash: string): Promise<UploadQueueRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM upload_queue WHERE user_id = ? AND file_hash = ?`,
+            [user_id, file_hash]
+        );
+        return rows.length === 0 ? null : BeaverDB.rowToUploadQueueRecord(rows[0]);
+    }
+
+    /**
      * Upsert multiple attachment records in a single transaction.
      * Inserts attachments that don't exist, updates attachments where fields have changed.
      * @param user_id User ID for the attachments
@@ -680,57 +745,19 @@ export class BeaverDB {
     }
 
     /**
-     * Get the next batch of attachments ready for upload and claim them for processing.
-     * @param user_id User ID
-     * @param limit Maximum number of attachments to return
-     * @param maxAttempts Maximum upload attempts before giving up
-     * @param visibilityTimeoutMinutes How long to claim the items for (in minutes)
-     * @returns Array of attachment records ready for upload
+     * Helper method to construct UploadQueueRecord from a database row
      */
-    public async getAttachmentsForUpload(
-        user_id: string,
-        limit: number = 5,
-        maxAttempts: number = 3,
-        visibilityTimeoutMinutes: number = 5
-    ): Promise<AttachmentRecord[]> {
-        // Use a transaction to ensure we don't get race conditions
-        return await this.conn.transaction(async (tx: any) => {
-            // Find attachments that:
-            // 1. Have a file_hash (indicating a file exists)
-            // 2. Are available in the queue (visibility NULL or expired)
-            // 3. Have not exceeded max attempts
-            // 4. Have upload_status pending or failed (or NULL)
-            const rows = await tx.queryAsync(
-                `SELECT * FROM attachments
-                WHERE user_id = ?
-                AND file_hash IS NOT NULL
-                AND can_upload = 1
-                AND (queue_visibility IS NULL OR queue_visibility <= datetime('now'))
-                AND (attempt_count IS NULL OR attempt_count < ?)
-                AND (upload_status IS NULL OR upload_status = 'pending' OR upload_status = 'failed')
-                LIMIT ?`,
-                [user_id, maxAttempts, limit]
-            );
-            
-            // Convert rows to attachment records
-            const attachments = rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
-            
-            // Claim the attachments by updating queue_visibility
-            if (attachments.length > 0) {
-                const ids = attachments.map((a: AttachmentRecord) => a.id);
-                const placeholders = ids.map(() => '?').join(',');
-                
-                await tx.queryAsync(
-                    `UPDATE attachments 
-                    SET queue_visibility = datetime('now', '+${visibilityTimeoutMinutes} minutes'),
-                        attempt_count = COALESCE(attempt_count, 0) + 1
-                    WHERE id IN (${placeholders})`,
-                    [...ids]
-                );
-            }
-            
-            return attachments;
-        });
+    private static rowToUploadQueueRecord(row: any): UploadQueueRecord {
+        return {
+            file_hash: row.file_hash,
+            user_id: row.user_id,
+            page_count: row.page_count,
+            file_size: row.file_size,
+            queue_visibility: row.queue_visibility,
+            attempt_count: row.attempt_count,
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+        };
     }
 
     /**
@@ -779,7 +806,7 @@ export class BeaverDB {
             [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NULL AND can_upload = 0',
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NULL',
             [user_id]
             ),
             this.conn.queryAsync(
@@ -798,6 +825,87 @@ export class BeaverDB {
             totalPages: aggregatesResult[0]?.totalPages || 0,
             totalSize: aggregatesResult[0]?.totalSize || 0
         };
+    }
+
+    /**
+     * Get the next batch of items from the upload queue and claim them for processing.
+     * @param user_id User ID
+     * @param limit Maximum number of items to return
+     * @param maxAttempts Maximum upload attempts before an item is no longer considered for upload via this method
+     * @param visibilityTimeoutMinutes How long to claim the items for (in minutes)
+     * @returns Array of upload queue records ready for processing
+     */
+    public async readQueueItems(
+        user_id: string,
+        limit: number = 5,
+        maxAttempts: number = 3,
+        visibilityTimeoutMinutes: number = 5
+    ): Promise<UploadQueueRecord[]> {
+        return await this.conn.transaction(async (tx: any) => {
+            const now = 'datetime(\'now\')'; // SQLite function for current UTC time
+            const visibilityTimestamp = `datetime('now', '+${visibilityTimeoutMinutes} minutes')`;
+
+            // Select items that:
+            // 1. Are for the given user_id
+            // 2. `queue_visibility` is NULL (never processed) or in the past (processing timed out)
+            // 3. `attempt_count` is less than `maxAttempts`
+            const rows = await tx.queryAsync(
+                `SELECT * FROM upload_queue
+                 WHERE user_id = ?
+                   AND (queue_visibility IS NULL OR queue_visibility <= ${now})
+                   AND attempt_count < ?
+                 ORDER BY attempt_count ASC, file_hash ASC -- Prioritize items with fewer attempts
+                 LIMIT ?`,
+                [user_id, maxAttempts, limit]
+            );
+
+            const itemsToProcess = rows.map((row: any) => BeaverDB.rowToUploadQueueRecord(row));
+
+            if (itemsToProcess.length > 0) {
+                const fileHashes = itemsToProcess.map((item: UploadQueueRecord) => item.file_hash);
+                const placeholders = fileHashes.map(() => '?').join(',');
+
+                // Update queue_visibility and increment attempt_count for the selected items
+                await tx.queryAsync(
+                    `UPDATE upload_queue
+                     SET queue_visibility = ${visibilityTimestamp},
+                         attempt_count = attempt_count + 1
+                     WHERE user_id = ? AND file_hash IN (${placeholders})`,
+                    [user_id, ...fileHashes]
+                );
+            }
+            return itemsToProcess;
+        });
+    }
+
+    /**
+     * Mark an item in the upload queue as completed.
+     * This involves deleting it from 'upload_queue' and updating 'attachments'.
+     * @param user_id User ID
+     * @param file_hash The file_hash of the completed item
+     * @returns boolean indicating whether the queue item was found and processed
+     */
+    public async completeQueueItem(user_id: string, file_hash: string): Promise<boolean> {
+        let itemDeleted = false;
+        await this.conn.executeTransaction(async () => {
+            // Delete from upload_queue
+            const deleteResult = await this.conn.queryAsync(
+                `DELETE FROM upload_queue WHERE user_id = ? AND file_hash = ?`,
+                [user_id, file_hash]
+            );
+            itemDeleted = (deleteResult.changes || 0) > 0;
+
+            if (itemDeleted) {
+                // Update all attachments with this file_hash to 'completed'
+                await this.conn.queryAsync(
+                    `UPDATE attachments
+                     SET upload_status = 'completed'
+                     WHERE user_id = ? AND file_hash = ?`,
+                    [user_id, file_hash]
+                );
+            }
+        });
+        return itemDeleted;
     }
 }
 
