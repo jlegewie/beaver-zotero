@@ -797,7 +797,6 @@ export class BeaverDB {
         const [
             totalResult,
             pendingResult,
-            inProgressResult,
             completedResult,
             failedResult,
             skippedResult,
@@ -808,11 +807,7 @@ export class BeaverDB {
             [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "pending" AND (queue_visibility IS NULL OR queue_visibility <= datetime("now"))',
-            [user_id]
-            ),
-            this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND queue_visibility > datetime("now")',
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "pending"',
             [user_id]
             ),
             this.conn.queryAsync(
@@ -836,7 +831,7 @@ export class BeaverDB {
         return {
             total: totalResult[0]?.count || 0,
             pending: pendingResult[0]?.count || 0,
-            inProgress: inProgressResult[0]?.count || 0,
+            inProgress: 0,
             completed: completedResult[0]?.count || 0,
             failed: failedResult[0]?.count || 0,
             skipped: skippedResult[0]?.count || 0,
