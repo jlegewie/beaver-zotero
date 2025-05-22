@@ -192,44 +192,63 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         setSyncTotal(0);
         setSyncCurrent(0);
         
-        syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
-        
-        // Create the notification observer with debouncing
-        const observer = {
-            notify: async function(event: string, type: string, ids: number[], extraData: any) {
-                if (type === 'item') {
-                    // Record the timestamp of this event
-                    eventsRef.current.timestamp = Date.now();
-                    
-                    if (event === 'add' || event === 'modify') {
-                        // Collect add/modify events
-                        ids.forEach(id => eventsRef.current.addModify.add(id));
-                    } else if (event === 'delete') {
-                        // Collect delete events with their metadata
-                        ids.forEach(id => {
-                            if (extraData && extraData[id]) {
-                                const { libraryID, key } = extraData[id];
-                                if (libraryID && key) {
-                                    eventsRef.current.delete.set(id, { libraryID, key });
+        // Function to create the observer
+        const setupObserver = () => {
+            // Create the notification observer with debouncing
+            const observer = {
+                notify: async function(event: string, type: string, ids: number[], extraData: any) {
+                    if (type === 'item') {
+                        // Record the timestamp of this event
+                        eventsRef.current.timestamp = Date.now();
+                        
+                        if (event === 'add' || event === 'modify') {
+                            // Collect add/modify events
+                            ids.forEach(id => eventsRef.current.addModify.add(id));
+                        } else if (event === 'delete') {
+                            // Collect delete events with their metadata
+                            ids.forEach(id => {
+                                if (extraData && extraData[id]) {
+                                    const { libraryID, key } = extraData[id];
+                                    if (libraryID && key) {
+                                        eventsRef.current.delete.set(id, { libraryID, key });
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        }
+                        
+                        // Clear existing timer and set a new one
+                        if (eventsRef.current.timer !== null) {
+                            clearTimeout(eventsRef.current.timer);
+                        }
+                        
+                        // Set new timer to process events after debounce period
+                        eventsRef.current.timer = setTimeout(processEvents, debounceMs);
                     }
-                    
-                    // Clear existing timer and set a new one
-                    if (eventsRef.current.timer !== null) {
-                        clearTimeout(eventsRef.current.timer);
-                    }
-                    
-                    // Set new timer to process events after debounce period
-                    eventsRef.current.timer = setTimeout(processEvents, debounceMs);
                 }
-            }
-        // @ts-ignore Zotero.Notifier.Notify is defined
-        } as Zotero.Notifier.Notify;
+            // @ts-ignore Zotero.Notifier.Notify is defined
+            } as Zotero.Notifier.Notify;
+            
+            // Register the observer
+            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
+        };
         
-        // Register the observer
-        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
+        // Create an async initialization function
+        const initializeSync = async () => {
+            try {
+                // First sync the database
+                await syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
+                // Then set up the observer after sync completes
+                setupObserver();
+            } catch (error: any) {
+                logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
+                Zotero.logError(error);
+                // Still set up the observer even if initial sync fails
+                setupObserver();
+            }
+        };
+        
+        // Call the async initialization function
+        initializeSync();
         
         // Cleanup function
         return () => {
