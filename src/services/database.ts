@@ -919,6 +919,8 @@ export class BeaverDB {
     /**
      * Upsert a single record into the 'upload_queue' table.
      * If a record with the same user_id and file_hash exists, it's updated. Otherwise, a new record is inserted.
+     * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
+     * For updates: queue_visibility and attempt_count are only updated if explicitly provided.
      * @param user_id User ID for the queue item.
      * @param item Data for the upload_queue record.
      */
@@ -927,22 +929,45 @@ export class BeaverDB {
         item: Omit<UploadQueueRecord, 'user_id'>
     ): Promise<void> {
         const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
+        
+        // Build the update clauses dynamically based on what fields are provided
+        const updateClauses = [
+            'page_count = excluded.page_count',
+            'file_size = excluded.file_size',
+            'library_id = excluded.library_id',
+            'zotero_key = excluded.zotero_key'
+        ];
+        
+        // Only update queue_visibility and attempt_count if they are explicitly provided
+        if (queue_visibility !== undefined) {
+            updateClauses.push('queue_visibility = excluded.queue_visibility');
+        }
+        
+        if (attempt_count !== undefined) {
+            updateClauses.push('attempt_count = excluded.attempt_count');
+        }
+        
         await this.conn.queryAsync(
             `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, file_hash) DO UPDATE SET
-                page_count = excluded.page_count,
-                file_size = excluded.file_size,
-                queue_visibility = excluded.queue_visibility,
-                attempt_count = excluded.attempt_count,
-                library_id = excluded.library_id,
-                zotero_key = excluded.zotero_key`,
-            [user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key]
+             VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+             ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
+            [
+                user_id, 
+                file_hash, 
+                page_count, 
+                file_size, 
+                queue_visibility ?? null, // Convert undefined to null for COALESCE
+                attempt_count ?? null,    // Convert undefined to null for COALESCE
+                library_id, 
+                zotero_key
+            ]
         );
     }
 
     /**
      * Upsert multiple upload_queue records in a single transaction.
+     * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
+     * For updates: queue_visibility and attempt_count are only updated if explicitly provided.
      * @param user_id User ID for the queue items
      * @param items An array of queue item data.
      */
@@ -953,17 +978,38 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             for (const item of items) {
                 const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
+                
+                // Build the update clauses dynamically based on what fields are provided
+                const updateClauses = [
+                    'page_count = excluded.page_count',
+                    'file_size = excluded.file_size',
+                    'library_id = excluded.library_id',
+                    'zotero_key = excluded.zotero_key'
+                ];
+                
+                // Only update queue_visibility and attempt_count if they are explicitly provided
+                if (queue_visibility !== undefined) {
+                    updateClauses.push('queue_visibility = excluded.queue_visibility');
+                }
+                
+                if (attempt_count !== undefined) {
+                    updateClauses.push('attempt_count = excluded.attempt_count');
+                }
+                
                 await this.conn.queryAsync(
                     `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(user_id, file_hash) DO UPDATE SET
-                        page_count = excluded.page_count,
-                        file_size = excluded.file_size,
-                        queue_visibility = excluded.queue_visibility,
-                        attempt_count = excluded.attempt_count,
-                        library_id = excluded.library_id,
-                        zotero_key = excluded.zotero_key`,
-                    [user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key]
+                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+                     ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
+                    [
+                        user_id, 
+                        file_hash, 
+                        page_count, 
+                        file_size, 
+                        queue_visibility ?? null, // Convert undefined to null for COALESCE
+                        attempt_count ?? null,    // Convert undefined to null for COALESCE
+                        library_id, 
+                        zotero_key
+                    ]
                 );
             }
         });
