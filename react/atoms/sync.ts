@@ -13,8 +13,18 @@ export interface LibrarySyncStatus {
 }
 
 // Library-specific sync status atom
+let initialLibraryStatus: Record<number, LibrarySyncStatus> = {};
+try {
+    const prefValue = getPref('selectedLibrary');
+    if (prefValue) {
+        initialLibraryStatus = JSON.parse(prefValue) as Record<number, LibrarySyncStatus>;
+    }
+} catch (e) {
+    const errorMessage = `Failed to parse 'selectedLibrary' preference: ${e instanceof Error ? e.message : String(e)}`;
+    Zotero.logError(new Error(errorMessage));
+}
 export const librariesSyncStatusAtom = atom<Record<number, LibrarySyncStatus>>(
-    JSON.parse(getPref('selectedLibrary') || '{}') as Record<number, LibrarySyncStatus>
+    initialLibraryStatus
 );
 
 // Derived atom for overall library sync progress
