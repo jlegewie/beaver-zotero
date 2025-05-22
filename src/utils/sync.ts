@@ -343,7 +343,8 @@ export async function syncItemsToBackend(
                 const attachments = batchResult.attachments.map(attachment => ({
                     library_id: attachment.library_id,
                     zotero_key: attachment.zotero_key,
-                    attachment_metadata_hash: attachment.metadata_hash
+                    attachment_metadata_hash: attachment.metadata_hash,
+                    file_hash: attachment.file_hash,
                 }));
                 // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
