@@ -10,7 +10,8 @@ import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
 const DEBOUNCE_MS = 2000;
-const SYNC_BATCH_SIZE = 50;
+const SYNC_BATCH_SIZE_INITIAL = 100;
+const SYNC_BATCH_SIZE_INCREMENTAL = 200;
 
 /**
  * Interface for collected sync events
@@ -88,12 +89,17 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Sync each library's items separately
             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
                 logger(`useZoteroSync: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
-                await syncItemsToBackend(libraryID, libraryItems, 'incremental', 
+                await syncItemsToBackend(
+                    libraryID,
+                    libraryItems,
+                    'incremental', 
                     (status) => setSyncStatus(status), 
                     (processed, total) => {
                         setSyncTotal(total);
                         setSyncCurrent(processed);
-                    });
+                    },
+                    SYNC_BATCH_SIZE_INCREMENTAL
+                );
             }
         } catch (error: any) {
             logger(`useZoteroSync: Error syncing modified items: ${error.message}`, 1);
@@ -237,7 +243,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         const initializeSync = async () => {
             try {
                 // First sync the database
-                await syncZoteroDatabase(filterFunction, SYNC_BATCH_SIZE, onStatusChange, onProgress);
+                await syncZoteroDatabase(filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
                 // Then set up the observer after sync completes
                 setupObserver();
             } catch (error: any) {
