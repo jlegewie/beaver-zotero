@@ -29,16 +29,7 @@ export interface AttachmentRecord {
     library_id: number;
     zotero_key: string;
     attachment_metadata_hash: string;
-
-    // File metadata
     file_hash: string | null;
-    page_count: number | null;
-    file_size: number | null;
-
-    // Queue management
-    queue_visibility: string | null; 
-    attempt_count: number | null;
-    can_upload: boolean | null;
 
     // Processing status
     upload_status: UploadStatus | null;
@@ -186,19 +177,12 @@ export class BeaverDB {
             docling_status: null,
             md_error_code: null,
             docling_error_code: null,
-            page_count: null,
-            file_size: null,
-            queue_visibility: null,
-            attempt_count: null,
-            can_upload: null
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, 
-            upload_status, md_status, docling_status, md_error_code, docling_error_code, page_count, file_size, 
-            queue_visibility, attempt_count, can_upload)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -210,12 +194,7 @@ export class BeaverDB {
                 finalAttachment.md_status,
                 finalAttachment.docling_status,
                 finalAttachment.md_error_code,
-                finalAttachment.docling_error_code,
-                finalAttachment.page_count,
-                finalAttachment.file_size,
-                finalAttachment.queue_visibility,
-                finalAttachment.attempt_count,
-                finalAttachment.can_upload
+                finalAttachment.docling_error_code
             ]
         );
         return id;
@@ -293,12 +272,7 @@ export class BeaverDB {
             'md_status',
             'docling_status',
             'md_error_code',
-            'docling_error_code',
-            'page_count',
-            'file_size',
-            'queue_visibility',
-            'attempt_count',
-            'can_upload'
+            'docling_error_code'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
@@ -444,16 +418,11 @@ export class BeaverDB {
             zotero_key: row.zotero_key,
             attachment_metadata_hash: row.attachment_metadata_hash,
             file_hash: row.file_hash,
-            page_count: row.page_count,
-            file_size: row.file_size,
             upload_status: row.upload_status as UploadStatus,
             md_status: row.md_status as ProcessingStatus,
             docling_status: row.docling_status as ProcessingStatus,
             md_error_code: row.md_error_code,
             docling_error_code: row.docling_error_code,
-            can_upload: row.can_upload,
-            queue_visibility: row.queue_visibility,
-            attempt_count: row.attempt_count,
         };
     }
 
@@ -495,11 +464,6 @@ export class BeaverDB {
             docling_status: 'unavailable',
             md_error_code: null,
             docling_error_code: null,
-            page_count: null,
-            file_size: null,
-            queue_visibility: null,
-            attempt_count: null,
-            can_upload: null
         };
 
         const finalIds: string[] = [];
@@ -544,8 +508,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code',
-                    'page_count', 'file_size', 'queue_visibility', 'attempt_count', 'can_upload'
+                    'file_hash', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -576,7 +539,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -590,17 +553,10 @@ export class BeaverDB {
                         attachment.md_status,
                         attachment.docling_status,
                         attachment.md_error_code,
-                        attachment.docling_error_code,
-                        attachment.page_count,
-                        attachment.file_size,
-                        attachment.queue_visibility,
-                        attachment.attempt_count,
-                        attachment.can_upload
+                        attachment.docling_error_code
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, 
-                    file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code, 
-                    page_count, file_size, queue_visibility, attempt_count, can_upload) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
