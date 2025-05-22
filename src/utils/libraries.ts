@@ -1,4 +1,4 @@
-import { ItemFilterFunction, syncingItemFilter } from "./sync";
+import { getItemsToSync, ItemFilterFunction, syncingItemFilter } from "./sync";
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 
 export interface LibraryStatistics {
@@ -22,14 +22,11 @@ export const getLibraryStatistics = async (
 
     const libraryStatistics = await Promise.all(userLibraries.map(async (library) => {
         // 1. Get all items from the library
-        const allItems = await Zotero.Items.getAll(library.libraryID, false, false, false);
+        const allItems = await getItemsToSync(library.libraryID);
                 
-        // 2. Filter items based on criteria
-        const itemsToSync = allItems.filter(filterFunction);
-
-        // 3. Get the page count for PDF attachments
+        // 2. Get the page count for PDF attachments
         let totalPageCount = 0;
-        for (const item of itemsToSync) {
+        for (const item of allItems) {
             if (item.isPDFAttachment()) {
                 const pageCount = await getPDFPageCount(item);
                 totalPageCount += pageCount || 0;
@@ -40,10 +37,10 @@ export const getLibraryStatistics = async (
             libraryID: library.libraryID,
             name: library.name,
             isGroup: library.isGroup,
-            itemCount: itemsToSync.length,
-            attachmentCount: itemsToSync.filter(item => item.isAttachment()).length,
-            pdfCount: itemsToSync.filter(item => item.isPDFAttachment()).length,
-            imageCount: itemsToSync.filter(item => item.isImageAttachment()).length,
+            itemCount: allItems.length,
+            attachmentCount: allItems.filter(item => item.isAttachment()).length,
+            pdfCount: allItems.filter(item => item.isPDFAttachment()).length,
+            imageCount: allItems.filter(item => item.isImageAttachment()).length,
             pageCount: totalPageCount,
         } as LibraryStatistics;
     }));

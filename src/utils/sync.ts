@@ -557,3 +557,18 @@ async function getModifiedItemsSince(libraryID: number, lastSyncDate: string): P
     const ids = await Zotero.DB.columnQueryAsync(sql, [libraryID, lastSyncDate]) as number[];
     return await Zotero.Items.getAsync(ids);
 }
+
+/**
+ * Gets all library items to sync
+ * @param libraryID Zotero library ID
+ * @param filterFunction Optional function to filter which items to sync
+ * @returns Promise resolving to array of modified Zotero items
+ */
+export async function getItemsToSync(
+    libraryID: number,
+    filterFunction: ItemFilterFunction = syncingItemFilter
+): Promise<Zotero.Item[]> {
+    const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
+    const itemsToSync = allItems.filter(filterFunction);
+    return itemsToSync;
+}
