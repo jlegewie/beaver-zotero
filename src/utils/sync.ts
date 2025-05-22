@@ -6,9 +6,7 @@ import { logger } from './logger';
 import { ItemRecord, AttachmentRecord } from '../services/database';
 import { userAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
-import { setPref } from './prefs';
-
-const LIBRARY_IDS = [1];
+import { getPref, setPref } from './prefs';
 
 /**
  * Interface for item filter function
@@ -21,7 +19,7 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  * @returns true if the item should be synced
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
-    return LIBRARY_IDS.includes(item.libraryID) && (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
+    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
 };
 
 /**
