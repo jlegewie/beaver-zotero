@@ -927,6 +927,36 @@ export class BeaverDB {
     }
 
     /**
+     * Mark an item in the upload queue as failed.
+     * This involves deleting it from 'upload_queue' and updating 'attachments'.
+     * @param user_id User ID
+     * @param file_hash The file_hash of the failed item
+     * @returns boolean indicating whether the queue item was found and processed
+     */
+    public async failQueueItem(user_id: string, file_hash: string): Promise<boolean> {
+        let itemDeleted = false;
+        await this.conn.executeTransaction(async () => {
+            // Delete from upload_queue
+            const deleteResult = await this.conn.queryAsync(
+                `DELETE FROM upload_queue WHERE user_id = ? AND file_hash = ?`,
+                [user_id, file_hash]
+            );
+            itemDeleted = (deleteResult.changes || 0) > 0;
+
+            if (itemDeleted) {
+                // Update all attachments with this file_hash to 'failed'
+                await this.conn.queryAsync(
+                    `UPDATE attachments
+                     SET upload_status = 'failed'
+                     WHERE user_id = ? AND file_hash = ?`,
+                    [user_id, file_hash]
+                );
+            }
+        });
+        return itemDeleted;
+    }
+
+    /**
      * Upsert a single record into the 'upload_queue' table.
      * If a record with the same user_id and file_hash exists, it's updated. Otherwise, a new record is inserted.
      * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
