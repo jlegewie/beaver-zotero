@@ -60,6 +60,16 @@ export interface UploadQueueRecord {
     zotero_key: string;
 }
 
+// Add a new interface for queue item input that allows optional file_hash
+export interface UploadQueueInput {
+    file_hash?: string | null;  // Allow optional/null for input
+    page_count?: number | null;
+    file_size?: number | null;
+    queue_visibility?: string;
+    attempt_count?: number;
+    library_id: number;
+    zotero_key: string;
+}
 
 /**
  * Manages the beaver SQLite database using Zotero's DBConnection.
@@ -926,9 +936,14 @@ export class BeaverDB {
      */
     public async upsertQueueItem(
         user_id: string,
-        item: Omit<UploadQueueRecord, 'user_id'>
+        item: UploadQueueInput
     ): Promise<void> {
         const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
+        
+        // Validate that file_hash is provided and not empty
+        if (!file_hash || file_hash.trim() === '') {
+            throw new Error('file_hash is required and cannot be empty');
+        }
         
         // Build the update clauses dynamically based on what fields are provided
         const updateClauses = [
@@ -966,17 +981,26 @@ export class BeaverDB {
 
     /**
      * Upsert multiple upload_queue records in a single transaction.
+     * Items without a valid file_hash will be filtered out before insertion.
      * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
      * For updates: queue_visibility and attempt_count are only updated if explicitly provided.
      * @param user_id User ID for the queue items
      * @param items An array of queue item data.
      */
-    public async upsertQueueItemsBatch(user_id: string, items: Omit<UploadQueueRecord, 'user_id'>[]): Promise<void> {
+    public async upsertQueueItemsBatch(user_id: string, items: UploadQueueInput[]): Promise<void> {
         if (items.length === 0) {
             return;
         }
+        
+        // Filter out items that don't have a valid file_hash since database requires it
+        const validItems = items.filter(item => item.file_hash && item.file_hash.trim() !== '');
+        
+        if (validItems.length === 0) {
+            return; // No valid items to process
+        }
+        
         await this.conn.executeTransaction(async () => {
-            for (const item of items) {
+            for (const item of validItems) {
                 const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
                 
                 // Build the update clauses dynamically based on what fields are provided
@@ -1002,11 +1026,11 @@ export class BeaverDB {
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
-                        file_hash, 
-                        page_count, 
-                        file_size, 
-                        queue_visibility ?? null, // Convert undefined to null for COALESCE
-                        attempt_count ?? null,    // Convert undefined to null for COALESCE
+                        file_hash!, // We know this is valid because of the filter above
+                        page_count ?? null, 
+                        file_size ?? null, 
+                        queue_visibility ?? null,
+                        attempt_count ?? null,
                         library_id, 
                         zotero_key
                     ]
