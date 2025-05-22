@@ -1,5 +1,5 @@
 import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
-import { initialSyncCompletedCountAtom, initialSyncItemCountAtom, SyncStatus, initialSyncCompletedAtom } from '../../react/atoms/ui';
+import { initialSyncCompletedCountAtom, SyncStatus, initialSyncCompletedAtom } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
@@ -353,7 +353,6 @@ export async function syncItemsToBackend(
 
             // Update initialSyncCompletedCountAtom if this is an initial sync
             if (syncType === 'initial' && batchResult.success > 0) {
-                console.log('batchResult.success', batchResult.success);
                 const currentCompleted = store.get(initialSyncCompletedCountAtom) || 0;
                 store.set(initialSyncCompletedCountAtom, currentCompleted + batchResult.success);
                 setPref('initialSyncCompletedCount', currentCompleted + batchResult.success);
@@ -406,30 +405,25 @@ export async function syncItemsToBackend(
  */
 export async function performInitialSync(
     libraryID: number,
-    filterFunction: ItemFilterFunction = syncingItemFilter,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 50
 ): Promise<any> {
     try {
-        // Zotero.Libraries.getName() is deprecated. Use Zotero.Library.prototype.name instead
-        // Zotero.Library.prototype.name
-        const libraryName = Zotero.Libraries.getName(libraryID);
+        const library = Zotero.Libraries.get(libraryID);
+        if (!library) {
+            logger(`Beaver Sync: Library ${libraryID} not found`, 1);
+            return;
+        }
+        const libraryName = library.name;
         logger(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
     
         // 1. Get all items from the library
-        const syncDate = Zotero.Date.dateToSQL(new Date(), true);
-        const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
-        
-        // 2. Filter items based on criteria
-        const itemsToSync = allItems.filter(filterFunction);
+        const itemsToSync = await getItemsToSync(libraryID)
         const totalItems = itemsToSync.length;
 
-        // 3. Set initial data import counts
+        // 2. Log items to sync
         logger(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
-        //  TODO: This is incorrect for multiple libraries. Will reset!!!
-        store.set(initialSyncItemCountAtom, totalItems);
-        setPref('initialSyncItemCount', totalItems);
         const totalAttachments = itemsToSync.filter(item => item.isAttachment()).length;
         
         if (totalItems === 0) {
@@ -437,13 +431,7 @@ export async function performInitialSync(
             return { status: 'completed', message: 'No items to sync' };
         }
 
-        // 4. Reset sync completed items counter at the start of sync
-        store.set(initialSyncCompletedCountAtom, 0);
-        setPref('initialSyncCompletedCount', 0);
-        store.set(initialSyncCompletedAtom, false);
-        setPref('initialSyncCompleted', false);
-        
-        // 5. Process items in batches using the new function
+        // 3. Process items in batches using the new function
         await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
         
     } catch (error: any) {
@@ -516,9 +504,13 @@ export async function syncZoteroDatabase(
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
+    // Get the selected libraries from the preferences
+    const selectedLibraryIds = JSON.parse(getPref("selectedLibraryIds") || "[]");
     const libraries = Zotero.Libraries.getAll();
-
-    for (const library of libraries) {
+    const librariesToSync = libraries.filter((library) => selectedLibraryIds.includes(library.id));
+    
+    // Now perform actual syncs for each library
+    for (const library of librariesToSync) {
         const libraryID = library.id;
         const libraryName = library.name;
         
@@ -531,17 +523,20 @@ export async function syncZoteroDatabase(
             
             // Perform initial sync if no previous sync date is found, otherwise perform periodic sync
             if (!lastSyncDate) {
-                await performInitialSync(libraryID, filterFunction, onStatusChange, onProgress, batchSize);
+                await performInitialSync(libraryID, onStatusChange, onProgress, batchSize);
             } else {
                 await performPeriodicSync(libraryID, lastSyncDate, filterFunction, onStatusChange, onProgress, batchSize);
             }
-            
         } catch (error: any) {
             logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
             Zotero.logError(error);
             // Continue with next library even if one fails
         }
     }
+    
+    // After all libraries are processed, mark initial sync as completed
+    store.set(initialSyncCompletedAtom, true);
+    setPref('initialSyncCompleted', true);
     
     logger('Beaver Sync: Sync completed for all libraries', 2);
 }

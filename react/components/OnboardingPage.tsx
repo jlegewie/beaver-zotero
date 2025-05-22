@@ -1,19 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, OneIcon as OneCircleIcon, TwoIcon as TwoCircleIcon, ThreeIcon as ThreeCircleIcon, CSSItemTypeIcon, CSSIcon } from "./icons";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { 
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
     fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
     fileStatusStatsAtom, SyncStatus,
-    initialSyncItemCountAtom, initialDataImportAttachmentCountAtom,
-    syncTypeAtom,
-    initialSyncCompletedAtom
+    initialSyncItemCountAtom,
+    initialSyncCompletedAtom,
+    initialSyncCompletedCountAtom
 } from "../atoms/ui";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
 import { getPref, setPref } from "../../src/utils/prefs";
+import { LibraryStatistics } from "../../src/utils/libraries";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
@@ -34,11 +35,12 @@ const ProcessItem: React.FC<{
     rightText?: string,
 }> = ({ status, icon, title, description, progress, leftText, rightText }) => {
     return (
-        <div className="display-flex flex-row gap-4 mt-6">
-            {icon}
-            
+        <div className="display-flex flex-row gap-4">
+            <div className="mt-1">
+                {icon}
+            </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
-                <div className="font-color-primary text-xl">{title}</div>
+                <div className="font-color-primary text-lg">{title}</div>
                 {description && (
                     <div className="font-color-tertiary text-base">
                         {description}
@@ -68,7 +70,6 @@ const OnboardingPage: React.FC = () => {
     const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
     
     // Database sync state
-    const syncType = useAtomValue(syncTypeAtom);
     const syncStatus = useAtomValue(syncStatusAtom);
     const syncTotal = useAtomValue(syncTotalAtom);
     const syncCurrent = useAtomValue(syncCurrentAtom);
@@ -85,8 +86,12 @@ const OnboardingPage: React.FC = () => {
     useFileStatus();
 
     // Initial data import state
-    const initialSyncItemCount = useAtomValue(initialSyncItemCountAtom);
-    const initialDataImportAttachmentCount = useAtomValue(initialDataImportAttachmentCountAtom);
+    const [initialSyncItemCount, setInitialSyncItemCount] = useAtom(initialSyncItemCountAtom);
+    const [initialSyncCompletedCount, setInitialSyncCompletedCount] = useAtom(initialSyncCompletedCountAtom);
+    const initialSyncCompleted = useAtomValue(initialSyncCompletedAtom);
+
+    // State for full library statistics (loaded asynchronously)
+    const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
 
     // Processing state
     const fileStats = useAtomValue(fileStatusStatsAtom);
@@ -136,18 +141,18 @@ const OnboardingPage: React.FC = () => {
         return 'completed';
     };
 
-    const OneIcon = <Icon icon={OneCircleIcon} className="font-color-secondary scale-13 mt-15"/>;
-    const TwoIcon = <Icon icon={TwoCircleIcon} className="font-color-secondary scale-13 mt-15"/>;
-    const ThreeIcon = <Icon icon={ThreeCircleIcon} className="font-color-secondary scale-13 mt-15"/>;
-    const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-15 mt-15" />;
-    const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-15 mt-15" />;
-    const SpinnerIcon = <Spinner className="scale-15 mt-15" />;
+    const OneIcon = <Icon icon={OneCircleIcon} className="font-color-secondary scale-14"/>;
+    const TwoIcon = <Icon icon={TwoCircleIcon} className="font-color-secondary scale-14"/>;
+    const ThreeIcon = <Icon icon={ThreeCircleIcon} className="font-color-secondary scale-14"/>;
+    const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
+    const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
+    const SpinnerIcon = <Spinner className="scale-14" />;
 
     const getSyncIcon = (): React.ReactNode => {
         if (syncStatus === 'idle') return SpinnerIcon;
-        if (syncType == 'initial' && syncStatus === 'in_progress') return SpinnerIcon;
+        if (syncStatus === 'in_progress') return SpinnerIcon;
         if (syncStatus === 'failed') return CancelIcon;
-        if (initialSyncCompletedAtom) return CheckmarkIcon;
+        if (initialSyncCompleted) return CheckmarkIcon;
         return OneIcon;
     };
 
@@ -165,6 +170,14 @@ const OnboardingPage: React.FC = () => {
             // Update authorization status
             setUserAuthorization(true);
             setPref('userAuthorization', true);
+            // Set item count for initial sync
+            const itemCount = libraryStatistics
+                .filter(library => selectedLibraryIds.includes(library.libraryID))
+                .reduce((acc, curr) => acc + curr.itemCount, 0);
+            setInitialSyncItemCount(itemCount);
+            setPref('initialSyncItemCount', itemCount);
+            setInitialSyncCompletedCount(0);
+            setPref('initialSyncCompletedCount', 0);
         }
     };
     
@@ -198,7 +211,11 @@ const OnboardingPage: React.FC = () => {
                     </div>
                     
                     {/* Library Selector Component */}
-                    <LibrarySelector onSelectionChange={handleLibrarySelectionChange} />
+                    <LibrarySelector
+                        onSelectionChange={handleLibrarySelectionChange}
+                        libraryStatistics={libraryStatistics}
+                        setLibraryStatistics={setLibraryStatistics}
+                    />
                     
                     {/* Button */}
                     <div className="display-flex flex-row mt-6">
@@ -216,18 +233,18 @@ const OnboardingPage: React.FC = () => {
                 </div>
             ) : (
                 // Step 2: Syncing Process
-                <div className="display-flex flex-col gap-3">
+                <div className="display-flex flex-col gap-5">
                     {/* Syncing your library */}
                     <ProcessItem 
                         status={syncStatus}
                         icon={getSyncIcon()}
                         title="Syncing Zotero database"
-                        progress={syncProgress}
-                        leftText={initialSyncItemCount > 0
-                            ? `Syncing ${initialSyncItemCount.toLocaleString()} items`
+                        progress={calculateProgress(initialSyncCompletedCount, initialSyncItemCount)}
+                        leftText={(initialSyncItemCount || 0) > 0
+                            ? `${initialSyncCompletedCount.toLocaleString()} items`
                             : undefined
                         }
-                        rightText={`${calculateProgress(syncCurrent, syncTotal)}%`}
+                        rightText={`${calculateProgress(initialSyncCompletedCount, initialSyncItemCount)}%`}
                     />
                     
                     {/* Uploading files */}

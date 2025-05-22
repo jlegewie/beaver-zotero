@@ -1,4 +1,4 @@
-import { getItemsToSync, ItemFilterFunction, syncingItemFilter } from "./sync";
+import { getItemsToSync } from "./sync";
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 
 export interface LibraryStatistics {
@@ -12,9 +12,7 @@ export interface LibraryStatistics {
     pageCount: number;
 }
 
-export const getLibraryStatistics = async (
-    filterFunction: ItemFilterFunction = syncingItemFilter
-): Promise<LibraryStatistics[]> => {
+export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     // Get all libraries
     const libraries = await Zotero.Libraries.getAll();
     // Filter to user libraries only (since publications are only in user libraries)

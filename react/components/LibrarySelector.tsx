@@ -7,16 +7,16 @@ import Button from "./button";
 
 interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;
+    libraryStatistics: LibraryStatistics[];
+    setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
 }
 
-const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange }) => {
+const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics }) => {
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
-    // State for full library statistics (loaded asynchronously)
-    const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
     // Track which libraries are selected
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
     // Loading state
