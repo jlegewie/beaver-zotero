@@ -10,6 +10,7 @@ import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
 const DEBOUNCE_MS = 2000;
+const SYNC_BATCH_SIZE = 50;
 
 /**
  * Interface for collected sync events
@@ -236,7 +237,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         const initializeSync = async () => {
             try {
                 // First sync the database
-                await syncZoteroDatabase(filterFunction, 50, onStatusChange, onProgress);
+                await syncZoteroDatabase(filterFunction, SYNC_BATCH_SIZE, onStatusChange, onProgress);
                 // Then set up the observer after sync completes
                 setupObserver();
             } catch (error: any) {
