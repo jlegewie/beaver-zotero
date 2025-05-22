@@ -5,11 +5,12 @@ pref("userId", "");
 pref("userEmail", "");
 
 // App settings
-pref("selectedLibraryIds", "");
+pref("selectedLibrary", "{}");
 pref("keyboardShortcut", "l");
 pref("updateSourcesFromZoteroSelection", false);
 
 // AI settings
+pref("maxAttachments", 8);
 pref("customInstructions", "");
 pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
@@ -21,10 +22,6 @@ pref("supportedModels","[]");
 // Initial onboarding process
 pref("userAuthorization", false);
 pref("isInitialDataImportComplete", false);
-
-pref("initialSyncItemCount", 0);
-pref("initialSyncCompletedCount", 0);
-pref("initialSyncCompleted", false);
 
 // Search
 pref("recentItems", "[]");

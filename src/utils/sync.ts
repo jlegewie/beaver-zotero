@@ -1,5 +1,5 @@
 import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
-import { initialSyncCompletedCountAtom, SyncStatus, initialSyncCompletedAtom } from '../../react/atoms/ui';
+import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
@@ -7,6 +7,7 @@ import { ItemRecord, AttachmentRecord } from '../services/database';
 import { userAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { getPref, setPref } from './prefs';
+import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
 
 /**
  * Interface for item filter function
@@ -351,13 +352,6 @@ export async function syncItemsToBackend(
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
             }
 
-            // Update initialSyncCompletedCountAtom if this is an initial sync
-            if (syncType === 'initial' && batchResult.success > 0) {
-                const currentCompleted = store.get(initialSyncCompletedCountAtom) || 0;
-                store.set(initialSyncCompletedCountAtom, currentCompleted + batchResult.success);
-                setPref('initialSyncCompletedCount', currentCompleted + batchResult.success);
-            }
-
             // Update processed count with actual success count
             const newProcessed = processedCount + batchResult.success;
             
@@ -394,6 +388,25 @@ export async function syncItemsToBackend(
 }
 
 /**
+ * Updates the library-specific sync status atom
+ * @param libraryID Zotero library ID
+ * @param updates Partial LibrarySyncStatus object containing only the fields to update
+ */
+const updateLibrarySyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
+    // Update the library-specific status atom
+    store.set(librariesSyncStatusAtom, (current) => ({
+        ...current,
+        [libraryID]: {
+            ...(current[libraryID] || {}),
+            ...updates,
+            libraryID
+        }
+    }));
+
+    setPref('selectedLibrary', JSON.stringify(store.get(librariesSyncStatusAtom)));
+};
+
+/**
  * Performs an initial sync of items from a Zotero library to the backend
  * 
  * @param libraryID Zotero library ID to sync
@@ -419,20 +432,55 @@ export async function performInitialSync(
         logger(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
     
         // 1. Get all items from the library
-        const itemsToSync = await getItemsToSync(libraryID)
+        const itemsToSync = await getItemsToSync(libraryID);
         const totalItems = itemsToSync.length;
+        logger(`Beaver Sync: Found ${totalItems} items to sync for library ${libraryID} (${libraryName})`, 3);
 
-        // 2. Log items to sync
-        logger(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
-        const totalAttachments = itemsToSync.filter(item => item.isAttachment()).length;
+        // 2. Update library-specific sync status atom
+        const libraryInitialStatus = {
+            libraryID,
+            libraryName,
+            itemCount: totalItems,
+            syncedCount: 0,
+            status: 'in_progress'
+        } as LibrarySyncStatus;
         
         if (totalItems === 0) {
-            logger('Beaver Sync: No items to sync, skipping sync operation', 3);
+            logger(`Beaver Sync: No items to sync for library ${libraryID} (${libraryName})`, 3);
+            updateLibrarySyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
             return { status: 'completed', message: 'No items to sync' };
         }
+        
+        updateLibrarySyncStatus(libraryID, libraryInitialStatus);
 
-        // 3. Process items in batches using the new function
-        await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
+        // Add custom progress callback that updates library-specific progress
+        const librarySpecificProgress = (processed: number, total: number) => {
+            const status = processed >= total ? 'completed' : 'in_progress';
+            updateLibrarySyncStatus(libraryID, { syncedCount: processed, status });
+            
+            // Also call the original progress callback if provided
+            if (onProgress) {
+                onProgress(processed, total);
+            }
+        };
+
+        // Add custom status change callback
+        const librarySpecificStatusChange = (status: SyncStatus) => {
+            updateLibrarySyncStatus(libraryID, { status });
+            if (onStatusChange) {
+                onStatusChange(status);
+            }
+        };
+
+        // Replace the syncItemsToBackend call with:
+        await syncItemsToBackend(
+            libraryID, 
+            itemsToSync, 
+            'initial', 
+            librarySpecificStatusChange, 
+            librarySpecificProgress, 
+            batchSize
+        );
         
     } catch (error: any) {
         logger('Beaver Sync: Error during initial sync: ' + error.message, 1);
@@ -505,9 +553,9 @@ export async function syncZoteroDatabase(
     onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
     // Get the selected libraries from the preferences
-    const selectedLibraryIds = JSON.parse(getPref("selectedLibraryIds") || "[]");
+    const selectedLibraries = JSON.parse(getPref("selectedLibrary") || "{}");
     const libraries = Zotero.Libraries.getAll();
-    const librariesToSync = libraries.filter((library) => selectedLibraryIds.includes(library.id));
+    const librariesToSync = libraries.filter((library) => selectedLibraries[library.libraryID]);
     
     // Now perform actual syncs for each library
     for (const library of librariesToSync) {
@@ -533,11 +581,7 @@ export async function syncZoteroDatabase(
             // Continue with next library even if one fails
         }
     }
-    
-    // After all libraries are processed, mark initial sync as completed
-    store.set(initialSyncCompletedAtom, true);
-    setPref('initialSyncCompleted', true);
-    
+        
     logger('Beaver Sync: Sync completed for all libraries', 2);
 }
 

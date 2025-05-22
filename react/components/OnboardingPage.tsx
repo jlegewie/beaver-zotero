@@ -6,10 +6,8 @@ import {
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
     fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
     fileStatusStatsAtom, SyncStatus,
-    initialSyncItemCountAtom,
-    initialSyncCompletedAtom,
-    initialSyncCompletedCountAtom
 } from "../atoms/ui";
+import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../atoms/sync";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
@@ -85,11 +83,11 @@ const OnboardingPage: React.FC = () => {
     // Realtime listening for file status updates
     useFileStatus();
 
-    // Initial data import state
-    const [initialSyncItemCount, setInitialSyncItemCount] = useAtom(initialSyncItemCountAtom);
-    const [initialSyncCompletedCount, setInitialSyncCompletedCount] = useAtom(initialSyncCompletedCountAtom);
-    const initialSyncCompleted = useAtomValue(initialSyncCompletedAtom);
-
+    // Library sync state
+    const setLibrariesSyncStatus = useSetAtom(librariesSyncStatusAtom);
+    
+    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
+    
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
 
@@ -141,19 +139,16 @@ const OnboardingPage: React.FC = () => {
         return 'completed';
     };
 
-    const OneIcon = <Icon icon={OneCircleIcon} className="font-color-secondary scale-14"/>;
-    const TwoIcon = <Icon icon={TwoCircleIcon} className="font-color-secondary scale-14"/>;
-    const ThreeIcon = <Icon icon={ThreeCircleIcon} className="font-color-secondary scale-14"/>;
     const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
     const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
     const SpinnerIcon = <Spinner className="scale-14" />;
 
     const getSyncIcon = (): React.ReactNode => {
-        if (syncStatus === 'idle') return SpinnerIcon;
-        if (syncStatus === 'in_progress') return SpinnerIcon;
-        if (syncStatus === 'failed') return CancelIcon;
-        if (initialSyncCompleted) return CheckmarkIcon;
-        return OneIcon;
+        if (librarySyncProgress.progress === 0) return SpinnerIcon;
+        if (librarySyncProgress.progress < 100) return SpinnerIcon;
+        if (librarySyncProgress.anyFailed) return CancelIcon;
+        if (librarySyncProgress.completed) return CheckmarkIcon;
+        return SpinnerIcon;
     };
 
     // Handle library selection change
@@ -165,19 +160,31 @@ const OnboardingPage: React.FC = () => {
     // Handle authorization
     const handleAuthorize = () => {
         if (selectedLibraryIds.length > 0) {
-            // Save the selected libraries for the sync process
-            setPref('selectedLibraryIds', JSON.stringify(selectedLibraryIds));
+            // Create a map of library IDs to library sync status
+            const selectedLibraries = Object.fromEntries(
+                selectedLibraryIds
+                    .map(id => {
+                        const library = libraryStatistics.find(library => library.libraryID === id);
+                        return [
+                            library?.libraryID,
+                            {
+                                libraryID: library?.libraryID,
+                                libraryName: library?.name || '',
+                                itemCount: library?.itemCount || 0,
+                                syncedCount: 0,
+                                status: 'idle',
+                            } as LibrarySyncStatus
+                        ];
+                    })
+            );
+
+            // Save the sync status for the selected libraries
+            setPref('selectedLibrary', JSON.stringify(selectedLibraries));
+            setLibrariesSyncStatus(selectedLibraries);
+            
             // Update authorization status
             setUserAuthorization(true);
             setPref('userAuthorization', true);
-            // Set item count for initial sync
-            const itemCount = libraryStatistics
-                .filter(library => selectedLibraryIds.includes(library.libraryID))
-                .reduce((acc, curr) => acc + curr.itemCount, 0);
-            setInitialSyncItemCount(itemCount);
-            setPref('initialSyncItemCount', itemCount);
-            setInitialSyncCompletedCount(0);
-            setPref('initialSyncCompletedCount', 0);
         }
     };
     
@@ -239,12 +246,12 @@ const OnboardingPage: React.FC = () => {
                         status={syncStatus}
                         icon={getSyncIcon()}
                         title="Syncing Zotero database"
-                        progress={calculateProgress(initialSyncCompletedCount, initialSyncItemCount)}
-                        leftText={(initialSyncItemCount || 0) > 0
-                            ? `${initialSyncCompletedCount.toLocaleString()} items`
+                        progress={librarySyncProgress.progress}
+                        leftText={librarySyncProgress.totalItems > 0
+                            ? `${librarySyncProgress.syncedItems.toLocaleString()} of ${librarySyncProgress.totalItems.toLocaleString()} items`
                             : undefined
                         }
-                        rightText={`${calculateProgress(initialSyncCompletedCount, initialSyncItemCount)}%`}
+                        rightText={`${librarySyncProgress.progress}%`}
                     />
                     
                     {/* Uploading files */}

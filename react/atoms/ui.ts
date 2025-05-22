@@ -1,19 +1,13 @@
 import { atom } from 'jotai';
-import { currentSourcesAtom } from './input';
 import { InputSource } from '../types/sources';
 import { FileStatus } from '../types/fileStatus';
-import { TextSelection, Annotation } from '../types/attachments/apiTypes';
-import { getPref } from '../../src/utils/prefs';
+import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage } from '../types/popupMessage';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
 
-// Initial data import status
-export const initialSyncCompletedAtom = atom<boolean>(getPref('initialSyncCompleted') || false);
-export const initialSyncItemCountAtom = atom<number>(getPref('initialSyncItemCount') || 0);
-export const initialSyncCompletedCountAtom = atom<number>(getPref('initialSyncCompletedCount') || 0);
 
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
@@ -22,6 +16,7 @@ export const userScrolledAtom = atom(false);
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 // Database sync status
+// TODO: Move to sync.ts
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 // 'idle' - Initial state, no sync has been attempted
 // 'in_progress' - Active sync operation

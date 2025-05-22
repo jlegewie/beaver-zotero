@@ -9,9 +9,10 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "userId": string;
       "userEmail": string;
-      "selectedLibraryIds": string;
+      "selectedLibrary": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
+      "maxAttachments": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
@@ -21,9 +22,6 @@ declare namespace _ZoteroTypes {
       "supportedModels": string;
       "userAuthorization": boolean;
       "isInitialDataImportComplete": boolean;
-      "initialSyncItemCount": number;
-      "initialSyncCompletedCount": number;
-      "initialSyncCompleted": boolean;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;
