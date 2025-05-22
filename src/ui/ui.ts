@@ -59,12 +59,31 @@ export class BeaverUIFactory {
             // Initialize React UI
             initializeReactUI(win);
             
-            // Render React components
-            const libraryRoot = win.document.getElementById("beaver-react-root-library");
-            const readerRoot = win.document.getElementById("beaver-react-root-reader");
+            // Create and render global initializer once
+            let globalInitializerRoot = win.document.getElementById("beaver-global-initializer-root");
+            if (!globalInitializerRoot) {
+                globalInitializerRoot = win.document.createElement("div");
+                globalInitializerRoot.id = "beaver-global-initializer-root";
+                globalInitializerRoot.style.display = "none"; // It's not a visible component
+                win.document.documentElement.appendChild(globalInitializerRoot);
+                
+                if (typeof win.renderGlobalInitializer === 'function') {
+                    win.renderGlobalInitializer(globalInitializerRoot);
+                } else {
+                    Zotero.debug("Beaver Error: renderGlobalInitializer function not found on window object.");
+                }
+            }
             
-            if (libraryRoot) win.renderAiSidebar(libraryRoot, "library");
-            if (readerRoot) win.renderAiSidebar(readerRoot, "reader");
+            // Render React components for actual sidebars
+            const libraryRootEl = win.document.getElementById("beaver-react-root-library");
+            const readerRootEl = win.document.getElementById("beaver-react-root-reader");
+            
+            if (libraryRootEl && typeof win.renderAiSidebar === 'function') {
+                win.renderAiSidebar(libraryRootEl, "library");
+            }
+            if (readerRootEl && typeof win.renderAiSidebar === 'function') {
+                win.renderAiSidebar(readerRootEl, "reader");
+            }
         };
     }
 
