@@ -1,7 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingStatus, UploadStatus } from './attachmentsService';
 
-// Interface for the 'items' table row
+/* 
+ * Interface for the 'items' table row
+ * 
+ * Table stores the current syncing state of a zotero item
+ * Items are only stored with a metadata hash after they have been synced
+ * 
+ */
 export interface ItemRecord {
     id: string;
     user_id: string;
@@ -10,14 +16,31 @@ export interface ItemRecord {
     item_metadata_hash: string;
 }
 
-// Interface for the 'attachments' table row
+/* 
+ * Interface for the 'attachments' table row
+ * 
+ * Table stores the current state of a zotero attachment. This includes
+ * the syncing state (file metadata), upload status and processing status.
+ * 
+ */
 export interface AttachmentRecord {
     id: string;
     user_id: string;
     library_id: number;
     zotero_key: string;
     attachment_metadata_hash: string;
+
+    // File metadata
     file_hash: string | null;
+    page_count: number | null;
+    file_size: number | null;
+
+    // Queue management
+    queue_visibility: string | null; 
+    attempt_count: number | null;
+    can_upload: boolean | null;
+
+    // Processing status
     upload_status: UploadStatus | null;
     md_status: ProcessingStatus | null;
     docling_status: ProcessingStatus | null;
@@ -65,6 +88,11 @@ export class BeaverDB {
                 zotero_key               TEXT NOT NULL,
                 attachment_metadata_hash TEXT NOT NULL,
                 file_hash                TEXT,
+                page_count               INTEGER,
+                file_size                INTEGER,
+                queue_visibility         TEXT,
+                attempt_count            INTEGER,
+                can_upload               BOOLEAN,
                 upload_status            TEXT,
                 md_status                TEXT,
                 docling_status           TEXT,
@@ -158,12 +186,19 @@ export class BeaverDB {
             docling_status: null,
             md_error_code: null,
             docling_error_code: null,
+            page_count: null,
+            file_size: null,
+            queue_visibility: null,
+            attempt_count: null,
+            can_upload: null
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, 
+            upload_status, md_status, docling_status, md_error_code, docling_error_code, page_count, file_size, 
+            queue_visibility, attempt_count, can_upload)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -175,7 +210,12 @@ export class BeaverDB {
                 finalAttachment.md_status,
                 finalAttachment.docling_status,
                 finalAttachment.md_error_code,
-                finalAttachment.docling_error_code
+                finalAttachment.docling_error_code,
+                finalAttachment.page_count,
+                finalAttachment.file_size,
+                finalAttachment.queue_visibility,
+                finalAttachment.attempt_count,
+                finalAttachment.can_upload
             ]
         );
         return id;
@@ -253,7 +293,12 @@ export class BeaverDB {
             'md_status',
             'docling_status',
             'md_error_code',
-            'docling_error_code'
+            'docling_error_code',
+            'page_count',
+            'file_size',
+            'queue_visibility',
+            'attempt_count',
+            'can_upload'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
@@ -399,11 +444,16 @@ export class BeaverDB {
             zotero_key: row.zotero_key,
             attachment_metadata_hash: row.attachment_metadata_hash,
             file_hash: row.file_hash,
+            page_count: row.page_count,
+            file_size: row.file_size,
             upload_status: row.upload_status as UploadStatus,
             md_status: row.md_status as ProcessingStatus,
             docling_status: row.docling_status as ProcessingStatus,
             md_error_code: row.md_error_code,
             docling_error_code: row.docling_error_code,
+            can_upload: row.can_upload,
+            queue_visibility: row.queue_visibility,
+            attempt_count: row.attempt_count,
         };
     }
 
@@ -439,11 +489,17 @@ export class BeaverDB {
 
         const defaults: Partial<AttachmentRecord> = {
             file_hash: null,
+            // TODO: Should they be set to null as a default?
             upload_status: 'pending',
             md_status: 'unavailable',
             docling_status: 'unavailable',
             md_error_code: null,
             docling_error_code: null,
+            page_count: null,
+            file_size: null,
+            queue_visibility: null,
+            attempt_count: null,
+            can_upload: null
         };
 
         const finalIds: string[] = [];
@@ -488,7 +544,8 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
+                    'file_hash', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code',
+                    'page_count', 'file_size', 'queue_visibility', 'attempt_count', 'can_upload'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -519,7 +576,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -533,10 +590,17 @@ export class BeaverDB {
                         attachment.md_status,
                         attachment.docling_status,
                         attachment.md_error_code,
-                        attachment.docling_error_code
+                        attachment.docling_error_code,
+                        attachment.page_count,
+                        attachment.file_size,
+                        attachment.queue_visibility,
+                        attachment.attempt_count,
+                        attachment.can_upload
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, 
+                    file_hash, upload_status, md_status, docling_status, md_error_code, docling_error_code, 
+                    page_count, file_size, queue_visibility, attempt_count, can_upload) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
@@ -662,6 +726,127 @@ export class BeaverDB {
         );
         
         return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get the next batch of attachments ready for upload and claim them for processing.
+     * @param user_id User ID
+     * @param limit Maximum number of attachments to return
+     * @param maxAttempts Maximum upload attempts before giving up
+     * @param visibilityTimeoutMinutes How long to claim the items for (in minutes)
+     * @returns Array of attachment records ready for upload
+     */
+    public async getAttachmentsForUpload(
+        user_id: string,
+        limit: number = 5,
+        maxAttempts: number = 3,
+        visibilityTimeoutMinutes: number = 5
+    ): Promise<AttachmentRecord[]> {
+        // Use a transaction to ensure we don't get race conditions
+        return await this.conn.transaction(async (tx: any) => {
+            // Find attachments that:
+            // 1. Have a file_hash (indicating a file exists)
+            // 2. Are available in the queue (visibility NULL or expired)
+            // 3. Have not exceeded max attempts
+            // 4. Have upload_status pending or failed (or NULL)
+            const rows = await tx.queryAsync(
+                `SELECT * FROM attachments
+                WHERE user_id = ?
+                AND file_hash IS NOT NULL
+                AND can_upload = 1
+                AND (queue_visibility IS NULL OR queue_visibility <= datetime('now'))
+                AND (attempt_count IS NULL OR attempt_count < ?)
+                AND (upload_status IS NULL OR upload_status = 'pending' OR upload_status = 'failed')
+                LIMIT ?`,
+                [user_id, maxAttempts, limit]
+            );
+            
+            // Convert rows to attachment records
+            const attachments = rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+            
+            // Claim the attachments by updating queue_visibility
+            if (attachments.length > 0) {
+                const ids = attachments.map((a: AttachmentRecord) => a.id);
+                const placeholders = ids.map(() => '?').join(',');
+                
+                await tx.queryAsync(
+                    `UPDATE attachments 
+                    SET queue_visibility = datetime('now', '+${visibilityTimeoutMinutes} minutes'),
+                        attempt_count = COALESCE(attempt_count, 0) + 1
+                    WHERE id IN (${placeholders})`,
+                    [...ids]
+                );
+            }
+            
+            return attachments;
+        });
+    }
+
+    /**
+     * Get comprehensive upload statistics
+     * @param user_id User ID
+     * @returns Upload statistics
+     */
+    public async getUploadStatistics(user_id: string): Promise<{
+        total: number;
+        pending: number;
+        inProgress: number;
+        completed: number;
+        failed: number;
+        skipped: number;
+        totalPages: number;
+        totalSize: number;
+    }> {
+        // Execute all queries in parallel for performance
+        const [
+            totalResult,
+            pendingResult,
+            inProgressResult,
+            completedResult,
+            failedResult,
+            skippedResult,
+            aggregatesResult
+        ] = await Promise.all([
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "pending" AND (queue_visibility IS NULL OR queue_visibility <= datetime("now"))',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND queue_visibility > datetime("now")',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "completed"',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "failed"',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NULL AND can_upload = 0',
+            [user_id]
+            ),
+            this.conn.queryAsync(
+            'SELECT SUM(page_count) as totalPages, SUM(file_size) as totalSize FROM attachments WHERE user_id = ?',
+            [user_id]
+            )
+        ]);
+        
+        return {
+            total: totalResult[0]?.count || 0,
+            pending: pendingResult[0]?.count || 0,
+            inProgress: inProgressResult[0]?.count || 0,
+            completed: completedResult[0]?.count || 0,
+            failed: failedResult[0]?.count || 0,
+            skipped: skippedResult[0]?.count || 0,
+            totalPages: aggregatesResult[0]?.totalPages || 0,
+            totalSize: aggregatesResult[0]?.totalSize || 0
+        };
     }
 }
 
