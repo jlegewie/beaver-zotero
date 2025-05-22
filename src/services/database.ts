@@ -859,7 +859,7 @@ export class BeaverDB {
         maxAttempts: number = 3,
         visibilityTimeoutMinutes: number = 5
     ): Promise<UploadQueueRecord[]> {
-        return await this.conn.transaction(async (tx: any) => {
+        return await this.conn.executeTransaction(async () => {
             const now = 'datetime(\'now\')'; // SQLite function for current UTC time
             const visibilityTimestamp = `datetime('now', '+${visibilityTimeoutMinutes} minutes')`;
 
@@ -867,7 +867,7 @@ export class BeaverDB {
             // 1. Are for the given user_id
             // 2. `queue_visibility` is NULL (never processed) or in the past (processing timed out)
             // 3. `attempt_count` is less than `maxAttempts`
-            const rows = await tx.queryAsync(
+            const rows = await this.conn.queryAsync(
                 `SELECT * FROM upload_queue
                  WHERE user_id = ?
                    AND (queue_visibility IS NULL OR queue_visibility <= ${now})
@@ -884,7 +884,7 @@ export class BeaverDB {
                 const placeholders = fileHashes.map(() => '?').join(',');
 
                 // Update queue_visibility and increment attempt_count for the selected items
-                await tx.queryAsync(
+                await this.conn.queryAsync(
                     `UPDATE upload_queue
                      SET queue_visibility = ${visibilityTimestamp},
                          attempt_count = attempt_count + 1
