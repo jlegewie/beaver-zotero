@@ -22,6 +22,9 @@ pref("supportedModels","[]");
 pref("userAuthorization", false);
 pref("isInitialDataImportComplete", false);
 
+pref("initialSyncItemCount", 0);
+pref("initialSyncCompletedCount", 0);
+pref("initialSyncCompleted", false);
 
 // Search
 pref("recentItems", "[]");

@@ -21,6 +21,9 @@ declare namespace _ZoteroTypes {
       "supportedModels": string;
       "userAuthorization": boolean;
       "isInitialDataImportComplete": boolean;
+      "initialSyncItemCount": number;
+      "initialSyncCompletedCount": number;
+      "initialSyncCompleted": boolean;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;

@@ -1,11 +1,14 @@
 import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
-import { SyncStatus } from '../../react/atoms/ui';
+import { initialSyncCompletedCountAtom, initialSyncItemCountAtom, SyncStatus, initialSyncCompletedAtom } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { ItemRecord, AttachmentRecord } from '../services/database';
 import { userAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
+import { setPref } from './prefs';
+
+const LIBRARY_IDS = [1];
 
 /**
  * Interface for item filter function
@@ -18,7 +21,7 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  * @returns true if the item should be synced
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
-    return item.libraryID === 1 && (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
+    return LIBRARY_IDS.includes(item.libraryID) && (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
 };
 
 /**
@@ -350,6 +353,14 @@ export async function syncItemsToBackend(
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
             }
 
+            // Update initialSyncCompletedCountAtom if this is an initial sync
+            if (syncType === 'initial' && batchResult.success > 0) {
+                console.log('batchResult.success', batchResult.success);
+                const currentCompleted = store.get(initialSyncCompletedCountAtom) || 0;
+                store.set(initialSyncCompletedCountAtom, currentCompleted + batchResult.success);
+                setPref('initialSyncCompletedCount', currentCompleted + batchResult.success);
+            }
+
             // Update processed count with actual success count
             const newProcessed = processedCount + batchResult.success;
             
@@ -415,15 +426,26 @@ export async function performInitialSync(
         // 2. Filter items based on criteria
         const itemsToSync = allItems.filter(filterFunction);
         const totalItems = itemsToSync.length;
-        
+
+        // 3. Set initial data import counts
         logger(`Beaver Sync: Found ${totalItems} items to sync from library "${libraryName}"`, 3);
-    
+        //  TODO: This is incorrect for multiple libraries. Will reset!!!
+        store.set(initialSyncItemCountAtom, totalItems);
+        setPref('initialSyncItemCount', totalItems);
+        const totalAttachments = itemsToSync.filter(item => item.isAttachment()).length;
+        
         if (totalItems === 0) {
             logger('Beaver Sync: No items to sync, skipping sync operation', 3);
             return { status: 'completed', message: 'No items to sync' };
         }
+
+        // 4. Reset sync completed items counter at the start of sync
+        store.set(initialSyncCompletedCountAtom, 0);
+        setPref('initialSyncCompletedCount', 0);
+        store.set(initialSyncCompletedAtom, false);
+        setPref('initialSyncCompleted', false);
         
-        // 3. Process items in batches using the new function
+        // 5. Process items in batches using the new function
         await syncItemsToBackend(libraryID, itemsToSync, 'initial', onStatusChange, onProgress, batchSize);
         
     } catch (error: any) {
