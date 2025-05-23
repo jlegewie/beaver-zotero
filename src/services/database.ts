@@ -1106,7 +1106,7 @@ export class BeaverDB {
      * @param user_id User ID
      * @returns Number of unique file hashes in upload queue
      */
-    public async getUploadSessionTotal(user_id: string): Promise<number> {
+    public async getTotalQueueItems(user_id: string): Promise<number> {
         try {
             const result = await this.conn.queryAsync(
                 'SELECT COUNT(DISTINCT file_hash) as count FROM upload_queue WHERE user_id = ?',
