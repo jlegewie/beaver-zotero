@@ -12,8 +12,8 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
-import { attachmentsService } from './attachmentsService';
-import { UploadQueueRecord } from './database';
+import { attachmentsService, ResetFailedResult } from './attachmentsService';
+import { UploadQueueInput, UploadQueueRecord } from './database';
 
 export interface UploadProgressInfo {
   status: SyncStatus;
@@ -577,6 +577,60 @@ export class FileUploader {
         }
     }
 }
+
+
+/**
+ * Utility function to reset failed uploads by calling the backend and restarting the uploader
+ */
+export const resetFailedUploads = async (): Promise<void> => {
+    try {
+        const isAuthenticated = store.get(isAuthenticatedAtom);
+        const user = store.get(userAtom);
+
+        if (!isAuthenticated || !user?.id) {
+            logger('Beaver File Uploader: Cannot reset failed uploads, user not authenticated or user ID missing.', 2);
+            return;
+        }
+        const userId = user.id;
+
+        const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
+        logger(`Beaver File Uploader: Backend reset ${results.length} failed uploads.`, 3);
+
+        if (results.length === 0) {
+            logger(`Beaver File Uploader: No failed uploads reported by backend to reset locally.`, 3);
+            // Restart the uploader
+            fileUploader.start();
+            logger(`Beaver File Uploader: Uploader restarted.`, 3);
+            return;
+        }
+
+        const itemsToResetInDB: UploadQueueInput[] = results.map(result => ({
+            file_hash: result.file_hash,
+            library_id: result.library_id,
+            zotero_key: result.zotero_key
+            // Other fields like page_count, attempt_count will be set to default reset values
+            // by the Zotero.Beaver.db.resetFailedUploads method.
+        }));
+
+        // @ts-ignore Beaver is defined
+        await Zotero.Beaver.db.resetFailedUploads(userId, itemsToResetInDB);
+        logger(`Beaver File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
+
+        // Restart the uploader
+        fileUploader.start();
+        logger(`Beaver File Uploader: Uploader restarted after resetting failed uploads.`, 3);
+
+    } catch (error: any) {
+        logger(`Beaver File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
+        // Zotero.logError is good for logging to Zotero's native error console
+        if (typeof Zotero !== 'undefined' && Zotero.logError) {
+            Zotero.logError(error);
+        } else {
+            console.error('Failed to reset failed uploads:', error); // Fallback if Zotero.logError is not available
+        }
+    }
+};
+
 
 /**
  * Exports a singleton instance for the file uploader.
