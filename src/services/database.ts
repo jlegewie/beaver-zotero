@@ -1033,6 +1033,71 @@ export class BeaverDB {
             }
         });
     }
+
+    /**
+     * Reset failed uploads by setting their status to pending and adding them back to the upload queue.
+     * @param user_id User ID
+     * @param items Array of UploadQueueInput objects containing file_hash, library_id, and zotero_key
+     */
+    public async resetFailedUploads(user_id: string, items: UploadQueueInput[]): Promise<void> {
+        if (items.length === 0) {
+            return;
+        }
+
+        await this.conn.executeTransaction(async () => {
+            // 1. Update attachments table: set upload_status to "pending" for all file_hashes
+            const fileHashes = items.map(item => item.file_hash);
+            const placeholders = fileHashes.map(() => '?').join(',');
+            
+            await this.conn.queryAsync(
+                `UPDATE attachments 
+                 SET upload_status = 'pending' 
+                 WHERE user_id = ? AND file_hash IN (${placeholders})`,
+                [user_id, ...fileHashes]
+            );
+
+            // 2. Upsert each item to upload_queue with reset values
+            for (const item of items) {
+                const queueItem: UploadQueueInput = {
+                    file_hash: item.file_hash,
+                    page_count: null,
+                    file_size: null,
+                    queue_visibility: undefined,
+                    attempt_count: 0,
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key
+                };  
+
+                // Use the existing upsert logic inline since we're already in a transaction
+                const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = queueItem;
+                
+                const updateClauses = [
+                    'page_count = excluded.page_count',
+                    'file_size = excluded.file_size',
+                    'library_id = excluded.library_id',
+                    'zotero_key = excluded.zotero_key',
+                    'queue_visibility = excluded.queue_visibility',  // Explicitly reset
+                    'attempt_count = excluded.attempt_count'         // Explicitly reset
+                ];
+                
+                await this.conn.queryAsync(
+                    `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
+                    [
+                        user_id, 
+                        file_hash!, 
+                        page_count, 
+                        file_size, 
+                        queue_visibility,
+                        attempt_count,
+                        library_id, 
+                        zotero_key
+                    ]
+                );
+            }
+        });
+    }
 }
 
 /* Example Usage:
