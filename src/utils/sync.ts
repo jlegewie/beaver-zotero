@@ -340,7 +340,7 @@ export async function syncItemsToBackend(
                 await Zotero.Beaver.db.upsertItemsBatch(user.id, items);
             }
 
-            // Update database attachments
+            // Update database attachments and add items to upload queue
             if (batchResult.attachments.length > 0) {
                 const attachments = batchResult.attachments.map(attachment => ({
                     library_id: attachment.library_id,
@@ -350,6 +350,24 @@ export async function syncItemsToBackend(
                 }));
                 // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
+                // TODO: Check on file size and page count limits here!
+                // Add items to upload queue
+                const uploadQueue = batchResult.attachments
+                    .filter(attachment => attachment.needs_upload)
+                    .map(attachment => ({
+                        file_hash: attachment.file_hash,
+                        user_id: user.id,
+                        // page_count
+                        // file_size
+                        library_id: attachment.library_id,
+                        zotero_key: attachment.zotero_key,
+                    }));
+                // @ts-ignore Beaver exists
+                await Zotero.Beaver.db.upsertQueueItemsBatch(user.id, uploadQueue);
+
+                // Start file uploader if there are attachments to upload
+                logger(`Beaver Sync: Starting file uploader`, 2);
+                fileUploader.start();
             }
 
             // Update processed count with actual success count
@@ -378,12 +396,7 @@ export async function syncItemsToBackend(
             onStatusChange?.('failed');
             break;
         }
-    }
-    
-    // Start file uploader if there are attachments to upload
-    if (attachmentCount > 0) {
-        logger(`Beaver Sync: Starting file uploader with ${attachmentCount} attachments to upload`, 2);
-        fileUploader.start();
+
     }
 }
 

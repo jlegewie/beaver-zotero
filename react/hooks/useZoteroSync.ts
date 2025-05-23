@@ -246,6 +246,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 await syncZoteroDatabase(filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
                 // Then set up the observer after sync completes
                 setupObserver();
+                // Start file uploader after sync completes
+                fileUploader.start();
             } catch (error: any) {
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);

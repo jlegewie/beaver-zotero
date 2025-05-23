@@ -27,6 +27,7 @@ export interface ItemResult {
     zotero_key: string;
     metadata_hash: string;
     file_hash: string | null;
+    needs_upload: boolean | null;
     success: boolean;
 }
 

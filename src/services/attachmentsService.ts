@@ -6,7 +6,38 @@ import { FileStatus } from '../../react/types/fileStatus';
 // processing_status from backend
 export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "converted" | "chunked" | "embedded" | "failed";
 // upload_status_literal from backend
-export type UploadStatus = "pending" | "completed" | "failed";
+export type UploadStatus = "pending" | "completed" | "failed" | "skipped";
+
+/**
+ * Request body for marking an upload as failed
+ */
+export interface FailUploadRequest {
+    file_hash: string;
+}
+
+/**
+ * Response from marking an upload as failed
+ */
+export interface UploadFailedResponse {
+    success: boolean;
+    message: string;
+}
+
+/**
+ * Request body for marking an upload as completed
+ */
+export interface CompleteUploadRequest {
+    file_hash: string;
+    page_count: number | null;
+}
+
+/**
+ * Response from marking an upload as completed
+ */
+export interface CompleteUploadResponse {
+    success: boolean;
+    message: string;
+}
 
 /**
  * Represents the processing status of a single attachment.
@@ -94,6 +125,32 @@ export class AttachmentsService extends ApiService {
      */
     async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<Record<string, number>> {
         return this.get<Record<string, number>>(`/attachments/error-code-stats/${type}`);
+    }
+
+    /**
+     * Marks an upload as failed for the given file hash.
+     * @param fileHash The hash of the file that failed to upload
+     * @returns Promise with the upload failed response
+     */
+    async markUploadFailed(fileHash: string): Promise<UploadFailedResponse> {
+        const request: FailUploadRequest = {
+            file_hash: fileHash
+        };
+        return this.post<UploadFailedResponse>('/attachments/fail-upload', request);
+    }
+
+    /**
+     * Marks an upload as completed for the given file hash.
+     * @param fileHash The hash of the file that was completed
+     * @param pageCount The number of pages in the file
+     * @returns Promise with the upload completed response
+     */
+    async markUploadCompleted(fileHash: string, pageCount: number | null): Promise<CompleteUploadResponse> {
+        const request: CompleteUploadRequest = {
+            file_hash: fileHash,
+            page_count: pageCount
+        };
+        return this.post<CompleteUploadResponse>('/attachments/complete-upload', request);
     }
 
     /**

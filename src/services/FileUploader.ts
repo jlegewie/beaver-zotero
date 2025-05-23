@@ -2,17 +2,18 @@
  * FileUploader.ts
  *
  * A uploader that processes Zotero file attachments in batches using a queue. 
- * It pulls pending items from the server, uploads them concurrently (up to MAX_CONCURRENT), 
- * handles retries, and updates progress based on server status. 
+ * It reads pending items from the local SQLite database, requests upload URLs on-demand,
+ * handles retries, and updates progress based on local queue status. 
  */
 
 import PQueue from 'p-queue';
-import { queueService, UploadQueueItem, PopQueueResponse, QueueStatus } from "./queueService";
 import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
-import { isAuthenticatedAtom } from '../../react/atoms/auth';
+import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
+import { attachmentsService } from './attachmentsService';
+import { UploadQueueRecord } from './database';
 
 export interface UploadProgressInfo {
   status: SyncStatus;
@@ -21,12 +22,36 @@ export interface UploadProgressInfo {
 }
 
 /**
- * Manages file uploads from a server-side queue of pending uploads.
+ * Queue status interface for local tracking
+ */
+export interface QueueStatus {
+    pending: number;
+    in_progress: number;
+    completed: number;
+    failed: number;
+    total: number;
+}
+
+/**
+ * Manages file uploads from a frontend-managed queue of pending uploads.
  */
 export class FileUploader {
     private isRunning: boolean = false;
     private uploadQueue!: PQueue; // Will be initialized on start
+
+    // upload concurrency
     private readonly MAX_CONCURRENT: number = 3;
+
+    // upload batching
+    // queue reads
+    private readonly BATCH_SIZE: number = 10;
+    private readonly MAX_ATTEMPTS: number = 3;
+    private readonly VISIBILITY_TIMEOUT: number = 15;
+
+    /**
+     * URL cache to store upload URLs with expiration times
+     */
+    private urlCache: Map<string, { url: string; expiresAt: Date }> = new Map();
 
     /**
      * Holds the last known queue status. 
@@ -93,13 +118,13 @@ export class FileUploader {
             this.localProgress.total = status.total;
         }
         
-        // Calculate completed count from server status
-        const serverCompleted = status.completed + status.failed;
+        // Calculate completed count from local status
+        const localCompleted = status.completed + status.failed;
         
         // Only increase the completed count, never decrease it
         // This prevents progress from going backward
-        if (serverCompleted > this.localProgress.completed) {
-            this.localProgress.completed = serverCompleted;
+        if (localCompleted > this.localProgress.completed) {
+            this.localProgress.completed = localCompleted;
         }
         
         // Report progress using our stable local tracking
@@ -108,6 +133,113 @@ export class FileUploader {
             this.localProgress.completed, 
             this.localProgress.total
         );
+    }
+
+    /**
+     * Gets upload URL for a single file hash with caching
+     * @param fileHash The file hash to get URL for
+     * @returns Upload URL or null if failed
+     */
+    private async getUploadUrl(fileHash: string): Promise<string | null> {
+        // Check cache first with 30-minute safety buffer
+        const cached = this.urlCache.get(fileHash);
+        if (cached) {
+            const safetyBuffer = 30 * 60 * 1000; // 30 minutes in milliseconds
+            if (new Date().getTime() < cached.expiresAt.getTime() - safetyBuffer) {
+                return cached.url;
+            } else {
+                // Remove expired URL from cache
+                this.urlCache.delete(fileHash);
+            }
+        }
+
+        try {
+            // Request new URL from backend
+            const urlResponse = await attachmentsService.getUploadUrls([fileHash]);
+            const uploadUrl = urlResponse[fileHash];
+            
+            if (uploadUrl) {
+                // Cache the URL for 90 minutes (30 minutes before the 2-hour expiration)
+                const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
+                this.urlCache.set(fileHash, { url: uploadUrl, expiresAt });
+                return uploadUrl;
+            }
+            
+            return null;
+        } catch (error: any) {
+            logger(`Beaver File Uploader: Error getting upload URL for ${fileHash}: ${error.message}`, 1);
+            return null;
+        }
+    }
+
+    /**
+     * Gets upload URLs for multiple items with caching
+     * @param items Array of queue items to get URLs for
+     * @returns Map of fileHash to URL for all items
+     */
+    private async getUploadUrls(items: UploadQueueRecord[]): Promise<Map<string, string>> {
+        const urlMap = new Map<string, string>();
+        const itemsNeedingUrls: UploadQueueRecord[] = [];
+        
+        // Check cache for existing valid URLs
+        const safetyBuffer = 30 * 60 * 1000; // 30 minutes in milliseconds
+        for (const item of items) {
+            const cached = this.urlCache.get(item.file_hash);
+            if (cached && new Date().getTime() < cached.expiresAt.getTime() - safetyBuffer) {
+                urlMap.set(item.file_hash, cached.url);
+            } else {
+                // Remove expired URL from cache
+                if (cached) {
+                    this.urlCache.delete(item.file_hash);
+                }
+                itemsNeedingUrls.push(item);
+            }
+        }
+
+        // Request new URLs in batch if needed
+        if (itemsNeedingUrls.length > 0) {
+            try {
+                const fileHashes = itemsNeedingUrls.map(item => item.file_hash);
+                const urlResponse = await attachmentsService.getUploadUrls(fileHashes);
+                
+                // Cache new URLs and add to result map
+                const expiresAt = new Date(Date.now() + 90 * 60 * 1000); // 90 minutes
+                for (const item of itemsNeedingUrls) {
+                    const uploadUrl = urlResponse[item.file_hash];
+                    if (uploadUrl) {
+                        this.urlCache.set(item.file_hash, { url: uploadUrl, expiresAt });
+                        urlMap.set(item.file_hash, uploadUrl);
+                    }
+                }
+            } catch (error: any) {
+                logger(`Beaver File Uploader: Error getting batch upload URLs: ${error.message}`, 1);
+            }
+        }
+
+        return urlMap;
+    }
+
+    /**
+     * Gets queue statistics from local database
+     * @param user_id User ID
+     * @returns Local queue status
+     */
+    private async getQueueStatistics(user_id: string): Promise<QueueStatus> {
+        try {
+            // @ts-ignore Beaver is defined
+            const stats = await Zotero.Beaver.db.getUploadStatistics(user_id);
+            
+            return {
+                pending: stats.pending,
+                in_progress: stats.inProgress,
+                completed: stats.completed,
+                failed: stats.failed,
+                total: stats.total
+            };
+        } catch (error: any) {
+            logger(`Beaver File Uploader: Error getting queue statistics: ${error.message}`, 1);
+            return this.lastStatus;
+        }
     }
 
     /**
@@ -163,7 +295,7 @@ export class FileUploader {
     }
 
     /**
-     * Main loop that continuously pops items from the server and processes them until
+     * Main loop that continuously reads items from local queue and processes them until
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
@@ -173,12 +305,6 @@ export class FileUploader {
             total: 0
         };
         
-        // Idle backoff handling
-        const MAX_CONSECUTIVE_IDLE = 10;
-        const IDLE_BACKOFF_TIME = 2500;
-        let consecutiveIdle = 0;
-        let idleBackoffTime = IDLE_BACKOFF_TIME;
-
         // Error backoff handling
         const MAX_CONSECUTIVE_ERRORS = 5;
         const ERROR_BACKOFF_TIME = 1000;
@@ -189,11 +315,13 @@ export class FileUploader {
             try {
                 // check authentication status
                 const isAuthenticated = store.get(isAuthenticatedAtom);
-                if (!isAuthenticated) {
-                    logger('Beaver File Uploader: Not authenticated. Stopping.', 3);
+                const user = store.get(userAtom);
+                if (!isAuthenticated || !user?.id) {
+                    logger('Beaver File Uploader: Not authenticated or no user ID. Stopping.', 3);
                     this.isRunning = false;
                     break;
                 }
+
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
                     logger(`Beaver File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
@@ -202,50 +330,46 @@ export class FileUploader {
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
 
-                // Fetch up to MAX_CONCURRENT items from the server, along with the updated status
-                const response: PopQueueResponse = await queueService.popQueueItems(this.MAX_CONCURRENT);
-                const items = response.items;
-                const status = response.status;
-                logger(`Beaver File Uploader: Popped ${items.length} items from the queue. Status: ${JSON.stringify(status)}`, 3);
+                // Read items from local queue with visibility timeout
+                // @ts-ignore Beaver is defined
+                const items: UploadQueueRecord[] = await Zotero.Beaver.db.readQueueItems(
+                    user.id, 
+                    this.BATCH_SIZE, 
+                    this.MAX_ATTEMPTS,
+                    this.VISIBILITY_TIMEOUT
+                );
 
-                // Update progress with the received status
-                this.reportProgress(status);
+                logger(`Beaver File Uploader: Read ${items.length} items from local queue`, 3);
 
-                // Add a short delay when no items are available but processing is ongoing
-                if (items.length === 0 && (status.pending > 0 || status.in_progress > 0)) {
-                    logger(`Beaver File Uploader: No items to process, but there are pending or in-progress items. Waiting 1 second before checking again.`, 3);
-                    // Wait a bit before checking again to avoid hammering the server
-                    await new Promise(resolve => setTimeout(resolve, idleBackoffTime));
-                    // Exponential backoff with max of 1 minute
-                    idleBackoffTime = Math.min(idleBackoffTime * 2, 60000);
-                    consecutiveIdle++;
-                    if (consecutiveIdle >= MAX_CONSECUTIVE_IDLE) {
-                        logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_IDLE} consecutive idle`, 2);
-                        this.isRunning = false;
-                        break;
-                    }
-                    continue;
-                }
-
-                // If no items and no pending/in-progress items, we're done
-                if (items.length === 0 && status.pending === 0 && status.in_progress === 0) {
-                    // Set final completed status with our tracked total
+                // If no items, we're done
+                if (items.length === 0) {
                     this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
                     break;
                 }
 
-                // Reset idle and error counters on successful queue pop
+                // Report progress
+                const status = await this.getQueueStatistics(user.id);
+                this.lastStatus = status;
+                this.reportProgress(status);
+
+                // Get upload URLs for all items
+                const urlMap = await this.getUploadUrls(items);
+
+                // Filter items that have valid URLs
+                const itemsWithUrls = items.filter(item => urlMap.has(item.file_hash));
+                logger(`Beaver File Uploader: Got upload URLs for ${itemsWithUrls.length} out of ${items.length} items`, 3);
+
+                // Reset idle and error counters on successful queue read
                 consecutiveErrors = 0;
                 errorBackoffTime = ERROR_BACKOFF_TIME;
-                consecutiveIdle = 0;
-                idleBackoffTime = IDLE_BACKOFF_TIME;
 
                 // Add each upload task to the concurrency queue
-                for (const item of items) {
-                    this.uploadQueue.add(() => this.uploadFile(item));
+                for (const item of itemsWithUrls) {
+                    const uploadUrl = urlMap.get(item.file_hash)!;
+                    this.uploadQueue.add(() => this.uploadFile(item, uploadUrl, user.id));
                 }
 
-                // Wait for these uploads to finish before popping the next batch
+                // Wait for these uploads to finish before reading the next batch
                 await this.uploadQueue.onIdle();
             } catch (error: any) {
                 logger('Beaver File Uploader: runQueue encountered an error: ' + error.message, 1);
@@ -276,17 +400,17 @@ export class FileUploader {
 
     /**
      * Uploads a single file item. 
-     * On success, the item is marked completed; on failure, we may reset or fail permanently.
+     * On success, the item is marked completed; on failure, we may retry or fail permanently.
      */
-    private async uploadFile(item: UploadQueueItem): Promise<void> {
+    private async uploadFile(item: UploadQueueRecord, uploadUrl: string, user_id: string): Promise<void> {
         try {
-            logger(`Beaver File Uploader: Uploading file for ${item.attachment_key}`, 3);
+            logger(`Beaver File Uploader: Uploading file for ${item.zotero_key}`, 3);
 
             // Retrieve file path from Zotero
-            const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.attachment_key);
+            const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
-                logger(`Beaver File Uploader: Attachment not found: ${item.attachment_key}`, 1);
-                await this.handlePermanentFailure(item, "Attachment not found in Zotero");
+                logger(`Beaver File Uploader: Attachment not found: ${item.zotero_key}`, 1);
+                await this.handlePermanentFailure(item, user_id, "Attachment not found in Zotero");
                 return;
             }
 
@@ -297,8 +421,8 @@ export class FileUploader {
             let filePath: string | null = null;
             filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
-                logger(`Beaver File Uploader: File path not found for attachment: ${item.attachment_key}`, 1);
-                await this.handlePermanentFailure(item, "File path not found");
+                logger(`Beaver File Uploader: File path not found for attachment: ${item.zotero_key}`, 1);
+                await this.handlePermanentFailure(item, user_id, "File path not found");
                 return;
             }
 
@@ -307,9 +431,9 @@ export class FileUploader {
             try {
                 fileArrayBuffer = await IOUtils.read(filePath);
             } catch (readError: any) {
-                logger(`Beaver File Uploader: Error reading file: ${item.attachment_key}`, 1);
+                logger(`Beaver File Uploader: Error reading file: ${item.zotero_key}`, 1);
                 Zotero.logError(readError);
-                await this.handlePermanentFailure(item, "Error reading file");
+                await this.handlePermanentFailure(item, user_id, "Error reading file");
                 return;
             }
             
@@ -325,7 +449,7 @@ export class FileUploader {
             while (!uploadSuccess && attempt < maxUploadAttempts) {
                 attempt++;
                 try {
-                    const response = await fetch(item.upload_url, {
+                    const response = await fetch(uploadUrl, {
                         method: 'PUT',
                         body: blob,
                         headers: { 'Content-Type': mimeType }
@@ -343,8 +467,8 @@ export class FileUploader {
                         }
                     }
                     
-                    // Use our new completion method
-                    await this.markUploadCompleted(item, pageCount);
+                    // Mark upload as completed
+                    await this.markUploadCompleted(item, pageCount, user_id);
                     uploadSuccess = true;
                 } catch (uploadError: any) {
                     if (
@@ -376,46 +500,68 @@ export class FileUploader {
             }
 
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error uploading file for attachment ${item.attachment_key}: ${error.message}`, 1);
+            logger(`Beaver File Uploader: Error uploading file for attachment ${item.zotero_key}: ${error.message}`, 1);
             Zotero.logError(error);
 
             // If attempts are too high, treat as permanently failed
-            if (item.attempts >= 3) {
-                await this.handlePermanentFailure(item, error instanceof Error ? error.message : "Max attempts reached");
+            if (item.attempt_count >= 3) {
+                await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
             } else {
-                // Otherwise, reset the item for retry later
-                try {
-                    await queueService.resetUpload(item.id);
-                } catch (resetError: any) {
-                    logger('Beaver File Uploader: Error resetting failed upload: ' + resetError.message, 1);
-                    Zotero.logError(resetError);
-                }
+                // The visibility timeout will handle retries automatically
+                // No action needed here - the item will become visible again after timeout
+                logger(`Beaver File Uploader: Upload failed for ${item.zotero_key}, will retry after visibility timeout`, 2);
+                setTimeout(() => this.start(), this.VISIBILITY_TIMEOUT * 60 * 1000);
             }
         }
     }
     
     /**
-     * Handles permanent failures by marking items as failed in the queue
+     * Handles permanent failures by marking items as failed in the backend first, 
+     * then in the local database only if backend update succeeds
      */
-    private async handlePermanentFailure(item: UploadQueueItem, reason: string): Promise<void> {
-        logger(`Beaver File Uploader: Permanent failure for ${item.attachment_key}: ${reason}`, 1);
+    private async handlePermanentFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+        logger(`Beaver File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
+        
         try {
-            // Mark the item as failed
-            await queueService.markUploadAsFailed(item.id, item.file_hash);
+            // First, notify backend of failure
+            await attachmentsService.markUploadFailed(item.file_hash);
+            
+            // Only if backend call succeeds, update local state
+            // @ts-ignore Beaver is defined
+            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
+            
+            // Remove URL from cache
+            this.urlCache.delete(item.file_hash);
+            
+            logger(`Beaver File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
+            
         } catch (failError: any) {
-            logger('Beaver File Uploader: Error marking item as failed: ' + failError.message, 1);
+            logger(`Beaver File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
             Zotero.logError(failError);
+            // Don't update local state or cleanup - this means the item will be retried later
+            // Re-throw the error so callers know the operation failed
+            throw failError;
         }
     }
 
-    // When marking an upload as completed, also update our progress
-    private async markUploadCompleted(item: UploadQueueItem, pageCount: number | null): Promise<void> {
+    /**
+     * Marks upload as completed in backend first, then updates local state only if successful
+     */
+    private async markUploadCompleted(item: UploadQueueRecord, pageCount: number | null, user_id: string): Promise<void> {
         try {
-            await queueService.completeUpload(item, pageCount);
-            logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.attachment_key} (page count: ${pageCount})`, 3);
+            // First, notify backend of completion
+            await attachmentsService.markUploadCompleted(item.file_hash, pageCount);
+
+            // Only if backend call succeeds, update local state and cleanup
+            // @ts-ignore Beaver is defined
+            await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
+
+            // Remove URL from cache only after successful backend update
+            this.urlCache.delete(item.file_hash);
+
+            logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
             
-            // Increment our local completed count immediately
-            // This provides immediate feedback without waiting for the next server poll
+            // Increment our local completed count only after successful backend update
             this.localProgress.completed++;
             this.reportStatus(
                 'in_progress', 
@@ -426,6 +572,8 @@ export class FileUploader {
         } catch (error: any) {
             logger(`Beaver File Uploader: Error marking upload as completed: ${error.message}`, 1);
             Zotero.logError(error);
+            // Re-throw the error so callers know the completion marking failed
+            throw error;
         }
     }
 }
