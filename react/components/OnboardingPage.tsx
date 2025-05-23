@@ -1,16 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, OneIcon as OneCircleIcon, TwoIcon as TwoCircleIcon, ThreeIcon as ThreeCircleIcon, CSSItemTypeIcon, CSSIcon } from "./icons";
+import React, { useState } from "react";
+import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon } from "./icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
-import { 
-    syncStatusAtom, syncTotalAtom, syncCurrentAtom,
-    fileStatusStatsAtom, SyncStatus,
-} from "../atoms/ui";
+import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileStatusStatsAtom } from "../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom } from "../atoms/sync";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
-import { getPref, setPref } from "../../src/utils/prefs";
+import { setPref } from "../../src/utils/prefs";
 import { LibraryStatistics } from "../../src/utils/libraries";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
