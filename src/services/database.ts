@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingStatus, UploadStatus } from './attachmentsService';
+import { logger } from '../utils/logger';
 
 /* 
  * Interface for the 'items' table row
@@ -1097,6 +1098,25 @@ export class BeaverDB {
                 );
             }
         });
+    }
+
+    /**
+     * Get the total number of unique files in the upload queue for a user
+     * This represents the total work for an upload session
+     * @param user_id User ID
+     * @returns Number of unique file hashes in upload queue
+     */
+    public async getUploadSessionTotal(user_id: string): Promise<number> {
+        try {
+            const result = await this.conn.queryAsync(
+                'SELECT COUNT(DISTINCT file_hash) as count FROM upload_queue WHERE user_id = ?',
+                [user_id]
+            );
+            return result[0]?.count || 0;
+        } catch (error: any) {
+            logger(`Beaver DB: Error getting upload session total: ${error.message}`, 1);
+            return 0;
+        }
     }
 }
 
