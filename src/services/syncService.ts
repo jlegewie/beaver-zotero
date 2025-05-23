@@ -1,5 +1,9 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { FileHashReference } from '../../react/types/attachments/apiTypes';
+import { UploadQueueInput } from './database';
+import { userAtom } from '../../react/atoms/auth';
+import { store } from '../../react';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -245,12 +249,26 @@ export class SyncService extends ApiService {
      * @param fileHash The new file hash
      * @returns Promise with the update response indicating if the hash was enqueued
      */
-    async forceAttachmentFileUpdate(libraryId: number, zoteroKey: string, fileHash: string): Promise<AttachmentUpdateResponse> {
-        return this.post<AttachmentUpdateResponse>('/zotero/sync/items/attachment-update', {
+    async forceAttachmentFileUpdate(libraryId: number, zoteroKey: string, fileHash: string): Promise<FileHashReference> {
+        const result = await this.post<FileHashReference>('/zotero/sync/items/attachment-update', {
             library_id: libraryId,
             zotero_key: zoteroKey,
             file_hash: fileHash
         });
+        // Queue file hash for upload in local db
+        if (result) {
+            // @ts-ignore Beaver is defined
+            await Zotero.Beaver.db.resetUploads(store.
+                get(userAtom).id,
+                {
+                    file_hash: result.file_hash,
+                    library_id: result.library_id,
+                    zotero_key: result.zotero_key
+                } as UploadQueueInput
+        );
+        }
+
+        return result;
     }
 }
 
