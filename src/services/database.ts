@@ -657,14 +657,12 @@ export class BeaverDB {
      * @param user_id The user_id of the item to delete.
      * @param libraryId The library_id of the item to delete.
      * @param zoteroKey The zotero_key of the item to delete.
-     * @returns boolean indicating whether an item was deleted.
      */
-    public async deleteItem(user_id: string, libraryId: number, zoteroKey: string): Promise<boolean> {
-        const result = await this.conn.queryAsync(
+    public async deleteItem(user_id: string, libraryId: number, zoteroKey: string): Promise<void> {
+        await this.conn.queryAsync(
             `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
             [user_id, libraryId, zoteroKey]
         );
-        return result.changes > 0;
     }
 
     /**
@@ -672,14 +670,12 @@ export class BeaverDB {
      * @param user_id The user_id of the attachment to delete.
      * @param libraryId The library_id of the attachment to delete.
      * @param zoteroKey The zotero_key of the attachment to delete.
-     * @returns boolean indicating whether an attachment was deleted.
      */
-    public async deleteAttachment(user_id: string, libraryId: number, zoteroKey: string): Promise<boolean> {
-        const result = await this.conn.queryAsync(
+    public async deleteAttachment(user_id: string, libraryId: number, zoteroKey: string): Promise<void> {
+        await this.conn.queryAsync(
             `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
             [user_id, libraryId, zoteroKey]
         );
-        return result.changes > 0;
     }
 
     /**
@@ -688,36 +684,20 @@ export class BeaverDB {
      * @param user_id The user_id of the record to delete.
      * @param libraryId The library_id of the record to delete.
      * @param zoteroKey The zotero_key of the record to delete.
-     * @returns An object indicating which types of records were deleted and how many.
      */
-    public async deleteByLibraryAndKey(user_id: string, libraryId: number, zoteroKey: string): Promise<{
-        itemDeleted: boolean;
-        attachmentDeleted: boolean;
-    }> {
-        const result = {
-            itemDeleted: false,
-            attachmentDeleted: false
-        };
-
+    public async deleteByLibraryAndKey(user_id: string, libraryId: number, zoteroKey: string): Promise<void> {
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
-            // Explicitly type the results to allow for potential undefined/null returns
-            const itemResult: { changes?: number } | null | undefined = await this.conn.queryAsync(
+            await this.conn.queryAsync(
                 `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
 
-            const attachmentResult: { changes?: number } | null | undefined = await this.conn.queryAsync(
+            await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
-
-            // Check if result exists and has changes > 0 before setting to true
-            result.itemDeleted = (!!itemResult && itemResult.changes && itemResult.changes > 0) || false;
-            result.attachmentDeleted = (!!attachmentResult && attachmentResult.changes && attachmentResult.changes > 0) || false;
         });
-
-        return result;
     }
 
     /**
@@ -790,8 +770,8 @@ export class BeaverDB {
         completed: number;
         failed: number;
         skipped: number;
-        totalPages: number;
-        totalSize: number;
+        // totalPages: number;
+        // totalSize: number;
     }> {
         // Execute all queries in parallel for performance
         const [
@@ -800,7 +780,7 @@ export class BeaverDB {
             completedResult,
             failedResult,
             skippedResult,
-            aggregatesResult
+            // aggregatesResult
         ] = await Promise.all([
             this.conn.queryAsync(
             'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL',
@@ -821,11 +801,11 @@ export class BeaverDB {
             this.conn.queryAsync(
             'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NULL',
             [user_id]
-            ),
-            this.conn.queryAsync(
-            'SELECT SUM(page_count) as totalPages, SUM(file_size) as totalSize FROM attachments WHERE user_id = ?',
-            [user_id]
             )
+            // this.conn.queryAsync(
+            // 'SELECT SUM(page_count) as totalPages, SUM(file_size) as totalSize FROM attachments WHERE user_id = ?',
+            // [user_id]
+            // )
         ]);
         
         return {
@@ -835,8 +815,8 @@ export class BeaverDB {
             completed: completedResult[0]?.count || 0,
             failed: failedResult[0]?.count || 0,
             skipped: skippedResult[0]?.count || 0,
-            totalPages: aggregatesResult[0]?.totalPages || 0,
-            totalSize: aggregatesResult[0]?.totalSize || 0
+            // totalPages: aggregatesResult[0]?.totalPages || 0,
+            // totalSize: aggregatesResult[0]?.totalSize || 0
         };
     }
 
@@ -899,26 +879,22 @@ export class BeaverDB {
      * @returns boolean indicating whether the queue item was found and processed
      */
     public async completeQueueItem(user_id: string, file_hash: string): Promise<boolean> {
-        let itemDeleted = false;
         await this.conn.executeTransaction(async () => {
             // Delete from upload_queue
-            const deleteResult = await this.conn.queryAsync(
+            await this.conn.queryAsync(
                 `DELETE FROM upload_queue WHERE user_id = ? AND file_hash = ?`,
                 [user_id, file_hash]
             );
-            itemDeleted = (deleteResult.changes || 0) > 0;
-
-            if (itemDeleted) {
-                // Update all attachments with this file_hash to 'completed'
-                await this.conn.queryAsync(
-                    `UPDATE attachments
-                     SET upload_status = 'completed'
-                     WHERE user_id = ? AND file_hash = ?`,
-                    [user_id, file_hash]
-                );
-            }
+        
+            // Update all attachments with this file_hash to 'completed'
+            await this.conn.queryAsync(
+                `UPDATE attachments
+                    SET upload_status = 'completed'
+                    WHERE user_id = ? AND file_hash = ?`,
+                [user_id, file_hash]
+            );
         });
-        return itemDeleted;
+        return true;
     }
 
     /**
@@ -926,29 +902,23 @@ export class BeaverDB {
      * This involves deleting it from 'upload_queue' and updating 'attachments'.
      * @param user_id User ID
      * @param file_hash The file_hash of the failed item
-     * @returns boolean indicating whether the queue item was found and processed
      */
-    public async failQueueItem(user_id: string, file_hash: string): Promise<boolean> {
-        let itemDeleted = false;
+    public async failQueueItem(user_id: string, file_hash: string): Promise<void> {
         await this.conn.executeTransaction(async () => {
             // Delete from upload_queue
-            const deleteResult = await this.conn.queryAsync(
+            await this.conn.queryAsync(
                 `DELETE FROM upload_queue WHERE user_id = ? AND file_hash = ?`,
                 [user_id, file_hash]
             );
-            itemDeleted = (deleteResult.changes || 0) > 0;
 
-            if (itemDeleted) {
-                // Update all attachments with this file_hash to 'failed'
-                await this.conn.queryAsync(
-                    `UPDATE attachments
-                     SET upload_status = 'failed'
-                     WHERE user_id = ? AND file_hash = ?`,
-                    [user_id, file_hash]
-                );
-            }
+            // Update all attachments with this file_hash to 'failed'
+            await this.conn.queryAsync(
+                `UPDATE attachments
+                 SET upload_status = 'failed'
+                 WHERE user_id = ? AND file_hash = ?`,
+                [user_id, file_hash]
+            );
         });
-        return itemDeleted;
     }
 
     /**
