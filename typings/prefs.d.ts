@@ -22,6 +22,7 @@ declare namespace _ZoteroTypes {
       "supportedModels": string;
       "userAuthorization": boolean;
       "isInitialDataImportComplete": boolean;
+      "currentUploadSession": string;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;
@@ -50,7 +51,6 @@ declare namespace _ZoteroTypes {
       "quickPrompt6_text": string;
       "quickPrompt6_librarySearch": boolean;
       "quickPrompt6_requiresAttachment": boolean;
-      "currentUploadSession": string;
     };
   }
 }
