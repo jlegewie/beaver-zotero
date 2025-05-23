@@ -7,8 +7,7 @@ import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from './icons';
 import Tooltip from './Tooltip';
 import IconButton from './IconButton';
 import { attachmentsService } from '../../src/services/attachmentsService';
-import { queueService } from '../../src/services/queueService';
-import { fileUploader } from '../../src/services/FileUploader';
+import { resetFailedUploads } from '../../src/services/FileUploader';
 
 function formatCount(count: number): string {
     if (count >= 10000) {
@@ -182,15 +181,6 @@ const FileStatusStats: React.FC<{
 }> = ({ className = '' }) => {
 
     const fileStats = useAtomValue(fileStatusStatsAtom);
-
-    const resetFailedUploads = () => {
-        queueService.resetFailedUploads()
-            .then(() => {
-                console.log('Failed uploads reset');
-                fileUploader.start();
-            })
-            .catch(err => console.error('Failed to reset failed uploads:', err));
-    };
 
     return (
         <div className="display-flex flex-col gap-4">
