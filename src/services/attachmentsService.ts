@@ -66,6 +66,14 @@ export interface AttachmentStatusResponse {
     upload_url?: string;
 }
 
+/**
+ * Response from resetting failed uploads
+ */
+export interface ResetFailedResult {
+    file_hash: string;
+    library_id: number;
+    zotero_key: string;
+}
 
 /**
  * Attachments-specific API service that extends the base API service
@@ -160,6 +168,14 @@ export class AttachmentsService extends ApiService {
      */
     async getUploadUrls(fileHashes: string[]): Promise<Record<string, string>> {
         return this.post<Record<string, string>>('/attachments/upload-urls', fileHashes);
+    }
+
+    /**
+     * Resets all failed uploads by changing their status back to pending.
+     * @returns Promise with an array of reset failed upload results
+     */
+    async resetFailedUploads(): Promise<ResetFailedResult[]> {
+        return this.post<ResetFailedResult[]>('/attachments/reset-failed-uploads', {});
     }
 }
 
