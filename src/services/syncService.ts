@@ -4,6 +4,7 @@ import { FileHashReference } from '../../react/types/attachments/apiTypes';
 import { UploadQueueInput } from './database';
 import { userAtom } from '../../react/atoms/auth';
 import { store } from '../../react';
+import { fileUploader } from './FileUploader';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -260,12 +261,13 @@ export class SyncService extends ApiService {
             // @ts-ignore Beaver is defined
             await Zotero.Beaver.db.resetUploads(store.
                 get(userAtom).id,
-                {
+                [{
                     file_hash: result.file_hash,
                     library_id: result.library_id,
                     zotero_key: result.zotero_key
-                } as UploadQueueInput
-        );
+                } as UploadQueueInput]
+            );
+            fileUploader.start();
         }
 
         return result;
