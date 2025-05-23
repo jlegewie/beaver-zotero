@@ -609,11 +609,11 @@ export const resetFailedUploads = async (): Promise<void> => {
             library_id: result.library_id,
             zotero_key: result.zotero_key
             // Other fields like page_count, attempt_count will be set to default reset values
-            // by the Zotero.Beaver.db.resetFailedUploads method.
+            // by the Zotero.Beaver.db.resetUploads method.
         }));
 
         // @ts-ignore Beaver is defined
-        await Zotero.Beaver.db.resetFailedUploads(userId, itemsToResetInDB);
+        await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
         logger(`Beaver File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
 
         // Restart the uploader
