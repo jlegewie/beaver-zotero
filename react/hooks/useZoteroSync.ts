@@ -3,8 +3,8 @@ import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFu
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
-import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom, SyncStatus } from "../atoms/ui";
-import { fileUploader, UploadProgressInfo } from "../../src/services/FileUploader";
+import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, SyncStatus } from "../atoms/ui";
+import { fileUploader } from "../../src/services/FileUploader";
 import { planFeaturesAtom, userAuthorizationAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
@@ -39,9 +39,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const setSyncTotal = useSetAtom(syncTotalAtom);
     const setSyncCurrent = useSetAtom(syncCurrentAtom);
-    const setFileUploadStatus = useSetAtom(fileUploadStatusAtom);
-    const setFileUploadTotal = useSetAtom(fileUploadTotalAtom);
-    const setFileUploadCurrent = useSetAtom(fileUploadCurrentAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const zoteroNotifierIdRef = useRef<string | null>(null);
@@ -171,17 +168,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         setSyncStatus('completed');
         setSyncTotal(0);
         setSyncCurrent(0);
-        setFileUploadStatus('completed');
-        setFileUploadTotal(0);
-        setFileUploadCurrent(0);
-        
-        // Set up file uploader with stable progress updates
-        fileUploader.setStatusCallback((info: UploadProgressInfo) => {
-            // Always update the values directly without checking previous state
-            setFileUploadStatus(info.status);
-            setFileUploadCurrent(info.current);
-            setFileUploadTotal(info.total);
-        });
         
         // Perform initial sync on mount with stable progress updates
         const onStatusChange = (status: SyncStatus) => {
@@ -247,7 +233,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 // Then set up the observer after sync completes
                 setupObserver();
                 // Start file uploader after sync completes
-                fileUploader.start();
+                await fileUploader.start();
             } catch (error: any) {
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);

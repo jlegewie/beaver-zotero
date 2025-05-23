@@ -50,6 +50,7 @@ declare namespace _ZoteroTypes {
       "quickPrompt6_text": string;
       "quickPrompt6_librarySearch": boolean;
       "quickPrompt6_requiresAttachment": boolean;
+      "currentUploadSession": string;
     };
   }
 }

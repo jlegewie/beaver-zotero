@@ -116,9 +116,9 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
                     buttonDisabled: !hashChanged,
-                    onClick: () => {
+                    onClick: async () => {
                         syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
-                        fileUploader.start();
+                        await fileUploader.start("manual");
                     }
                 };
             case 'failed': {
@@ -130,9 +130,9 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonTooltip: 'Retry processing',
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     buttonDisabled: !hashChanged,
-                    onClick: () => {
+                    onClick: async () => {
                         syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
-                        fileUploader.start();
+                        await fileUploader.start("manual");
                     }
                 };
               }

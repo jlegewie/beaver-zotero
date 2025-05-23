@@ -267,7 +267,7 @@ export class SyncService extends ApiService {
                     zotero_key: result.zotero_key
                 } as UploadQueueInput]
             );
-            fileUploader.start();
+            await fileUploader.start("manual");
         }
 
         return result;

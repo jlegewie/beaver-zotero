@@ -115,7 +115,7 @@ export const useProfileSync = () => {
                                         logger(`useProfileSync: Successfully refreshed ProfileWithPlan for ${userId}.`);
                                         // If the plan allows file uploads, start the file uploader
                                         if (refreshedProfileWithPlan.plan.upload_files) {
-                                            fileUploader.start();
+                                            await fileUploader.start();
                                         }
                                     } catch (error: any) {
                                         logger(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);

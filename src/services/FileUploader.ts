@@ -14,22 +14,15 @@ import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
+import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType, isUploadQueueSession } from '../../react/atoms/sync';
+import { getPref, setPref } from '../utils/prefs';
+import { v4 as uuidv4 } from 'uuid';
+import { planFeaturesAtom } from '../../react/atoms/profile';
 
 export interface UploadProgressInfo {
   status: SyncStatus;
   current: number;
   total: number;
-}
-
-/**
- * Queue status interface for local tracking
- */
-export interface QueueStatus {
-    pending: number;
-    in_progress: number;
-    completed: number;
-    failed: number;
-    total: number;
 }
 
 /**
@@ -49,90 +42,104 @@ export class FileUploader {
     private readonly VISIBILITY_TIMEOUT: number = 15;
 
     /**
+     * Minimum interval between currentFile updates (in milliseconds)
+     */
+    private readonly MIN_FILE_UPDATE_INTERVAL: number = 200;
+    private lastFileUpdateTime: number = 0;
+
+    /**
      * URL cache to store upload URLs with expiration times
      */
     private urlCache: Map<string, { url: string; expiresAt: Date }> = new Map();
 
     /**
-     * Holds the last known queue status. 
-     * This may be used to display progress if the queue fails to update later.
+     * Updates the upload queue status atom
      */
-    private lastStatus: QueueStatus = {
-        pending: 0,
-        in_progress: 0,
-        completed: 0,
-        failed: 0,
-        total: 0
-    };
-
-    /**
-     * Callback for upload status and progress updates
-     */
-    private statusCallback?: (info: UploadProgressInfo) => void;
-
-    /**
-     * Legacy progress callback for backward compatibility
-     */
-    private progressCallback?: (completed: number, total: number) => void;
-
-    /**
-     * Sets a comprehensive callback for status and progress updates
-     */
-    public setStatusCallback(callback: (info: UploadProgressInfo) => void): void {
-        this.statusCallback = callback;
-    }
-
-    /**
-     * Sets a callback for upload progress notifications (legacy method)
-     */
-    public setProgressCallback(callback: (completed: number, total: number) => void): void {
-        this.progressCallback = callback;
-    }
-
-    /**
-     * Updates status and progress through callbacks
-     */
-    private reportStatus(status: SyncStatus, current: number = 0, total: number = 0): void {
-        if (this.statusCallback) {
-            this.statusCallback({ status, current, total });
-        }
+    private updateQueueStatus(updates: Partial<UploadQueueSession>, persist: boolean = true): void {
+        store.set(uploadQueueStatusAtom, (current) => {
+            const newStatus = { ...current, ...updates };
+            newStatus.total = (
+                (newStatus.pending || 0) +
+                (newStatus.completed || 0) + 
+                (newStatus.failed || 0) +
+                (newStatus.skipped || 0)
+            );
+            return newStatus as UploadQueueSession;
+        });
         
-        // For backward compatibility
-        if (this.progressCallback && status === 'in_progress') {
-            this.progressCallback(current, total);
+        if (persist) {
+            setPref('currentUploadSession', JSON.stringify(store.get(uploadQueueStatusAtom)));
         }
     }
 
-    // Track progress locally to avoid flashing zeroes
-    private localProgress = {
-        completed: 0,
-        total: 0
-    };
-    
     /**
-     * Updates status with stable progress tracking that won't reset to zero
+     * Increments the queue status by the given values
+     * @param updates The values to increment by
+     * @param persist Whether to persist the session to prefs
      */
-    private reportProgress(status: QueueStatus): void {
-        // Update our high water mark for total items
-        if (status.total > this.localProgress.total) {
-            this.localProgress.total = status.total;
+    private incrementQueueStatus(
+        updates: Partial<Pick<UploadQueueSession, 'pending' | 'completed' | 'failed' | 'skipped'>>,
+        persist: boolean = true
+    ): void {
+
+        store.set(uploadQueueStatusAtom, (current: UploadQueueSession | null) => {
+            const newStatus = {
+                ...current,
+                pending: (current?.pending || 0) + (updates.pending || 0),
+                completed: (current?.completed || 0) + (updates.completed || 0),
+                failed: (current?.failed || 0) + (updates.failed || 0),
+                skipped: (current?.skipped || 0) + (updates.skipped || 0),
+            } as UploadQueueSession;
+
+            newStatus.total = (
+                (newStatus.pending || 0) +
+                (newStatus.completed || 0) + 
+                (newStatus.failed || 0) +
+                (newStatus.skipped || 0)
+            );
+            
+            return newStatus;
+        });
+        if (persist) {
+            setPref('currentUploadSession', JSON.stringify(store.get(uploadQueueStatusAtom)));
+        }
+    }
+
+    /**
+     * Updates the current file being uploaded with rate limiting
+     */
+    private updateCurrentAttachment(libraryId: number, zoteroKey: string): void {
+        const now = Date.now();
+        if (libraryId && zoteroKey && now - this.lastFileUpdateTime < this.MIN_FILE_UPDATE_INTERVAL) {
+            return; // Skip update if too soon
         }
         
-        // Calculate completed count from local status
-        const localCompleted = status.completed + status.failed;
+        this.lastFileUpdateTime = now;
+        this.updateQueueStatus({ currentFile: libraryId + "-" + zoteroKey }, false);
+    }
+
+    /**
+     * Recovers a previous session if it exists and is valid
+     */
+    private recoverSession(): UploadQueueSession | null {
+        const sessionJson = getPref('currentUploadSession');
+        if (!sessionJson || sessionJson === '') return null;
         
-        // Only increase the completed count, never decrease it
-        // This prevents progress from going backward
-        if (localCompleted > this.localProgress.completed) {
-            this.localProgress.completed = localCompleted;
+        try {
+            const session = JSON.parse(sessionJson);
+            
+            // validate the session
+            if (!isUploadQueueSession(session)) {
+                return null;
+            }
+
+            // Return the session if it's in progress, otherwise clear it
+            return session.status === 'in_progress' ? session : null;
+        } catch (error: any) {
+            setPref('currentUploadSession', '{}');
+            logger('Beaver File Uploader: Failed to recover session: ' + error.message, 1);
+            return null;
         }
-        
-        // Report progress using our stable local tracking
-        this.reportStatus(
-            'in_progress', 
-            this.localProgress.completed, 
-            this.localProgress.total
-        );
     }
 
     /**
@@ -220,25 +227,15 @@ export class FileUploader {
     }
 
     /**
-     * Gets queue statistics from local database
-     * @param user_id User ID
-     * @returns Local queue status
+     * Calculate the total number of unique files that need uploading for this session
      */
-    private async getQueueStatistics(user_id: string): Promise<QueueStatus> {
+    private async calculatePendingItems(user_id: string): Promise<number> {
         try {
             // @ts-ignore Beaver is defined
-            const stats = await Zotero.Beaver.db.getUploadStatistics(user_id);
-            
-            return {
-                pending: stats.pending,
-                in_progress: stats.inProgress,
-                completed: stats.completed,
-                failed: stats.failed,
-                total: stats.total
-            };
+            return await Zotero.Beaver.db.getTotalQueueItems(user_id);
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error getting queue statistics: ${error.message}`, 1);
-            return this.lastStatus;
+            logger(`Beaver File Uploader: Error calculating session total: ${error.message}`, 1);
+            return 0;
         }
     }
 
@@ -246,17 +243,49 @@ export class FileUploader {
      * Starts the file uploader if it's not already running.
      * Initializes a concurrency queue and continuously processes queue items 
      * until no more items or until stopped.
+     * @param sessionType Type of upload session (default: 'background')
      */
-    public start(): void {
+    public async start(sessionType: UploadSessionType = 'background'): Promise<void> {
+        // check authentication status and plan features
+        const user = store.get(userAtom);
+        if (!user?.id) {
+            logger('Beaver File Uploader: No user ID found. Stopping.', 3);
+            return;
+        }
+        if (!store.get(planFeaturesAtom).uploadFiles) {
+            logger('Beaver File Uploader: Uploading files is not supported for this plan. Stopping.', 3);
+            return;
+        }
+
+        // check if already running
         if (this.isRunning) {
-            logger('Beaver File Uploader: Already running. Start call ignored.', 4);
+            logger('Beaver File Uploader: Already running. Updating session instead.', 4);
             return;
         }
         this.isRunning = true;
-        logger('Beaver File Uploader: Starting file uploader', 3);
-
-        // Report starting status
-        this.reportStatus('in_progress', 0, 0);
+        
+        // Check for recovered session or create a new session
+        const recoveredSession = this.recoverSession();
+        if (recoveredSession) {
+            this.updateQueueStatus(recoveredSession, false);
+            logger(`Beaver File Uploader: Recovered ${recoveredSession.sessionType} session`, 3);
+        } else {
+            const total = await this.calculatePendingItems(user.id);
+            this.updateQueueStatus({
+                sessionId: uuidv4(),
+                sessionType: sessionType,
+                startTime: new Date().toISOString(),
+                status: 'in_progress',
+                pending: total,
+                completed: 0,
+                failed: 0,
+                skipped: 0,
+                total: total,
+                currentFile: null
+            });
+        }
+        
+        logger(`Beaver File Uploader: Starting file uploader (session type: ${sessionType})`, 3);
 
         // Initialize the p-queue with desired concurrency
         this.uploadQueue = new PQueue({ concurrency: this.MAX_CONCURRENT });
@@ -266,7 +295,8 @@ export class FileUploader {
             .catch(error => {
                 logger('Beaver File Uploader: Error in runQueue: ' + error.message, 1);
                 Zotero.logError(error);
-                this.reportStatus('failed');
+                this.isRunning = false;
+                this.updateQueueStatus({ status: 'failed' });
             });
     }
 
@@ -284,13 +314,13 @@ export class FileUploader {
 
         // Wait for all queued tasks to finish, if any
         try {
-            await this.uploadQueue.onIdle();
-            // Update status to completed if we stopped cleanly
-            this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
+            await this.uploadQueue.onIdle();            
+            // Clear session
+            this.updateQueueStatus({ status: 'completed', currentFile: null }, true);
         } catch (error: any) {
             logger('Beaver File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
             Zotero.logError(error);
-            this.reportStatus('failed');
+            this.updateQueueStatus({ status: 'failed', currentFile: null }, true);
         }
     }
 
@@ -299,17 +329,14 @@ export class FileUploader {
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
-        // Reset progress tracking at the start of a queue run
-        this.localProgress = {
-            completed: 0,
-            total: 0
-        };
-        
         // Error backoff handling
         const MAX_CONSECUTIVE_ERRORS = 5;
         const ERROR_BACKOFF_TIME = 1000;
         let consecutiveErrors = 0;
         let errorBackoffTime = ERROR_BACKOFF_TIME;
+
+        // Only recalculate pending periodically or when needed
+        let lastPendingUpdate = 0;
 
         while (this.isRunning) {
             try {
@@ -343,21 +370,31 @@ export class FileUploader {
 
                 // If no items, we're done
                 if (items.length === 0) {
-                    this.reportStatus('completed', this.localProgress.total, this.localProgress.total);
                     break;
                 }
-
-                // Report progress
-                const status = await this.getQueueStatistics(user.id);
-                this.lastStatus = status;
-                this.reportProgress(status);
 
                 // Get upload URLs for all items
                 const urlMap = await this.getUploadUrls(items);
 
-                // Filter items that have valid URLs
+                // Separate items with and without URLs
                 const itemsWithUrls = items.filter(item => urlMap.has(item.file_hash));
-                logger(`Beaver File Uploader: Got upload URLs for ${itemsWithUrls.length} out of ${items.length} items`, 3);
+                const itemsWithoutUrls = items.filter(item => !urlMap.has(item.file_hash));
+
+                // Mark items without URLs as failed (they can't be processed)
+                for (const item of itemsWithoutUrls) {
+                    try {
+                        await this.handlePermanentFailure(item, user.id, "Unable to get upload URL");
+                    } catch (error: any) {
+                        logger(`Failed to mark item ${item.zotero_key} as failed: ${error.message}`, 2);
+                    }
+                }
+
+                // Only recalculate pending periodically or when needed
+                if (Date.now() - lastPendingUpdate > 30000) { // Every 30 seconds
+                    const pending = await this.calculatePendingItems(user.id);
+                    this.updateQueueStatus({ pending }, true);
+                    lastPendingUpdate = Date.now();
+                }
 
                 // Reset idle and error counters on successful queue read
                 consecutiveErrors = 0;
@@ -375,27 +412,23 @@ export class FileUploader {
                 logger('Beaver File Uploader: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
                 
-                // Report error status
-                this.reportStatus('failed');
-                
-                // Increment consecutive error counter
                 consecutiveErrors++;
                 
-                // If we've hit max consecutive errors, take a break
+                // If we've hit max consecutive errors, stop the session
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, pausing for recovery`, 2);
-                    await new Promise(resolve => setTimeout(resolve, 60000)); // 1 minute timeout
-                    consecutiveErrors = 0; // Reset counter after pause
+                    logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping session`, 2);
+                    throw new Error('Max consecutive errors reached');
                 }
-                
-                // Continue the loop instead of breaking - we'll try again with backoff
-                continue;
+
+                // Continue with backoff...
+                await new Promise(resolve => setTimeout(resolve, 30000));
             }
         }
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
         logger('Beaver File Uploader: Finished processing queue.', 3);
+        this.updateQueueStatus({ status: 'completed', currentFile: null }, true);
     }
 
     /**
@@ -404,6 +437,9 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueRecord, uploadUrl: string, user_id: string): Promise<void> {
         try {
+            // Update current file being processed
+            this.updateCurrentAttachment(item.library_id, item.zotero_key);
+            
             logger(`Beaver File Uploader: Uploading file for ${item.zotero_key}`, 3);
 
             // Retrieve file path from Zotero
@@ -510,8 +546,11 @@ export class FileUploader {
                 // The visibility timeout will handle retries automatically
                 // No action needed here - the item will become visible again after timeout
                 logger(`Beaver File Uploader: Upload failed for ${item.zotero_key}, will retry after visibility timeout`, 2);
-                setTimeout(() => this.start(), this.VISIBILITY_TIMEOUT * 60 * 1000);
+                // setTimeout(() => this.start(), this.VISIBILITY_TIMEOUT * 60 * 1000);
             }
+        } finally {
+            // Clear current file when done (success or failure)
+            this.updateQueueStatus({ currentFile: null }, false);
         }
     }
     
@@ -532,6 +571,8 @@ export class FileUploader {
             
             // Remove URL from cache
             this.urlCache.delete(item.file_hash);
+
+            this.incrementQueueStatus({ failed: 1, pending: -1 }, true);
             
             logger(`Beaver File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
             
@@ -562,12 +603,7 @@ export class FileUploader {
             logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
             
             // Increment our local completed count only after successful backend update
-            this.localProgress.completed++;
-            this.reportStatus(
-                'in_progress', 
-                this.localProgress.completed, 
-                this.localProgress.total
-            );
+            this.incrementQueueStatus({ completed: 1, pending: -1 }, true);
             
         } catch (error: any) {
             logger(`Beaver File Uploader: Error marking upload as completed: ${error.message}`, 1);
@@ -575,6 +611,24 @@ export class FileUploader {
             // Re-throw the error so callers know the completion marking failed
             throw error;
         }
+    }
+
+    private async validateRecoveredSession(session: UploadQueueSession, user_id: string): Promise<UploadQueueSession> {
+        // Recalculate actual pending items
+        const actualPending = await this.calculatePendingItems(user_id);
+        
+        // Adjust session if needed
+        if (actualPending !== session.pending) {
+            logger(`Beaver File Uploader: Adjusting recovered session pending count from ${session.pending} to ${actualPending}`, 3);
+            const newTotal = actualPending + session.completed + session.failed + (session.skipped || 0);
+            return {
+                ...session,
+                pending: actualPending,
+                total: newTotal
+            };
+        }
+        
+        return session;
     }
 }
 
@@ -598,9 +652,6 @@ export const resetFailedUploads = async (): Promise<void> => {
 
         if (results.length === 0) {
             logger(`Beaver File Uploader: No failed uploads reported by backend to reset locally.`, 3);
-            // Restart the uploader
-            fileUploader.start();
-            logger(`Beaver File Uploader: Uploader restarted.`, 3);
             return;
         }
 
@@ -617,7 +668,7 @@ export const resetFailedUploads = async (): Promise<void> => {
         logger(`Beaver File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
 
         // Restart the uploader
-        fileUploader.start();
+        await fileUploader.start("manual");
         logger(`Beaver File Uploader: Uploader restarted after resetting failed uploads.`, 3);
 
     } catch (error: any) {

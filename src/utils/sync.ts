@@ -367,7 +367,7 @@ export async function syncItemsToBackend(
 
                 // Start file uploader if there are attachments to upload
                 logger(`Beaver Sync: Starting file uploader`, 2);
-                fileUploader.start();
+                await fileUploader.start(syncType === 'initial' ? "initial" : "background");
             }
 
             // Update processed count with actual success count

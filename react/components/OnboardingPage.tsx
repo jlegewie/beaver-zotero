@@ -3,11 +3,10 @@ import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, O
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { 
-    syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
-    fileUploadStatusAtom, fileUploadTotalAtom, fileUploadCurrentAtom,
+    syncStatusAtom, syncTotalAtom, syncCurrentAtom,
     fileStatusStatsAtom, SyncStatus,
 } from "../atoms/ui";
-import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../atoms/sync";
+import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom } from "../atoms/sync";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
@@ -70,10 +69,9 @@ const OnboardingPage: React.FC = () => {
     const syncStatus = useAtomValue(syncStatusAtom);
     const syncTotal = useAtomValue(syncTotalAtom);
     const syncCurrent = useAtomValue(syncCurrentAtom);
+
     // File upload state
-    const fileStatus = useAtomValue(fileUploadStatusAtom);
-    const fileTotal = useAtomValue(fileUploadTotalAtom);
-    const fileCurrent = useAtomValue(fileUploadCurrentAtom);
+    const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -99,44 +97,8 @@ const OnboardingPage: React.FC = () => {
         return Math.min(Math.round((current / total) * 100), 100);
     };
     
-    const syncProgress = calculateProgress(syncCurrent, syncTotal);
-    const uploadProgress = calculateProgress(fileStats.uploadCompletedCount, fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount);
+    const uploadProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueStatus?.total || 0);
     const indexingProgress = fileStats.progress;
-
-    // Status messages
-    const getSyncDescription = () => {
-        if (syncStatus === 'idle') return "Waiting to begin library sync...";
-        if (syncStatus === 'in_progress') return "Beaver is syncing your Zotero library...";
-        if (syncStatus === 'failed') return "There was an error syncing your library.";
-        return "Your Zotero library has been synced successfully.";
-    };
-
-    const getUploadDescription = () => {
-        if (fileStatus === 'idle') return "Waiting to begin file upload...";
-        if (fileStatus === 'in_progress') return "Uploading your PDF files to Beaver...";
-        if (fileStatus === 'failed') return "There was an error uploading some files.";
-        return "Your files have been uploaded successfully.";
-    };
-
-    const getIndexingDescription = () => {
-        const { activeProcessingCount, queuedProcessingCount, completedFiles, failedProcessingCount } = fileStats;
-        const totalProcessing = activeProcessingCount + queuedProcessingCount + completedFiles + failedProcessingCount;
-        
-        if (totalProcessing === 0) return "Waiting to begin file indexing...";
-        if (activeProcessingCount > 0 || queuedProcessingCount > 0) return "Indexing your files for search...";
-        if (failedProcessingCount > 0) return `Indexing completed with ${failedProcessingCount} errors.`;
-        return "All your files have been indexed successfully.";
-    };
-
-    const getIndexingStatus = (): SyncStatus => {
-        const { activeProcessingCount, queuedProcessingCount, completedFiles, failedProcessingCount } = fileStats;
-        const totalProcessing = activeProcessingCount + queuedProcessingCount + completedFiles + failedProcessingCount;
-        
-        if (totalProcessing === 0) return 'idle';
-        if (activeProcessingCount > 0 || queuedProcessingCount > 0) return 'in_progress';
-        if (failedProcessingCount > 0) return 'failed';
-        return 'completed';
-    };
 
     const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
     const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
@@ -148,6 +110,20 @@ const OnboardingPage: React.FC = () => {
         if (librarySyncProgress.anyFailed) return CancelIcon;
         if (librarySyncProgress.completed) return CheckmarkIcon;
         return SpinnerIcon;
+    };
+
+    const getUploadIcon = (): React.ReactNode => {
+        if (uploadQueueStatus?.status === 'completed') return CheckmarkIcon;
+        if (uploadQueueStatus?.status === 'failed') return CancelIcon;
+        return SpinnerIcon;
+    };
+
+    const getUploadLeftText = (): string => {
+        let text = "";
+        if(!uploadQueueStatus) return "";
+        if (uploadQueueStatus?.failed && uploadQueueStatus.failed > 0) text += `${uploadQueueStatus?.failed?.toLocaleString()} failed`;
+        if (uploadQueueStatus?.skipped && uploadQueueStatus.skipped > 0) text += `${uploadQueueStatus?.skipped?.toLocaleString()} skipped`;
+        return text;
     };
 
     // Handle library selection change
@@ -254,12 +230,9 @@ const OnboardingPage: React.FC = () => {
                     
                     {/* Uploading files */}
                     <ProcessItem 
-                        icon={CheckmarkIcon}
-                        title={`Uploading ${fileStats.uploadPendingCount + fileStats.uploadCompletedCount + fileStats.uploadFailedCount} files`}
-                        leftText={fileStats.uploadFailedCount > 0
-                            ? `${fileStats.uploadFailedCount.toLocaleString()} failed`
-                            : undefined
-                        }
+                        icon={getUploadIcon()}
+                        title={uploadQueueStatus ? `Uploading ${uploadQueueStatus.total.toLocaleString()} files` : "Uploading files"}
+                        leftText={getUploadLeftText()}
                         rightText={`${uploadProgress}%`}
                         progress={uploadProgress}
                     />

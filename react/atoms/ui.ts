@@ -3,6 +3,7 @@ import { InputSource } from '../types/sources';
 import { FileStatus } from '../types/fileStatus';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage } from '../types/popupMessage';
+import { uploadQueueStatusAtom } from './sync';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -35,16 +36,14 @@ export const fileUploadCurrentAtom = atom<number>(0);
 export const syncingAtom = atom(
     (get) => {
         const dbStatus = get(syncStatusAtom);
-        const fileStatus = get(fileUploadStatusAtom);
-        return dbStatus === 'in_progress' || fileStatus === 'in_progress';
+        return dbStatus === 'in_progress' || get(uploadQueueStatusAtom)?.status === 'in_progress';
     }
 );
 
 export const syncErrorAtom = atom(
     (get) => {
         const dbStatus = get(syncStatusAtom);
-        const fileStatus = get(fileUploadStatusAtom);
-        return dbStatus === 'failed' || fileStatus === 'failed';
+        return dbStatus === 'failed' || get(uploadQueueStatusAtom)?.status === 'failed';
     }
 );
 
