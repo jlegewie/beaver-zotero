@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon } from "./icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
-import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, fileStatusStatsAtom } from "../atoms/ui";
+import { fileStatusStatsAtom } from "../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom } from "../atoms/sync";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
@@ -62,11 +62,6 @@ const OnboardingPage: React.FC = () => {
     // User authorization state
     const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
     
-    // Database sync state
-    const syncStatus = useAtomValue(syncStatusAtom);
-    const syncTotal = useAtomValue(syncTotalAtom);
-    const syncCurrent = useAtomValue(syncCurrentAtom);
-
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
 
