@@ -1035,11 +1035,11 @@ export class BeaverDB {
     }
 
     /**
-     * Reset failed uploads by setting their status to pending and adding them back to the upload queue.
+     * Reset uploads by setting their status to pending and adding them back to the upload queue.
      * @param user_id User ID
      * @param items Array of UploadQueueInput objects containing file_hash, library_id, and zotero_key
      */
-    public async resetFailedUploads(user_id: string, items: UploadQueueInput[]): Promise<void> {
+    public async resetUploads(user_id: string, items: UploadQueueInput[]): Promise<void> {
         if (items.length === 0) {
             return;
         }

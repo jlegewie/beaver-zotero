@@ -39,6 +39,14 @@ export interface CompleteUploadResponse {
     message: string;
 }
 
+export interface CompleteUploadResult {
+    upload_completed: boolean;
+    queued: boolean;
+    error: string;
+    required_pages: number | null;
+    remaining_pages: number | null;
+}
+
 /**
  * Represents the processing status of a single attachment.
  * Mirrors the AttachmentStatusResponse Pydantic model in the backend.
@@ -153,12 +161,12 @@ export class AttachmentsService extends ApiService {
      * @param pageCount The number of pages in the file
      * @returns Promise with the upload completed response
      */
-    async markUploadCompleted(fileHash: string, pageCount: number | null): Promise<CompleteUploadResponse> {
+    async markUploadCompleted(fileHash: string, pageCount: number | null): Promise<CompleteUploadResult> {
         const request: CompleteUploadRequest = {
             file_hash: fileHash,
             page_count: pageCount
         };
-        return this.post<CompleteUploadResponse>('/attachments/complete-upload', request);
+        return this.post<CompleteUploadResult>('/attachments/complete-upload', request);
     }
 
     /**
