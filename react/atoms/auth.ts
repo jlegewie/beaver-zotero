@@ -1,5 +1,7 @@
 import { atom } from 'jotai';
 import { Session } from '@supabase/supabase-js';
+import { supabase } from '../../src/services/supabaseClient';
+import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
 
 /**
  * Atom representing the current authentication session
@@ -32,8 +34,21 @@ export type AuthUser = {
  * Null when no user is authenticated
  */
 export const userAtom = atom<AuthUser | null>(null);
+export const userIdAtom = atom<string | null>((get) => get(userAtom)?.id || null);
 
 /**
  * Loading state atom to track auth initialization status
  */
 export const authLoadingAtom = atom<boolean>(true);
+
+/**
+ * Atom setter for logging out, setting session and user atoms to null
+ */
+export const logoutAtom = atom(
+    null,
+    (_, set) => {
+        supabase.auth.signOut();
+        set(profileWithPlanAtom, null);
+        set(isProfileLoadedAtom, false);
+    }
+);

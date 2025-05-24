@@ -2,7 +2,7 @@ import React from "react";
 // @ts-ignore no idea
 import { useState, useCallback, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
-import { userAtom } from '../atoms/auth';
+import { logoutAtom, userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { UserIcon, LogoutIcon, LinkIcon, CancelIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon } from './icons';
 import IconButton from "./IconButton";
@@ -299,6 +299,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 // --- Main Preference Page Component ---
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
+    const logout = useSetAtom(logoutAtom);
 
     // --- State for Preferences ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
@@ -334,12 +335,6 @@ const PreferencePage: React.FC = () => {
         // Note: Individual pref saving is handled within QuickPromptSettings component's onBlur/onChange
     }, []);
 
-    const handleLogout = () => {
-        supabase.auth.signOut();
-        setProfileWithPlan(null);
-        setIsProfileLoaded(false);
-    };
-
     return (
         <div
             id="beaver-preferences"
@@ -365,7 +360,7 @@ const PreferencePage: React.FC = () => {
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
-                        <Button variant="outline" icon={LogoutIcon} onClick={handleLogout}>Logout</Button>
+                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
                 </div>
             ) : (
