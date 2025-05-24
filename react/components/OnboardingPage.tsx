@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon } from "./icons";
+import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon } from "./icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { fileStatusStatsAtom } from "../atoms/ui";
@@ -9,6 +9,8 @@ import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
 import { setPref } from "../../src/utils/prefs";
 import { LibraryStatistics } from "../../src/utils/libraries";
+import { syncZoteroDatabase } from "../../src/utils/sync";
+import IconButton from "./IconButton";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
@@ -26,14 +28,22 @@ const ProcessItem: React.FC<{
     progress?: number,
     leftText?: string,
     rightText?: string,
-}> = ({ icon, title, description, progress, leftText, rightText }) => {
+    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | undefined,
+    onClick?: () => void,
+}> = ({ icon, title, description, progress, leftText, rightText, rightIcon, onClick }) => {
     return (
         <div className="display-flex flex-row gap-4">
             <div className="mt-1">
                 {icon}
             </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
-                <div className="font-color-primary text-lg">{title}</div>
+                <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
+                    <div className="font-color-primary text-lg">{title}</div>
+                    <div className="flex-1"/>
+                    {rightIcon && onClick && (
+                        <IconButton icon={rightIcon} onClick={onClick} variant="ghost-secondary" className="scale-12" />
+                    )}
+                </div>
                 {description && (
                     <div className="font-color-tertiary text-base">
                         {description}
@@ -95,7 +105,11 @@ const OnboardingPage: React.FC = () => {
 
     const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
     const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
-    const SpinnerIcon = <Spinner className="scale-14" />;
+    const SpinnerIcon = <Spinner className="scale-14 -mr-1" />;
+
+    const handleSyncRetryClick = () => {
+        syncZoteroDatabase();
+    };
 
     const getSyncIcon = (): React.ReactNode => {
         if (librarySyncProgress.anyFailed) return CancelIcon;
@@ -105,6 +119,8 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getUploadIcon = (): React.ReactNode => {
+        if (librarySyncProgress.anyFailed) return CancelIcon;
+        if (librarySyncProgress.progress < 100) return SpinnerIcon;
         if (uploadQueueStatus?.status === 'completed') return CheckmarkIcon;
         if (uploadQueueStatus?.status === 'failed') return CancelIcon;
         return SpinnerIcon;
@@ -176,7 +192,7 @@ const OnboardingPage: React.FC = () => {
                 </p>
             </div>
 
-            {/* Step 1: Library Selection & Authorization */}
+            {/* ------------- Step 1: Library Selection & Authorization ------------- */}
             {!userAuthorization ? (
                 <div className="display-flex flex-col gap-3">
                     <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
@@ -208,7 +224,7 @@ const OnboardingPage: React.FC = () => {
                     </div>
                 </div>
             ) : (
-                // Step 2: Syncing Process
+                // ------------- Step 2: Syncing Process -------------
                 <div className="display-flex flex-col gap-5">
                     {/* Syncing your library */}
                     <ProcessItem 
@@ -220,6 +236,8 @@ const OnboardingPage: React.FC = () => {
                             : undefined
                         }
                         rightText={`${librarySyncProgress.progress}%`}
+                        rightIcon={librarySyncProgress.anyFailed ? RepeatIcon : undefined}
+                        onClick={librarySyncProgress.anyFailed ? handleSyncRetryClick : undefined}
                     />
                     
                     {/* Uploading files */}
