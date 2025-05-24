@@ -132,12 +132,12 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getUploadLeftText = (): string => {
-        let text = "";
+        const textParts: string[] = [];
         if(!uploadQueueStatus) return "";
-        if (uploadQueueTotal > 0) text += `${uploadQueueTotal?.toLocaleString()} files`;
-        if (uploadQueueStatus?.failed && uploadQueueStatus.failed > 0) text += `${uploadQueueStatus?.failed?.toLocaleString()} failed`;
-        if (uploadQueueStatus?.skipped && uploadQueueStatus.skipped > 0) text += `${uploadQueueStatus?.skipped?.toLocaleString()} skipped`;
-        return text;
+        if (uploadQueueTotal > 0) textParts.push(`${uploadQueueTotal?.toLocaleString()} files`);
+        if (uploadQueueStatus?.failed && uploadQueueStatus.failed > 0) textParts.push(`${uploadQueueStatus?.failed?.toLocaleString()} failed`);
+        if (uploadQueueStatus?.skipped && uploadQueueStatus.skipped > 0) textParts.push(`${uploadQueueStatus?.skipped?.toLocaleString()} skipped`);
+        return textParts.join(", ");
         
     };
 
