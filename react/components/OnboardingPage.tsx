@@ -129,33 +129,33 @@ const OnboardingPage: React.FC = () => {
     
     // Handle authorization
     const handleAuthorize = () => {
-        if (selectedLibraryIds.length > 0) {
-            // Create a map of library IDs to library sync status
-            const selectedLibraries = Object.fromEntries(
-                selectedLibraryIds
-                    .map(id => {
-                        const library = libraryStatistics.find(library => library.libraryID === id);
-                        return [
-                            library?.libraryID,
-                            {
-                                libraryID: library?.libraryID,
-                                libraryName: library?.name || '',
-                                itemCount: library?.itemCount || 0,
-                                syncedCount: 0,
-                                status: 'idle',
-                            } as LibrarySyncStatus
-                        ];
-                    })
-            );
+        if (selectedLibraryIds.length === 0) return;
+        
+        // Create a map of library IDs to library sync status
+        const selectedLibraries = Object.fromEntries(
+            selectedLibraryIds
+                .map(id => {
+                    const library = libraryStatistics.find(library => library.libraryID === id);
+                    return [
+                        library?.libraryID,
+                        {
+                            libraryID: library?.libraryID,
+                            libraryName: library?.name || '',
+                            itemCount: library?.itemCount || 0,
+                            syncedCount: 0,
+                            status: 'idle',
+                        } as LibrarySyncStatus
+                    ];
+                })
+        );
 
-            // Save the sync status for the selected libraries
-            setPref('selectedLibrary', JSON.stringify(selectedLibraries));
-            setLibrariesSyncStatus(selectedLibraries);
-            
-            // Update authorization status
-            setUserAuthorization(true);
-            setPref('userAuthorization', true);
-        }
+        // Save the sync status for the selected libraries
+        setPref('selectedLibrary', JSON.stringify(selectedLibraries));
+        setLibrariesSyncStatus(selectedLibraries);
+        
+        // Update authorization status
+        setUserAuthorization(true);
+        setPref('userAuthorization', true);
     };
     
     return (
