@@ -5,7 +5,7 @@ import { getPref } from "../../src/utils/prefs";
 
 
 export const userAuthorizationAtom = atom<boolean>(getPref('userAuthorization'));
-export const isInitialDataImportCompleteAtom = atom(getPref("isInitialDataImportComplete"));
+export const isOnboardingCompleteAtom = atom(getPref("isOnboardingComplete"));
 
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
