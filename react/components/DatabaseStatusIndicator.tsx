@@ -6,7 +6,7 @@ import {
     syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
     syncingAtom, syncErrorAtom, SyncStatus
 } from "../atoms/ui";
-import { uploadQueueStatusAtom } from "../atoms/sync";
+import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import Tooltip from "./Tooltip";
 import { syncZoteroDatabase } from '../../src/utils/sync';
 import IconButton from "./IconButton";
@@ -27,6 +27,7 @@ const DatabaseStatusIndicator: React.FC = () => {
     
     // File upload atoms
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
+    const uploadQueueTotal = useAtomValue(uploadQueueTotalAtom);
     
     // Combined atoms
     const isSyncing = useAtomValue(syncingAtom);
@@ -45,7 +46,7 @@ const DatabaseStatusIndicator: React.FC = () => {
         
         // Check if initial sync (large operation) is in progress
         const isInitialSync = syncStatus === 'in_progress' && syncTotal > 50;
-        const isLargeFileUpload = uploadQueueStatus?.status === 'in_progress' && uploadQueueStatus?.total > 20;
+        const isLargeFileUpload = uploadQueueStatus?.status === 'in_progress' && uploadQueueTotal > 20;
         
         if (isInitialSync || isLargeFileUpload) {
             return { color: "yellow", fading: true };
@@ -72,7 +73,7 @@ const DatabaseStatusIndicator: React.FC = () => {
     };
     
     const dbProgress = calculateProgress(syncCurrent, syncTotal);
-    const fileProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueStatus?.total || 0);
+    const fileProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueTotal);
     
     // Progress display text with proper formatting
     const getProgressText = (status: SyncStatus, progress: number, current: number, total: number, type: 'database' | 'file'): string => {
@@ -90,7 +91,7 @@ const DatabaseStatusIndicator: React.FC = () => {
     };
     
     const dbProgressText = getProgressText(syncStatus, dbProgress, syncCurrent, syncTotal, 'database');
-    const fileProgressText = getProgressText(uploadQueueStatus?.status as SyncStatus, fileProgress, uploadQueueStatus?.pending || 0, uploadQueueStatus?.total || 0, 'file');
+    const fileProgressText = getProgressText(uploadQueueStatus?.status as SyncStatus, fileProgress, uploadQueueStatus?.pending || 0, uploadQueueTotal, 'file');
     
     // Handle manual sync button click
     const handleSyncClick = () => {

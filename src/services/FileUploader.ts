@@ -19,12 +19,6 @@ import { getPref, setPref } from '../utils/prefs';
 import { v4 as uuidv4 } from 'uuid';
 import { planFeaturesAtom } from '../../react/atoms/profile';
 
-export interface UploadProgressInfo {
-  status: SyncStatus;
-  current: number;
-  total: number;
-}
-
 /**
  * Manages file uploads from a frontend-managed queue of pending uploads.
  */
@@ -57,14 +51,7 @@ export class FileUploader {
      */
     private updateQueueStatus(updates: Partial<UploadQueueSession>, persist: boolean = true): void {
         store.set(uploadQueueStatusAtom, (current) => {
-            const newStatus = { ...current, ...updates };
-            newStatus.total = (
-                (newStatus.pending || 0) +
-                (newStatus.completed || 0) + 
-                (newStatus.failed || 0) +
-                (newStatus.skipped || 0)
-            );
-            return newStatus as UploadQueueSession;
+            return { ...current, ...updates } as UploadQueueSession;
         });
         
         if (persist) {
@@ -90,13 +77,6 @@ export class FileUploader {
                 failed: (current?.failed || 0) + (updates.failed || 0),
                 skipped: (current?.skipped || 0) + (updates.skipped || 0),
             } as UploadQueueSession;
-
-            newStatus.total = (
-                (newStatus.pending || 0) +
-                (newStatus.completed || 0) + 
-                (newStatus.failed || 0) +
-                (newStatus.skipped || 0)
-            );
             
             return newStatus;
         });
@@ -270,17 +250,16 @@ export class FileUploader {
             this.updateQueueStatus(recoveredSession, false);
             logger(`Beaver File Uploader: Recovered ${recoveredSession.sessionType} session`, 3);
         } else {
-            const total = await this.calculatePendingItems(user.id);
+            const pending = await this.calculatePendingItems(user.id);
             this.updateQueueStatus({
                 sessionId: uuidv4(),
                 sessionType: sessionType,
                 startTime: new Date().toISOString(),
                 status: 'in_progress',
-                pending: total,
+                pending: pending,
                 completed: 0,
                 failed: 0,
                 skipped: 0,
-                total: total,
                 currentFile: null
             });
         }
@@ -620,12 +599,7 @@ export class FileUploader {
         // Adjust session if needed
         if (actualPending !== session.pending) {
             logger(`Beaver File Uploader: Adjusting recovered session pending count from ${session.pending} to ${actualPending}`, 3);
-            const newTotal = actualPending + session.completed + session.failed + (session.skipped || 0);
-            return {
-                ...session,
-                pending: actualPending,
-                total: newTotal
-            };
+            return {...session, pending: actualPending};
         }
         
         return session;

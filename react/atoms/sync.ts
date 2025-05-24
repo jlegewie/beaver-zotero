@@ -16,11 +16,16 @@ export interface UploadQueueSession {
     completed: number;
     failed: number;
     skipped: number;
-    total: number;
     currentFile: string | null;
 }
 
 export const uploadQueueStatusAtom = atom<UploadQueueSession | null>(null);
+
+export const uploadQueueTotalAtom = atom<number>((get) => {
+    const status = get(uploadQueueStatusAtom);
+    return (status?.pending || 0) + (status?.completed || 0) + (status?.failed || 0) + (status?.skipped || 0);
+});
+
 
 export function isUploadQueueSession(obj: any): obj is UploadQueueSession {
     return (

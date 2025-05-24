@@ -3,7 +3,7 @@ import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon } 
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { fileStatusStatsAtom } from "../atoms/ui";
-import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom } from "../atoms/sync";
+import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import Button from "./button";
 import { userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
@@ -64,6 +64,7 @@ const OnboardingPage: React.FC = () => {
     
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
+    const uploadQueueTotal = useAtomValue(uploadQueueTotalAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -89,7 +90,7 @@ const OnboardingPage: React.FC = () => {
         return Math.min(Math.round((current / total) * 100), 100);
     };
     
-    const uploadProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueStatus?.total || 0);
+    const uploadProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueTotal);
     const indexingProgress = fileStats.progress;
 
     const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
@@ -113,7 +114,7 @@ const OnboardingPage: React.FC = () => {
     const getUploadLeftText = (): string => {
         let text = "";
         if(!uploadQueueStatus) return "";
-        if (uploadQueueStatus?.total && uploadQueueStatus.total > 0) text += `${uploadQueueStatus?.total?.toLocaleString()} files`;
+        if (uploadQueueTotal > 0) text += `${uploadQueueTotal?.toLocaleString()} files`;
         if (uploadQueueStatus?.failed && uploadQueueStatus.failed > 0) text += `${uploadQueueStatus?.failed?.toLocaleString()} failed`;
         if (uploadQueueStatus?.skipped && uploadQueueStatus.skipped > 0) text += `${uploadQueueStatus?.skipped?.toLocaleString()} skipped`;
         return text;
