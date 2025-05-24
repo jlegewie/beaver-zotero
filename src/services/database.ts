@@ -72,6 +72,15 @@ export interface UploadQueueInput {
     zotero_key: string;
 }
 
+// Upload statistics for a user
+export interface AttachmentUploadStatistics {
+    total: number;
+    pending: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+}
+
 /**
  * Manages the beaver SQLite database using Zotero's DBConnection.
  */
@@ -764,16 +773,7 @@ export class BeaverDB {
      * @param user_id User ID
      * @returns Upload statistics
      */
-    public async getUploadStatistics(user_id: string): Promise<{
-        total: number;
-        pending: number;
-        inProgress: number;
-        completed: number;
-        failed: number;
-        skipped: number;
-        // totalPages: number;
-        // totalSize: number;
-    }> {
+    public async getAttachmentUploadStatistics(user_id: string): Promise<AttachmentUploadStatistics> {
         // Execute all queries in parallel for performance
         const [
             totalResult,
@@ -784,24 +784,24 @@ export class BeaverDB {
             // aggregatesResult
         ] = await Promise.all([
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL',
-            [user_id]
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL',
+                [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "pending"',
-            [user_id]
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "pending"',
+                [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "completed"',
-            [user_id]
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "completed"',
+                [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "failed"',
-            [user_id]
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "failed"',
+                [user_id]
             ),
             this.conn.queryAsync(
-            'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NULL',
-            [user_id]
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "skipped"',
+                [user_id]
             )
             // this.conn.queryAsync(
             // 'SELECT SUM(page_count) as totalPages, SUM(file_size) as totalSize FROM attachments WHERE user_id = ?',
@@ -812,7 +812,6 @@ export class BeaverDB {
         return {
             total: totalResult[0]?.count || 0,
             pending: pendingResult[0]?.count || 0,
-            inProgress: 0,
             completed: completedResult[0]?.count || 0,
             failed: failedResult[0]?.count || 0,
             skipped: skippedResult[0]?.count || 0,
