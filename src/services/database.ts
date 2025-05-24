@@ -66,7 +66,7 @@ export interface UploadQueueInput {
     file_hash?: string | null;  // Allow optional/null for input
     page_count?: number | null;
     file_size?: number | null;
-    queue_visibility?: string;
+    queue_visibility?: string | null;
     attempt_count?: number;
     library_id: number;
     zotero_key: string;
@@ -1046,7 +1046,11 @@ export class BeaverDB {
 
         await this.conn.executeTransaction(async () => {
             // 1. Update attachments table: set upload_status to "pending" for all file_hashes
-            const fileHashes = items.map(item => item.file_hash);
+            const fileHashes = items.map(item => item.file_hash).filter(hash => hash); // Ensure hashes are not null/undefined
+            if (fileHashes.length === 0) {
+                // No valid file hashes to process
+                return;
+            }
             const placeholders = fileHashes.map(() => '?').join(',');
             
             await this.conn.queryAsync(
@@ -1058,11 +1062,17 @@ export class BeaverDB {
 
             // 2. Upsert each item to upload_queue with reset values
             for (const item of items) {
+                // Skip if file_hash is missing, as it's crucial for the queue logic
+                if (!item.file_hash) {
+                    logger(`Beaver DB: Skipping reset for item without file_hash. Library ID: ${item.library_id}, Zotero Key: ${item.zotero_key}`, 1);
+                    continue;
+                }
+
                 const queueItem: UploadQueueInput = {
                     file_hash: item.file_hash,
                     page_count: null,
                     file_size: null,
-                    queue_visibility: undefined,
+                    queue_visibility: null, // Changed from undefined to null
                     attempt_count: 0,
                     library_id: item.library_id,
                     zotero_key: item.zotero_key
