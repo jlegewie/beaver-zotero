@@ -154,8 +154,8 @@ const OnboardingPage: React.FC = () => {
         setLibrariesSyncStatus(selectedLibraries);
         
         // Update authorization status
-        setUserAuthorization(true);
         setPref('userAuthorization', true);
+        setUserAuthorization(true);
     };
     
     return (
