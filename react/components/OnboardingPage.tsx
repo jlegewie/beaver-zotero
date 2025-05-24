@@ -98,10 +98,9 @@ const OnboardingPage: React.FC = () => {
     const SpinnerIcon = <Spinner className="scale-14" />;
 
     const getSyncIcon = (): React.ReactNode => {
-        if (librarySyncProgress.progress === 0) return SpinnerIcon;
-        if (librarySyncProgress.progress < 100) return SpinnerIcon;
         if (librarySyncProgress.anyFailed) return CancelIcon;
-        if (librarySyncProgress.completed) return CheckmarkIcon;
+        if (librarySyncProgress.progress < 100) return SpinnerIcon;
+        if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
         return SpinnerIcon;
     };
 
