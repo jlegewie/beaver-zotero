@@ -21,7 +21,9 @@ pref("supportedModels","[]");
 
 // Initial onboarding process
 pref("userAuthorization", false);
-pref("isInitialDataImportComplete", false);
+pref("isInitialSyncComplete", false);
+pref("isInitialUploadComplete", false);
+pref("isOnboardingComplete", false);
 pref("currentUploadSession", "{}");
 
 // Search

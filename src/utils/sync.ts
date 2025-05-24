@@ -342,6 +342,8 @@ export async function syncItemsToBackend(
 
             // Update database attachments and add items to upload queue
             if (batchResult.attachments.length > 0) {
+                // Update database attachments
+                logger(`Beaver Sync: Updating local database attachments`, 2);
                 const attachments = batchResult.attachments.map(attachment => ({
                     library_id: attachment.library_id,
                     zotero_key: attachment.zotero_key,
@@ -350,9 +352,10 @@ export async function syncItemsToBackend(
                 }));
                 // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
-                // TODO: Check on file size and page count limits here!
+                
                 // Add items to upload queue
-                const uploadQueue = batchResult.attachments
+                // TODO: Check on file size and page count limits here!
+                const uploadQueueItems = batchResult.attachments
                     .filter(attachment => attachment.needs_upload)
                     .map(attachment => ({
                         file_hash: attachment.file_hash,
@@ -362,8 +365,9 @@ export async function syncItemsToBackend(
                         library_id: attachment.library_id,
                         zotero_key: attachment.zotero_key,
                     }));
+                logger(`Beaver Sync: Adding ${uploadQueueItems.length} items to upload queue`, 2);
                 // @ts-ignore Beaver exists
-                await Zotero.Beaver.db.upsertQueueItemsBatch(user.id, uploadQueue);
+                await Zotero.Beaver.db.upsertQueueItemsBatch(user.id, uploadQueueItems);
 
                 // Start file uploader if there are attachments to upload
                 logger(`Beaver Sync: Starting file uploader`, 2);

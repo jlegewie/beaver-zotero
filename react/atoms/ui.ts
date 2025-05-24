@@ -24,8 +24,6 @@ export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 // 'completed' - Sync finished successfully
 // 'failed' - Sync operation failed
 export const syncStatusAtom = atom<SyncStatus>('idle');
-export const syncTotalAtom = atom<number>(0);
-export const syncCurrentAtom = atom<number>(0);
 
 // File upload status
 export const fileUploadStatusAtom = atom<SyncStatus>('idle');
@@ -69,6 +67,7 @@ export const fileStatusStatsAtom = atom(
         const failedProcessingCount = fileStatus?.md_failed || 0;
         const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
         const queuedProcessingCount = fileStatus?.md_queued || 0;
+        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount;
 
         // combined stats
         const failedCount = uploadFailedCount + failedProcessingCount;
@@ -85,6 +84,7 @@ export const fileStatusStatsAtom = atom(
             completedFiles,
             failedProcessingCount,
             activeProcessingCount,
+            totalProcessingCount,
             progress,
             failedCount,
             activeCount,

@@ -3,10 +3,13 @@ import { ProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile"
 import { accountService } from "../../src/services/accountService";
 import { getPref } from "../../src/utils/prefs";
 
-
+// Onboarding state
 export const userAuthorizationAtom = atom<boolean>(getPref('userAuthorization'));
+export const isInitialSyncCompleteAtom = atom<boolean>(getPref('isInitialSyncComplete'));
+export const isInitialUploadCompleteAtom = atom<boolean>(getPref('isInitialUploadComplete'));
 export const isOnboardingCompleteAtom = atom(getPref("isOnboardingComplete"));
 
+// Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 

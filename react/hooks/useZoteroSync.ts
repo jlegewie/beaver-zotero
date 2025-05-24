@@ -3,7 +3,7 @@ import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFu
 import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
-import { syncStatusAtom, syncTotalAtom, syncCurrentAtom, SyncStatus } from "../atoms/ui";
+import { syncStatusAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader } from "../../src/services/FileUploader";
 import { planFeaturesAtom, userAuthorizationAtom } from "../atoms/profile";
 import { store } from "../index";
@@ -37,8 +37,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthorized = useAtomValue(userAuthorizationAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
-    const setSyncTotal = useSetAtom(syncTotalAtom);
-    const setSyncCurrent = useSetAtom(syncCurrentAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const zoteroNotifierIdRef = useRef<string | null>(null);
@@ -60,8 +58,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         
         // Reset progress counters at the start of this operation
         setSyncStatus('in_progress');
-        setSyncTotal(0);
-        setSyncCurrent(0);
         
         try {
             // Get the items from Zotero
@@ -91,10 +87,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                     libraryItems,
                     'incremental', 
                     (status) => setSyncStatus(status), 
-                    (processed, total) => {
-                        setSyncTotal(total);
-                        setSyncCurrent(processed);
-                    },
+                    (processed, total) => { },
                     SYNC_BATCH_SIZE_INCREMENTAL
                 );
             }
@@ -158,32 +151,20 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     };
 
     useEffect(() => {
+        // Conditions for sync
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!planFeatures.databaseSync) return;
 
+        // Set initial status to in_progress
         logger("useZoteroSync: Setting up Zotero sync", 3);
+        setSyncStatus('in_progress');
         
-        // Initialize atoms to completed state instead of idle
-        setSyncStatus('completed');
-        setSyncTotal(0);
-        setSyncCurrent(0);
-        
-        // Perform initial sync on mount with stable progress updates
+        // Status change callback
         const onStatusChange = (status: SyncStatus) => {
             setSyncStatus(status);
         }
-        
-        const onProgress = (processed: number, total: number) => {
-            // Always update with the actual values
-            setSyncTotal(total);
-            setSyncCurrent(processed);
-        }
-        
-        // Reset progress counters before starting the initial sync
-        setSyncStatus('in_progress');
-        setSyncTotal(0);
-        setSyncCurrent(0);
+        const onProgress = (processed: number, total: number) => { }
         
         // Function to create the observer
         const setupObserver = () => {

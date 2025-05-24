@@ -71,8 +71,8 @@ export function useUploadProgress(
     
     // Derived state
     const progress = stats
-        ? (stats.total > 0 ? Math.round(((stats.completed + stats.failed + stats.skipped) / stats.total) * 100) : 0)
-        // ? (stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0)
+        // ? (stats.total > 0 ? Math.round(((stats.completed + stats.failed + stats.skipped) / stats.total) * 100) : 0)
+        ? (stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0)
         : 0;
     
     const isComplete = stats

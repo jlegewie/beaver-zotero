@@ -3,8 +3,7 @@ import React from "react";
 // @ts-ignore no idea why this is needed
 import { useState, useMemo } from "react";
 import { 
-    syncStatusAtom, syncTotalAtom, syncCurrentAtom, 
-    syncingAtom, syncErrorAtom, SyncStatus
+    syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus
 } from "../atoms/ui";
 import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import Tooltip from "./Tooltip";
@@ -12,6 +11,7 @@ import { syncZoteroDatabase } from '../../src/utils/sync';
 import IconButton from "./IconButton";
 import { DatabaseStatusIcon } from "./icons";
 import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner } from "./icons";
+import { librarySyncProgressAtom } from "../atoms/sync";
 
 // Possible icon states
 type IconState = {
@@ -22,8 +22,7 @@ type IconState = {
 const DatabaseStatusIndicator: React.FC = () => {
     // Database sync atoms
     const syncStatus = useAtomValue(syncStatusAtom);
-    const syncTotal = useAtomValue(syncTotalAtom);
-    const syncCurrent = useAtomValue(syncCurrentAtom);
+    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     
     // File upload atoms
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
@@ -45,13 +44,8 @@ const DatabaseStatusIndicator: React.FC = () => {
         }
         
         // Check if initial sync (large operation) is in progress
-        const isInitialSync = syncStatus === 'in_progress' && syncTotal > 50;
         const isLargeFileUpload = uploadQueueStatus?.status === 'in_progress' && uploadQueueTotal > 20;
-        
-        if (isInitialSync || isLargeFileUpload) {
-            return { color: "yellow", fading: true };
-        }
-        
+                
         // Check if incremental sync or small file upload is in progress
         if (isSyncing) {
             return { color: "green", fading: true };
@@ -72,7 +66,7 @@ const DatabaseStatusIndicator: React.FC = () => {
         return Math.min(Math.round((current / total) * 100), 100);
     };
     
-    const dbProgress = calculateProgress(syncCurrent, syncTotal);
+    const dbProgress = librarySyncProgress.progress;
     const fileProgress = calculateProgress(uploadQueueStatus?.completed || 0, uploadQueueTotal);
     
     // Progress display text with proper formatting
@@ -90,7 +84,7 @@ const DatabaseStatusIndicator: React.FC = () => {
         return type === 'database' ? 'Syncing...' : 'Uploading...';
     };
     
-    const dbProgressText = getProgressText(syncStatus, dbProgress, syncCurrent, syncTotal, 'database');
+    const dbProgressText = getProgressText(syncStatus, dbProgress, librarySyncProgress.syncedItems, librarySyncProgress.totalItems, 'database');
     const fileProgressText = getProgressText(uploadQueueStatus?.status as SyncStatus, fileProgress, uploadQueueStatus?.pending || 0, uploadQueueTotal, 'file');
     
     // Handle manual sync button click
