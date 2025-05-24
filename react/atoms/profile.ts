@@ -44,6 +44,11 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     } as PlanFeatures;
 });
 
+export const planSupportedAtom = atom<boolean>((get) => {
+    const planFeatures = get(planFeaturesAtom);
+    return planFeatures.databaseSync && planFeatures.uploadFiles && planFeatures.fileProcessing;
+});
+
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     const profile = get(profileWithPlanAtom);
     return {

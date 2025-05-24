@@ -1,16 +1,18 @@
 import React, { useState } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon } from "./icons";
+import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon } from "./icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../hooks/useFileStatus';
 import { fileStatusStatsAtom } from "../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus, uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import Button from "./button";
-import { userAuthorizationAtom } from '../atoms/profile';
+import { isProfileLoadedAtom, profileWithPlanAtom, userAuthorizationAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
 import { setPref } from "../../src/utils/prefs";
 import { LibraryStatistics } from "../../src/utils/libraries";
 import { syncZoteroDatabase } from "../../src/utils/sync";
 import IconButton from "./IconButton";
+import { planSupportedAtom } from "../atoms/profile";
+import { supabase } from "../../src/services/supabaseClient";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
@@ -71,6 +73,9 @@ const ProcessItem: React.FC<{
 const OnboardingPage: React.FC = () => {
     // User authorization state
     const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
+    const planSupported = useAtomValue(planSupportedAtom);
+    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
+    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
@@ -141,6 +146,12 @@ const OnboardingPage: React.FC = () => {
         setSelectedLibraryIds(libraryIds);
         setIsLibrarySelectionValid(libraryIds.length > 0);
     };
+
+    const handleLogout = () => {
+        supabase.auth.signOut();
+        setProfileWithPlan(null);
+        setIsProfileLoaded(false);
+    };
     
     // Handle authorization
     const handleAuthorize = () => {
@@ -192,8 +203,22 @@ const OnboardingPage: React.FC = () => {
                 </p>
             </div>
 
+            {/* ------------- Plan not supported ------------- */}
+            {!planSupported && (
+                <div className="display-flex flex-col gap-3">
+                    <div className="text-lg font-semibold mb-3">Plan not supported</div>
+                    <div className="text-base font-color-secondary">
+                        Your plan does not support the features required for Beaver. Please upgrade your plan to continue.
+                    </div>
+                    <div className="display-flex flex-row items-center gap-3 mt-2">
+                        <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
+                        <Button variant="outline" icon={LogoutIcon} onClick={handleLogout}>Logout</Button>
+                    </div>
+                </div>
+            )}
+
             {/* ------------- Step 1: Library Selection & Authorization ------------- */}
-            {!userAuthorization ? (
+            {planSupported && !userAuthorization && (
                 <div className="display-flex flex-col gap-3">
                     <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
                     <div className="text-base font-color-secondary">
@@ -223,8 +248,10 @@ const OnboardingPage: React.FC = () => {
                         </Button>
                     </div>
                 </div>
-            ) : (
-                // ------------- Step 2: Syncing Process -------------
+            )}
+
+            {/* ------------- Step 2: Syncing Process ------------- */}
+            {planSupported && userAuthorization && (
                 <div className="display-flex flex-col gap-5">
                     {/* Syncing your library */}
                     <ProcessItem 
