@@ -14,6 +14,8 @@ import IconButton from "./IconButton";
 import { planSupportedAtom } from "../atoms/profile";
 import { supabase } from "../../src/services/supabaseClient";
 
+const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
+
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
         <div
@@ -124,8 +126,12 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getUploadIcon = (): React.ReactNode => {
+        // Ensure library sync is complete
         if (librarySyncProgress.anyFailed) return CancelIcon;
         if (librarySyncProgress.progress < 100) return SpinnerIcon;
+
+        // Use upload queue status to determine icon
+        if (((uploadQueueStatus?.failed || 0) / uploadQueueTotal) > MAX_FAILED_UPLOAD_PERCENTAGE) return CancelIcon;
         if (uploadQueueStatus?.status === 'completed') return CheckmarkIcon;
         if (uploadQueueStatus?.status === 'failed') return CancelIcon;
         return SpinnerIcon;
