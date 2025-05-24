@@ -113,9 +113,11 @@ const OnboardingPage: React.FC = () => {
     const getUploadLeftText = (): string => {
         let text = "";
         if(!uploadQueueStatus) return "";
+        if (uploadQueueStatus?.total && uploadQueueStatus.total > 0) text += `${uploadQueueStatus?.total?.toLocaleString()} files`;
         if (uploadQueueStatus?.failed && uploadQueueStatus.failed > 0) text += `${uploadQueueStatus?.failed?.toLocaleString()} failed`;
         if (uploadQueueStatus?.skipped && uploadQueueStatus.skipped > 0) text += `${uploadQueueStatus?.skipped?.toLocaleString()} skipped`;
         return text;
+        
     };
 
     // Handle library selection change
@@ -223,7 +225,7 @@ const OnboardingPage: React.FC = () => {
                     {/* Uploading files */}
                     <ProcessItem 
                         icon={getUploadIcon()}
-                        title={uploadQueueStatus ? `Uploading ${uploadQueueStatus.total.toLocaleString()} files` : "Uploading files"}
+                        title="Uploading files"
                         leftText={getUploadLeftText()}
                         rightText={`${uploadProgress}%`}
                         progress={uploadProgress}
