@@ -108,8 +108,7 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
         parent_key: item.parentKey || null,
         attachment_url: item.getField('url'),
         link_mode: item.attachmentLinkMode,
-        // @ts-ignore - Add runtime check or proper types later
-        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        deleted: item.isInTrash(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
     };

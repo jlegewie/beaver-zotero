@@ -340,6 +340,16 @@ declare namespace Zotero {
             dispose(): void;
         }
     }
+
+    interface Item {
+        /**
+         * Determine whether the item or any of its ancestors is in the trash
+         *
+         * @return {Boolean}
+         */
+        isInTrash(): boolean;
+    }
+
 }
 
 declare namespace Zotero {

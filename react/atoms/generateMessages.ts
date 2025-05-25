@@ -354,7 +354,6 @@ function _processChatCompletionViaBackend(
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
         model: model,
-        // @ts-ignore Beaver exists
         frontend_version: Zotero.Beaver.pluginVersion || ''
     } as ChatCompletionRequestBody;
 
