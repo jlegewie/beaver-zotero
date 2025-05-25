@@ -22,6 +22,7 @@ import IconButton from "./IconButton";
 import { planSupportedAtom } from "../atoms/profile";
 import { logger } from "../../src/utils/logger";
 import { resetFailedUploads } from '../../src/services/FileUploader';
+import { accountService } from "../../src/services/accountService";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
@@ -88,10 +89,10 @@ const OnboardingPage: React.FC = () => {
     const planSupported = useAtomValue(planSupportedAtom);
     
     // Onboarding state
-    const [hasAuthorizedAccess, setHasAuthorizedAccess] = useAtom(hasAuthorizedAccessAtom);
+    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
     const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
-    const setHasCompletedOnboarding = useSetAtom(hasCompletedOnboardingAtom);
+    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
@@ -144,6 +145,10 @@ const OnboardingPage: React.FC = () => {
             }
         }
     );
+
+    // Loading states for service calls
+    const [isAuthorizing, setIsAuthorizing] = useState(false);
+    const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
 
     // Library Sync complete: Set hasCompletedInitialSync and start upload polling
     useEffect(() => {
@@ -259,34 +264,55 @@ const OnboardingPage: React.FC = () => {
     };
 
     // Handle authorization
-    const handleAuthorize = () => {
-        if (selectedLibraryIds.length === 0) return;
+    const handleAuthorize = async () => {
+        if (selectedLibraryIds.length === 0 || isAuthorizing) return;
         
-        // Create a map of library IDs to library sync status
-        const selectedLibraries = Object.fromEntries(
-            selectedLibraryIds
-                .map(id => {
-                    const library = libraryStatistics.find(library => library.libraryID === id);
-                    return [
-                        library?.libraryID,
-                        {
-                            libraryID: library?.libraryID,
-                            libraryName: library?.name || '',
-                            itemCount: library?.itemCount || 0,
-                            syncedCount: 0,
-                            status: 'idle',
-                        } as LibrarySyncStatus
-                    ];
-                })
-        );
+        setIsAuthorizing(true);
+        try {
+            // Create a map of library IDs to library sync status
+            const selectedLibraries = Object.fromEntries(
+                selectedLibraryIds
+                    .map(id => {
+                        const library = libraryStatistics.find(library => library.libraryID === id);
+                        return [
+                            library?.libraryID,
+                            {
+                                libraryID: library?.libraryID,
+                                libraryName: library?.name || '',
+                                itemCount: library?.itemCount || 0,
+                                syncedCount: 0,
+                                status: 'idle',
+                            } as LibrarySyncStatus
+                        ];
+                    })
+            );
 
-        // Save the sync status for the selected libraries
-        setPref('selectedLibrary', JSON.stringify(selectedLibraries));
-        setLibrariesSyncStatus(selectedLibraries);
+            // Save the sync status for the selected libraries
+            setPref('selectedLibrary', JSON.stringify(selectedLibraries));
+            setLibrariesSyncStatus(selectedLibraries);
+            
+            // Call the service to authorize access
+            await accountService.authorizeAccess();
+        } catch (error) {
+            logger(`OnboardingPage: Error authorizing access: ${error}`);
+        } finally {
+            setIsAuthorizing(false);
+        }
+    };
+
+    const handleCompleteOnboarding = async () => {
+        if (isCompletingOnboarding) return;
         
-        // Update authorization status
-        setPref('hasAuthorizedAccess', true);
-        setHasAuthorizedAccess(true);
+        setIsCompletingOnboarding(true);
+        try {
+            // Call the service to complete onboarding
+            await accountService.completeOnboarding();
+            
+        } catch (error) {
+            logger(`OnboardingPage: Error completing onboarding: ${error}`);
+        } finally {
+            setIsCompletingOnboarding(false);
+        }
     };
     
     return (
@@ -344,10 +370,10 @@ const OnboardingPage: React.FC = () => {
                         <div className="flex-1" />
                         <Button
                             variant="solid"
-                            rightIcon={ArrowRightIcon}
+                            rightIcon={isAuthorizing ? Spinner : ArrowRightIcon}
                             className="scale-11"
                             onClick={handleAuthorize}
-                            disabled={!isLibrarySelectionValid}
+                            disabled={!isLibrarySelectionValid || isAuthorizing}
                         >
                             Authorize & Continue
                         </Button>
@@ -401,13 +427,10 @@ const OnboardingPage: React.FC = () => {
                         </div>
                         <Button
                             variant="solid"
-                            rightIcon={ArrowRightIcon}
+                            rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
                             className="scale-11"
-                            disabled={!hasCompletedInitialUpload || !hasCompletedInitialSync}
-                            onClick={() => {
-                                setPref('hasCompletedOnboarding', true)
-                                setHasCompletedOnboarding(true)
-                            }}
+                            disabled={!hasCompletedInitialUpload || !hasCompletedInitialSync || isCompletingOnboarding}
+                            onClick={handleCompleteOnboarding}
                         >
                             Complete
                         </Button>

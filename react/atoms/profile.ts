@@ -4,10 +4,18 @@ import { accountService } from "../../src/services/accountService";
 import { getPref } from "../../src/utils/prefs";
 
 // Onboarding state
-export const hasAuthorizedAccessAtom = atom<boolean>(getPref('hasAuthorizedAccess'));
+export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.has_authorized_access || false;
+});
+
+export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.has_completed_onboarding || false;
+});
+
 export const hasCompletedInitialSyncAtom = atom<boolean>(getPref('hasCompletedInitialSync'));
 export const hasCompletedInitialUploadAtom = atom<boolean>(getPref('hasCompletedInitialUpload'));
-export const hasCompletedOnboardingAtom = atom(getPref("hasCompletedOnboarding"));
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);

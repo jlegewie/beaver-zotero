@@ -71,6 +71,10 @@ export interface ProfileModel {
     current_period_end?: Date;
     stripe_customer_id: string | null;
     stripe_subscription_id: string | null;
+    // Onboarding state
+    has_authorized_access: boolean;
+    consented_at: Date;
+    has_completed_onboarding: boolean;
     // Balances
     basic_page_balance: number;
     advanced_page_balance: number;
