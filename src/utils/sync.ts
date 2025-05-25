@@ -349,6 +349,7 @@ export async function syncItemsToBackend(
                     zotero_key: attachment.zotero_key,
                     attachment_metadata_hash: attachment.metadata_hash,
                     file_hash: attachment.file_hash,
+                    upload_status: attachment.upload_status || 'pending',
                 }));
                 // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);

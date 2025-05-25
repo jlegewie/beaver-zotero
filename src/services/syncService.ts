@@ -5,6 +5,7 @@ import { UploadQueueInput } from './database';
 import { userAtom } from '../../react/atoms/auth';
 import { store } from '../../react';
 import { fileUploader } from './FileUploader';
+import { UploadStatus } from './attachmentsService';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -31,8 +32,16 @@ export interface ItemResult {
     library_id: number;
     zotero_key: string;
     metadata_hash: string;
-    file_hash: string | null;
-    needs_upload: boolean | null;
+    success: boolean;
+}
+
+export interface AttachmentResult {
+    library_id: number;
+    zotero_key: string;
+    metadata_hash: string;
+    file_hash: string;
+    needs_upload: boolean;
+    upload_status: UploadStatus;
     success: boolean;
 }
 
@@ -40,7 +49,7 @@ export interface BatchResult {
     sync_id: string;
     sync_status: "in_progress" | "completed" | "failed";
     items: ItemResult[];
-    attachments: ItemResult[];
+    attachments: AttachmentResult[];
     processed: number;
     success: number;
     failed: number;
