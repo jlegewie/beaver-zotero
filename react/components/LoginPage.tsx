@@ -1,6 +1,4 @@
-import React from "react";
-// @ts-ignore: React is defined
-import { useState } from 'react'
+import React, { useState } from "react";
 import SignInForm from "./auth/SignInForm";
 
 interface LoginPageProps {

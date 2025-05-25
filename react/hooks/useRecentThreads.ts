@@ -1,4 +1,3 @@
-// @ts-ignore useEffect is defined in React
 import { useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { recentThreadsAtom } from '../atoms/threads';

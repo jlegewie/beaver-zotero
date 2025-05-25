@@ -60,7 +60,6 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         }
 
         // 3. Try to get attachment status from Beaver DB
-        // @ts-ignore Beaver is defined
         const attachmentStatus = await getAttachmentStatus(attachmentItem, user.id);
         if (!attachmentStatus) {
             return { text: 'Unknown status', showButton: false };

@@ -19,6 +19,8 @@ declare const __env__: "production" | "development";
 
 declare namespace Zotero {
     namespace Beaver {
+        const pluginVersion: string;
+
         const db: {
             /**
              * Initialize the database by creating tables if they don't exist.

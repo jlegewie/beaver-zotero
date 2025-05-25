@@ -1,6 +1,4 @@
-import React from "react";
-// @ts-ignore no idea
-import { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';

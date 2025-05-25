@@ -1,4 +1,3 @@
-// @ts-ignore useEffect is defined in React
 import { useEffect } from 'react';
 
 /**

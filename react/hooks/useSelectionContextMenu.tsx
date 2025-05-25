@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MenuPosition } from '../components/ContextMenu';
 
 interface UseSelectionContextMenuOptions {

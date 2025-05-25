@@ -1,4 +1,3 @@
-// @ts-ignore useEffect is defined in React
 import { useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { isSidebarVisibleAtom, isLibraryTabAtom } from '../atoms/ui';

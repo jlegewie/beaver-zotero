@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no types for react
-import { useEffect, useRef, useState, ReactNode } from 'react';
+import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { Icon, SearchIcon } from './icons';
 
 /**

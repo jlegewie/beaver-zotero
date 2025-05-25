@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useEffect, useRef, useState, ReactNode } from 'react';
+import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import ReactDOM from 'react-dom';
 
 /**

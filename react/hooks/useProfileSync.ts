@@ -1,4 +1,3 @@
-// @ts-ignore: Not sure why this is needed
 import { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";

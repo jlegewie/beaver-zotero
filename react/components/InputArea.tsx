@@ -1,4 +1,3 @@
-// @ts-ignore no idea
 import React, { useState, useRef, useEffect } from 'react';
 import { StopIcon } from './icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';

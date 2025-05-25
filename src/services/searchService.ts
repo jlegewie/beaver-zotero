@@ -27,8 +27,7 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item) {
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
         year: extractYear(item),
-        // @ts-ignore Beaver exists
-        reference: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+        reference: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         rank: 0,
         similarity: 0,
     } as ItemSearchResult;

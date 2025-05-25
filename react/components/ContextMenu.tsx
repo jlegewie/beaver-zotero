@@ -1,6 +1,5 @@
-import React from 'react';
-// @ts-ignore - not idea why
 import { useEffect, useRef, useState, ReactNode } from 'react';
+import React from 'react';
 import ReactDOM from 'react-dom';
 import { Icon } from './icons';
 

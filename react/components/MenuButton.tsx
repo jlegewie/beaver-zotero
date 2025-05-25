@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why
-import { useState, useRef, ReactNode, useEffect } from 'react';
+import React, { useState, useRef, ReactNode, useEffect } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
 import Tooltip from './Tooltip';

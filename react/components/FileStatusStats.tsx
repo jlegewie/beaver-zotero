@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAtomValue, useAtom } from 'jotai';
 import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
 import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from './icons';

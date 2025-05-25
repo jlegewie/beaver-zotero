@@ -1,6 +1,4 @@
-import React  from 'react';
-// @ts-ignore useEffect is defined in React
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../atoms/threads';
 import MenuButton from './MenuButton';

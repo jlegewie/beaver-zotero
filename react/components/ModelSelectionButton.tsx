@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no types for react
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from './icons';

@@ -1,4 +1,3 @@
-// @ts-ignore no idea
 import React, { useEffect, useRef, forwardRef } from "react";
 import UserMessageDisplay from "./UserMessageDisplay"
 import AssistantMessage from "./AssistantMessage"

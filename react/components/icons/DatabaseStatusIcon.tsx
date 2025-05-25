@@ -1,7 +1,5 @@
 import React from "react";
-// @ts-ignore no idea why this is needed
 import { useEffect, useState } from "react";
-
 
 const COLORS = {
     red: "#db2c3a",

@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { fileStatusStatsAtom } from '../atoms/ui';
 import Button from './button';

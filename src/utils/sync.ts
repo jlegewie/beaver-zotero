@@ -39,8 +39,7 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
         year: extractYear(item),
         publication: item.getField('publicationTitle'),
         abstract: item.getField('abstractNote'),
-        // @ts-ignore Beaver exists
-        reference: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+        reference: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         identifiers: extractIdentifiers(item),
         url: item.getField('url'),
         tags: item.getTags(),

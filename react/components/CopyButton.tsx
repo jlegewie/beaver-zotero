@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { CopyIcon, TickIcon } from './icons';
 import IconButton from './IconButton';
 import { copyToClipboard } from '../utils/clipboard';

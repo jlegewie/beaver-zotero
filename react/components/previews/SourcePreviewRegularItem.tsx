@@ -1,6 +1,4 @@
-import React from 'react';
-// @ts-ignore no idea why this is needed
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { inputAttachmentCountAtom, updateSourceChildItemKeysAtom } from '../../atoms/input';
 import { isValidZoteroItem } from '../../utils/sourceUtils';

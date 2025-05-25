@@ -12,7 +12,7 @@ const SourcePreviewAttachment: React.FC<SourcePreviewAttachmentProps> = ({ sourc
     const formatContent = (item: Zotero.Item) => {
         if (item.isNote()) {
             const title = item.getNoteTitle();
-            // @ts-ignore getNote exists
+            // @ts-ignore unescapeHTML exists
             const content = Zotero.Utilities.unescapeHTML(item.getNote());
             return content.replace(title, '').trim().slice(0, MAX_NOTE_CONTENT_LENGTH) + '...';
         }

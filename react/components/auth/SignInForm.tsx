@@ -1,6 +1,4 @@
-import React, { useEffect } from 'react'
-// @ts-ignore: React is defined
-import { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../button'
 import { getPref, setPref } from '../../../src/utils/prefs'
