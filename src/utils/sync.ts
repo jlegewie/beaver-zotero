@@ -186,7 +186,7 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
     if (isbn) identifiers.isbn = isbn;
 
     const issn = item.getField('ISSN');
-    if (isbn) identifiers.isbn = isbn;
+    if (issn) identifiers.isbn = isbn;
     
     const archiveID = item.getField('archiveID');
     if (archiveID) identifiers.archiveID = archiveID;
