@@ -43,8 +43,7 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
         identifiers: extractIdentifiers(item),
         url: item.getField('url'),
         tags: item.getTags(),
-        // @ts-ignore - Add proper types later
-        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        deleted: item.isInTrash(),
     };
 
     // 2. Calculate hash from the extracted hashed fields
