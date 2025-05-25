@@ -42,3 +42,4 @@ export { default as TwoIcon } from './icons/TwoIcon';
 export { default as ThreeIcon } from './icons/ThreeIcon';
 export { default as FourIcon } from './icons/FourIcon';
 export { default as AlertCircleIcon } from './icons/AlertCircleIcon';
+export { default as CircleIcon } from './icons/CircleIcon';
