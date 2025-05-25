@@ -75,6 +75,7 @@ export interface ProfileModel {
     has_authorized_access: boolean;
     consented_at: Date;
     has_completed_onboarding: boolean;
+    libraries?: Record<string, any>[];
     // Balances
     basic_page_balance: number;
     advanced_page_balance: number;
