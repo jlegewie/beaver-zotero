@@ -4,9 +4,10 @@ import { useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../button'
 import { getPref, setPref } from '../../../src/utils/prefs'
-import { accountService } from '../../../src/services/accountService'
-import { isProfileLoadedAtom, profileWithPlanAtom } from '../../atoms/profile'
-import { useSetAtom } from 'jotai'
+import { useAtomValue } from 'jotai'
+import { isProfileLoadedAtom } from '../../atoms/profile'
+
+const PROFILE_LOAD_TIMEOUT = 10000; // 10 second timeout
 
 interface SignInFormProps {
     setErrorMsg: (errorMsg: string | null) => void;
@@ -17,12 +18,36 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
-    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
-    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
+    const [isWaitingForProfile, setIsWaitingForProfile] = useState(false)
+    const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
 
     useEffect(() => {
         emailInputRef?.current?.focus();
     }, []);
+
+    // Add timeout for profile loading
+    useEffect(() => {
+        if (isWaitingForProfile) {
+            const timeout = setTimeout(() => {
+                if (!isProfileLoaded) {
+                    setErrorMsg('Failed to load profile data. Try again later.');
+                    supabase.auth.signOut();
+                    setIsWaitingForProfile(false);
+                    setIsLoading(false);
+                }
+            }, PROFILE_LOAD_TIMEOUT);
+
+            return () => clearTimeout(timeout);
+        }
+    }, [isWaitingForProfile, isProfileLoaded, setErrorMsg]);
+
+    // Handle successful profile loading
+    useEffect(() => {
+        if (isWaitingForProfile && isProfileLoaded) {
+            setIsWaitingForProfile(false);
+            setIsLoading(false);
+        }
+    }, [isWaitingForProfile, isProfileLoaded]);
     
     const handleSignIn = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -42,31 +67,17 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
             const { data, error } = await supabase.auth.signInWithPassword({ email, password })
             if (error) {
                 setErrorMsg(error.message)
-            }
-            else {
+                setIsLoading(false)
+            } else {
                 setPref("userId", data.user.id);
                 setPref("userEmail", data.user.email ?? "");
                 
-                // Fetch user profile
-                try {
-                    const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
-                    if(!fetchedProfileWithPlan) {
-                        supabase.auth.signOut();
-                        setErrorMsg('Failed to load profile data. Try again later.');
-                        return;
-                    }
-                    setProfileWithPlan(fetchedProfileWithPlan);
-                    setIsProfileLoaded(true);
-                } catch (profileError) {
-                    setErrorMsg('Failed to load profile data. Try again later.');
-                    supabase.auth.signOut();
-                } finally {
-                    setIsLoading(false);
-                }
+                // Wait for useProfileSync to fetch the profile
+                setIsWaitingForProfile(true);
+                // isLoading will be set to false when profile loads or timeout occurs
             }
         } catch (err) {
             setErrorMsg('An unexpected error occurred')
-        } finally {
             setIsLoading(false)
         }
     }
@@ -126,6 +137,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                     disabled={email=="" || password==""}
                 >
                     Login
+                    {/* {isWaitingForProfile ? 'Loading profile...' : 'Login'} */}
                 </Button>
             </div>
         </form>

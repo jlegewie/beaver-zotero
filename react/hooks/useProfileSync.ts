@@ -28,7 +28,7 @@ const toSafeProfileModel = (profile: ProfileModel): SafeProfileModel => {
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
-    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
+    const [isProfileLoaded, setIsProfileLoaded] = useAtom(isProfileLoadedAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
     const channelRef = useRef<RealtimeChannel | null>(null);
@@ -37,11 +37,11 @@ export const useProfileSync = () => {
         const syncProfileData = async (userId: string) => {
             logger(`useProfileSync: User ${userId} authenticated. Fetching profile and plan.`);
             try {
-                // 1. Fetch initial ProfileWithPlan (fetching now done at login)
-                // const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
-                // setProfileWithPlan(fetchedProfileWithPlan);
-                // setIsProfileLoaded(true);
-                // logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+                // --- Fetch initial ProfileWithPlan ---
+                const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
+                setProfileWithPlan(fetchedProfileWithPlan);
+                setIsProfileLoaded(true);
+                logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
                 // --- Realtime Setup ---
                 if (channelRef.current) {
@@ -147,7 +147,7 @@ export const useProfileSync = () => {
         };
 
         // --- Effect Logic ---
-        if (isAuthenticated && user && isProfileLoaded) {
+        if (isAuthenticated && user) {
             syncProfileData(user.id);
         } else {
             logger(`useProfileSync: User not authenticated, user data unavailable, or profile not loaded.`);
