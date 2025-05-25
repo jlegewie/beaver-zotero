@@ -42,7 +42,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
         ragSearch: profile?.plan.rag_search || false,
         agentModels: profile?.plan.agent_models || false,
         byok: profile?.plan.allows_byok || false,
-        maxUserAttachments: profile?.plan.max_chat_attachments_per_message || 2,
+        maxUserAttachments: profile?.plan.max_user_attachments || 2,
     } as PlanFeatures;
 });
 

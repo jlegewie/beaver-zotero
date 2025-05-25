@@ -28,7 +28,7 @@ interface SafePlanModel {
     max_page_count: number;
     max_storage_gb: number;
     max_items_sync: number;
-    max_chat_attachments_per_message: number;
+    max_user_attachments: number;
 }
 
 export interface PlanFeatures {
