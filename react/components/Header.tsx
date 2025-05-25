@@ -10,7 +10,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { planFeaturesAtom } from '../atoms/profile';
+import { planFeaturesAtom, isOnboardingCompleteAtom } from '../atoms/profile';
 import Button from './button';
 
 interface HeaderProps {
@@ -25,6 +25,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
+    const isOnboardingComplete = useAtomValue(isOnboardingCompleteAtom);
 
     const handleNewThread = async () => {
         await newThread();
@@ -37,6 +38,8 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
     return (
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
             <div className="flex-1 display-flex gap-4">
+
+                {/* Close chat */}
                 <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
                     <IconButton
                         icon={CancelIcon}
@@ -45,7 +48,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                         ariaLabel="Close chat"
                     />
                 </Tooltip>
-                {isAuthenticated && (
+
+                {/* New chat and chat history */}
+                {isAuthenticated && isOnboardingComplete && (
                     <>
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
@@ -63,7 +68,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                     </>
                 )}
             </div>
-            {isAuthenticated && !settingsPage && (
+
+            {/* Database status and user account menu */}
+            {isAuthenticated && isOnboardingComplete && !settingsPage && (
                 <div className="display-flex gap-4">
                     {planFeatures.databaseSync && <DatabaseStatusIndicator />}
                     <UserAccountMenuButton
@@ -72,6 +79,8 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                     />
                 </div>
             )}
+
+            {/* Close settings page */}
             {isAuthenticated && settingsPage && (
                 <Button
                     variant="outline"
