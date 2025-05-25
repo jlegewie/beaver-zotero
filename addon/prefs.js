@@ -21,9 +21,9 @@ pref("supportedModels","[]");
 
 // Initial onboarding process
 pref("hasAuthorizedAccess", false);
-pref("isInitialSyncComplete", false);
-pref("isInitialUploadComplete", false);
-pref("isOnboardingComplete", false);
+pref("hasCompletedInitialSync", false);
+pref("hasCompletedInitialUpload", false);
+pref("hasCompletedOnboarding", false);
 pref("currentUploadSession", "{}");
 
 // Search

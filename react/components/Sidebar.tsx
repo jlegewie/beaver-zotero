@@ -15,7 +15,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './PreviewContainer';
 import DragDropWrapper from './DragDropWrapper';
 import PopupMessageContainer from './PopupMessageContainer';
-import { hasAuthorizedAccessAtom, isOnboardingCompleteAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isProfileLoadedAtom } from '../atoms/profile';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -26,7 +26,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const isOnboardingComplete = useAtomValue(isOnboardingCompleteAtom);
+    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
 
@@ -53,7 +53,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         );
     }
 
-    if(!hasAuthorizedAccess || !isOnboardingComplete) {
+    if(!hasAuthorizedAccess || !hasCompletedOnboarding) {
         return (
             <div className="bg-sidepane h-full display-flex flex-col min-w-0">
                 <Header />

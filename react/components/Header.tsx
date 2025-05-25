@@ -10,7 +10,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { planFeaturesAtom, isOnboardingCompleteAtom } from '../atoms/profile';
+import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './button';
 
 interface HeaderProps {
@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
-    const isOnboardingComplete = useAtomValue(isOnboardingCompleteAtom);
+    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
 
     const handleNewThread = async () => {
         await newThread();
@@ -50,7 +50,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                 </Tooltip>
 
                 {/* New chat and chat history */}
-                {isAuthenticated && isOnboardingComplete && (
+                {isAuthenticated && hasCompletedOnboarding && (
                     <>
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
@@ -70,7 +70,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             </div>
 
             {/* Database status and user account menu */}
-            {isAuthenticated && isOnboardingComplete && !settingsPage && (
+            {isAuthenticated && hasCompletedOnboarding && !settingsPage && (
                 <div className="display-flex gap-4">
                     {planFeatures.databaseSync && <DatabaseStatusIndicator />}
                     <UserAccountMenuButton

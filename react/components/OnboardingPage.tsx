@@ -13,7 +13,7 @@ import {
 } from "../atoms/sync";
 import Button from "./button";
 import { userIdAtom, logoutAtom } from "../atoms/auth";
-import { isOnboardingCompleteAtom, hasAuthorizedAccessAtom, isInitialSyncCompleteAtom, isInitialUploadCompleteAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
 import { setPref } from "../../src/utils/prefs";
 import { LibraryStatistics } from "../../src/utils/libraries";
@@ -88,10 +88,10 @@ const OnboardingPage: React.FC = () => {
     const planSupported = useAtomValue(planSupportedAtom);
     
     // Onboarding state
-    const [hasAuthorizedAccess, setUserAuthorization] = useAtom(hasAuthorizedAccessAtom);
-    const [isInitialSyncComplete, setIsInitialSyncComplete] = useAtom(isInitialSyncCompleteAtom);
-    const [isInitialUploadComplete, setIsInitialUploadComplete] = useAtom(isInitialUploadCompleteAtom);
-    const setIsOnboardingComplete = useSetAtom(isOnboardingCompleteAtom);
+    const [hasAuthorizedAccess, setHasAuthorizedAccess] = useAtom(hasAuthorizedAccessAtom);
+    const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
+    const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
+    const setHasCompletedOnboarding = useSetAtom(hasCompletedOnboardingAtom);
     
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
@@ -135,8 +135,8 @@ const OnboardingPage: React.FC = () => {
                 // Check if upload is complete with acceptable failure rate
                 const failureRate = stats.total > 0 ? stats.failed / stats.total : 0;
                 if (failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE) {
-                    setIsInitialUploadComplete(true);
-                    setPref('isInitialUploadComplete', true);
+                    setHasCompletedInitialUpload(true);
+                    setPref('hasCompletedInitialUpload', true);
                 }
             },
             onError: (error: any) => {
@@ -145,13 +145,13 @@ const OnboardingPage: React.FC = () => {
         }
     );
 
-    // Library Sync complete: Set isInitialSyncComplete and start upload polling
+    // Library Sync complete: Set hasCompletedInitialSync and start upload polling
     useEffect(() => {
         const isSyncComplete = librarySyncProgress.progress >= 100 && !librarySyncProgress.anyFailed;
 
-        // Set isInitialSyncComplete
-        setIsInitialSyncComplete(isSyncComplete);
-        setPref('isInitialSyncComplete', isSyncComplete);
+        // Set hasCompletedInitialSync
+        setHasCompletedInitialSync(isSyncComplete);
+        setPref('hasCompletedInitialSync', isSyncComplete);
 
         // Start upload polling
         const shouldStartPolling = isSyncComplete && !isUploadPolling && !isUploadComplete && !!userId;
@@ -169,9 +169,9 @@ const OnboardingPage: React.FC = () => {
     useEffect(() => {
         if (isUploadComplete && uploadStats) {
             const failureRate = uploadStats.total > 0 ? uploadStats.failed / uploadStats.total : 0;
-            setIsInitialUploadComplete(failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE);
+            setHasCompletedInitialUpload(failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE);
         }
-    }, [isUploadComplete, uploadStats, setIsInitialUploadComplete]);
+    }, [isUploadComplete, uploadStats, setHasCompletedInitialUpload]);
 
     // Calculate progress percentages
     const calculateProgress = (current: number, total: number): number => {
@@ -286,7 +286,7 @@ const OnboardingPage: React.FC = () => {
         
         // Update authorization status
         setPref('hasAuthorizedAccess', true);
-        setUserAuthorization(true);
+        setHasAuthorizedAccess(true);
     };
     
     return (
@@ -403,10 +403,10 @@ const OnboardingPage: React.FC = () => {
                             variant="solid"
                             rightIcon={ArrowRightIcon}
                             className="scale-11"
-                            disabled={!isInitialUploadComplete || !isInitialSyncComplete}
+                            disabled={!hasCompletedInitialUpload || !hasCompletedInitialSync}
                             onClick={() => {
-                                setPref('isOnboardingComplete', true)
-                                setIsOnboardingComplete(true)
+                                setPref('hasCompletedOnboarding', true)
+                                setHasCompletedOnboarding(true)
                             }}
                         >
                             Complete
