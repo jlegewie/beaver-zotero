@@ -4,7 +4,7 @@ import { accountService } from "../../src/services/accountService";
 import { getPref } from "../../src/utils/prefs";
 
 // Onboarding state
-export const userAuthorizationAtom = atom<boolean>(getPref('userAuthorization'));
+export const hasAuthorizedAccessAtom = atom<boolean>(getPref('hasAuthorizedAccess'));
 export const isInitialSyncCompleteAtom = atom<boolean>(getPref('isInitialSyncComplete'));
 export const isInitialUploadCompleteAtom = atom<boolean>(getPref('isInitialUploadComplete'));
 export const isOnboardingCompleteAtom = atom(getPref("isOnboardingComplete"));

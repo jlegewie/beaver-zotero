@@ -20,7 +20,7 @@ pref("supportedModelsLastFetched", "");
 pref("supportedModels","[]");
 
 // Initial onboarding process
-pref("userAuthorization", false);
+pref("hasAuthorizedAccess", false);
 pref("isInitialSyncComplete", false);
 pref("isInitialUploadComplete", false);
 pref("isOnboardingComplete", false);

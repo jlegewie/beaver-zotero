@@ -7,7 +7,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { planFeaturesAtom, userAuthorizationAtom } from '../atoms/profile';
+import { planFeaturesAtom, hasAuthorizedAccessAtom } from '../atoms/profile';
 
 /**
  * Hook that fetches the user's file status, keeps the fileStatusAtom updated,
@@ -17,7 +17,7 @@ import { planFeaturesAtom, userAuthorizationAtom } from '../atoms/profile';
 export const useFileStatus = (): void => {
     const setFileStatus = useSetAtom(fileStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const userAuthorization = useAtomValue(userAuthorizationAtom);
+    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const user = useAtomValue(userAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     // Ref to manage the realtime channel instance
@@ -49,7 +49,7 @@ export const useFileStatus = (): void => {
     useEffect(() => {
         // --- Guard Clause ---
         // Only proceed if user is authenticated, user data exists, AND plan supports file processing
-        if (!isAuthenticated || !user || !planFeatures.fileProcessing || !userAuthorization) {
+        if (!isAuthenticated || !user || !planFeatures.fileProcessing || !hasAuthorizedAccess) {
             logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${planFeatures.fileProcessing}`);
             setFileStatus(null); // Clear status if conditions not met
             // Ensure any existing channel is cleaned up if dependencies change mid-subscription

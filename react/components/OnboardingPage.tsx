@@ -13,7 +13,7 @@ import {
 } from "../atoms/sync";
 import Button from "./button";
 import { userIdAtom, logoutAtom } from "../atoms/auth";
-import { isOnboardingCompleteAtom, userAuthorizationAtom, isInitialSyncCompleteAtom, isInitialUploadCompleteAtom } from '../atoms/profile';
+import { isOnboardingCompleteAtom, hasAuthorizedAccessAtom, isInitialSyncCompleteAtom, isInitialUploadCompleteAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";
 import { setPref } from "../../src/utils/prefs";
 import { LibraryStatistics } from "../../src/utils/libraries";
@@ -88,7 +88,7 @@ const OnboardingPage: React.FC = () => {
     const planSupported = useAtomValue(planSupportedAtom);
     
     // Onboarding state
-    const [userAuthorization, setUserAuthorization] = useAtom(userAuthorizationAtom);
+    const [hasAuthorizedAccess, setUserAuthorization] = useAtom(hasAuthorizedAccessAtom);
     const [isInitialSyncComplete, setIsInitialSyncComplete] = useAtom(isInitialSyncCompleteAtom);
     const [isInitialUploadComplete, setIsInitialUploadComplete] = useAtom(isInitialUploadCompleteAtom);
     const setIsOnboardingComplete = useSetAtom(isOnboardingCompleteAtom);
@@ -285,7 +285,7 @@ const OnboardingPage: React.FC = () => {
         setLibrariesSyncStatus(selectedLibraries);
         
         // Update authorization status
-        setPref('userAuthorization', true);
+        setPref('hasAuthorizedAccess', true);
         setUserAuthorization(true);
     };
     
@@ -301,7 +301,7 @@ const OnboardingPage: React.FC = () => {
             <div className="display-flex flex-col items-start mb-4">
                 <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
                 <p className="text-base font-color-secondary -mt-2">
-                    {!userAuthorization 
+                    {!hasAuthorizedAccess 
                         ? "Let's set up your Beaver environment by connecting to your Zotero library."
                         : "Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min."
                     }
@@ -323,7 +323,7 @@ const OnboardingPage: React.FC = () => {
             )}
 
             {/* ------------- Step 1: Library Selection & Authorization ------------- */}
-            {planSupported && !userAuthorization && (
+            {planSupported && !hasAuthorizedAccess && (
                 <div className="display-flex flex-col gap-3">
                     <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
                     <div className="text-base font-color-secondary">
@@ -356,7 +356,7 @@ const OnboardingPage: React.FC = () => {
             )}
 
             {/* ------------- Step 2: Syncing Process ------------- */}
-            {planSupported && userAuthorization && (
+            {planSupported && hasAuthorizedAccess && (
                 <div className="display-flex flex-col gap-5">
                     {/* Syncing your library */}
                     <ProcessItem 
