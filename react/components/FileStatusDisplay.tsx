@@ -84,6 +84,7 @@ const FileStatusDisplay: React.FC<{
         >
             {/* <div className="display-flex flex-row gap-2"> */}
             <div className="display-flex flex-row gap-4">
+                <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount} iconClassName="scale-115" />
                 <StatusItem icon={SyncIcon} count={fileStats.activeCount} iconClassName={syncIconClassName} />
                 <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} iconClassName="scale-115 text-green-500" />
                 <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} iconClassName="scale-115 text-red-500" />
