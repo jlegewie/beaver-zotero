@@ -105,7 +105,7 @@ const DatabaseStatusIndicator: React.FC = () => {
         <IconButton
             icon={memoizedIcon}
             onClick={handleSyncClick}
-            className="scale-75"
+            className="scale-12"
             ariaLabel="Sync status"
             onMouseEnter={() => setIsHovering(true)}
             onMouseLeave={() => setIsHovering(false)}
