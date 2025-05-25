@@ -21,7 +21,7 @@ interface SafePlanModel {
     advanced_document_processing: boolean;
     allows_byok: boolean;
     rag_search: boolean;
-    agentic_search: boolean;
+    agent_models: boolean;
     deep_research: boolean;
     // Limits
     max_file_size_mb: number;
@@ -38,8 +38,7 @@ export interface PlanFeatures {
     advancedProcessing: boolean;
     fileProcessing: boolean;
     ragSearch: boolean;
-    agenticSearch: boolean;
-    deepResearch: boolean;
+    agentModels: boolean;
     byok: boolean;
     maxUserAttachments: number;
 }

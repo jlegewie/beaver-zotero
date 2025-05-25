@@ -40,8 +40,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
         advancedProcessing: profile?.plan.advanced_document_processing || false,
         fileProcessing: profile?.plan.basic_document_processing || profile?.plan.advanced_document_processing || false,
         ragSearch: profile?.plan.rag_search || false,
-        agenticSearch: profile?.plan.agentic_search || false,
-        deepResearch: profile?.plan.deep_research || false,
+        agentModels: profile?.plan.agent_models || false,
         byok: profile?.plan.allows_byok || false,
         maxUserAttachments: profile?.plan.max_chat_attachments_per_message || 2,
     } as PlanFeatures;
