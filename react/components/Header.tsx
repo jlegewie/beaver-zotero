@@ -70,9 +70,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             </div>
 
             {/* Database status and user account menu */}
-            {isAuthenticated && hasCompletedOnboarding && !settingsPage && (
+            {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && <DatabaseStatusIndicator />}
+                    {planFeatures.databaseSync && hasCompletedOnboarding && <DatabaseStatusIndicator />}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

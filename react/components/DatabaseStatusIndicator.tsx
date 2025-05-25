@@ -1,16 +1,10 @@
+import React, { useState, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import React from "react";
-// @ts-ignore no idea why this is needed
-import { useState, useMemo } from "react";
-import { 
-    syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus
-} from "../atoms/ui";
+import { syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus } from "../atoms/ui";
 import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
-import Tooltip from "./Tooltip";
 import { syncZoteroDatabase } from '../../src/utils/sync';
 import IconButton from "./IconButton";
 import { DatabaseStatusIcon } from "./icons";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner } from "./icons";
 import { librarySyncProgressAtom } from "../atoms/sync";
 
 // Possible icon states
@@ -92,61 +86,6 @@ const DatabaseStatusIndicator: React.FC = () => {
         syncZoteroDatabase();
     };
     
-    // Create the tooltip content
-    const customContent = (
-        <div className="display-flex flex-col gap-3 px-0 py-1 max-w-xs">
-            <div className="display-flex flex-col gap-3 items-start">
-                <div className="display-flex flex-row justify-between items-center w-full">
-                    <div className="display-flex items-center gap-3">
-                        {syncStatus === 'in_progress' ? (
-                            <Spinner size={14} />
-                        ) : syncStatus === 'failed' ? (
-                            <Icon icon={CancelCircleIcon} className="font-color-red scale-12" />
-                        ) : (
-                            <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-12" />
-                        )}
-                        <span className="font-color-secondary text-base">
-                            Sync with Beaver
-                        </span>
-                    </div>
-                    
-                    {/* {syncStatus !== 'in_progress' && (
-                        <IconButton
-                            icon={Spinner}
-                            onClick={handleSyncClick}
-                            className="scale-10 ml-auto"
-                            ariaLabel="Sync database"
-                            title="Run database sync"
-                        />
-                    )} */}
-                </div>
-                
-                <span className="font-color-tertiary text-sm">
-                    {dbProgressText}
-                </span>
-            </div>
-            
-            <div className="display-flex flex-col gap-3 items-start">
-                <div className="display-flex flex-row items-center gap-3">
-                    {uploadQueueStatus?.status === 'in_progress' ? (
-                        <Spinner size={14} />
-                    ) : uploadQueueStatus?.status === 'failed' ? (
-                        <Icon icon={CancelCircleIcon} className="font-color-red scale-12" />
-                    ) : (
-                        <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-12" />
-                    )}
-                    <span className="font-color-secondary text-base">
-                        File Uploads
-                    </span>
-                </div>
-                
-                <span className="font-color-tertiary text-sm">
-                    {fileProgressText}
-                </span>
-            </div>
-        </div>
-    );
-    
     const [isHovering, setIsHovering] = useState(false);
     
     // Memoize the icon component to prevent recreation on each render
@@ -163,22 +102,14 @@ const DatabaseStatusIndicator: React.FC = () => {
     }, [iconState.color, iconState.fading, isHovering]);
     
     return (
-        <Tooltip 
-            content="Sync Status" 
-            showArrow 
-            singleLine 
-            customContent={customContent}
-            stayOpenOnAnchorClick={true}
-        >
-            <IconButton
-                icon={memoizedIcon}
-                onClick={handleSyncClick}
-                className="scale-12"
-                ariaLabel="Sync status"
-                onMouseEnter={() => setIsHovering(true)}
-                onMouseLeave={() => setIsHovering(false)}
-            />
-        </Tooltip>
+        <IconButton
+            icon={memoizedIcon}
+            onClick={handleSyncClick}
+            className="scale-75"
+            ariaLabel="Sync status"
+            onMouseEnter={() => setIsHovering(true)}
+            onMouseLeave={() => setIsHovering(false)}
+        />
     );
 };
 
