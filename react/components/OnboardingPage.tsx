@@ -223,7 +223,7 @@ const OnboardingPage: React.FC = () => {
     const getIndexingIcon = (): React.ReactNode => {
         if (librarySyncProgress.anyFailed) return StepThreeIcon;
         if (fileStats.totalProcessingCount === 0) return StepThreeIcon;
-        if (fileStats.progress >= 100) return CheckmarkIcon;
+        if (fileStats.processingProgress >= 100) return CheckmarkIcon;
         return SpinnerIcon;
     };
 
@@ -238,7 +238,12 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getIndexingLeftText = (): string => {
-        return "";
+        if (fileStats.totalProcessingCount === 0) return "";
+        const textParts: string[] = [];
+        if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
+        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
+        if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
+        return textParts.join(", ");
     };
 
     const hasUploadFailures = (): boolean => {
@@ -381,8 +386,8 @@ const OnboardingPage: React.FC = () => {
                     {/* Indexing files */}
                     <ProcessItem 
                         icon={getIndexingIcon()}
-                        title="Indexing files"
-                        progress={fileStats.progress}
+                        title="File processing"
+                        progress={fileStats.processingProgress}
                         rightText={fileStats.totalProcessingCount === 0 ? "" : `${fileStats.progress}%`}
                         leftText={getIndexingLeftText()}
                     />
@@ -390,8 +395,10 @@ const OnboardingPage: React.FC = () => {
                     <div className="flex-1"/>
 
                     {/* Button */}
-                    <div className="display-flex flex-row mb-1">
-                        <div className="flex-1" />
+                    <div className="display-flex flex-row items-center mb-1">
+                        <div className="flex-1 font-color-secondary text-sm">
+                            {fileStats.processingProgress < 100 ? "Processing incomplete. Expect slower response times & limited search." : ""}
+                        </div>
                         <Button
                             variant="solid"
                             rightIcon={ArrowRightIcon}
