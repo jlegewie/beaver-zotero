@@ -80,7 +80,6 @@ export function renderToMarkdown(
                 citationObject.locator = attrs.pages;
                 citationObject.label = 'p.';
             }
-            // @ts-ignore Beaver exists
             citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
         } else if (itemToCite.isNote()) {
             citation = '(Note)';
@@ -94,7 +93,6 @@ export function renderToMarkdown(
     }).replace('  (', ' (');
 
     // Format the bibliography
-    // @ts-ignore Beaver exists
     const bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
 
     // Return the formatted content

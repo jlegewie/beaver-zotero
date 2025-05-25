@@ -42,7 +42,6 @@ export async function sourceToContentParts(source: ThreadSource): Promise<Conten
         const authors = parentItem?.getCreators();
         const year = parentItem.getField('date', true).slice(0, 4);*/
         const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-        // @ts-ignore Beaver exists
         const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
         const warning = `This document is an attachment and can be the ${type}, an Appendix, Supplement, a review, or other related material attached to the ${type}.`;
         const metadata = `# Document (id: ${identifier})\nType: ${type}\nReference: ${reference}`;
@@ -60,7 +59,6 @@ export async function sourceToContentParts(source: ThreadSource): Promise<Conten
     // Note with parent item
     } else if (parentItem && item.isNote()) {
         const type = Zotero.ItemTypes.getLocalizedString(parentItem.itemType);
-        // @ts-ignore Beaver exists
         const reference = Zotero.Beaver.citationService.formatBibliography(parentItem);
         // @ts-ignore unescapeHTML exists
         const content = Zotero.Utilities.unescapeHTML(item.getNote());

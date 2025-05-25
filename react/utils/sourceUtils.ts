@@ -25,7 +25,6 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     // Get the display name
     let displayName = item.isNote()
         ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
-        // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatCitation(item, true);
 
     // Add a count
@@ -37,7 +36,6 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
 export function getCitationFromItem(item: Zotero.Item): string {
     const citation = item.isNote()
         ? "Note"
-        // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatCitation(item, true);
     return citation;
 }
@@ -46,7 +44,6 @@ export function getReferenceFromItem(item: Zotero.Item): string {
     const reference = item.isNote()
         // @ts-ignore unescapeHTML exists
         ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
-        // @ts-ignore Beaver exists
         : Zotero.Beaver.citationService.formatBibliography(item);
     return reference.replace(/\n/g, '<br />');
 }

@@ -283,9 +283,62 @@ declare namespace Zotero {
              */
             getTotalQueueItems(user_id: string): Promise<number>;
         }
+
+        /**
+         * Citation object for CSL formatting
+         */
+        type Citation = {
+            id: number;
+            locator?: string;
+            label?: string;
+            prefix?: string;
+            suffix?: string;
+            suppressAuthor?: boolean;
+            authorOnly?: boolean;
+        }
+
+        /**
+         * Citation service for formatting citations using CSL
+         */
+        const citationService: {
+            /**
+             * Format an in-text citation for Zotero items
+             * @param items Single Zotero item or array of items to format
+             * @param clean If true, removes parentheses and normalizes quotes
+             * @returns Formatted in-text citation or empty string on error
+             */
+            formatCitation(items: Zotero.Item | Zotero.Item[], clean?: boolean): string;
+
+            /**
+             * Format an in-text citation for citation objects
+             * @param citationItems Array of citation objects to format
+             * @param clean If true, removes parentheses and normalizes quotes
+             * @returns Formatted in-text citation or empty string on error
+             */
+            formatCitation(citationItems: Citation[], clean?: boolean): string;
+
+            /**
+             * Format multiple items as a bibliography entry
+             * @param items Single Zotero item or array of items
+             * @param format Output format - "text" or "html"
+             * @returns Formatted bibliography or empty string on error
+             */
+            formatBibliography(items: Zotero.Item | Zotero.Item[], format?: "text" | "html"): string;
+
+            /**
+             * Force recreation of the CSL engine on next use
+             * Call this when preferences change
+             */
+            reset(): void;
+
+            /**
+             * Free resources when the service is no longer needed
+             * Call during plugin shutdown
+             */
+            dispose(): void;
+        }
     }
 }
-
 
 declare namespace Zotero {
     namespace BetterBibTeX {
