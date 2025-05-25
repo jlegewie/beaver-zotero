@@ -20,10 +20,8 @@ pref("supportedModelsLastFetched", "");
 pref("supportedModels","[]");
 
 // Initial onboarding process
-pref("hasAuthorizedAccess", false);
 pref("hasCompletedInitialSync", false);
 pref("hasCompletedInitialUpload", false);
-pref("hasCompletedOnboarding", false);
 pref("currentUploadSession", "{}");
 
 // Search

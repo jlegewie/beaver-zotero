@@ -20,10 +20,8 @@ declare namespace _ZoteroTypes {
       "lastUsedModel": string;
       "supportedModelsLastFetched": string;
       "supportedModels": string;
-      "hasAuthorizedAccess": boolean;
       "hasCompletedInitialSync": boolean;
       "hasCompletedInitialUpload": boolean;
-      "hasCompletedOnboarding": boolean;
       "currentUploadSession": string;
       "recentItems": string;
       "citationFormat": string;
