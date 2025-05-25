@@ -1,7 +1,8 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel, ToolCall, ZoteroItemReference } from '../types/chat/apiTypes';
+import { MessageModel, ToolCall } from '../types/chat/apiTypes';
+import { ZoteroItemReference } from '../types/zotero';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,

@@ -61,7 +61,6 @@ export interface SyncCompleteResponse {
 }
 
 // --- Item Types ---
-
 /** Fields included in the Item metadata file_hash calculation. */
 export interface ItemDataHashedFields {
     zotero_key: string;
@@ -79,7 +78,7 @@ export interface ItemDataHashedFields {
     url?: string;
 }
 
-/** Full Item data */
+/** Item data based on ItemData pydantic model */
 export interface ItemData extends ItemDataHashedFields {
     date_added?: string;
     date_modified?: string;
@@ -110,6 +109,7 @@ export interface AttachmentDataHashedFields {
     filename: string;
 }
 
+/** Attachment data based on AttachmentData pydantic model */
 export interface AttachmentData {
     // attachments table fields
     library_id: number;

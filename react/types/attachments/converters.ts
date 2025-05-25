@@ -10,7 +10,7 @@ import {
     isSourceAttachment,
     isAnnotationAttachment
 } from './apiTypes';
-import { ZoteroItemReference } from '../chat/apiTypes';
+import { ZoteroItemReference } from '../zotero';
 
 export function getAnnotationsFromItem(item: Zotero.Item): Annotation[] {
     if(!item.isAttachment()) return [];

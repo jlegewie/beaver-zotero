@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ZoteroItemReference } from '../../react/types/chat/apiTypes';
+import { ZoteroItemReference } from '../../react/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
 import { UploadQueueRecord } from './database';
 import { logger } from '../utils/logger';

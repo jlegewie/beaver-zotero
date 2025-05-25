@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { threadMessagesAtom } from '../atoms/threads';
 import { SourceCitation } from '../types/sources';
 import { createThreadSourceFromItem, getParentItem, getCitationFromItem, getReferenceFromItem, getDisplayNameFromItem } from '../utils/sourceUtils';
-import { createZoteroItemReference } from "../types/chat/apiTypes";
+import { createZoteroItemReference } from "../types/zotero";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 

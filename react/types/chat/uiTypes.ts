@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolCall, ZoteroItemReference } from './apiTypes';
+import { ToolCall } from './apiTypes';
+import { ZoteroItemReference } from '../zotero';
 
 
 // Warning messages
