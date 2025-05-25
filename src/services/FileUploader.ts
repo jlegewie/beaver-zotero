@@ -211,7 +211,6 @@ export class FileUploader {
      */
     private async calculatePendingItems(user_id: string): Promise<number> {
         try {
-            // @ts-ignore Beaver is defined
             return await Zotero.Beaver.db.getTotalQueueItems(user_id);
         } catch (error: any) {
             logger(`Beaver File Uploader: Error calculating session total: ${error.message}`, 1);
@@ -337,7 +336,6 @@ export class FileUploader {
                 }
 
                 // Read items from local queue with visibility timeout
-                // @ts-ignore Beaver is defined
                 const items: UploadQueueRecord[] = await Zotero.Beaver.db.readQueueItems(
                     user.id, 
                     this.BATCH_SIZE, 
@@ -545,7 +543,6 @@ export class FileUploader {
             await attachmentsService.markUploadFailed(item.file_hash);
             
             // Only if backend call succeeds, update local state
-            // @ts-ignore Beaver is defined
             await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
             
             // Remove URL from cache
@@ -573,7 +570,6 @@ export class FileUploader {
             await attachmentsService.markUploadCompleted(item.file_hash, pageCount);
 
             // Only if backend call succeeds, update local state and cleanup
-            // @ts-ignore Beaver is defined
             await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
 
             // Remove URL from cache only after successful backend update
@@ -637,7 +633,6 @@ export const resetFailedUploads = async (): Promise<void> => {
             // by the Zotero.Beaver.db.resetUploads method.
         }));
 
-        // @ts-ignore Beaver is defined
         await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
         logger(`Beaver File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
 

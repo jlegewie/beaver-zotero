@@ -19,8 +19,7 @@ export async function getAttachmentStatus(
 ): Promise<AttachmentStatusResponse> {
 
     // 1. Get attachment status from Beaver DB
-    // @ts-ignore Beaver is defined
-    const attachmentsDB = await Zotero.Beaver.db?.getAttachmentsByZoteroKeys(user_id, attachmentItem.libraryID, [attachmentItem.key]);
+    const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(user_id, attachmentItem.libraryID, [attachmentItem.key]);
     let attachmentStatus: AttachmentStatusResponse | null = null;
     if (attachmentsDB && attachmentsDB.length > 0) {
         logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
@@ -41,8 +40,7 @@ export async function getAttachmentStatus(
 
         // 3. Save status to Beaver DB
         try {
-            // @ts-ignore Beaver is defined
-            await Zotero.Beaver.db?.updateAttachment(
+            await Zotero.Beaver.db.updateAttachment(
 
                 user_id,
                 attachmentItem.libraryID,

@@ -297,9 +297,7 @@ export async function syncItemsToBackend(
         const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData).filter(Boolean)) as AttachmentData[];
 
         // Get database items and attachments
-        // @ts-ignore Beaver exists
         const itemsDB = await Zotero.Beaver.db.getItemsByZoteroKeys(user.id, libraryID, itemsData.map(item => item.zotero_key));
-        // @ts-ignore Beaver exists
         const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(user.id, libraryID, attachmentsData.map(att => att.zotero_key));
 
         // Filter out items where the metadata_hash did not change
@@ -397,7 +395,6 @@ export async function syncItemsToBackend(
                     zotero_key: item.zotero_key,
                     item_metadata_hash: item.metadata_hash
                 }));
-                // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertItemsBatch(user.id, items);
             }
 
@@ -412,7 +409,6 @@ export async function syncItemsToBackend(
                     file_hash: attachment.file_hash,
                     upload_status: attachment.upload_status || 'pending',
                 }));
-                // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
                 
                 // Add items to upload queue
@@ -428,7 +424,6 @@ export async function syncItemsToBackend(
                         zotero_key: attachment.zotero_key,
                     }));
                 logger(`Beaver Sync: Adding ${uploadQueueItems.length} items to upload queue`, 2);
-                // @ts-ignore Beaver exists
                 await Zotero.Beaver.db.upsertQueueItemsBatch(user.id, uploadQueueItems);
 
                 // Start file uploader if there are attachments to upload

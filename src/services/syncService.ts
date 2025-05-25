@@ -265,11 +265,14 @@ export class SyncService extends ApiService {
             zotero_key: zoteroKey,
             file_hash: fileHash
         });
+        const userId = store.get(userAtom)?.id;
+        if (!userId) {
+            throw new Error('User ID not found');
+        }
         // Queue file hash for upload in local db
         if (result) {
-            // @ts-ignore Beaver is defined
-            await Zotero.Beaver.db.resetUploads(store.
-                get(userAtom).id,
+            await Zotero.Beaver.db.resetUploads(
+                userId,
                 [{
                     file_hash: result.file_hash,
                     library_id: result.library_id,

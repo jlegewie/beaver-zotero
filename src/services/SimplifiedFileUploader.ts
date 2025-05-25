@@ -44,9 +44,8 @@ export class SimplifiedFileUploader {
     }
 
     private async readQueueItems(limit: number = BATCH_SIZE_QUEUE_READ) {
-        // @ts-ignore Beaver is defined
         const items: UploadQueueRecord[] = await Zotero.Beaver.db.readQueueItems(
-            this.user_id, 
+            this.user_id || '',
             limit,
             3,
             VISIBILITY_TIMEOUT
@@ -273,8 +272,7 @@ export class SimplifiedFileUploader {
             await attachmentsService.markUploadCompleted(item.file_hash, item.page_count);
 
             // Only if backend call succeeds, update local state and cleanup
-            // @ts-ignore Beaver is defined
-            await Zotero.Beaver.db.completeQueueItem(this.user_id, item.file_hash);
+            await Zotero.Beaver.db.completeQueueItem(this.user_id || '', item.file_hash);
 
             logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${item.page_count})`, 3);
             
@@ -301,8 +299,7 @@ export class SimplifiedFileUploader {
             await attachmentsService.markUploadFailed(item.file_hash);
             
             // Only if backend call succeeds, update local state
-            // @ts-ignore Beaver is defined
-            await Zotero.Beaver.db.failQueueItem(this.user_id, item.file_hash);
+            await Zotero.Beaver.db.failQueueItem(this.user_id || '', item.file_hash);
             
             // Update local state
             this.updateStatus('failed');

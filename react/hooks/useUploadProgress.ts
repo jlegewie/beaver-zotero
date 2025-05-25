@@ -92,7 +92,6 @@ export function useUploadProgress(
         logger(`useUploadProgress: Fetching stats for user: ${userId}`);
         
         try {
-            // @ts-ignore Beaver is untyped
             const newStats = await Zotero.Beaver.db.getAttachmentUploadStatistics(userId);
             logger(`useUploadProgress: Successfully fetched upload stats: ${JSON.stringify(newStats)}`);
             return newStats;
