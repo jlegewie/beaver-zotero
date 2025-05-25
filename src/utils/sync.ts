@@ -204,6 +204,58 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
 }
 
 /**
+ * Get the BibTeX cite-key for a Zotero.Item, if available.
+ * Tries Better BibTeX, then Zotero beta field citationKey, then Extra.
+ *
+ * @param {Zotero.Item} item
+ * @return {string|null}
+ */
+async function getCiteKey(item: Zotero.Item): Promise<string | null> {
+    // 1. Ensure we actually have an item
+    if (!item) return null;
+
+    // 2. If Better BibTeX is present, use its KeyManager API
+    if (typeof Zotero !== 'undefined'
+        && Zotero.BetterBibTeX
+        && Zotero.BetterBibTeX.KeyManager
+        && typeof Zotero.BetterBibTeX.KeyManager.get === 'function'
+    ) {
+        try {
+            const keydata = Zotero.BetterBibTeX.KeyManager.get(item.id);
+            
+            // Handle retry case (when KeyManager isn't ready)
+            if (keydata && keydata.retry) {
+                // KeyManager not ready, fall through to other methods
+            } else if (keydata && keydata.citationKey) {
+                return keydata.citationKey;
+            }
+        }
+        catch (e) {
+            // Something went wrong in BBT; fall back
+            logger('getCiteKey: BetterBibTeX KeyManager failed');
+        }
+    }
+
+    // 3. Use citationKey field (Zotero beta)
+    try {
+        const citationKey = item.getField('citationKey');
+        if (citationKey) return citationKey;
+    } catch (e) {
+        // citationKey field might not exist in older Zotero versions
+    }
+
+    // 4. Fallback: look for a pinned key in Extra field
+    try {
+        const extra = item.getField('extra') || '';
+        const m = extra.match(/^\s*Citation Key:\s*([^\s]+)/m);
+        return m ? m[1] : null;
+    } catch (e) {
+        logger('getCiteKey: Failed to get extra field');
+        return null;
+    }
+}
+
+/**
  * Syncs an array of Zotero items to the backend in batches
  * 
  * @param libraryID Zotero library ID
@@ -433,6 +485,40 @@ const updateLibrarySyncStatus = (libraryID: number, updates: Partial<LibrarySync
     setPref('selectedLibrary', JSON.stringify(store.get(librariesSyncStatusAtom)));
 };
 
+/*
+ * Ensures that the library sync status is completed
+ * @param libraryID Zotero library ID
+ */
+const ensureCompletionOfLibrarySyncStatus = async (libraryID: number) => {
+    const current = store.get(librariesSyncStatusAtom);
+    const library = current[libraryID];
+
+    // If the library is not found, create a new library sync status
+    // (should never happen)
+    if (!library) {
+        logger(`Beaver Sync: Library ${libraryID} not found, creating new library sync status`, 1);
+        const itemsToSync = await getItemsToSync(libraryID);
+        const newStatus: LibrarySyncStatus = {
+            libraryID,
+            libraryName: Zotero.Libraries.getName(libraryID),
+            itemCount: itemsToSync.length,
+            syncedCount: itemsToSync.length,
+            status: 'completed'
+        };
+        updateLibrarySyncStatus(libraryID, newStatus);
+    }
+
+    // If the library is found, but not completed, update the library sync status to completed
+    if (library.status !== 'completed' || library.syncedCount < library.itemCount) {
+        const newStatus: Partial<LibrarySyncStatus> = {
+            ...library,
+            status: 'completed',
+            syncedCount: library.itemCount,
+        };
+        updateLibrarySyncStatus(libraryID, newStatus);
+    }
+}
+
 /**
  * Performs an initial sync of items from a Zotero library to the backend
  * 
@@ -600,6 +686,9 @@ export async function syncZoteroDatabase(
             if (!lastSyncDate) {
                 await performInitialSync(libraryID, onStatusChange, onProgress, batchSize);
             } else {
+                // Mark initial sync as complete
+                ensureCompletionOfLibrarySyncStatus(libraryID);
+                // Perform periodic sync
                 await performPeriodicSync(libraryID, lastSyncDate, filterFunction, onStatusChange, onProgress, batchSize);
             }
         } catch (error: any) {
