@@ -186,7 +186,16 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
     if (isbn) identifiers.isbn = isbn;
 
     const issn = item.getField('ISSN');
-    if (issn) identifiers.isbn = isbn;
+    if (issn) identifiers.issn = issn;
+
+    const pmid = item.getField('PMID');
+    if (pmid) identifiers.pmid = pmid; 
+
+    const pmcid = item.getField('PMCID');
+    if (pmcid) identifiers.pmcid = pmcid; 
+
+    const arXivID = item.getField('arXiv ID') || item.getField('arXivID');
+    if (arXivID) identifiers.arXivID = arXivID; 
     
     const archiveID = item.getField('archiveID');
     if (archiveID) identifiers.archiveID = archiveID;
