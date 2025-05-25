@@ -3,8 +3,9 @@ import MenuButton from './MenuButton';
 import { MenuItem } from './ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon } from './icons';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useAuth } from '../hooks/useAuth';
+import { hasCompletedOnboardingAtom } from '../atoms/profile';
 
 interface UserAccountMenuButtonProps {
     className?: string;
@@ -18,6 +19,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
     className = '',
     ariaLabel = 'User Account Menu',
 }) => {
+    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const { signOut } = useAuth();
 
@@ -27,6 +29,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             label: "Settings",
             onClick: () => togglePreferencePage((prev) => !prev),
             icon: SettingsIcon,
+            disabled: !hasCompletedOnboarding,
         },
         {
             label: "Manage account",
