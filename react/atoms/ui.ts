@@ -67,7 +67,10 @@ export const fileStatusStatsAtom = atom(
         const failedProcessingCount = fileStatus?.md_failed || 0;
         const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
         const queuedProcessingCount = fileStatus?.md_queued || 0;
-        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount;
+        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles;
+        const processingProgress = totalProcessingCount > 0
+            ? Math.min(((failedProcessingCount + completedFiles) / totalProcessingCount) * 100, 100)
+            : 0;
 
         // combined stats
         const failedCount = uploadFailedCount + failedProcessingCount;
@@ -85,6 +88,7 @@ export const fileStatusStatsAtom = atom(
             failedProcessingCount,
             activeProcessingCount,
             totalProcessingCount,
+            processingProgress,
             progress,
             failedCount,
             activeCount,
