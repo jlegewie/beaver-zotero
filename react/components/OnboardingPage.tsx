@@ -184,8 +184,8 @@ const OnboardingPage: React.FC = () => {
         syncZoteroDatabase();
     };
 
-    const handleUploadRetryClick = () => {
-        resetFailedUploads();
+    const handleUploadRetryClick = async () => {
+        await resetFailedUploads();
         startUploadPolling();
     };
 
