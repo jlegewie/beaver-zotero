@@ -31,7 +31,7 @@ export class FileUploader {
 
     // upload batching
     // queue reads
-    private readonly BATCH_SIZE: number = 10;
+    private readonly BATCH_SIZE: number = 15;
     private readonly MAX_ATTEMPTS: number = 3;
     private readonly VISIBILITY_TIMEOUT: number = 15;
 
