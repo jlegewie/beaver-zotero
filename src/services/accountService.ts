@@ -27,10 +27,23 @@ export class AccountService extends ApiService {
      * @returns Promise with the profile data
      */
     async getProfileWithPlan(): Promise<ProfileWithPlan> {
-        // The backend endpoint is /account/profile, but the ApiService
-        // likely assumes the base URL includes the base path.
-        // Adjust the path if necessary based on ApiService implementation.
         return this.get<ProfileWithPlan>('/account/profile');
+    }
+
+    /**
+     * Sets the user's authorization status to authorized and records consent timestamp
+     * @returns Promise with the response message
+     */
+    async authorizeAccess(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/account/authorize', {});
+    }
+
+    /**
+     * Sets the user's onboarding status to completed
+     * @returns Promise with the response message
+     */
+    async completeOnboarding(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/account/complete-onboarding', {});
     }
 }
 
