@@ -711,6 +711,34 @@ export class BeaverDB {
     }
 
     /**
+     * Delete multiple records from either items or attachments table by user_id, library_id and zotero_keys.
+     * Use this method when you don't know which table contains the records.
+     * @param user_id The user_id of the records to delete.
+     * @param libraryId The library_id of the records to delete.
+     * @param zoteroKeys Array of zotero_keys of the records to delete.
+     */
+    public async deleteByLibraryAndKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<void> {
+        if (zoteroKeys.length === 0) {
+            return;
+        }
+
+        // Execute both delete operations in a transaction for atomicity
+        await this.conn.executeTransaction(async () => {
+            const placeholders = zoteroKeys.map(() => '?').join(',');
+            
+            await this.conn.queryAsync(
+                `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
+                [user_id, libraryId, ...zoteroKeys]
+            );
+
+            await this.conn.queryAsync(
+                `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
+                [user_id, libraryId, ...zoteroKeys]
+            );
+        });
+    }
+
+    /**
      * Retrieve multiple item records by their user_id, library_id and zotero_keys.
      * @param user_id The user_id of the items.
      * @param libraryId The library_id of the items.
