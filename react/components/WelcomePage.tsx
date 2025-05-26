@@ -49,7 +49,7 @@ const WelcomePage: React.FC = () => {
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 p-4"
         >
             {/* Top spacing */}
-            <div style={{ height: '5vh' }}></div>
+            <div style={{ height: prompts.length > 0 ? '5vh' : '0vh' }}></div>
 
             {/* Custom Prompt */}
             {prompts.length > 0 && (
