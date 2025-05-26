@@ -1,4 +1,4 @@
-import { syncService, ItemData, AttachmentData, FileData, ItemDataHashedFields, AttachmentDataHashedFields } from '../services/syncService';
+import { syncService } from '../services/syncService';
 import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
@@ -8,6 +8,7 @@ import { userAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { getPref, setPref } from './prefs';
 import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData } from '../../react/types/zotero';
 
 /**
  * Interface for item filter function
@@ -29,27 +30,39 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
  * @returns Promise resolving to ItemData object for syncing
  */
 async function extractItemData(item: Zotero.Item): Promise<ItemData> {
-    // 1. Extract fields intended for hashing
+
+    // ------- 1. Get full item data -------
+    // @ts-ignore - Returns of item.toJSON are not typed correctly
+    const { abstractNote, creators, collections, tags, version, ...fullItemData } = item.toJSON();
+
+    // ------- 2. Extract fields for hashing -------
     const hashedFields: ItemDataHashedFields = {
         zotero_key: item.key,
         library_id: item.libraryID,
         item_type: item.itemType,
         title: item.getField('title'),
-        authors: extractPrimaryCreators(item),
+        creators: extractCreators(item),
+        date: item.getField('date'),
         year: extractYear(item),
-        publication: item.getField('publicationTitle'),
+        publication_title: item.getField('publicationTitle'),
         abstract: item.getField('abstractNote'),
-        reference: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
-        identifiers: extractIdentifiers(item),
         url: item.getField('url'),
-        tags: item.getTags(),
+        identifiers: extractIdentifiers(item),
+
+        item_json: fullItemData,
+
+        language: item.getField('language'),
+        formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         deleted: item.isInTrash(),
+        tags: item.getTags().length > 0 ? item.getTags() : null,
+        collections: extractCollections(item),
+        citation_key: await getCiteKey(item),
     };
 
-    // 2. Calculate hash from the extracted hashed fields
+    // ------- 3. Calculate hash from the extracted hashed fields -------
     const metadataHash = await calculateObjectHash(hashedFields);
 
-    // 3. Construct final ItemData object
+    // ------- 4. Construct final ItemData object -------
     const itemData: ItemData = {
         ...hashedFields,
         // Add non-hashed fields
@@ -60,6 +73,16 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
     };
 
     return itemData;
+}
+
+
+export interface FileData {
+    // filename: string;
+    file_hash: string;
+    size: number;
+    mime_type: string;
+    // content?: string;
+    storage_path?: string;
 }
 
 /**
@@ -97,7 +120,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  */
 async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData | null> {
     // 1. Extract File Data (can be null)
-    const fileData: FileData | null = await extractFileData(item);
+    const fileData = await extractFileData(item);
     if (!fileData) return null;
 
     // 2. Prepare the object containing only fields for hashing
@@ -112,24 +135,15 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
         filename: item.attachmentFilename,
     };
 
-    // 3. Calculate hash from the prepared hashed fields object
+    // ------- 3. Calculate hash from the prepared hashed fields object -------
     const metadataHash = await calculateObjectHash(hashedFields);
 
-    // 4. Construct final AttachmentData object
+    // ------- 4. Construct final AttachmentData object -------
     const attachmentData: AttachmentData = {
-        // Include base fields
-        library_id: hashedFields.library_id,
-        zotero_key: hashedFields.zotero_key,
-        parent_key: hashedFields.parent_key,
-        deleted: hashedFields.deleted,
-        title: hashedFields.title,
-        attachment_url: hashedFields.attachment_url,
-        link_mode: hashedFields.link_mode,
+        ...hashedFields,
         // Add non-hashed fields
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
-        // File data
-        filename: hashedFields.filename,
         ...(fileData || {}),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
@@ -155,6 +169,45 @@ function extractPrimaryCreators(item: Zotero.Item): any[] {
 }
 
 /**
+ * Extracts creators from a Zotero item
+ * @param item Zotero item
+ * @returns Array of creators
+ */
+function extractCreators(item: Zotero.Item): ZoteroCreator[] | null {
+    const itemCreators = item.getCreators();
+    const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
+
+    const creators = itemCreators.map((creator, index) => ({
+        first_name: creator.firstName || null,
+        last_name: creator.lastName || null,
+        field_mode: creator.fieldMode,
+        creator_type_id: creator.creatorTypeID,
+        creator_type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+        is_primary: creator.creatorTypeID === primaryCreatorTypeID
+    } as ZoteroCreator));
+
+    return creators.length > 0 ? creators : null;
+}
+
+
+function extractCollections(item: Zotero.Item): ZoteroCollection[] | null {
+    const collections = item.getCollections().
+        map(collection_id => {
+            const collection = Zotero.Collections.get(collection_id).toJSON();
+            return {
+                collection_id,
+                key: collection.key,
+                name: collection.name,
+                parent_collection: collection.parentCollection || null,
+                relations: collection.relations,
+            } as ZoteroCollection;
+        })
+
+    return collections.length > 0 ? collections : null;
+}
+
+
+/**
  * Attempts to extract a year from a Zotero item's date field
  * @param item Zotero item
  * @returns Extracted year or undefined
@@ -173,8 +226,8 @@ export function extractYear(item: Zotero.Item): number | undefined {
  * @param item Zotero item
  * @returns Object with identifiers
  */
-function extractIdentifiers(item: Zotero.Item): Record<string, string> {
-    const identifiers: Record<string, string> = {};
+function extractIdentifiers(item: Zotero.Item): BibliographicIdentifier | null {
+    const identifiers: BibliographicIdentifier = {};
     
     const doi = item.getField('DOI');
     if (doi) identifiers.doi = doi;
@@ -197,7 +250,7 @@ function extractIdentifiers(item: Zotero.Item): Record<string, string> {
     const archiveID = item.getField('archiveID');
     if (archiveID) identifiers.archiveID = archiveID;
     
-    return identifiers;
+    return Object.keys(identifiers).length > 0 ? identifiers : null;
 }
 
 /**

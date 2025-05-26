@@ -40,13 +40,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const source = sourceCitations.find(source => source.libraryID === libraryID && source.itemKey === itemKey);
 
     // Get citation data
-    let reference = '';
+    let formatted_citation = '';
     let citation = '';
     let url = '';
 
     // If we have a source, use it
     if (source) {
-        reference = source.reference;
+        formatted_citation = source.formatted_citation;
         citation = source.citation;
         url = source.url;
     // Fallback: get the Zotero item and create the citation data
@@ -60,7 +60,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
         // Get the citation data
         citation = getCitationFromItem(item);
-        reference = getReferenceFromItem(item);
+        formatted_citation = getReferenceFromItem(item);
         url = createZoteroURI(item);
     }
     
@@ -157,7 +157,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             {exportRendering ?
                 citationElement
             :
-                <Tooltip content={reference} width={TOOLTIP_WIDTH}>
+                <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
                     {citationElement}
                 </Tooltip>
             }

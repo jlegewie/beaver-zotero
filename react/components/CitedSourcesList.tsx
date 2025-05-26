@@ -81,7 +81,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                             {/* Right bottom section */}
                             <div className="flex-1 px-2 text-sm font-color-secondary
                                             min-w-0 overflow-hidden text-ellipsis">
-                                {source.reference}
+                                {source.formatted_citation}
                             </div>
                         </div>
                     </div>

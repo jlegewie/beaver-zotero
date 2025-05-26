@@ -154,7 +154,7 @@ export type ReaderContext = {
     page: number | null;
     identifier: string;
     itemType: string;
-    reference: string | null;
+    formatted_citation: string | null;
     selection: string | null;
 }
 

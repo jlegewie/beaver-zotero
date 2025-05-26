@@ -41,11 +41,11 @@ export function getCitationFromItem(item: Zotero.Item): string {
 }
 
 export function getReferenceFromItem(item: Zotero.Item): string {
-    const reference = item.isNote()
+    const formatted_citation = item.isNote()
         // @ts-ignore unescapeHTML exists
         ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
         : Zotero.Beaver.citationService.formatBibliography(item);
-    return reference.replace(/\n/g, '<br />');
+    return formatted_citation.replace(/\n/g, '<br />');
 }
 
 export function createSourceIdentifier(item: Zotero.Item): string {

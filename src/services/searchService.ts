@@ -12,7 +12,7 @@ export interface ItemSearchResult {
     deleted: boolean;
     title?: string;
     year?: number;
-    reference?: string;
+    formatted_citation?: string;
     rank?: number;
     similarity?: number;
 }
@@ -27,7 +27,7 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item) {
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
         year: extractYear(item),
-        reference: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
+        formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         rank: 0,
         similarity: 0,
     } as ItemSearchResult;

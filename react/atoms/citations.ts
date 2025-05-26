@@ -62,7 +62,7 @@ export const updateSourceCitationsAtom = atom(
                     ...source,
                     citation: getCitationFromItem(itemToCite),
                     name: getDisplayNameFromItem(itemToCite),
-                    reference: getReferenceFromItem(itemToCite),
+                    formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
                     icon: item.getItemTypeIconName(),
                     numericCitation: (index + 1).toString()

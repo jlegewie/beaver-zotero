@@ -6,6 +6,7 @@ import { userAtom } from '../../react/atoms/auth';
 import { store } from '../../react';
 import { fileUploader } from './FileUploader';
 import { UploadStatus } from './attachmentsService';
+import { ItemData, AttachmentData } from '../../react/types/zotero';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -58,76 +59,6 @@ export interface BatchResult {
 
 export interface SyncCompleteResponse {
     status: string;
-}
-
-// --- Item Types ---
-/** Fields included in the Item metadata file_hash calculation. */
-export interface ItemDataHashedFields {
-    zotero_key: string;
-    item_type: string;
-    library_id: number;
-    title?: string;
-    authors?: any;
-    year?: number;
-    publication?: string;
-    abstract?: string;
-    reference?: string;
-    identifiers?: any;
-    tags?: any[];
-    deleted: boolean;
-    url?: string;
-}
-
-/** Item data based on ItemData pydantic model */
-export interface ItemData extends ItemDataHashedFields {
-    date_added?: string;
-    date_modified?: string;
-    // Hash of the fields defined in ItemDataHashedFields
-    item_metadata_hash: string;
-}
-
-// --- Attachment & File Types ---
-
-export interface FileData {
-    // filename: string;
-    file_hash: string;
-    size: number;
-    mime_type: string;
-    // content?: string;
-    storage_path?: string;
-}
-
-/** Fields included in the Attachment metadata file_hash calculation. */
-export interface AttachmentDataHashedFields {
-    library_id: number;
-    zotero_key: string;
-    parent_key: string | null;
-    attachment_url: string | null;
-    link_mode: number | null;
-    deleted: boolean;
-    title: string;
-    filename: string;
-}
-
-/** Attachment data based on AttachmentData pydantic model */
-export interface AttachmentData {
-    // attachments table fields
-    library_id: number;
-    zotero_key: string;
-    parent_key: string | null;
-    attachment_url: string | null;
-    link_mode: number | null;
-    deleted: boolean;
-    title: string;
-    date_added: string;
-    date_modified: string;
-    // file table data
-    file_hash: string;
-    size: number;
-    mime_type: string;
-    filename: string;
-    // Hash of the fields defined in AttachmentDataHashedFields
-    attachment_metadata_hash: string;
 }
 
 export interface LastSyncDateResponse {
