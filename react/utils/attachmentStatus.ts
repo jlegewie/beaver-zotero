@@ -41,7 +41,6 @@ export async function getAttachmentStatus(
         // 3. Save status to Beaver DB
         try {
             await Zotero.Beaver.db.updateAttachment(
-
                 user_id,
                 attachmentItem.libraryID,
                 attachmentItem.key,
