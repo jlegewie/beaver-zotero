@@ -22,7 +22,6 @@ declare namespace _ZoteroTypes {
       "supportedModels": string;
       "hasCompletedInitialSync": boolean;
       "hasCompletedInitialUpload": boolean;
-      "currentUploadSession": string;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;

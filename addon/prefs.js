@@ -22,7 +22,6 @@ pref("supportedModels","[]");
 // Initial onboarding process
 pref("hasCompletedInitialSync", false);
 pref("hasCompletedInitialUpload", false);
-pref("currentUploadSession", "{}");
 
 // Search
 pref("recentItems", "[]");

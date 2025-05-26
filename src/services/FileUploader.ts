@@ -7,16 +7,13 @@
  */
 
 import PQueue from 'p-queue';
-import { SyncStatus } from '../../react/atoms/ui';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
-import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType, isUploadQueueSession } from '../../react/atoms/sync';
-import { getPref, setPref } from '../utils/prefs';
-import { v4 as uuidv4 } from 'uuid';
+import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType } from '../../react/atoms/sync';
 import { planFeaturesAtom } from '../../react/atoms/profile';
 
 /**
@@ -49,14 +46,10 @@ export class FileUploader {
     /**
      * Updates the upload queue status atom
      */
-    private updateQueueStatus(updates: Partial<UploadQueueSession>, persist: boolean = true): void {
+    private updateQueueStatus(updates: Partial<UploadQueueSession>): void {
         store.set(uploadQueueStatusAtom, (current) => {
             return { ...current, ...updates } as UploadQueueSession;
         });
-        
-        if (persist) {
-            setPref('currentUploadSession', JSON.stringify(store.get(uploadQueueStatusAtom)));
-        }
     }
 
     /**
@@ -80,9 +73,6 @@ export class FileUploader {
             
             return newStatus;
         });
-        if (persist) {
-            setPref('currentUploadSession', JSON.stringify(store.get(uploadQueueStatusAtom)));
-        }
     }
 
     /**
@@ -95,31 +85,7 @@ export class FileUploader {
         }
         
         this.lastFileUpdateTime = now;
-        this.updateQueueStatus({ currentFile: libraryId + "-" + zoteroKey }, false);
-    }
-
-    /**
-     * Recovers a previous session if it exists and is valid
-     */
-    private recoverSession(): UploadQueueSession | null {
-        const sessionJson = getPref('currentUploadSession');
-        if (!sessionJson || sessionJson === '') return null;
-        
-        try {
-            const session = JSON.parse(sessionJson);
-            
-            // validate the session
-            if (!isUploadQueueSession(session)) {
-                return null;
-            }
-
-            // Return the session if it's in progress, otherwise clear it
-            return session.status === 'in_progress' ? session : null;
-        } catch (error: any) {
-            setPref('currentUploadSession', '{}');
-            logger('Beaver File Uploader: Failed to recover session: ' + error.message, 1);
-            return null;
-        }
+        this.updateQueueStatus({ currentFile: libraryId + "-" + zoteroKey });
     }
 
     /**
@@ -154,7 +120,7 @@ export class FileUploader {
             
             return null;
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error getting upload URL for ${fileHash}: ${error.message}`, 1);
+            logger(`File Uploader: Error getting upload URL for ${fileHash}: ${error.message}`, 1);
             return null;
         }
     }
@@ -199,7 +165,7 @@ export class FileUploader {
                     }
                 }
             } catch (error: any) {
-                logger(`Beaver File Uploader: Error getting batch upload URLs: ${error.message}`, 1);
+                logger(`File Uploader: Error getting batch upload URLs: ${error.message}`, 1);
             }
         }
 
@@ -213,7 +179,7 @@ export class FileUploader {
         try {
             return await Zotero.Beaver.db.getTotalQueueItems(user_id);
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error calculating session total: ${error.message}`, 1);
+            logger(`File Uploader: Error calculating session total: ${error.message}`, 1);
             return 0;
         }
     }
@@ -228,42 +194,33 @@ export class FileUploader {
         // check authentication status and plan features
         const user = store.get(userAtom);
         if (!user?.id) {
-            logger('Beaver File Uploader: No user ID found. Stopping.', 3);
+            logger('File Uploader: No user ID found. Stopping.', 3);
             return;
         }
         if (!store.get(planFeaturesAtom).uploadFiles) {
-            logger('Beaver File Uploader: Uploading files is not supported for this plan. Stopping.', 3);
+            logger('File Uploader: Uploading files is not supported for this plan. Stopping.', 3);
             return;
         }
 
         // check if already running
         if (this.isRunning) {
-            logger('Beaver File Uploader: Already running. Updating session instead.', 4);
+            logger('File Uploader: Already running. Updating session instead.', 4);
             return;
         }
         this.isRunning = true;
         
-        // Check for recovered session or create a new session
-        const recoveredSession = this.recoverSession();
-        if (recoveredSession) {
-            this.updateQueueStatus(recoveredSession, false);
-            logger(`Beaver File Uploader: Recovered ${recoveredSession.sessionType} session`, 3);
-        } else {
-            const pending = await this.calculatePendingItems(user.id);
-            this.updateQueueStatus({
-                sessionId: uuidv4(),
-                sessionType: sessionType,
-                startTime: new Date().toISOString(),
-                status: 'in_progress',
-                pending: pending,
-                completed: 0,
-                failed: 0,
-                skipped: 0,
-                currentFile: null
-            });
-        }
+        const pending = await this.calculatePendingItems(user.id);
+        this.updateQueueStatus({
+            sessionType: sessionType,
+            status: 'in_progress',
+            pending: pending,
+            completed: 0,
+            failed: 0,
+            skipped: 0,
+            currentFile: null
+        });
         
-        logger(`Beaver File Uploader: Starting file uploader (session type: ${sessionType})`, 3);
+        logger(`File Uploader: Starting file uploader (session type: ${sessionType})`, 3);
 
         // Initialize the p-queue with desired concurrency
         this.uploadQueue = new PQueue({ concurrency: this.MAX_CONCURRENT });
@@ -271,7 +228,7 @@ export class FileUploader {
         // Begin processing in the background
         this.runQueue()
             .catch(error => {
-                logger('Beaver File Uploader: Error in runQueue: ' + error.message, 1);
+                logger('File Uploader: Error in runQueue: ' + error.message, 1);
                 Zotero.logError(error);
                 this.isRunning = false;
                 this.updateQueueStatus({ status: 'failed' });
@@ -288,17 +245,17 @@ export class FileUploader {
         }
 
         this.isRunning = false;
-        logger('Beaver File Uploader: Stopping file uploader', 3);
+        logger('File Uploader: Stopping file uploader', 3);
 
         // Wait for all queued tasks to finish, if any
         try {
             await this.uploadQueue.onIdle();            
             // Clear session
-            this.updateQueueStatus({ status: 'completed', currentFile: null }, true);
+            this.updateQueueStatus({ status: 'completed', currentFile: null });
         } catch (error: any) {
-            logger('Beaver File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
+            logger('File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
             Zotero.logError(error);
-            this.updateQueueStatus({ status: 'failed', currentFile: null }, true);
+            this.updateQueueStatus({ status: 'failed', currentFile: null });
         }
     }
 
@@ -322,14 +279,14 @@ export class FileUploader {
                 const isAuthenticated = store.get(isAuthenticatedAtom);
                 const user = store.get(userAtom);
                 if (!isAuthenticated || !user?.id) {
-                    logger('Beaver File Uploader: Not authenticated or no user ID. Stopping.', 3);
+                    logger('File Uploader: Not authenticated or no user ID. Stopping.', 3);
                     this.isRunning = false;
                     break;
                 }
 
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
-                    logger(`Beaver File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
+                    logger(`File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
                     await new Promise(resolve => setTimeout(resolve, errorBackoffTime));
                     // Exponential backoff with max of 1 minute
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
@@ -343,7 +300,7 @@ export class FileUploader {
                     this.VISIBILITY_TIMEOUT
                 );
 
-                logger(`Beaver File Uploader: Read ${items.length} items from local queue`, 3);
+                logger(`File Uploader: Read ${items.length} items from local queue`, 3);
 
                 // If no items, we're done
                 if (items.length === 0) {
@@ -369,7 +326,7 @@ export class FileUploader {
                 // Only recalculate pending periodically or when needed
                 if (Date.now() - lastPendingUpdate > 30000) { // Every 30 seconds
                     const pending = await this.calculatePendingItems(user.id);
-                    this.updateQueueStatus({ pending }, true);
+                    this.updateQueueStatus({ pending });
                     lastPendingUpdate = Date.now();
                 }
 
@@ -386,14 +343,14 @@ export class FileUploader {
                 // Wait for these uploads to finish before reading the next batch
                 await this.uploadQueue.onIdle();
             } catch (error: any) {
-                logger('Beaver File Uploader: runQueue encountered an error: ' + error.message, 1);
+                logger('File Uploader: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
                 
                 consecutiveErrors++;
                 
                 // If we've hit max consecutive errors, stop the session
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    logger(`Beaver File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping session`, 2);
+                    logger(`File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping session`, 2);
                     throw new Error('Max consecutive errors reached');
                 }
 
@@ -404,8 +361,8 @@ export class FileUploader {
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
-        logger('Beaver File Uploader: Finished processing queue.', 3);
-        this.updateQueueStatus({ status: 'completed', currentFile: null }, true);
+        logger('File Uploader: Finished processing queue.', 3);
+        this.updateQueueStatus({ status: 'completed', currentFile: null });
     }
 
     /**
@@ -417,12 +374,12 @@ export class FileUploader {
             // Update current file being processed
             this.updateCurrentAttachment(item.library_id, item.zotero_key);
             
-            logger(`Beaver File Uploader: Uploading file for ${item.zotero_key}`, 3);
+            logger(`File Uploader: Uploading file for ${item.zotero_key}`, 3);
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
-                logger(`Beaver File Uploader: Attachment not found: ${item.zotero_key}`, 1);
+                logger(`File Uploader: Attachment not found: ${item.zotero_key}`, 1);
                 await this.handlePermanentFailure(item, user_id, "Attachment not found in Zotero");
                 return;
             }
@@ -434,7 +391,7 @@ export class FileUploader {
             let filePath: string | null = null;
             filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
-                logger(`Beaver File Uploader: File path not found for attachment: ${item.zotero_key}`, 1);
+                logger(`File Uploader: File path not found for attachment: ${item.zotero_key}`, 1);
                 await this.handlePermanentFailure(item, user_id, "File path not found");
                 return;
             }
@@ -444,7 +401,7 @@ export class FileUploader {
             try {
                 fileArrayBuffer = await IOUtils.read(filePath);
             } catch (readError: any) {
-                logger(`Beaver File Uploader: Error reading file: ${item.zotero_key}`, 1);
+                logger(`File Uploader: Error reading file: ${item.zotero_key}`, 1);
                 Zotero.logError(readError);
                 await this.handlePermanentFailure(item, user_id, "Error reading file");
                 return;
@@ -471,7 +428,7 @@ export class FileUploader {
                     if (!response.ok) {
                         if (response.status >= 500) {
                             // Server error - may be temporary
-                            logger(`Beaver File Uploader: Server error ${response.status} on attempt ${attempt}, will retry`, 2);
+                            logger(`File Uploader: Server error ${response.status} on attempt ${attempt}, will retry`, 2);
                             await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
                             continue;
                         } else {
@@ -498,7 +455,7 @@ export class FileUploader {
                         )
                     ) {
                         // Network error, retry with backoff
-                        logger(`Beaver File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
+                        logger(`File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
                         await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
                     } else {
                         // Other errors, rethrow to be handled by outer catch
@@ -513,7 +470,7 @@ export class FileUploader {
             }
 
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error uploading file for attachment ${item.zotero_key}: ${error.message}`, 1);
+            logger(`File Uploader: Error uploading file for attachment ${item.zotero_key}: ${error.message}`, 1);
             Zotero.logError(error);
 
             // If attempts are too high, treat as permanently failed
@@ -522,12 +479,12 @@ export class FileUploader {
             } else {
                 // The visibility timeout will handle retries automatically
                 // No action needed here - the item will become visible again after timeout
-                logger(`Beaver File Uploader: Upload failed for ${item.zotero_key}, will retry after visibility timeout`, 2);
+                logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after visibility timeout`, 2);
                 // setTimeout(() => this.start(), this.VISIBILITY_TIMEOUT * 60 * 1000);
             }
         } finally {
             // Clear current file when done (success or failure)
-            this.updateQueueStatus({ currentFile: null }, false);
+            this.updateQueueStatus({ currentFile: null });
         }
     }
     
@@ -536,7 +493,7 @@ export class FileUploader {
      * then in the local database only if backend update succeeds
      */
     private async handlePermanentFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
-        logger(`Beaver File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
+        logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
             // First, notify backend of failure
@@ -550,10 +507,10 @@ export class FileUploader {
 
             this.incrementQueueStatus({ failed: 1, pending: -1 }, true);
             
-            logger(`Beaver File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
+            logger(`File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
             
         } catch (failError: any) {
-            logger(`Beaver File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
             Zotero.logError(failError);
             // Don't update local state or cleanup - this means the item will be retried later
             // Re-throw the error so callers know the operation failed
@@ -575,31 +532,19 @@ export class FileUploader {
             // Remove URL from cache only after successful backend update
             this.urlCache.delete(item.file_hash);
 
-            logger(`Beaver File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
+            logger(`File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
             
             // Increment our local completed count only after successful backend update
             this.incrementQueueStatus({ completed: 1, pending: -1 }, true);
             
         } catch (error: any) {
-            logger(`Beaver File Uploader: Error marking upload as completed: ${error.message}`, 1);
+            logger(`File Uploader: Error marking upload as completed: ${error.message}`, 1);
             Zotero.logError(error);
             // Re-throw the error so callers know the completion marking failed
             throw error;
         }
     }
 
-    private async validateRecoveredSession(session: UploadQueueSession, user_id: string): Promise<UploadQueueSession> {
-        // Recalculate actual pending items
-        const actualPending = await this.calculatePendingItems(user_id);
-        
-        // Adjust session if needed
-        if (actualPending !== session.pending) {
-            logger(`Beaver File Uploader: Adjusting recovered session pending count from ${session.pending} to ${actualPending}`, 3);
-            return {...session, pending: actualPending};
-        }
-        
-        return session;
-    }
 }
 
 
@@ -612,16 +557,16 @@ export const resetFailedUploads = async (): Promise<void> => {
         const user = store.get(userAtom);
 
         if (!isAuthenticated || !user?.id) {
-            logger('Beaver File Uploader: Cannot reset failed uploads, user not authenticated or user ID missing.', 2);
+            logger('File Uploader: Cannot reset failed uploads, user not authenticated or user ID missing.', 2);
             return;
         }
         const userId = user.id;
 
         const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
-        logger(`Beaver File Uploader: Backend reset ${results.length} failed uploads.`, 3);
+        logger(`File Uploader: Backend reset ${results.length} failed uploads.`, 3);
 
         if (results.length === 0) {
-            logger(`Beaver File Uploader: No failed uploads reported by backend to reset locally.`, 3);
+            logger(`File Uploader: No failed uploads reported by backend to reset locally.`, 3);
             return;
         }
 
@@ -634,14 +579,14 @@ export const resetFailedUploads = async (): Promise<void> => {
         }));
 
         await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
-        logger(`Beaver File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
+        logger(`File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
 
         // Restart the uploader
         await fileUploader.start("manual");
-        logger(`Beaver File Uploader: Uploader restarted after resetting failed uploads.`, 3);
+        logger(`File Uploader: Uploader restarted after resetting failed uploads.`, 3);
 
     } catch (error: any) {
-        logger(`Beaver File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
+        logger(`File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
         // Zotero.logError is good for logging to Zotero's native error console
         if (typeof Zotero !== 'undefined' && Zotero.logError) {
             Zotero.logError(error);

@@ -6,12 +6,8 @@ import { SyncStatus } from './ui';
 export type UploadSessionType = 'initial' | 'background' | 'manual';
 export type UploadQueueStatusType = 'in_progress' | 'completed' | 'failed';
 export interface UploadQueueSession {
-    sessionId: string;
     sessionType: UploadSessionType;
-    startTime: string;
     status: UploadQueueStatusType;
-    
-    // Statistics
     pending: number;
     completed: number;
     failed: number;
@@ -25,25 +21,6 @@ export const uploadQueueTotalAtom = atom<number>((get) => {
     const status = get(uploadQueueStatusAtom);
     return (status?.pending || 0) + (status?.completed || 0) + (status?.failed || 0) + (status?.skipped || 0);
 });
-
-
-export function isUploadQueueSession(obj: any): obj is UploadQueueSession {
-    return (
-        typeof obj === 'object' &&
-        obj !== null &&
-        typeof obj.sessionId === 'string' &&
-        (obj.sessionType === 'initial' || obj.sessionType === 'background' || obj.sessionType === 'manual') &&
-        typeof obj.startTime === 'string' &&
-        (obj.status === 'in_progress' || obj.status === 'completed' || obj.status === 'failed') &&
-        typeof obj.pending === 'number' &&
-        typeof obj.completed === 'number' &&
-        typeof obj.failed === 'number' &&
-        typeof obj.skipped === 'number' &&
-        typeof obj.total === 'number' &&
-        (typeof obj.currentFile === 'string' || obj.currentFile === null)
-    );
-}
-
 
 
 // Library sync tracking
