@@ -2,17 +2,16 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../atoms/auth';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { UserIcon, LogoutIcon, LinkIcon, CancelIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon } from './icons';
+import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from './icons';
 import IconButton from "./IconButton";
 import Button from "./button";
-import { supabase } from "../../src/services/supabaseClient";
-import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom } from 'jotai';
 import { chatService, ErrorType } from '../../src/services/chatService';
 import { ProviderType } from '../atoms/models';
-import { isProfileLoadedAtom, profileWithPlanAtom } from "../atoms/profile";
+import { profileWithPlanAtom } from "../atoms/profile";
 import { logger } from "../../src/utils/logger";
-import { validateSelectedModelAtom, fetchModelsAtom } from '../atoms/models';
+import { validateSelectedModelAtom } from '../atoms/models';
+import { getCustomPromptsFromPreferences, CustomPrompt } from "../types/settings";
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
@@ -26,42 +25,22 @@ const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     </h2>
 );
 
-// --- Quick Prompt Type and Initial State ---
-export type QuickPrompt = {
-    index?: number;
-    title: string;
-    text: string;
-    librarySearch: boolean;
-    requiresAttachment: boolean;
-};
-
-function getInitialQuickPrompts(): QuickPrompt[] {
-    const prompts: QuickPrompt[] = [];
-    for (let i = 1; i <= 6; i++) {
-        prompts.push({
-            // @ts-ignore correct type
-            title: getPref(`quickPrompt${i}_title`) ?? '',
-            // @ts-ignore correct type
-            text: getPref(`quickPrompt${i}_text`) ?? '',
-            // @ts-ignore correct type
-            librarySearch: getPref(`quickPrompt${i}_librarySearch`) ?? false,
-            // @ts-ignore correct type
-            requiresAttachment: getPref(`quickPrompt${i}_requiresAttachment`) ?? false,
-        });
-    }
-    return prompts;
-}
-
-// --- Single Quick Prompt Settings Component ---
-interface QuickPromptSettingsProps {
+// --- Single Custom Prompt Settings Component ---
+interface CustomPromptSettingsProps {
     index: number;
-    prompt: QuickPrompt;
-    onChange: (index: number, updatedPrompt: QuickPrompt) => void;
+    prompt: CustomPrompt;
+    onChange: (index: number, updatedPrompt: CustomPrompt) => void;
+    onRemove: (index: number) => void;
 }
 
-const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt, onChange }) => {
+const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prompt, onChange, onRemove }) => {
     const [text, setText] = useState(prompt.text);
     const [title, setTitle] = useState(prompt.title);
+
+    useEffect(() => {
+        setText(prompt.text);
+        setTitle(prompt.title);
+    }, [prompt.text, prompt.title]);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = event.target.value;
@@ -70,12 +49,6 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
         if (newValue !== prompt.text) {
             const updated = { ...prompt, text: newValue };
             onChange(index, updated);
-            const idx = index + 1;
-            if (idx >= 1 && idx <= 6) {
-                const pref = `quickPrompt${idx}_text`;
-                // @ts-ignore correct pref key
-                setPref(pref, newValue);
-            }
         }
     };
 
@@ -86,34 +59,35 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
         if (newValue !== prompt.title) {
             const updated = { ...prompt, title: newValue };
             onChange(index, updated);
-            const idx = index + 1;
-            if (idx >= 1 && idx <= 6) {
-                const pref = `quickPrompt${idx}_title`;
-                // @ts-ignore correct pref key
-                setPref(pref, newValue);
-            }
         }
     };
 
-    const handleCheckboxChange = (field: keyof QuickPrompt) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleCheckboxChange = (field: keyof CustomPrompt) => (event: React.ChangeEvent<HTMLInputElement>) => {
         const newValue = event.target.checked;
         const updated = { ...prompt, [field]: newValue };
         onChange(index, updated);
-        const idx = index + 1;
-        if (idx >= 1 && idx <= 6) {
-            const pref = `quickPrompt${idx}_${field}`;
-            // @ts-ignore correct type
-            setPref(pref, newValue);
-        }
+    };
+
+    const handleRemove = () => {
+        onRemove(index);
     };
 
     return (
         <div className="display-flex flex-col gap-2">
-            <div className="display-flex flex-row gap-3 items-center">
-                <label className="font-semibold text-sm font-color-primary">
-                    Quick Prompt
-                </label>
-                <label className="font-semibold text-sm font-color-secondary">⌘{index + 1}</label>
+            <div className="display-flex flex-row gap-3 items-center justify-between">
+                <div className="display-flex flex-row gap-3 items-center">
+                    <label className="font-semibold text-sm font-color-primary">
+                        Custom Prompt
+                    </label>
+                    <label className="font-semibold text-sm font-color-secondary">⌘{index + 1}</label>
+                </div>
+                <IconButton
+                    variant="ghost-secondary"
+                    icon={CancelIcon}
+                    onClick={handleRemove}
+                    className="scale-90"
+                    ariaLabel={`Remove prompt ${index + 1}`}
+                />
             </div>
             <div className="display-flex flex-row gap-2 items-center">
                 <label className="text-sm font-color-secondary">Title</label>
@@ -138,7 +112,7 @@ const QuickPromptSettings: React.FC<QuickPromptSettingsProps> = ({ index, prompt
                         type="checkbox"
                         checked={prompt.librarySearch}
                         onChange={handleCheckboxChange('librarySearch')}
-                        className="scale-90" // Adjust scale/style as needed
+                        className="scale-90"
                     />
                     Library Search
                 </label>
@@ -304,10 +278,17 @@ const PreferencePage: React.FC = () => {
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(getInitialQuickPrompts);
-    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
-    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
+    const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
+
+    // Helper function to save custom prompts array to preferences
+    const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
+        // Remove the index field before saving since it's derived from array position
+        const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
+        const promptsJson = JSON.stringify(promptsToSave);
+        setPref('customPrompts', promptsJson);
+        logger('Saved custom prompts to preferences');
+    }, []);
 
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
@@ -323,15 +304,45 @@ const PreferencePage: React.FC = () => {
         handlePrefSave('customInstructions', newValue);
     };
 
-    // --- Quick Prompt Change Handler ---
-    const handleQuickPromptChange = useCallback((index: number, updatedPrompt: QuickPrompt) => {
-        setQuickPrompts((currentPrompts: any) => {
+    // --- Custom Prompt Change Handler ---
+    const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
+        setCustomPrompts((currentPrompts) => {
             const newPrompts = [...currentPrompts];
             newPrompts[index] = updatedPrompt;
+            
+            // Save to preferences
+            saveCustomPromptsToPrefs(newPrompts);
+            
             return newPrompts;
         });
-        // Note: Individual pref saving is handled within QuickPromptSettings component's onBlur/onChange
-    }, []);
+    }, [saveCustomPromptsToPrefs]);
+
+    // --- Add Prompt Handler ---
+    const handleAddPrompt = useCallback(() => {
+        if (customPrompts.length >= 9) return; // Safety check
+        
+        const newPrompt: CustomPrompt = {
+            title: "",
+            text: "",
+            librarySearch: false,
+            requiresAttachment: false
+        };
+        
+        setCustomPrompts((currentPrompts) => {
+            const newPrompts = [...currentPrompts, newPrompt];
+            saveCustomPromptsToPrefs(newPrompts);
+            return newPrompts;
+        });
+    }, [customPrompts.length, saveCustomPromptsToPrefs]);
+
+    // --- Remove Prompt Handler ---
+    const handleRemovePrompt = useCallback((indexToRemove: number) => {
+        setCustomPrompts((currentPrompts) => {
+            const newPrompts = currentPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
+            saveCustomPromptsToPrefs(newPrompts);
+            return newPrompts;
+        });
+    }, [saveCustomPromptsToPrefs]);
 
     return (
         <div
@@ -430,20 +441,33 @@ const PreferencePage: React.FC = () => {
             />
             {/* TODO: Add word/char counter */}
 
-            {/* --- Quick Prompts Section --- */}
-            <SectionHeader>Quick Prompts</SectionHeader>
+            {/* --- Custom Prompts Section --- */}
+            <SectionHeader>Custom Prompts</SectionHeader>
             <div className="text-sm font-color-secondary mb-2">
-                Configure up to 6 quick prompts with keyboard shortcuts (⌘1-⌘6). Enable library search or set conditions based on attachments.
+                Configure up to 9 custom prompts with keyboard shortcuts (⌘1-⌘9). Enable library search or set conditions based on attachments.
             </div>
             <div className="display-flex flex-col gap-5">
-                {quickPrompts.map((prompt: QuickPrompt, index: number) => (
-                    <QuickPromptSettings
+                {customPrompts.map((prompt: CustomPrompt, index: number) => (
+                    <CustomPromptSettings
                         key={index}
                         index={index}
                         prompt={prompt}
-                        onChange={handleQuickPromptChange}
+                        onChange={handleCustomPromptChange}
+                        onRemove={handleRemovePrompt}
                     />
                 ))}
+                
+                {/* Add Prompt Button */}
+                <div className="display-flex flex-row items-center justify-start">
+                    <Button
+                        variant="outline"
+                        onClick={handleAddPrompt}
+                        disabled={customPrompts.length >= 9}
+                        className="text-sm"
+                    >
+                        Add Prompt
+                    </Button>
+                </div>
             </div>
 
             {/* Spacer at the bottom */}

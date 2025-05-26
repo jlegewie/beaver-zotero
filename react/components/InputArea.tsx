@@ -11,6 +11,8 @@ import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
 import MessageAttachmentDisplay from './MessageAttachmentDisplay';
 import { isAgentModelAtom } from '../atoms/models';
+import { getCustomPromptsFromPreferences } from '../types/settings';
+import { logger } from '../../src/utils/logger';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -92,23 +94,22 @@ const InputArea: React.FC<InputAreaProps> = ({
             newThread();
         }
 
-        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for quick prompt
+        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for custom prompt
         for (let i = 1 as 1 | 2 | 3 | 4 | 5 | 6; i <= 6; i++) {
             if (e.key === i.toString() &&  ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
                 e.preventDefault();
-                handleQuickPrompt(i);
+                handleCustomPrompt(i);
             }
         }
     };
 
-    const handleQuickPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6) => {
-        const quickPrompt = getPref(`quickPrompt${i}_text`);
-        const requiresAttachment = getPref(`quickPrompt${i}_requiresAttachment`);
-        console.log('Quick prompt:', i, quickPrompt, requiresAttachment, currentSources.length);
-        if (quickPrompt && (!requiresAttachment || currentSources.length > 0)) {
-            console.log('Quick prompt test:', i);
-            const librarySearch = getPref(`quickPrompt${i}_librarySearch`);
-            chatCompletion(quickPrompt, librarySearch);
+    const handleCustomPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) => {
+        const customPrompts = getCustomPromptsFromPreferences();
+        if (!customPrompts[i - 1]) return;
+        const customPrompt = customPrompts[i - 1];
+        logger(`Custom prompt: ${i} ${customPrompt.text} ${currentSources.length}`);
+        if (customPrompt && (!customPrompt.requiresAttachment || currentSources.length > 0)) {
+            chatCompletion(customPrompt.text, customPrompt.librarySearch);
         }
     }
 
