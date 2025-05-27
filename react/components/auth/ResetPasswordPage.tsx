@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../src/services/supabaseClient';
+import { supabase } from '../../../src/services/supabaseClient';
 
 /**
  * Fully‑featured password‑reset page that mimics the look & feel of `LoginPage`.
