@@ -1,28 +1,28 @@
 import React, { useState, useEffect } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "./icons";
+import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useFileStatus } from '../hooks/useFileStatus';
-import { useUploadProgress } from '../hooks/useUploadProgress';
-import { fileStatusStatsAtom } from "../atoms/ui";
+import { useFileStatus } from '../../hooks/useFileStatus';
+import { useUploadProgress } from '../../hooks/useUploadProgress';
+import { fileStatusStatsAtom } from "../../atoms/ui";
 import {
     librariesSyncStatusAtom,
     librarySyncProgressAtom,
     LibrarySyncStatus,
     uploadQueueStatusAtom,
     uploadQueueTotalAtom
-} from "../atoms/sync";
-import Button from "./ui/Button";
-import { userIdAtom, logoutAtom } from "../atoms/auth";
-import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../atoms/profile';
-import LibrarySelector from "./LibrarySelector";
-import { setPref } from "../../src/utils/prefs";
-import { LibraryStatistics } from "../../src/utils/libraries";
-import { syncZoteroDatabase } from "../../src/utils/sync";
-import IconButton from "./IconButton";
-import { planSupportedAtom } from "../atoms/profile";
-import { logger } from "../../src/utils/logger";
-import { resetFailedUploads } from '../../src/services/FileUploader';
-import { accountService } from "../../src/services/accountService";
+} from "../../atoms/sync";
+import Button from "../ui/Button";
+import { userIdAtom, logoutAtom } from "../../atoms/auth";
+import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
+import LibrarySelector from "../LibrarySelector";
+import { setPref } from "../../../src/utils/prefs";
+import { LibraryStatistics } from "../../../src/utils/libraries";
+import { syncZoteroDatabase } from "../../../src/utils/sync";
+import IconButton from "../IconButton";
+import { planSupportedAtom } from "../../atoms/profile";
+import { logger } from "../../../src/utils/logger";
+import { resetFailedUploads } from '../../../src/services/FileUploader';
+import { accountService } from "../../../src/services/accountService";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 

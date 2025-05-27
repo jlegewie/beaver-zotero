@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import SignInForm from "./auth/SignInForm";
+import SignInForm from "../auth/SignInForm";
 
 interface LoginPageProps {
     emailInputRef?: React.RefObject<HTMLInputElement>;

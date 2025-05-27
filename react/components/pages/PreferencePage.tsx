@@ -1,17 +1,17 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
-import { logoutAtom, userAtom } from '../atoms/auth';
-import { getPref, setPref } from '../../src/utils/prefs';
-import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from './icons';
-import IconButton from "./IconButton";
-import Button from "./ui/Button";
+import { logoutAtom, userAtom } from '../../atoms/auth';
+import { getPref, setPref } from '../../../src/utils/prefs';
+import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from '../icons';
+import IconButton from "../IconButton";
+import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { chatService, ErrorType } from '../../src/services/chatService';
-import { ProviderType } from '../atoms/models';
-import { profileWithPlanAtom } from "../atoms/profile";
-import { logger } from "../../src/utils/logger";
-import { validateSelectedModelAtom } from '../atoms/models';
-import { getCustomPromptsFromPreferences, CustomPrompt } from "../types/settings";
+import { chatService, ErrorType } from '../../../src/services/chatService';
+import { ProviderType } from '../../atoms/models';
+import { profileWithPlanAtom } from "../../atoms/profile";
+import { logger } from "../../../src/utils/logger";
+import { validateSelectedModelAtom } from '../../atoms/models';
+import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 
 // Assuming basic checkbox/input elements for now. Replace with custom components if available.
 
