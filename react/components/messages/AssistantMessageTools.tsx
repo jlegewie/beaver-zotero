@@ -4,8 +4,8 @@ import { ToolCall } from '../../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon, Icon } from '../icons/icons';
 import Button from '../ui/Button';
-import ZoteroItemsList from '../ZoteroItemsList';
-import { MessageErrorWarningDisplay } from '../ErrorWarningDisplay';
+import ZoteroItemsList from '../ui/ZoteroItemsList';
+import { MessageErrorWarningDisplay } from './ErrorWarningDisplay';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;

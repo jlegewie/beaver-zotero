@@ -14,7 +14,7 @@ import PreferencePage from './pages/PreferencePage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
-import PopupMessageContainer from './PopupMessageContainer';
+import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isProfileLoadedAtom } from '../atoms/profile';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {

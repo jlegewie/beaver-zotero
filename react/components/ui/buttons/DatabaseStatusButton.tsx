@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus } from "../atoms/ui";
-import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
-import { syncZoteroDatabase } from '../../src/utils/sync';
-import IconButton from "./ui/IconButton";
-import { DatabaseStatusIcon } from "./icons/icons";
-import { librarySyncProgressAtom } from "../atoms/sync";
+import { syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus } from "../../../atoms/ui";
+import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../../../atoms/sync";
+import { syncZoteroDatabase } from '../../../../src/utils/sync';
+import IconButton from "../IconButton";
+import { DatabaseStatusIcon } from "../../icons/icons";
+import { librarySyncProgressAtom } from "../../../atoms/sync";
 
 // Possible icon states
 type IconState = {
@@ -13,7 +13,7 @@ type IconState = {
     fading: boolean;
 };
 
-const DatabaseStatusIndicator: React.FC = () => {
+const DatabaseStatusButton: React.FC = () => {
     // Database sync atoms
     const syncStatus = useAtomValue(syncStatusAtom);
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
@@ -113,4 +113,4 @@ const DatabaseStatusIndicator: React.FC = () => {
     );
 };
 
-export default DatabaseStatusIndicator;
+export default DatabaseStatusButton;

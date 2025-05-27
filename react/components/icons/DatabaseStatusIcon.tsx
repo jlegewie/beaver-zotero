@@ -7,14 +7,14 @@ const COLORS = {
     yellow: "#faa700",
 }
 
-type DatabaseStatusIndicatorProps = React.SVGProps<SVGSVGElement> & {
+type DatabaseStatusButtonProps = React.SVGProps<SVGSVGElement> & {
     dotColor?: "red" | "green" | "yellow" | string;
     fading?: boolean;
     fadeDuration?: number; // in milliseconds
     hover?: boolean;
 };
 
-const DatabaseStatusIcon: React.FC<DatabaseStatusIndicatorProps> = ({
+const DatabaseStatusIcon: React.FC<DatabaseStatusButtonProps> = ({
     dotColor = "green",
     fading = true,
     fadeDuration = 1000,

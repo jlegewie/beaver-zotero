@@ -14,7 +14,7 @@ import {
 import Button from "../ui/Button";
 import { userIdAtom, logoutAtom } from "../../atoms/auth";
 import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
-import LibrarySelector from "../LibrarySelector";
+import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { syncZoteroDatabase } from "../../../src/utils/sync";

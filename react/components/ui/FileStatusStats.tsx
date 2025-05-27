@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAtomValue, useAtom } from 'jotai';
-import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
-import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from './icons/icons';
-import Tooltip from './ui/Tooltip';
-import IconButton from './ui/IconButton';
-import { attachmentsService } from '../../src/services/attachmentsService';
-import { resetFailedUploads } from '../../src/services/FileUploader';
+import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../../atoms/ui';
+import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from '../icons/icons';
+import Tooltip from './Tooltip';
+import IconButton from './IconButton';
+import { attachmentsService } from '../../../src/services/attachmentsService';
+import { resetFailedUploads } from '../../../src/services/FileUploader';
 
 function formatCount(count: number): string {
     if (count >= 10000) {

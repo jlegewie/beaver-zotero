@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Button from "../ui/Button";
-import FileStatusStats from "../FileStatusStats";
-import FileStatusDisplay from "../FileStatusDisplay";
+import FileStatusStats from "../ui/FileStatusStats";
+import FileStatusButton from "../ui/buttons/FileStatusButton";
 import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
@@ -95,7 +95,7 @@ const HomePage: React.FC = () => {
                         </span>
                     </Button>
                     {!showFileStatus && (
-                        <FileStatusDisplay showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
+                        <FileStatusButton showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
                     )}
                 </div>
                 

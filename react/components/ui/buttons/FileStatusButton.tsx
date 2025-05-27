@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
-import { fileStatusStatsAtom } from '../atoms/ui';
-import Button from './ui/Button';
-import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons/icons';
-import { Icon } from './icons/icons';
+import { fileStatusStatsAtom } from '../../../atoms/ui';
+import Button from '../Button';
+import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from '../../icons/icons';
+import { Icon } from '../../icons/icons';
 
 interface StatusItemProps {
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
@@ -35,7 +35,7 @@ const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className = '', ic
 /**
  * Button component displaying aggregated file processing status.
  */
-const FileStatusDisplay: React.FC<{
+const FileStatusButton: React.FC<{
     className?: string,
     showFileStatus: boolean,
     setShowFileStatus: (showFileStatus: boolean) => void
@@ -91,4 +91,4 @@ const FileStatusDisplay: React.FC<{
     );
 };
 
-export default FileStatusDisplay; 
+export default FileStatusButton; 

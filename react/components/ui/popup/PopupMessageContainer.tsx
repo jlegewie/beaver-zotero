@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { popupMessagesAtom } from '../atoms/ui';
+import { popupMessagesAtom } from '../../../atoms/ui';
 import PopupMessageItem from './PopupMessageItem';
 
 const MAX_MESSAGES = 3;

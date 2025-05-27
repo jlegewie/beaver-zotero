@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, Spinner, CSSIcon } from "./icons/icons";
-import { getLibraryStatistics, LibraryStatistics } from "../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom } from "../atoms/profile";
+import { Icon, Spinner, CSSIcon } from "../icons/icons";
+import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
+import { planFeaturesAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue } from "jotai";
-import Button from "./ui/Button";
+import Button from "../ui/Button";
 
 interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;

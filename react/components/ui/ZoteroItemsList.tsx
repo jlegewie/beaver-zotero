@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CSSItemTypeIcon } from './icons/icons';
-import { getDisplayNameFromItem } from '../utils/sourceUtils';
-import { SourceAttachment } from '../types/attachments/apiTypes';
-import { ZoteroItemReference } from '../types/zotero';
+import { CSSItemTypeIcon } from '../icons/icons';
+import { getDisplayNameFromItem } from '../../utils/sourceUtils';
+import { SourceAttachment } from '../../types/attachments/apiTypes';
+import { ZoteroItemReference } from '../../types/zotero';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;

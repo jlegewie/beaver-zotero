@@ -1,12 +1,12 @@
 import React from 'react';
-import { ChatMessage, Warning } from '../types/chat/uiTypes';
-import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons/icons';
+import { ChatMessage, Warning } from '../../types/chat/uiTypes';
+import { Icon, AlertIcon, KeyIcon, CancelIcon } from '../icons/icons';
 import { useSetAtom } from 'jotai';
-import Button from './ui/Button';
-import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { removeMessageAtom, removeWarningFromMessageAtom } from '../atoms/threads';
-import IconButton from './ui/IconButton';
-import ZoteroItemsList from './ZoteroItemsList';
+import Button from '../ui/Button';
+import { isPreferencePageVisibleAtom } from '../../atoms/ui';
+import { removeMessageAtom, removeWarningFromMessageAtom } from '../../atoms/threads';
+import IconButton from '../ui/IconButton';
+import ZoteroItemsList from '../ui/ZoteroItemsList';
 
 // Get appropriate error message based on the error type
 const getErrorMessage = (errorType: string) => {
