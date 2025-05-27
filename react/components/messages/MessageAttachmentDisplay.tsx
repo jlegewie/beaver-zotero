@@ -1,11 +1,11 @@
 import React from 'react'
-import { SourceButton } from './SourceButton';
+import { SourceButton } from '../SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/input';
-import { TextSelectionButton } from './TextSelectionButton';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../../atoms/input';
+import { TextSelectionButton } from '../TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import AddSourcesMenu from './ui/menus/AddSourcesMenu';
-import { AnnotationButton } from './AnnotationButton';
+import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
+import { AnnotationButton } from '../AnnotationButton';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,

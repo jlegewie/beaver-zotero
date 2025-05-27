@@ -9,7 +9,7 @@ import { getPref } from '../../src/utils/prefs';
 import Button from './ui/Button';
 import { MenuPosition } from './ui/menus/SearchMenu';
 import ModelSelectionButton from './ui/buttons/ModelSelectionButton';
-import MessageAttachmentDisplay from './MessageAttachmentDisplay';
+import MessageAttachmentDisplay from './messages/MessageAttachmentDisplay';
 import { isAgentModelAtom } from '../atoms/models';
 import { getCustomPromptsFromPreferences } from '../types/settings';
 import { logger } from '../../src/utils/logger';

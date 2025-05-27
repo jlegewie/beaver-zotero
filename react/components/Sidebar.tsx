@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import InputArea from "./InputArea"
 import Header from "./Header"
-import { MessagesArea } from "./MessagesArea"
+import { MessagesArea } from "./messages/MessagesArea"
 import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';

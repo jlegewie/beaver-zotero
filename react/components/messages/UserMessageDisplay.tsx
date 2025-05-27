@@ -1,15 +1,15 @@
 import React from 'react';
 import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import { SourceButton } from "./SourceButton";
-import { ChatMessage } from '../types/chat/uiTypes';
-import { userAddedSourcesAtom } from '../atoms/threads';
-import ContextMenu from './ui/menu/ContextMenu';
-import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
-import { InputSource } from '../types/sources';
-import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
-import { currentReaderAttachmentKeyAtom } from '../atoms/input';
-import { AnnotationButton } from './AnnotationButton';
+import { SourceButton } from "../SourceButton";
+import { ChatMessage } from '../../types/chat/uiTypes';
+import { userAddedSourcesAtom } from '../../atoms/threads';
+import ContextMenu from '../ui/menu/ContextMenu';
+import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
+import { InputSource } from '../../types/sources';
+import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
+import { AnnotationButton } from '../AnnotationButton';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;

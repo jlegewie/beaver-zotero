@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, forwardRef } from "react";
 import UserMessageDisplay from "./UserMessageDisplay"
 import AssistantMessage from "./AssistantMessage"
-import { scrollToBottom } from "../utils/scrollToBottom";
-import { ChatMessage } from "../types/chat/uiTypes";
+import { scrollToBottom } from "../../utils/scrollToBottom";
+import { ChatMessage } from "../../types/chat/uiTypes";
 import AssistantMessageTools from "./AssistantMessageTools";
-import { isChatRequestPendingAtom } from "../atoms/threads";
+import { isChatRequestPendingAtom } from "../../atoms/threads";
 import { useAtomValue } from "jotai";
 
 type MessagesAreaProps = {
