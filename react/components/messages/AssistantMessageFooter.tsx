@@ -7,7 +7,7 @@ import IconButton from '../ui/IconButton';
 import MenuButton from '../ui/MenuButton';
 import { regenerateFromMessageAtom } from '../../atoms/generateMessages';
 import Button from '../ui/Button';
-import CitedSourcesList from '../CitedSourcesList';
+import CitedSourcesList from '../sources/CitedSourcesList';
 import { SourceCitation } from '../../types/sources';
 import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';

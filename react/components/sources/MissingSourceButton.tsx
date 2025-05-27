@@ -1,6 +1,6 @@
 import React from 'react'
-import { InputSource } from '../types/sources'
-import Tooltip from './ui/Tooltip'
+import { InputSource } from '../../types/sources'
+import Tooltip from '../ui/Tooltip'
 
 
 export interface MissingSourceButtonProps {

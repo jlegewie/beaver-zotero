@@ -1,5 +1,5 @@
 import React from 'react'
-import { SourceButton } from '../SourceButton';
+import { SourceButton } from '../sources/SourceButton';
 import { useAtomValue } from 'jotai';
 import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../../atoms/input';
 import { TextSelectionButton } from '../TextSelectionButton';

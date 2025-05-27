@@ -1,12 +1,12 @@
 import React from 'react';
-import { InputSource, SourceCitation } from '../types/sources';
-import { openSource, revealSource } from '../utils/sourceUtils';
-import { CSSItemTypeIcon } from './icons';
-import IconButton from './ui/IconButton';
-import { ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { ZoteroIcon } from './icons/ZoteroIcon';
-import { getPref } from '../../src/utils/prefs';
-import { sourceCitationsAtom } from '../atoms/citations';
+import { InputSource, SourceCitation } from '../../types/sources';
+import { openSource, revealSource } from '../../utils/sourceUtils';
+import { CSSItemTypeIcon } from '../icons';
+import IconButton from '../ui/IconButton';
+import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { ZoteroIcon } from '../icons/ZoteroIcon';
+import { getPref } from '../../../src/utils/prefs';
+import { sourceCitationsAtom } from '../../atoms/citations';
 import { useAtomValue } from 'jotai';
 
 interface CitedSourcesListProps {

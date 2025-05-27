@@ -1,16 +1,16 @@
 import React, { useEffect, useState, forwardRef } from 'react'
-import { CSSItemTypeIcon, CSSIcon } from "./icons"
-import { InputSource } from '../types/sources'
+import { CSSItemTypeIcon, CSSIcon } from "../icons"
+import { InputSource } from '../../types/sources'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../atoms/input'
-import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../utils/sourceUtils'
-import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { truncateText } from '../utils/stringUtils'
-import { BookmarkIcon, Icon } from './icons'
+import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../../atoms/input'
+import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../../utils/sourceUtils'
+import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { truncateText } from '../../utils/stringUtils'
+import { BookmarkIcon, Icon } from '../icons'
 import MissingSourceButton from './MissingSourceButton'
-import { usePreviewHover } from '../hooks/usePreviewHover'
-import { activePreviewAtom } from '../atoms/ui'
-import { getPref } from '../../src/utils/prefs'
+import { usePreviewHover } from '../../hooks/usePreviewHover'
+import { activePreviewAtom } from '../../atoms/ui'
+import { getPref } from '../../../src/utils/prefs'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");

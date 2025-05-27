@@ -1,7 +1,7 @@
 import React from 'react';
 import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import { SourceButton } from "../SourceButton";
+import { SourceButton } from "../sources/SourceButton";
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { userAddedSourcesAtom } from '../../atoms/threads';
 import ContextMenu from '../ui/menu/ContextMenu';
