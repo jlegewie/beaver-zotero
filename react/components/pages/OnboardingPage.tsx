@@ -13,7 +13,7 @@ import {
 } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { userIdAtom, logoutAtom } from "../../atoms/auth";
-import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
+import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
 import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
@@ -92,7 +92,6 @@ const OnboardingPage: React.FC = () => {
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
     const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
-    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     
     // File upload state
     const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
