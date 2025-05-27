@@ -94,21 +94,6 @@ export async function createSourceFromItem(
     } as InputSource;
 }
 
-export function createSourceFromItemSync(item: Zotero.Item): InputSource {
-    const type = getSourceTypeFromItem(item);
-
-    return {
-        id: uuidv4(),
-        type: type,
-        libraryID: item.libraryID,
-        itemKey: item.key,
-        pinned: false,
-        parentKey: item.parentKey || null,
-        childItemKeys: [],
-        timestamp: Date.now(),
-    } as InputSource;
-}
-
 
 export function organizeSourcesByRegularItems(attachments: MessageAttachmentWithId[]): InputSource[] {
     return attachments.reduce((acc, attachment) => {
