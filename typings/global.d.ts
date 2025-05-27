@@ -284,6 +284,14 @@ declare namespace Zotero {
              * @returns Number of unique file hashes in upload queue
              */
             getTotalQueueItems(user_id: string): Promise<number>;
+
+            /**
+             * Set visibility timeout for queue items
+             * @param user_id User ID
+             * @param file_hash File hash of the item
+             * @param timeoutMinutes Timeout in minutes
+             */
+            setQueueItemTimeout(user_id: string, file_hash: string, timeoutMinutes: number): Promise<void>;
         }
 
         /**

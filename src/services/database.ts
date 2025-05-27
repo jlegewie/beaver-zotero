@@ -1155,6 +1155,25 @@ export class BeaverDB {
             return 0;
         }
     }
+
+    /**
+     * Set visibility timeout for a queue items
+     * @param user_id User ID
+     * @param file_hash File hash of the item
+     * @param timeoutMinutes Timeout in minutes
+     */
+    public async setQueueItemTimeout(
+        user_id: string, 
+        file_hash: string, 
+        timeoutMinutes: number
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE upload_queue 
+             SET queue_visibility = datetime('now', '+' || ? || ' minutes')
+             WHERE user_id = ? AND file_hash = ?`,
+            [timeoutMinutes, user_id, file_hash]
+        );
+    }
 }
 
 /* Example Usage:
