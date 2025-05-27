@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
-import { threadAttachmentCountAtom, userAddedSourceKeysAtom } from "./threads";
+import { threadAttachmentCountAtom, userAttachmentKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
@@ -44,8 +44,8 @@ export const inputAttachmentCountAtom = atom<number>((get) => {
         inputAttachmentKeys.push(readerAttachmentKey);
     }
     // Exclude user-added sources already in thread
-    const userAddedSourceKeys = get(userAddedSourceKeysAtom);
-    const filteredInputAttachmentKeys = inputAttachmentKeys.filter((key) => !userAddedSourceKeys.includes(key));
+    const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
+    const filteredInputAttachmentKeys = inputAttachmentKeys.filter((key) => !userAddedAttachmentKeys.includes(key));
     // Return total of attachments
     return [...new Set(filteredInputAttachmentKeys)].length;
 });
@@ -87,7 +87,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
     null,
     async (get, set, items: Zotero.Item[], pinned: boolean = false) => {
         const currentSources = get(currentSourcesAtom);
-        const userAddedSourceKeys = get(userAddedSourceKeysAtom);
+        const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
         
         // Map of existing Zotero sources by item key
         const existingMap = new Map(currentSources.map((res) => [res.itemKey, res]));
@@ -98,7 +98,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         // Excluded keys
         const excludedKeys = new Set([
             ...removedItemKeysCache,
-            ...userAddedSourceKeys,
+            ...userAddedAttachmentKeys,
             ...pinnedSources.map((res) => res.itemKey)
         ]);
     
@@ -109,7 +109,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
                 if (existingMap.has(item.key)) {
                     return existingMap.get(item.key)!;
                 }
-                return await createSourceFromItem(item, pinned, userAddedSourceKeys);
+                return await createSourceFromItem(item, pinned, userAddedAttachmentKeys);
             });
         
         // Wait for all sources to be created

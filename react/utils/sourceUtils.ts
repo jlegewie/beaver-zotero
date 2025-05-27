@@ -1,8 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
-import { InputSource, ThreadSource } from '../types/sources';
+import { InputSource } from '../types/sources';
 import { truncateText } from './stringUtils';
 import { syncingItemFilter } from '../../src/utils/sync';
 import { isValidAnnotationType } from '../types/attachments/apiTypes';
+import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -93,7 +94,7 @@ export async function createSourceFromItem(
     } as InputSource;
 }
 
-export function createThreadSourceFromItem(item: Zotero.Item): ThreadSource {
+export function createSourceFromItemSync(item: Zotero.Item): InputSource {
     const type = getSourceTypeFromItem(item);
 
     return {
@@ -105,51 +106,49 @@ export function createThreadSourceFromItem(item: Zotero.Item): ThreadSource {
         parentKey: item.parentKey || null,
         childItemKeys: [],
         timestamp: Date.now(),
-    } as ThreadSource;
+    } as InputSource;
 }
 
 
-export function organizeSourcesByRegularItems(sources: InputSource[]): InputSource[] {
-    const regularItemSources = sources.filter((s) => s.type === "regularItem");
-    return sources.reduce((acc, source) => {
-        // If the source is not a regular item, skip it (already in regularItemSources)
-        if(source.type === "regularItem") return acc;
+export function organizeSourcesByRegularItems(attachments: MessageAttachmentWithId[]): InputSource[] {
+    return attachments.reduce((acc, attachment) => {
+        const zoteroItem = getZoteroItem(attachment);
 
-        // If the source has no parent or is an annotation, add it to the accumulator
-        if(!source.parentKey || source.type === "annotation") {
-            acc.push(source);
+        // 1. Skip invalid items
+        if(!zoteroItem) return acc;
+        
+        // 2. Add standalone attachments or annotations (no parent)
+        if(!zoteroItem.parentItem || zoteroItem.isAnnotation()) {
+            acc.push(createSourceFromAttachmentOrNote(zoteroItem));
             return acc;
         }
 
-        // Get the parent key
-        const parent = acc.find((s) => s.itemKey === source.parentKey);
-        
-        // If the parent is not in the accumulator, add it
+        // 3. Get or add parent source
+        const parent = acc.find((s: InputSource) => s.itemKey === zoteroItem.parentKey);
         if(!parent) {
-            const parentItem = getParentItem(source);
-            if(!parentItem) return acc;
             acc.push({
-                ...source,
                 id: uuidv4(),
-                itemKey: parentItem.key,
                 type: "regularItem",
+                messageId: attachment.messageId,
+                libraryID: zoteroItem.libraryID,
+                itemKey: zoteroItem.parentKey,
+                pinned: false,
                 parentKey: null,
-                childItemKeys: [source.itemKey]
+                childItemKeys: [attachment.zotero_key]
             } as InputSource);
             return acc;
+        } else {
+            parent.childItemKeys.push(attachment.zotero_key);
         }
 
-        // Add the source to the parent
-        parent.childItemKeys.push(source.itemKey);
-
         return acc;
-    }, regularItemSources);
+    }, [] as InputSource[]);
 }
 
 export function createSourceFromAttachmentOrNote(
     item: Zotero.Item,
     pinned: boolean = false
-): ThreadSource {
+): InputSource {
     if (item.isRegularItem()) {
         throw new Error("Cannot call createSourceFromAttachment on a regular item");
     }
@@ -168,9 +167,22 @@ export function createSourceFromAttachmentOrNote(
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: InputSource): Zotero.Item | null {
+export function getZoteroItem(source: InputSource | MessageAttachmentWithId): Zotero.Item | null {
     try {
-        const item = Zotero.Items.getByLibraryAndKey(source.libraryID, source.itemKey);
+        let libId: number;
+        let itemKeyValue: string;
+
+        if ('libraryID' in source && 'itemKey' in source) {
+            libId = source.libraryID;
+            itemKeyValue = source.itemKey;
+        } else if ('library_id' in source && 'zotero_key' in source) {
+            libId = source.library_id;
+            itemKeyValue = source.zotero_key;
+        } else {
+            console.error("getZoteroItem: Source object does not have expected key structure (libraryID/itemKey or library_id/zotero_key):", source);
+            return null;
+        }
+        const item = Zotero.Items.getByLibraryAndKey(libId, itemKeyValue);
         return item || null;
     } catch (error) {
         console.error("Error retrieving Zotero item:", error);

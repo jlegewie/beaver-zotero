@@ -1,11 +1,9 @@
 import { ChatMessage } from '../../react/types/chat/uiTypes';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ThreadSource } from '../../react/types/sources';
 import { MessageModel } from '../../react/types/chat/apiTypes';
 import { toMessageUI } from '../../react/types/chat/converters';
-import { createSourceFromItem } from '../../react/utils/sourceUtils';
-import { toThreadSource } from '../../react/types/attachments/converters';
+import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
 
 // Types that match the backend models
 export interface Thread {
@@ -56,27 +54,28 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread
      * @returns Promise with an array of messages
      */
-    async getThreadMessages(threadId: string): Promise<{ messages: ChatMessage[], userSources: ThreadSource[], toolCallSources: ThreadSource[] }> {
+    async getThreadMessages(
+        threadId: string
+    ): Promise<{ messages: ChatMessage[], userAttachments: MessageAttachmentWithId[], toolAttachments: MessageAttachmentWithId[] }> {
+        // Get thread messages from backend
         const messages = await this.get<MessageModel[]>(`/threads/${threadId}/messages`);
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
-
-        const userSources: ThreadSource[] = [];
-        const toolCallSources: ThreadSource[] = [];
+        
+        // Get user attachments from thread messages
+        const userAttachments: MessageAttachmentWithId[] = [];
+        const toolAttachments: MessageAttachmentWithId[] = [];
         
         for (const message of messages) {
             if (message.role === 'user') {
                 for (const attachment of message.attachments || []) {
-                    const source = await toThreadSource(attachment, message.id);
-                    if (source) {
-                        userSources.push(source);
-                    }
+                    userAttachments.push({ ...attachment, messageId: message.id } as MessageAttachmentWithId);
                 }
             }
         }
 
-        return { messages: chatMessages, userSources: userSources, toolCallSources: toolCallSources };
+        return { messages: chatMessages, userAttachments: userAttachments, toolAttachments: toolAttachments };
     }
 
     /**
@@ -121,35 +120,6 @@ export class ThreadService extends ApiService {
     async createThread(name?: string): Promise<Thread> {
         const payload = { name: name || null };
         return this.post<Thread>('/threads', payload);
-    }
-
-    /**
-     * Resets a thread by deleting the specified message and all subsequent messages
-     * @param threadId The ID of the thread
-     * @param messageId The ID of the message to reset from
-     * @returns Promise with the remaining messages and extracted sources
-     */
-    async resetThreadFromMessage(
-        threadId: string,
-        messageId: string
-    ): Promise<{ messages: ChatMessage[], sources: ThreadSource[] }> {
-        const messages = await this.post<MessageModel[]>(`/threads/${threadId}/reset-from-message/${messageId}`, {});
-        
-        // Convert backend MessageModel to frontend ChatMessage format
-        const chatMessages = messages.map(toMessageUI);
-
-        const sources: ThreadSource[] = [];
-        
-        for (const message of messages) {
-            for (const attachment of message.attachments || []) {
-                const source = await toThreadSource(attachment, message.id);
-                if (source) {
-                    sources.push(source);
-                }
-            }
-        }
-
-        return { messages: chatMessages, sources: sources };
     }
 }
 

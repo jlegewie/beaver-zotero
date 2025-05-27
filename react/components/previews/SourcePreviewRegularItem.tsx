@@ -7,7 +7,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { InputSource } from '../../types/sources';
 import SourcePreviewHeading from './SourcePreviewHeading';
-import { threadAttachmentCountAtom, userAddedSourceKeysAtom } from '../../atoms/threads';
+import { threadAttachmentCountAtom, userAttachmentKeysAtom } from '../../atoms/threads';
 import { planFeaturesAtom } from '../../atoms/profile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 
@@ -22,7 +22,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     const [attachmentNumber, setAttachmentNumber] = useState<number>(0);
     const [noteNumber, setNoteNumber] = useState<number>(0);
     const [validItemIds, setValidItemIds] = useState<{[id: number]: boolean}>({});
-    const userAddedSourceKeys = useAtomValue(userAddedSourceKeysAtom);
+    const userAttachmentKeys = useAtomValue(userAttachmentKeysAtom);
     const setPopupMessage = useSetAtom(addPopupMessageAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
@@ -125,17 +125,17 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
                         <div 
                             key={`att-${child.id}`}
                             className={validItemIds[child.id]
-                                ? `display-flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${userAddedSourceKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
+                                ? `display-flex p-2 items-center attachment-item cursor-pointer font-color-secondary ${userAttachmentKeys.includes(child.key) ? 'opacity-60 cursor-not-allowed' : ''}`
                                 : `display-flex p-2 items-center attachment-item cursor-not-allowed font-color-red`
                             }
-                            onClick={() => validItemIds[child.id] && !userAddedSourceKeys.includes(child.key) ? handleToggleItem(child.key) : null}
+                            onClick={() => validItemIds[child.id] && !userAttachmentKeys.includes(child.key) ? handleToggleItem(child.key) : null}
                         >
                             <input 
                                 type="checkbox" 
                                 className="mr-2"
                                 checked={isItemSelected(child.key)}
                                 onChange={() => {}} // React requires this for controlled components
-                                disabled={!validItemIds[child.id] || userAddedSourceKeys.includes(child.key)}
+                                disabled={!validItemIds[child.id] || userAttachmentKeys.includes(child.key)}
                             />
                             
                             <span className="mr-1 fit-content">

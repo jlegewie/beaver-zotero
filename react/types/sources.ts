@@ -15,9 +15,9 @@ export interface InputSource {
 
 export type ReaderSource = InputSource & { type: "reader" };
 
-export type ThreadSource = Omit<InputSource, "type"> & {
-  type: "attachment" | "note" | "annotation" | "reader";
-};
+// export type ThreadSource = Omit<InputSource, "type"> & {
+//   type: "attachment" | "note" | "annotation" | "reader";
+// };
 
 export interface SourceCitation extends InputSource {
     icon: string | null;

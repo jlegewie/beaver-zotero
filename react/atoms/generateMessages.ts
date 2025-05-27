@@ -11,17 +11,17 @@ import {
     currentThreadIdAtom,
     addOrUpdateMessageAtom,
     addOrUpdateToolcallAtom,
-    addToolCallSourcesToThreadSourcesAtom,
+    addToolCallResponsesToToolAttachmentsAtom,
     cancellerHolder,
     isCancellableAtom,
     isCancellingAtom,
     cancelStreamingMessageAtom,
     isChatRequestPendingAtom,
     currentAssistantMessageIdAtom,
-    userAddedSourcesAtom,
-    toolCallSourcesAtom
+    userAttachmentsAtom,
+    toolAttachmentsAtom,
 } from './threads';
-import { InputSource, ThreadSource } from '../types/sources';
+import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
@@ -30,31 +30,32 @@ import { Model, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
-import { toMessageAttachment, toThreadSource } from '../types/attachments/converters';
+import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { updateSourceCitationsAtom } from './citations';
+import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
  * 
  * @param inputSources - Array of InputSource objects to be flattened
- * @returns Array of ThreadSource objects
+ * @returns Array of InputSource objects
  */
 function flattenSources(
     inputSources: InputSource[]
-): ThreadSource[] {
+): InputSource[] {
     // Flatten regular item attachments
     const sourcesFromRegularItems = inputSources
         .filter((s) => s.type === "regularItem")
         .flatMap((s) => getChildItems(s).map((item) => {
             const source = createSourceFromAttachmentOrNote(item);
             return {...source, timestamp: s.timestamp};
-        })) as ThreadSource[];
+        })) as InputSource[];
     
     // Source, note, and annotation attachments
     const otherSources = (inputSources
-        .filter((s) => s.type === "attachment" || s.type === "note"  || s.type === "annotation")) as ThreadSource[];
+        .filter((s) => s.type === "attachment" || s.type === "note"  || s.type === "annotation")) as InputSource[];
     
     // Return flattened sources
     return [...sourcesFromRegularItems, ...otherSources];
@@ -63,12 +64,12 @@ function flattenSources(
 /**
  * Validates sources and removes invalid ones.
  * 
- * @param sources - Array of ThreadSource objects to be validated
+ * @param sources - Array of InputSource objects to be validated
  * @returns Array of valid sources sorted by timestamp
  */
 async function validateSources(
-    sources: ThreadSource[]
-): Promise<ThreadSource[]> {
+    sources: InputSource[]
+): Promise<InputSource[]> {
     const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
 }
@@ -200,14 +201,17 @@ export const generateResponseAtom = atom(
         const validatedSources = await validateSources(flattenedSources);
 
         // Convert sources to MessageAttachments and process image annotations
-        const messageAttachments = await Promise.all(validatedSources.map(async (s) => await toMessageAttachment(s)))
-            .then(attachments => processImageAnnotations([...attachments.flat()]));
+        const messageAttachments = await Promise.all(
+            validatedSources
+                .map(async (s) => await toMessageAttachment(s)))
+                .then(attachments => processImageAnnotations([...attachments.flat()])
+        );
 
         // Get current reader state and add to message attachments if not already in the thread
         const readerState = getCurrentReaderState();
-        const currentUserAddedSources = get(userAddedSourcesAtom).map(s => `${s.libraryID}-${s.itemKey}`);
-        if(readerState && !currentUserAddedSources.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
-            logger(`generateResponseAtom: Adding reader state to message attachments: ${readerState.library_id}-${readerState.zotero_key}`);
+        const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
+        if(readerState && !currentUserAttachmentKeys.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
+            logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${readerState.library_id}, zotero_key: ${readerState.zotero_key})`);
             // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
             messageAttachments.push({
                 library_id: readerState.library_id,
@@ -217,10 +221,15 @@ export const generateResponseAtom = atom(
             } as SourceAttachment);
         }
 
-        // Update thread sources
-        const newUserAddedSources = await Promise.all(messageAttachments.map(a => toThreadSource(a, userMsg.id)));
-        set(userAddedSourcesAtom, (prev) => 
-            [...prev, ...newUserAddedSources.filter(Boolean) as ThreadSource[]]);
+        // Update user attachments
+        set(userAttachmentsAtom, (prev) => {
+            const newAttachments = messageAttachments.map(a => ({
+                ...a,
+                messageId: userMsg.id,
+                image_base64: undefined
+            }) as MessageAttachmentWithId);
+            return [...prev, ...newAttachments];
+        });
         
         // Reset user message and source after adding to message
         set(resetCurrentSourcesAtom);
@@ -286,12 +295,14 @@ export const regenerateFromMessageAtom = atom(
         set(threadMessagesAtom, [...truncatedMessages, assistantMsg]);
         set(currentAssistantMessageIdAtom, assistantMsg.id);
 
-        // Update sources
+        // Update message attachments
         const messageIds = truncatedMessages.map(m => m.id);
-        const newUserAddedSources = get(userAddedSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
-        set(userAddedSourcesAtom, newUserAddedSources);
-        const newToolCallSources = get(toolCallSourcesAtom).filter(r => r.messageId && messageIds.includes(r.messageId));
-        set(toolCallSourcesAtom, newToolCallSources);
+        set(userAttachmentsAtom, (prev) =>
+            prev.filter(a => a.messageId && messageIds.includes(a.messageId))
+        );
+        set(toolAttachmentsAtom, (prev) =>
+            prev.filter(a => a.messageId && messageIds.includes(a.messageId))
+        );
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);
@@ -390,7 +401,7 @@ function _processChatCompletionViaBackend(
                 set(addOrUpdateMessageAtom, { message });
                 // Add the tool call sources to the thread sources (if any)
                 if (message.status === 'completed' && message.tool_calls) {
-                    set(addToolCallSourcesToThreadSourcesAtom, {messages: [message]});
+                    set(addToolCallResponsesToToolAttachmentsAtom, {messages: [message]});
                 }
 
                 // Update source citations if the message contains the closing '>' of

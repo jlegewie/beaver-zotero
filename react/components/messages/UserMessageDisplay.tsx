@@ -3,13 +3,14 @@ import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { SourceButton } from "../sources/SourceButton";
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { userAddedSourcesAtom } from '../../atoms/threads';
+import { userAttachmentsAtom } from '../../atoms/threads';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { InputSource } from '../../types/sources';
 import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
 import { AnnotationButton } from '../input/AnnotationButton';
+import { MessageAttachmentWithId } from '../../types/attachments/uiTypes';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -18,16 +19,13 @@ interface UserMessageDisplayProps {
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     message
 }) => {
-    const userAddedSources = useAtomValue(userAddedSourcesAtom);
+    const userAttachments = useAtomValue(userAttachmentsAtom);
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const messageSources: InputSource[] = useMemo(() => {
-        const messageSources = userAddedSources.filter(s => s.messageId === message.id);
-            // .filter(s => s.messageId === message.id && s.itemKey !== currentReaderAttachmentKey);
-        const organizedSources = organizeSourcesByRegularItems(messageSources);
-        return organizedSources;
-    }, [userAddedSources, currentReaderAttachmentKey]);
+        return organizeSourcesByRegularItems(userAttachments.filter(s => s.messageId === message.id));
+    }, [userAttachments, currentReaderAttachmentKey]);
 
     const {
         isMenuOpen: isSelectionMenuOpen, 

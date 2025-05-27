@@ -1,14 +1,12 @@
-import { InputSource, ThreadSource } from '../sources';
-import { createSourceFromItem, getZoteroItem } from '../../utils/sourceUtils';
+import { InputSource } from '../sources';
+import { getZoteroItem } from '../../utils/sourceUtils';
 import {
     MessageAttachment,
     SourceAttachment,
     AnnotationAttachment,
     NoteAttachment,
     Annotation,
-    AnnotationPosition,
-    isSourceAttachment,
-    isAnnotationAttachment
+    AnnotationPosition
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
 
@@ -94,26 +92,4 @@ export async function toMessageAttachment(source: InputSource): Promise<MessageA
     } else {
         return [];
     }
-}
-
-
-export async function toThreadSource(attachment: MessageAttachment, messageId?: string): Promise<ThreadSource | null> {
-    if (isSourceAttachment(attachment)) {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
-        if (!item) return null;
-        return {
-            ...(await createSourceFromItem(item)),
-            ...(messageId && { messageId: messageId }),
-        } as ThreadSource;
-    }
-    if (isAnnotationAttachment(attachment)) {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
-        if (!item) return null;
-        return {
-            ...(await createSourceFromItem(item)),
-            ...(messageId && { messageId: messageId }),
-            type: "annotation"
-        } as ThreadSource;
-    }
-    return null;
 }

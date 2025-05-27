@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { threadMessagesAtom } from '../atoms/threads';
 import { SourceCitation } from '../types/sources';
-import { createThreadSourceFromItem, getParentItem, getCitationFromItem, getReferenceFromItem, getDisplayNameFromItem } from '../utils/sourceUtils';
+import { createSourceFromItemSync, getParentItem, getCitationFromItem, getReferenceFromItem, getDisplayNameFromItem } from '../utils/sourceUtils';
 import { createZoteroItemReference } from "../types/zotero";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
@@ -51,7 +51,7 @@ export const updateSourceCitationsAtom = atom(
         const citations: SourceCitation[] = [];
         items.forEach((item, index) => {
             if (!item) return;
-            const source = createThreadSourceFromItem(item);
+            const source = createSourceFromItemSync(item);
             if (!source) return;
             
             const parentItem = getParentItem(source);

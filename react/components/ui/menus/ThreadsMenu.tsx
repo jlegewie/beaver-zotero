@@ -1,6 +1,6 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../../../atoms/threads';
+import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallResponsesToToolAttachmentsAtom, userAttachmentsAtom } from '../../../atoms/threads';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
@@ -53,12 +53,12 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const user = useAtomValue(userAtom);
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const setThreadMessages = useSetAtom(threadMessagesAtom);
-    const setUserAddedSources = useSetAtom(userAddedSourcesAtom);
+    const setUserAttachments = useSetAtom(userAttachmentsAtom);
     const updateSourceCitations = useSetAtom(updateSourceCitationsAtom);
     const setCurrentSources = useSetAtom(currentSourcesAtom);
     const setMessageContent = useSetAtom(currentMessageContentAtom);
     const setUserScrolled = useSetAtom(userScrolledAtom);
-    const addToolCallSourcesToThreadSources = useSetAtom(addToolCallSourcesToThreadSourcesAtom);
+    const addToolCallResponsesToToolAttachments = useSetAtom(addToolCallResponsesToToolAttachmentsAtom);
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
@@ -135,14 +135,14 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setIsPreferencePageVisible(false);
 
             // Use the thread service to fetch messages
-            const { messages, userSources, toolCallSources } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
             
-            // Update the thread messages and sources state
+            // Update the thread messages and attachments state
             setThreadMessages(messages);
             await updateSourceCitations();
-            setUserAddedSources(userSources);
-            // setToolCallSources(toolCallSources);
-            addToolCallSourcesToThreadSources({messages: messages});
+            setUserAttachments(userAttachments);
+            // setToolAttachments(toolAttachments);
+            addToolCallResponsesToToolAttachments({messages: messages});
             
             // Clear sources for now
             setCurrentSources([]);

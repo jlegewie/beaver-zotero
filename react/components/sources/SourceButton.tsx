@@ -94,7 +94,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Get the icon element
         const getIconElement = () => {
             // Remove icon on hover if not the current reader attachment
-            if (isHovered && currentReaderAttachmentKey != source.itemKey) {
+            if (isHovered && canEdit && currentReaderAttachmentKey != source.itemKey) {
                 return (<span
                     role="button"
                     className="source-remove"
