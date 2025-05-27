@@ -33,7 +33,7 @@ import { store } from '../index';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
-import { updateSourceCitationsAtom } from './citations';
+import { updateAttachmentCitationsAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 
 /**
@@ -387,7 +387,7 @@ function _processChatCompletionViaBackend(
                     // Update source citations if the delta contains the closing '>' of
                     // a citation (or other) tag
                     if (delta.includes('>')) {
-                        set(updateSourceCitationsAtom);
+                        set(updateAttachmentCitationsAtom);
                     }
                 }
                 // if (type === "reasoning")
@@ -407,7 +407,7 @@ function _processChatCompletionViaBackend(
                 // Update source citations if the message contains the closing '>' of
                 // a citation (or other) tag
                 if (message.role === 'assistant' && message.content && message.content.includes('>')) {
-                    set(updateSourceCitationsAtom);
+                    set(updateAttachmentCitationsAtom);
                 }
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {

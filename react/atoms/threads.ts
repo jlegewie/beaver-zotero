@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from 
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { sourceCitationsAtom } from "./citations";
+import { attachmentCitationsAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 
 // Thread messages and attachments
@@ -90,7 +90,7 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
-        set(sourceCitationsAtom, []);
+        set(attachmentCitationsAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);

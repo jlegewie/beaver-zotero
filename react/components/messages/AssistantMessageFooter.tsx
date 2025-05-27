@@ -8,10 +8,10 @@ import MenuButton from '../ui/MenuButton';
 import { regenerateFromMessageAtom } from '../../atoms/generateMessages';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
-import { SourceCitation } from '../../types/sources';
 import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { sourceCitationsAtom } from '../../atoms/citations';
+import { attachmentCitationsAtom } from '../../atoms/citations';
+import { AttachmentCitation } from '../../types/attachments/uiTypes';
 
 interface AssistantMessageFooterProps {
     message: ChatMessage;
@@ -24,7 +24,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const citations = useAtomValue(sourceCitationsAtom);
+    const citations = useAtomValue(attachmentCitationsAtom);
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -54,12 +54,12 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         await copyToClipboard(formattedContent);
     };
 
-    const saveAsNote = async (source?: SourceCitation) => {
+    const saveAsNote = async (citation?: AttachmentCitation) => {
         const formattedContent = renderToHTML(message.content);
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
-        if (source && source.parentKey) {
-            newNote.parentKey = source.parentKey;
+        if (citation && citation.parentKey) {
+            newNote.parentKey = citation.parentKey;
         }
         await newNote.saveTx();
         // @ts-ignore selectItem exists

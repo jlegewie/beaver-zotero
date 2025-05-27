@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { InputSource } from '../types/sources';
 import { truncateText } from './stringUtils';
 import { syncingItemFilter } from '../../src/utils/sync';
-import { isValidAnnotationType } from '../types/attachments/apiTypes';
+import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 
 // Constants
@@ -167,7 +167,7 @@ export function createSourceFromAttachmentOrNote(
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: InputSource | MessageAttachmentWithId): Zotero.Item | null {
+export function getZoteroItem(source: InputSource | MessageAttachmentWithId | SourceAttachment): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -267,15 +267,15 @@ export async function isSourceValid(source: InputSource): Promise<boolean> {
     return await isValidZoteroItem(item);
 }
 
-export function revealSource(source: InputSource) {
-    const itemID = Zotero.Items.getIDFromLibraryAndKey(source.libraryID, source.itemKey);
+export function revealSource(source: SourceAttachment) {
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
         // @ts-ignore selectItem exists
         Zotero.getActiveZoteroPane().itemsView.selectItem(itemID);
     }
 }
 
-export async function openSource(source: InputSource) {
+export async function openSource(source: SourceAttachment) {
     const item = getZoteroItem(source);
     if (!item) return;
     

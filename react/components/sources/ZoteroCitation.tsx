@@ -1,7 +1,7 @@
 import React from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { sourceCitationsAtom } from '../../atoms/citations';
+import { attachmentCitationsAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
@@ -26,7 +26,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     exportRendering = false
 }) => {
     // Get the sources from atom state
-    const sourceCitations = useAtomValue(sourceCitationsAtom);
+    const attachmentCitations = useAtomValue(attachmentCitationsAtom);
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
@@ -36,19 +36,19 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const [libraryIDString, itemKey] = id.includes('-') ? id.split('-') : [id, id];
     const libraryID = parseInt(libraryIDString) || 1;
 
-    // Find the source in the available sources
-    const source = sourceCitations.find(source => source.libraryID === libraryID && source.itemKey === itemKey);
+    // Find the attachmentCitation in the available sources
+    const attachmentCitation = attachmentCitations.find(a => a.library_id === libraryID && a.zotero_key === itemKey);
 
     // Get citation data
     let formatted_citation = '';
     let citation = '';
     let url = '';
 
-    // If we have a source, use it
-    if (source) {
-        formatted_citation = source.formatted_citation;
-        citation = source.citation;
-        url = source.url;
+    // If we have a attachmentCitation, use it
+    if (attachmentCitation) {
+        formatted_citation = attachmentCitation.formatted_citation;
+        citation = attachmentCitation.citation;
+        url = attachmentCitation.url;
     // Fallback: get the Zotero item and create the citation data
     } else {
         // Get the Zotero item
@@ -108,7 +108,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             ? (pages ? `p.${pages}` : 'Ibid')
             : (pages ? `${citation}, p.${pages}` : citation);
     } else {
-        displayText = source?.numericCitation || citation;
+        displayText = attachmentCitation?.numericCitation || citation;
     }
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;

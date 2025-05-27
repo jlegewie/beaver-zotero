@@ -18,12 +18,3 @@ export type ReaderSource = InputSource & { type: "reader" };
 // export type ThreadSource = Omit<InputSource, "type"> & {
 //   type: "attachment" | "note" | "annotation" | "reader";
 // };
-
-export interface SourceCitation extends InputSource {
-    icon: string | null;
-    name: string;             // Display name for the source
-    citation: string;         // In-text citation for the source used in assistant messages
-    formatted_citation: string;        // Bibliographic reference for the source
-    url: string;              // URL for the source
-    numericCitation: string;  // Numeric citation for the source used in assistant messages
-};
