@@ -992,10 +992,10 @@ export class BeaverDB {
             [
                 user_id, 
                 file_hash, 
-                page_count, 
-                file_size, 
-                queue_visibility ?? null, // Convert undefined to null for COALESCE
-                attempt_count ?? null,    // Convert undefined to null for COALESCE
+                page_count ?? null,
+                file_size ?? null,
+                queue_visibility ?? null,
+                attempt_count ?? null,
                 library_id, 
                 zotero_key
             ]
