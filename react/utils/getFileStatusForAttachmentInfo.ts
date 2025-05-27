@@ -59,14 +59,21 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             return { text: 'File does not exist', showButton: false };
         }
 
-        // 3. Try to get attachment status from Beaver DB
-        const attachmentStatus = await getAttachmentStatus(attachmentItem, user.id);
+        // 3. Get attachment status from Beaver DB (local cache first, then backend)
+        let attachmentStatus: AttachmentStatusResponse | null = null;
+        try {
+            attachmentStatus = await getAttachmentStatus(attachmentItem, user.id);
+        } catch (error) {
+            logger(`getFileStatusForAttachmentInfo: Error getting attachment status for ${attachmentItem.key}: ${error}`);
+        }
         if (!attachmentStatus) {
             return { text: 'Unknown status', showButton: false };
         }
 
-        const fileStatus = attachmentStatus.md_status;
-        const errorCode = attachmentStatus.md_error_code;
+        // Processing status of file
+        const planFeatures = store.get(planFeaturesAtom);
+        const fileStatus = planFeatures.advancedProcessing ? attachmentStatus.docling_status : attachmentStatus.md_status;
+        const errorCode = planFeatures.advancedProcessing ? attachmentStatus.docling_error_code : attachmentStatus.md_error_code;
         if (!fileStatus) {
             return { text: 'Unknown status', showButton: false };
         }
@@ -75,6 +82,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         const currentHash = await attachmentItem.attachmentHash;
         const hashChanged = Boolean(!attachmentStatus.file_hash) || attachmentStatus.file_hash !== currentHash;
 
+        // Status: Uploading
         if (attachmentStatus.upload_status === 'pending') {
             return {
                 text: 'Uploading...',
@@ -116,7 +124,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        await syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
                         await fileUploader.start("manual");
                     }
                 };
@@ -130,7 +138,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        await syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
                         await fileUploader.start("manual");
                     }
                 };
