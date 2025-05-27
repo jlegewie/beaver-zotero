@@ -50,7 +50,25 @@ export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<Record<string, number> | null>(null);
 export const errorCodeLastFetchedAtom = atom<number | null>(null);
 
-export const fileStatusStatsAtom = atom(
+export interface FileStatusStats {
+    fileStatusAvailable: boolean;
+    totalFiles: number;
+    completedFiles: number;
+    failedProcessingCount: number;
+    activeProcessingCount: number;
+    totalProcessingCount: number;
+    processingProgress: number;
+    progress: number;
+    failedCount: number;
+    activeCount: number;
+    uploadPendingCount: number;
+    queuedProcessingCount: number;
+    uploadCompletedCount: number;
+    uploadFailedCount: number;
+}
+
+
+export const fileStatusStatsAtom = atom<FileStatusStats>(
     (get) => {
         const fileStatus = get(fileStatusAtom);
         
@@ -96,7 +114,7 @@ export const fileStatusStatsAtom = atom(
             queuedProcessingCount,
             uploadCompletedCount,
             uploadFailedCount,
-        };
+        } as FileStatusStats;
     }
 );
 
