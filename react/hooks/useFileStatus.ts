@@ -49,7 +49,7 @@ export const useFileStatus = (): void => {
         // --- Guard Clause ---
         // Only proceed if user is authenticated, user data exists, AND plan supports file processing
         if (!isAuthenticated || !user || !planFeatures.fileProcessing || !hasAuthorizedAccess) {
-            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${planFeatures.fileProcessing}`);
+            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${planFeatures.fileProcessing}, HasAuthorizedAccess: ${hasAuthorizedAccess}`);
             setFileStatus(null); // Clear status if conditions not met
             // Ensure any existing channel is cleaned up if dependencies change mid-subscription
             if (channelRef.current) {
@@ -175,5 +175,5 @@ export const useFileStatus = (): void => {
                 logger(`useFileStatus: Cleanup called, no active channel to remove for user ${userId}.`);
             }
         };
-    }, [isAuthenticated, user, planFeatures.fileProcessing, setFileStatus]);
+    }, [isAuthenticated, user, planFeatures.fileProcessing, setFileStatus, hasAuthorizedAccess]);
 };
