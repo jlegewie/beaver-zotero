@@ -3,6 +3,7 @@ import { AttachmentUploadStatistics } from '../../src/services/database';
 import { logger } from '../../src/utils/logger';
 import { store } from '../index';
 import { userIdAtom } from '../atoms/auth';
+import { fileUploader } from '../../src/services/FileUploader';
 
 // Hook configuration options
 interface UseUploadProgressOptions {
@@ -286,6 +287,9 @@ export function useUploadProgress(
             logger(`useUploadProgress: Stats updated: ${JSON.stringify(stats)}`);
             logger(`useUploadProgress: Progress: ${progress}%`);
             logger(`useUploadProgress: Is complete: ${isComplete}`);
+            if (stats.pending > 0) {
+                fileUploader.start("manual");
+            }
         }
     }, [stats, progress, isComplete]);
     

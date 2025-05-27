@@ -137,7 +137,6 @@ const OnboardingPage: React.FC = () => {
                 const failureRate = stats.total > 0 ? stats.failed / stats.total : 0;
                 if (failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE) {
                     setHasCompletedInitialUpload(true);
-                    setPref('hasCompletedInitialUpload', true);
                 }
             },
             onError: (error: any) => {
@@ -156,7 +155,6 @@ const OnboardingPage: React.FC = () => {
 
         // Set hasCompletedInitialSync
         setHasCompletedInitialSync(isSyncComplete);
-        setPref('hasCompletedInitialSync', isSyncComplete);
 
         // Start upload polling
         const shouldStartPolling = isSyncComplete && !isUploadPolling && !isUploadComplete && !!userId;

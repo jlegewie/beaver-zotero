@@ -30,7 +30,8 @@ export class FileUploader {
     // queue reads
     private readonly BATCH_SIZE: number = 15;
     private readonly MAX_ATTEMPTS: number = 3;
-    private readonly VISIBILITY_TIMEOUT: number = 15;
+    private readonly INITIAL_VISIBILITY_TIMEOUT: number = 1; // 1 minute timeout for reads
+    private readonly RETRY_VISIBILITY_TIMEOUT: number = 15;  // 15 minutes timeout for retries
 
     /**
      * Minimum interval between currentFile updates (in milliseconds)
@@ -297,7 +298,7 @@ export class FileUploader {
                     user.id, 
                     this.BATCH_SIZE, 
                     this.MAX_ATTEMPTS,
-                    this.VISIBILITY_TIMEOUT
+                    this.INITIAL_VISIBILITY_TIMEOUT
                 );
 
                 logger(`File Uploader: Read ${items.length} items from local queue`, 3);
@@ -477,10 +478,13 @@ export class FileUploader {
             if (item.attempt_count >= 3) {
                 await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
             } else {
-                // The visibility timeout will handle retries automatically
-                // No action needed here - the item will become visible again after timeout
-                logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after visibility timeout`, 2);
-                // setTimeout(() => this.start(), this.VISIBILITY_TIMEOUT * 60 * 1000);
+                // Set longer timeout for application-handled retry
+                await Zotero.Beaver.db.setQueueItemTimeout(
+                    user_id,
+                    item.file_hash,
+                    this.RETRY_VISIBILITY_TIMEOUT
+                );
+                logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.RETRY_VISIBILITY_TIMEOUT} minutes`, 2);
             }
         } finally {
             // Clear current file when done (success or failure)

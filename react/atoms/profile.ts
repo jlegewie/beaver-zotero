@@ -14,8 +14,8 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     return profile?.has_completed_onboarding || false;
 });
 
-export const hasCompletedInitialSyncAtom = atom<boolean>(getPref('hasCompletedInitialSync'));
-export const hasCompletedInitialUploadAtom = atom<boolean>(getPref('hasCompletedInitialUpload'));
+export const hasCompletedInitialSyncAtom = atom<boolean>(false);
+export const hasCompletedInitialUploadAtom = atom<boolean>(false);
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
