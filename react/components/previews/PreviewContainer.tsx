@@ -1,9 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
-import { activePreviewAtom, previewCloseTimeoutAtom } from '../atoms/ui';
-import SourcePreviewContent from './previews/SourcePreviewContent';
-import TextSelectionPreviewContent from './previews/TextSelectionPreviewContent';
-import AnnotationPreviewContent from './previews/AnnotationPreviewContent';
+import { activePreviewAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
+import SourcePreviewContent from './SourcePreviewContent';
+import TextSelectionPreviewContent from './TextSelectionPreviewContent';
+import AnnotationPreviewContent from './AnnotationPreviewContent';
 
 // Preview height constants
 const MIN_HEIGHT = 100;

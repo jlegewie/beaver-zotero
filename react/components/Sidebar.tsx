@@ -12,7 +12,7 @@ import LoginPage from './LoginPage';
 import OnboardingPage from './OnboardingPage';
 import PreferencePage from './PreferencePage';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import PreviewContainer from './PreviewContainer';
+import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './DragDropWrapper';
 import PopupMessageContainer from './PopupMessageContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isProfileLoadedAtom } from '../atoms/profile';
