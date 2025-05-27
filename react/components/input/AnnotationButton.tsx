@@ -1,15 +1,15 @@
 import React, { forwardRef, useEffect, useState } from 'react'
-import { CSSIcon, Icon, ArrowUpRightIcon } from "./icons/icons"
-import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
+import { CSSIcon, Icon, ArrowUpRightIcon } from "../icons/icons"
+import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { useSetAtom, useAtomValue } from 'jotai'
-import { activePreviewAtom } from '../atoms/ui'
-import { usePreviewHover } from '../hooks/usePreviewHover'
-import { currentReaderAttachmentKeyAtom, currentSourcesAtom } from '../atoms/input';
-import { Annotation } from '../types/attachments/apiTypes';
-import { navigateToAnnotation } from '../utils/readerUtils';
-import { InputSource } from '../types/sources';
-import { toAnnotation } from '../types/attachments/converters';
-import { getZoteroItem, isValidZoteroItem } from '../utils/sourceUtils';
+import { activePreviewAtom } from '../../atoms/ui'
+import { usePreviewHover } from '../../hooks/usePreviewHover'
+import { currentReaderAttachmentKeyAtom, currentSourcesAtom } from '../../atoms/input';
+import { Annotation } from '../../types/attachments/apiTypes';
+import { navigateToAnnotation } from '../../utils/readerUtils';
+import { InputSource } from '../../types/sources';
+import { toAnnotation } from '../../types/attachments/converters';
+import { getZoteroItem, isValidZoteroItem } from '../../utils/sourceUtils';
 
 export const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',

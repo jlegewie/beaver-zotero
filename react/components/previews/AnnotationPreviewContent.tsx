@@ -5,7 +5,7 @@ import { currentSourcesAtom } from '../../atoms/input';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
+import { ANNOTATION_ICON_BY_TYPE } from '../input/AnnotationButton';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { CancelIcon } from '../icons/icons';

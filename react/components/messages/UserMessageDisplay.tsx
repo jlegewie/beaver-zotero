@@ -9,7 +9,7 @@ import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { InputSource } from '../../types/sources';
 import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
-import { AnnotationButton } from '../AnnotationButton';
+import { AnnotationButton } from '../input/AnnotationButton';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;

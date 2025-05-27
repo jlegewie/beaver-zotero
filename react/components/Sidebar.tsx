@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import InputArea from "./InputArea"
+import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./messages/MessagesArea"
 import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
@@ -13,7 +13,7 @@ import OnboardingPage from './pages/OnboardingPage';
 import PreferencePage from './pages/PreferencePage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
-import DragDropWrapper from './DragDropWrapper';
+import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './PopupMessageContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isProfileLoadedAtom } from '../atoms/profile';
 

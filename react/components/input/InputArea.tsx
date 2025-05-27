@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StopIcon } from './icons/icons';
+import { StopIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
-import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';
-import { readerTextSelectionAtom } from '../atoms/input';
-import { generateResponseAtom } from '../atoms/generateMessages';
-import { getPref } from '../../src/utils/prefs';
-import Button from './ui/Button';
-import { MenuPosition } from './ui/menus/SearchMenu';
-import ModelSelectionButton from './ui/buttons/ModelSelectionButton';
-import MessageAttachmentDisplay from './messages/MessageAttachmentDisplay';
-import { isAgentModelAtom } from '../atoms/models';
-import { getCustomPromptsFromPreferences } from '../types/settings';
-import { logger } from '../../src/utils/logger';
+import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../../atoms/threads';
+import { currentSourcesAtom, currentMessageContentAtom } from '../../atoms/input';
+import { readerTextSelectionAtom } from '../../atoms/input';
+import { generateResponseAtom } from '../../atoms/generateMessages';
+import { getPref } from '../../../src/utils/prefs';
+import Button from '../ui/Button';
+import { MenuPosition } from '../ui/menus/SearchMenu';
+import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
+import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
+import { isAgentModelAtom } from '../../atoms/models';
+import { getCustomPromptsFromPreferences } from '../../types/settings';
+import { logger } from '../../../src/utils/logger';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
