@@ -4,7 +4,7 @@ import { useSetAtom, useAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { readerTextSelectionAtom } from '../../atoms/input';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import Button from '../button';
+import Button from '../ui/Button';
 import IconButton from '../IconButton';
 import { TextSelection } from '../../types/attachments/apiTypes';
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils';

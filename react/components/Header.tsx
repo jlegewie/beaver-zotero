@@ -11,7 +11,7 @@ import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
-import Button from './button';
+import Button from './ui/Button';
 
 interface HeaderProps {
     onClose?: () => void;

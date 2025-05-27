@@ -11,7 +11,7 @@ import {
     uploadQueueStatusAtom,
     uploadQueueTotalAtom
 } from "../atoms/sync";
-import Button from "./button";
+import Button from "./ui/Button";
 import { userIdAtom, logoutAtom } from "../atoms/auth";
 import { hasCompletedOnboardingAtom, hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../atoms/profile';
 import LibrarySelector from "./LibrarySelector";

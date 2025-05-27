@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { fileStatusStatsAtom } from '../atoms/ui';
-import Button from './button';
+import Button from './ui/Button';
 import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
 import { Icon } from './icons';
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
-import Button from '../button'
+import Button from '../ui/Button'
 import { getPref, setPref } from '../../../src/utils/prefs'
 import { useAtomValue } from 'jotai'
 import { isProfileLoadedAtom } from '../../atoms/profile'

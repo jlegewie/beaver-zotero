@@ -2,7 +2,7 @@ import React from 'react';
 import { ChatMessage, Warning } from '../types/chat/uiTypes';
 import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
 import { useSetAtom } from 'jotai';
-import Button from './button';
+import Button from './ui/Button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { removeMessageAtom, removeWarningFromMessageAtom } from '../atoms/threads';
 import IconButton from './IconButton';

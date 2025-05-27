@@ -6,7 +6,7 @@ import { copyToClipboard } from '../utils/clipboard';
 import IconButton from './IconButton';
 import MenuButton from './MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
-import Button from './button';
+import Button from './ui/Button';
 import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';

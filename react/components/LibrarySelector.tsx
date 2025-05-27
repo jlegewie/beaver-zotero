@@ -3,7 +3,7 @@ import { Icon, Spinner, CSSIcon } from "./icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../src/utils/libraries";
 import { planFeaturesAtom, profileBalanceAtom } from "../atoms/profile";
 import { useAtomValue } from "jotai";
-import Button from "./button";
+import Button from "./ui/Button";
 
 interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;

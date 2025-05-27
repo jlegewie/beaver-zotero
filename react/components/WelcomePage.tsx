@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import Button from "./button";
+import Button from "./ui/Button";
 import FileStatusStats from "./FileStatusStats";
 import FileStatusDisplay from "./FileStatusDisplay";
 import { ArrowDownIcon, ArrowRightIcon } from './icons';

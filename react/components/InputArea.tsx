@@ -6,7 +6,7 @@ import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';
 import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { getPref } from '../../src/utils/prefs';
-import Button from './button';
+import Button from './ui/Button';
 import { MenuPosition } from './SearchMenu';
 import ModelSelectionButton from './ModelSelectionButton';
 import MessageAttachmentDisplay from './MessageAttachmentDisplay';

@@ -3,7 +3,7 @@ import { ChatMessage } from '../types/chat/uiTypes';
 import { ToolCall } from '../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon, Icon } from './icons';
-import Button from './button';
+import Button from './ui/Button';
 import ZoteroItemsList from './ZoteroItemsList';
 import { MessageErrorWarningDisplay } from './ErrorWarningDisplay';
 
