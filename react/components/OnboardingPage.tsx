@@ -245,6 +245,7 @@ const OnboardingPage: React.FC = () => {
     const getIndexingLeftText = (): string => {
         if (fileStats.totalProcessingCount === 0) return "";
         const textParts: string[] = [];
+        textParts.push(`${fileStats.completedFiles.toLocaleString()} completed`);
         if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
         if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
         if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
