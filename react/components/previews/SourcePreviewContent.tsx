@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, CancelIcon, BookmarkIcon } from '../icons';
+import { Icon, CancelIcon, BookmarkIcon } from '../icons/icons';
 import { InputSource } from '../../types/sources';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';

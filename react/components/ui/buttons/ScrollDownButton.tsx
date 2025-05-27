@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, ArrowDownIcon } from '../../icons';
+import { Icon, ArrowDownIcon } from '../../icons/icons';
 import { activePreviewAtom } from '../../../atoms/ui';
 import { useAtomValue } from 'jotai';
 import { popupMessagesAtom } from '../../../atoms/ui';

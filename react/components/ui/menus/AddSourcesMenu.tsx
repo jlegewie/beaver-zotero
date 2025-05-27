@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from '../../icons';
+import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../../../utils/sourceUtils';
 import { createSourceFromItem } from '../../../utils/sourceUtils';

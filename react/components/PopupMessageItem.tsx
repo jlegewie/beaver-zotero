@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon } from './icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon } from './icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../utils/popupMessageUtils';
 import IconButton from './ui/IconButton';

@@ -1,7 +1,7 @@
 import React from 'react';
 import { InputSource, SourceCitation } from '../../types/sources';
 import { openSource, revealSource } from '../../utils/sourceUtils';
-import { CSSItemTypeIcon } from '../icons';
+import { CSSItemTypeIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';

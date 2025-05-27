@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { Icon } from '../../icons';
+import { Icon } from '../../icons/icons';
 
 /**
 * Menu item interface

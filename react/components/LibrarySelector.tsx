@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, Spinner, CSSIcon } from "./icons";
+import { Icon, Spinner, CSSIcon } from "./icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../src/utils/libraries";
 import { planFeaturesAtom, profileBalanceAtom } from "../atoms/profile";
 import { useAtomValue } from "jotai";

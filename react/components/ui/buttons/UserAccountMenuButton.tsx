@@ -1,7 +1,7 @@
 import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon } from '../../icons';
+import { SettingsIcon, UserIcon, LogoutIcon } from '../../icons/icons';
 import { isPreferencePageVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useAuth } from '../../../hooks/useAuth';

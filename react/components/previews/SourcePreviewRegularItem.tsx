@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { inputAttachmentCountAtom, updateSourceChildItemKeysAtom } from '../../atoms/input';
 import { isValidZoteroItem } from '../../utils/sourceUtils';
-import { CSSItemTypeIcon } from '../icons';
+import { CSSItemTypeIcon } from '../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils';
 import { InputSource } from '../../types/sources';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChatMessage, Warning } from '../types/chat/uiTypes';
-import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons';
+import { Icon, AlertIcon, KeyIcon, CancelIcon } from './icons/icons';
 import { useSetAtom } from 'jotai';
 import Button from './ui/Button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';

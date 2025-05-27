@@ -4,7 +4,7 @@ import { syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus } from "../atoms
 import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import { syncZoteroDatabase } from '../../src/utils/sync';
 import IconButton from "./ui/IconButton";
-import { DatabaseStatusIcon } from "./icons";
+import { DatabaseStatusIcon } from "./icons/icons";
 import { librarySyncProgressAtom } from "../atoms/sync";
 
 // Possible icon states

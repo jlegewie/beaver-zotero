@@ -1,5 +1,5 @@
 import React from 'react';
-import { CancelIcon, PlusSignIcon, SettingsIcon, UserIcon } from './icons';
+import { CancelIcon, PlusSignIcon, SettingsIcon, UserIcon } from './icons/icons';
 import DatabaseStatusIndicator from './DatabaseStatusIndicator';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';

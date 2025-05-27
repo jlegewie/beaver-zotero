@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StopIcon } from './icons';
+import { StopIcon } from './icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../atoms/threads';
 import { currentSourcesAtom, currentMessageContentAtom } from '../atoms/input';

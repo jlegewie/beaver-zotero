@@ -1,5 +1,5 @@
 import React from 'react';
-import { CSSItemTypeIcon } from '../icons';
+import { CSSItemTypeIcon } from '../icons/icons';
 import { InputSource } from '../../types/sources';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 

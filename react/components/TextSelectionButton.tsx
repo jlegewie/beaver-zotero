@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react'
-import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons"
+import { CSSIcon, Icon, TextAlignLeftIcon } from "./icons/icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../atoms/input'
 import { navigateToPageInCurrentReader } from '../utils/readerUtils'

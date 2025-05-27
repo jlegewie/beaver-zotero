@@ -1,5 +1,5 @@
 import React from 'react';
-import { CancelIcon, TextAlignLeftIcon, Icon } from '../icons';
+import { CancelIcon, TextAlignLeftIcon, Icon } from '../icons/icons';
 import { useSetAtom, useAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { readerTextSelectionAtom } from '../../atoms/input';

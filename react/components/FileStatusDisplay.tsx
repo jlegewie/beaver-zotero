@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { fileStatusStatsAtom } from '../atoms/ui';
 import Button from './ui/Button';
-import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons';
-import { Icon } from './icons';
+import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from './icons/icons';
+import { Icon } from './icons/icons';
 
 interface StatusItemProps {
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;

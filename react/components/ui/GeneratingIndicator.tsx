@@ -1,6 +1,6 @@
 import React from 'react';
 import Button from './Button';
-import { Icon, Spinner, BrainIcon } from '../icons';
+import { Icon, Spinner, BrainIcon } from '../icons/icons';
 import { MessageStatus } from '../../types/chat/uiTypes';
 
 interface GeneratingIndicatorProps {

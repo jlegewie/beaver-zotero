@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import Button from "./ui/Button";
 import FileStatusStats from "./FileStatusStats";
 import FileStatusDisplay from "./FileStatusDisplay";
-import { ArrowDownIcon, ArrowRightIcon } from './icons';
+import { ArrowDownIcon, ArrowRightIcon } from './icons/icons';
 import { useFileStatus } from '../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { useSetAtom, useAtomValue } from 'jotai';

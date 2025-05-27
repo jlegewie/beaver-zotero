@@ -1,5 +1,5 @@
 import React, { forwardRef, useEffect, useState } from 'react'
-import { CSSIcon, Icon, ArrowUpRightIcon } from "./icons"
+import { CSSIcon, Icon, ArrowUpRightIcon } from "./icons/icons"
 import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import { useSetAtom, useAtomValue } from 'jotai'
 import { activePreviewAtom } from '../atoms/ui'

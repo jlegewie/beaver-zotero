@@ -1,12 +1,12 @@
 import React, { useEffect, useState, forwardRef } from 'react'
-import { CSSItemTypeIcon, CSSIcon } from "../icons"
+import { CSSItemTypeIcon, CSSIcon } from "../icons/icons"
 import { InputSource } from '../../types/sources'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem, isSourceValid } from '../../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils'
-import { BookmarkIcon, Icon } from '../icons'
+import { BookmarkIcon, Icon } from '../icons/icons'
 import MissingSourceButton from './MissingSourceButton'
 import { usePreviewHover } from '../../hooks/usePreviewHover'
 import { activePreviewAtom } from '../../atoms/ui'

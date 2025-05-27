@@ -5,7 +5,7 @@ import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
 import { Thread } from '../../../types/chat/uiTypes';
-import { ChattingIcon } from '../../icons';
+import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';

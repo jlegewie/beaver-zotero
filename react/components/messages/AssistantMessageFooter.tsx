@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons';
+import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '../ui/IconButton';

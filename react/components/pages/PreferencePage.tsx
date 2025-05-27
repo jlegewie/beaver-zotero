@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from '../icons';
+import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from '../icons/icons';
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';

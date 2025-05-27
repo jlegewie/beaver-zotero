@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons';
+import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons/icons';
 import { getPref } from '../../../../src/utils/prefs';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { 
