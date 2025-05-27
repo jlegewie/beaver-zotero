@@ -1,6 +1,6 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallResponsesToToolAttachmentsAtom, userAttachmentsAtom } from '../../../atoms/threads';
+import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallResponsesToToolAttachmentsAtom, userAttachmentsAtom, loadThreadAtom } from '../../../atoms/threads';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
@@ -52,15 +52,8 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
 }) => {
     const user = useAtomValue(userAtom);
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
-    const setThreadMessages = useSetAtom(threadMessagesAtom);
-    const setUserAttachments = useSetAtom(userAttachmentsAtom);
-    const updateAttachmentCitations = useSetAtom(updateAttachmentCitationsAtom);
-    const setCurrentSources = useSetAtom(currentSourcesAtom);
-    const setMessageContent = useSetAtom(currentMessageContentAtom);
-    const setUserScrolled = useSetAtom(userScrolledAtom);
-    const addToolCallResponsesToToolAttachments = useSetAtom(addToolCallResponsesToToolAttachmentsAtom);
-    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
-    const [currentThreadId, setCurrentThreadId] = useAtom(currentThreadIdAtom);
+    const loadThread = useSetAtom(loadThreadAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
     const [threads, setThreads] = useAtom(recentThreadsAtom);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
@@ -129,24 +122,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
 
     const handleLoadThread = async (threadId: string) => {
         try {
-            setUserScrolled(false);
-            // Set the current thread ID
-            setCurrentThreadId(threadId);
-            setIsPreferencePageVisible(false);
-
-            // Use the thread service to fetch messages
-            const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
-            
-            // Update the thread messages and attachments state
-            setThreadMessages(messages);
-            await updateAttachmentCitations();
-            setUserAttachments(userAttachments);
-            // setToolAttachments(toolAttachments);
-            addToolCallResponsesToToolAttachments({messages: messages});
-            
-            // Clear sources for now
-            setCurrentSources([]);
-            setMessageContent('');
+            loadThread({threadId: threadId});
         } catch (error) {
             console.error('Error loading thread:', error);
         }

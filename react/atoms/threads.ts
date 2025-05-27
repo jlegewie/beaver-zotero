@@ -1,12 +1,13 @@
 import { atom } from "jotai";
 import { ChatMessage, Thread, Warning } from "../types/chat/uiTypes";
-import { currentMessageContentAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { attachmentCitationsAtom } from "./citations";
+import { attachmentCitationsAtom, updateAttachmentCitationsAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
+import { threadService } from "../../src/services/threadService";
 
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -103,6 +104,31 @@ export const newThreadAtom = atom(
         set(userScrolledAtom, false);
     }
 );
+
+export const loadThreadAtom = atom(
+    null,
+    async (_, set, { threadId }: { threadId: string }) => {
+        set(userScrolledAtom, false);
+        // Set the current thread ID
+        set(currentThreadIdAtom, threadId);
+        set(isPreferencePageVisibleAtom, false);
+
+        // Use the thread service to fetch messages
+        const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
+        
+        // Update the thread messages and attachments state
+        set(threadMessagesAtom, messages);
+        set(updateAttachmentCitationsAtom);
+        set(userAttachmentsAtom, userAttachments);
+        // set(toolAttachmentsAtom, toolAttachments);
+        set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+        
+        // Clear sources for now
+        set(currentSourcesAtom, []);
+        set(currentMessageContentAtom, '');
+    }
+);
+
 
 export const setMessageContentAtom = atom(
     null,
