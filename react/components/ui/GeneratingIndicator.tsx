@@ -1,13 +1,13 @@
 import React from 'react';
-import Button from './ui/Button';
-import { Icon, Spinner, BrainIcon } from './icons';
-import { MessageStatus } from '../types/chat/uiTypes';
+import Button from './Button';
+import { Icon, Spinner, BrainIcon } from '../icons';
+import { MessageStatus } from '../../types/chat/uiTypes';
 
-interface GeneratingButtonProps {
+interface GeneratingIndicatorProps {
     status: MessageStatus;
 }
 
-const GeneratingButton: React.FC<GeneratingButtonProps> = ({ status }) => {
+const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status }) => {
     const label = status === "thinking" ? "Thinking..." : "Generating...";
     
     return (
@@ -37,4 +37,4 @@ const GeneratingButton: React.FC<GeneratingButtonProps> = ({ status }) => {
     );
 };
 
-export default GeneratingButton;
+export default GeneratingIndicator;

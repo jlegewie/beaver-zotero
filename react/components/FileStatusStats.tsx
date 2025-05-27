@@ -3,7 +3,7 @@ import { useAtomValue, useAtom } from 'jotai';
 import { fileStatusStatsAtom, errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../atoms/ui';
 import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from './icons';
 import Tooltip from './ui/Tooltip';
-import IconButton from './IconButton';
+import IconButton from './ui/IconButton';
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { resetFailedUploads } from '../../src/services/FileUploader';
 

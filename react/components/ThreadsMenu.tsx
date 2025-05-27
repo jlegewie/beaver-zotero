@@ -1,8 +1,8 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../atoms/threads';
-import MenuButton from './MenuButton';
-import { MenuItem } from './ContextMenu';
+import MenuButton from './ui/MenuButton';
+import { MenuItem } from './ui/ContextMenu';
 import { threadService } from '../../src/services/threadService';
 import { Thread } from '../types/chat/uiTypes';
 import { ChattingIcon } from './icons';

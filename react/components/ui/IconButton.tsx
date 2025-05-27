@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from './icons';
+import { Icon } from '../icons';
 
 type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary';
 

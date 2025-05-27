@@ -6,7 +6,6 @@ import { ChatMessage } from "../types/chat/uiTypes";
 import AssistantMessageTools from "./AssistantMessageTools";
 import { isChatRequestPendingAtom } from "../atoms/threads";
 import { useAtomValue } from "jotai";
-import GeneratingButton from "./GeneratingButton";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];

@@ -8,7 +8,7 @@ import { generateResponseAtom } from '../atoms/generateMessages';
 import { getPref } from '../../src/utils/prefs';
 import Button from './ui/Button';
 import { MenuPosition } from './SearchMenu';
-import ModelSelectionButton from './ModelSelectionButton';
+import ModelSelectionButton from './ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from './MessageAttachmentDisplay';
 import { isAgentModelAtom } from '../atoms/models';
 import { getCustomPromptsFromPreferences } from '../types/settings';

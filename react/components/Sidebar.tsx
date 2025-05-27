@@ -4,7 +4,7 @@ import Header from "./Header"
 import { MessagesArea } from "./MessagesArea"
 import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { ScrollDownButton } from './ScrollDownButton';
+import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
 import WelcomePage from './WelcomePage';

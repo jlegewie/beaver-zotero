@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { CopyIcon, TickIcon } from './icons';
-import IconButton from './IconButton';
-import { copyToClipboard } from '../utils/clipboard';
+import { CopyIcon, TickIcon } from '../../icons';
+import IconButton from '../IconButton';
+import { copyToClipboard } from '../../../utils/clipboard';
 
 interface CopyButtonProps {
     /** Text content to copy */

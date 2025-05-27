@@ -7,7 +7,7 @@ import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE } from '../AnnotationButton';
 import Button from '../ui/Button';
-import IconButton from '../IconButton';
+import IconButton from '../ui/IconButton';
 import { CancelIcon } from '../icons';
 import { InputSource } from '../../types/sources';
 import { toAnnotation } from '../../types/attachments/converters';

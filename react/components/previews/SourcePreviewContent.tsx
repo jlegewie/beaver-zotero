@@ -11,7 +11,7 @@ import SourcePreviewAttachment from './SourcePreviewAttachment';
 import { getCurrentPage } from '../../utils/readerUtils';
 import { getZoteroItem } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
-import IconButton from '../IconButton';
+import IconButton from '../ui/IconButton';
 import { getPref } from '../../../src/utils/prefs';
 
 // Get the updateSourcesFromZoteroSelection preference

@@ -18,7 +18,7 @@ import LibrarySelector from "../LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
-import IconButton from "../IconButton";
+import IconButton from "../ui/IconButton";
 import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { resetFailedUploads } from '../../../src/services/FileUploader';

@@ -5,7 +5,7 @@ import { useSetAtom } from 'jotai';
 import Button from './ui/Button';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { removeMessageAtom, removeWarningFromMessageAtom } from '../atoms/threads';
-import IconButton from './IconButton';
+import IconButton from './ui/IconButton';
 import ZoteroItemsList from './ZoteroItemsList';
 
 // Get appropriate error message based on the error type

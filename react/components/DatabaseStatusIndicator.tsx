@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { syncStatusAtom, syncingAtom, syncErrorAtom, SyncStatus } from "../atoms/ui";
 import { uploadQueueStatusAtom, uploadQueueTotalAtom } from "../atoms/sync";
 import { syncZoteroDatabase } from '../../src/utils/sync';
-import IconButton from "./IconButton";
+import IconButton from "./ui/IconButton";
 import { DatabaseStatusIcon } from "./icons";
 import { librarySyncProgressAtom } from "../atoms/sync";
 

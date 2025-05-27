@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MenuPosition } from '../components/ContextMenu';
+import { MenuPosition } from '../components/ui/ContextMenu';
 
 interface UseSelectionContextMenuOptions {
     onCopy?: (selectedText: string) => void;

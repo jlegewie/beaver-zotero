@@ -3,14 +3,14 @@ import { ChatMessage } from '../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from './icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { copyToClipboard } from '../utils/clipboard';
-import IconButton from './IconButton';
-import MenuButton from './MenuButton';
+import IconButton from './ui/IconButton';
+import MenuButton from './ui/MenuButton';
 import { regenerateFromMessageAtom } from '../atoms/generateMessages';
 import Button from './ui/Button';
 import CitedSourcesList from './CitedSourcesList';
 import { SourceCitation } from '../types/sources';
 import { renderToMarkdown, renderToHTML } from '../utils/citationRenderers';
-import CopyButton from './CopyButton';
+import CopyButton from './ui/buttons/CopyButton';
 import { sourceCitationsAtom } from '../atoms/citations';
 
 interface AssistantMessageFooterProps {

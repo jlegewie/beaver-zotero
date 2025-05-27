@@ -1,12 +1,12 @@
 import React, { useRef } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import ContextMenu from './ContextMenu';
+import ContextMenu from './ui/ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';
 import AssistantMessageFooter from './AssistantMessageFooter';
-import GeneratingButton from './GeneratingButton';
+import GeneratingIndicator from './ui/GeneratingIndicator';
 
 interface AssistantMessageProps {
     message: ChatMessage;
@@ -62,7 +62,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
 
                 {/* Generating button */}
                 {message.status === 'in_progress' && message.content === '' && isLastMessage && !message.tool_calls && (
-                    <GeneratingButton status={message.status} />
+                    <GeneratingIndicator status={message.status} />
                 )}
 
                 {/* Error */}

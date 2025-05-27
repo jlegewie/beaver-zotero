@@ -1,8 +1,8 @@
 import React from 'react';
-import { Icon, ArrowDownIcon } from './icons';
-import { activePreviewAtom } from '../atoms/ui';
+import { Icon, ArrowDownIcon } from '../../icons';
+import { activePreviewAtom } from '../../../atoms/ui';
 import { useAtomValue } from 'jotai';
-import { popupMessagesAtom } from '../atoms/ui';
+import { popupMessagesAtom } from '../../../atoms/ui';
 
 interface ScrollDownButtonProps extends React.HTMLProps<HTMLButtonElement> {
     onClick: () => void;

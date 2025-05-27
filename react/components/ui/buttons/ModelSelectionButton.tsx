@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import MenuButton from './MenuButton';
-import { MenuItem } from './ContextMenu';
-import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from './icons';
-import { getPref } from '../../src/utils/prefs';
+import MenuButton from '../MenuButton';
+import { MenuItem } from '../ContextMenu';
+import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons';
+import { getPref } from '../../../../src/utils/prefs';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { 
   selectedModelAtom, 
@@ -14,7 +14,7 @@ import {
   updateSelectedModelAtom,
   validateSelectedModelAtom,
   isAgentModelAtom
-} from '../atoms/models';
+} from '../../../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 17;
 const REFETCH_INTERVAL_HOURS = 6;

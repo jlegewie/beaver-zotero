@@ -3,7 +3,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, CancelIcon } from '../icons';
-import IconButton from "../IconButton";
+import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { chatService, ErrorType } from '../../../src/services/chatService';

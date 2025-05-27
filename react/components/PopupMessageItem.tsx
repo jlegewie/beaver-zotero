@@ -3,7 +3,7 @@ import { PopupMessage, POPUP_MESSAGE_DURATION } from '../types/popupMessage';
 import { Icon, CancelIcon, AlertIcon, InformationCircleIcon } from './icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../utils/popupMessageUtils';
-import IconButton from './IconButton';
+import IconButton from './ui/IconButton';
 
 interface PopupMessageItemProps {
     message: PopupMessage;

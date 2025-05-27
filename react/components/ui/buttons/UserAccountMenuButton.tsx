@@ -1,11 +1,11 @@
 import React from 'react';
-import MenuButton from './MenuButton';
-import { MenuItem } from './ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon } from './icons';
-import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import MenuButton from '../MenuButton';
+import { MenuItem } from '../ContextMenu';
+import { SettingsIcon, UserIcon, LogoutIcon } from '../../icons';
+import { isPreferencePageVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useAuth } from '../hooks/useAuth';
-import { hasCompletedOnboardingAtom } from '../atoms/profile';
+import { useAuth } from '../../../hooks/useAuth';
+import { hasCompletedOnboardingAtom } from '../../../atoms/profile';
 
 interface UserAccountMenuButtonProps {
     className?: string;
