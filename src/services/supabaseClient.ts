@@ -1,28 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
+import { EncryptedStorage } from './EncryptedStorage';
 
-// Use Zotero's preference system to store auth data
+// Create encrypted storage instance
+const encryptedStorage = new EncryptedStorage();
+
+// Adapter to make EncryptedStorage compatible with Supabase's expected storage interface
 const zoteroStorage = {
-    getItem: (key: string) => {
+    getItem: async (key: string) => {
         try {
-            const data = Zotero.Prefs.get(`beaver.auth.${key}`);
-            return data ? JSON.parse(data as string) : null;
+            const data = await encryptedStorage.getItem(key);
+            return data ? JSON.parse(data) : null;
         } catch (error) {
-            console.error('Error getting auth from Zotero prefs:', error);
+            console.error('Error getting auth from encrypted storage:', error);
             return null;
         }
     },
-    setItem: (key: string, value: string) => {
+    setItem: async (key: string, value: string) => {
         try {
-            Zotero.Prefs.set(`beaver.auth.${key}`, JSON.stringify(value));
+            await encryptedStorage.setItem(key, JSON.stringify(value));
         } catch (error) {
-            console.error('Error setting auth in Zotero prefs:', error);
+            console.error('Error setting auth in encrypted storage:', error);
         }
     },
-    removeItem: (key: string) => {
+    removeItem: async (key: string) => {
         try {
-            Zotero.Prefs.clear(`beaver.auth.${key}`);
+            encryptedStorage.removeItem(key);
         } catch (error) {
-            console.error('Error removing auth from Zotero prefs:', error);
+            console.error('Error removing auth from encrypted storage:', error);
         }
     }
 };
