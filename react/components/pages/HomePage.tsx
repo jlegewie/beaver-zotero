@@ -1,18 +1,18 @@
 import React, { useState } from "react";
-import Button from "./ui/Button";
-import FileStatusStats from "./FileStatusStats";
-import FileStatusDisplay from "./FileStatusDisplay";
-import { ArrowDownIcon, ArrowRightIcon } from './icons/icons';
-import { useFileStatus } from '../hooks/useFileStatus';
-import { isPreferencePageVisibleAtom } from '../atoms/ui';
+import Button from "../ui/Button";
+import FileStatusStats from "../FileStatusStats";
+import FileStatusDisplay from "../FileStatusDisplay";
+import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { useFileStatus } from '../../hooks/useFileStatus';
+import { isPreferencePageVisibleAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom } from '../atoms/threads';
-import { generateResponseAtom } from '../atoms/generateMessages';
-import { currentReaderAttachmentAtom, currentSourcesAtom } from "../atoms/input";
-import { planFeaturesAtom } from "../atoms/profile";
-import { getCustomPromptsFromPreferences, CustomPrompt } from "../types/settings";
+import { isStreamingAtom } from '../../atoms/threads';
+import { generateResponseAtom } from '../../atoms/generateMessages';
+import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/input";
+import { planFeaturesAtom } from "../../atoms/profile";
+import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 
-const WelcomePage: React.FC = () => {
+const HomePage: React.FC = () => {
     const [showFileStatus, setShowFileStatus] = useState(false);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
@@ -108,4 +108,4 @@ const WelcomePage: React.FC = () => {
     );
 };
 
-export default WelcomePage;
+export default HomePage;

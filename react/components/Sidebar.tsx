@@ -7,7 +7,7 @@ import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
-import WelcomePage from './WelcomePage';
+import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
 import PreferencePage from './pages/PreferencePage';
@@ -88,7 +88,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     ref={messagesContainerRef}
                 />
             ) : (
-                <WelcomePage />
+                <HomePage />
             )}
 
             {/* Prompt area (footer) with floating elements */}
