@@ -223,7 +223,7 @@ const FileStatusStats: React.FC<{
 
             {/* File processing stats */}
             <div className="display-flex flex-row items-end">
-                <div className="font-color-secondary text-lg mt-1">Processing</div>
+                <div className="font-color-secondary text-lg mb-1">Processing</div>
                 <div className="flex-1" />
                 <div className="display-flex flex-row gap-5">
                     <Stat label="Pending" count={fileStats.queuedProcessingCount} isLoading={!fileStats} />
