@@ -1,7 +1,7 @@
 import React, { useState, useRef, ReactNode, useEffect } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
 import { Icon } from './icons';
-import Tooltip from './Tooltip';
+import Tooltip from './ui/Tooltip';
 
 interface MenuButtonProps {
     menuItems: MenuItem[];

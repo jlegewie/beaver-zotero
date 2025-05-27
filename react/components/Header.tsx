@@ -5,7 +5,7 @@ import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './IconButton';
-import Tooltip from './Tooltip';
+import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ThreadsMenu';
 import UserAccountMenuButton from './UserAccountMenuButton';

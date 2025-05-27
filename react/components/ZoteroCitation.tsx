@@ -1,5 +1,5 @@
 import React from 'react';
-import Tooltip from './Tooltip';
+import Tooltip from './ui/Tooltip';
 import { useAtomValue } from 'jotai';
 import { sourceCitationsAtom } from '../atoms/citations';
 import { getPref } from '../../src/utils/prefs';
