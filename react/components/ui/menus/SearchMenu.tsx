@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
-import { Icon, SearchIcon } from './icons';
+import { Icon, SearchIcon } from '../../icons';
 
 /**
 * Menu item interface for search menu

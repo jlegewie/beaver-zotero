@@ -1,5 +1,5 @@
 import React, { useState, useRef, ReactNode, useEffect } from 'react';
-import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
+import ContextMenu, { MenuItem, MenuPosition } from './menu/ContextMenu';
 import { Icon } from '../icons';
 import Tooltip from './Tooltip';
 

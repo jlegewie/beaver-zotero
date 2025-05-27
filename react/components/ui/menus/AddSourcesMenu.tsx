@@ -1,20 +1,20 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from './icons';
-import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../src/services/searchService';
-import { getDisplayNameFromItem, isSourceValid } from '../utils/sourceUtils';
-import { createSourceFromItem } from '../utils/sourceUtils';
+import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from '../../icons';
+import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../../../src/services/searchService';
+import { getDisplayNameFromItem, isSourceValid } from '../../../utils/sourceUtils';
+import { createSourceFromItem } from '../../../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { currentSourcesAtom, inputAttachmentCountAtom } from '../atoms/input';
+import { currentSourcesAtom, inputAttachmentCountAtom } from '../../../atoms/input';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { InputSource } from '../types/sources';
-import { getPref, setPref } from '../../src/utils/prefs';
-import { getRecentAsync } from '../utils/zotero';
-import { searchTitleCreatorYear } from '../utils/search';
-import { logger } from '../../src/utils/logger';
-import { planFeaturesAtom } from '../atoms/profile';
-import { threadAttachmentCountAtom } from '../atoms/threads';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { InputSource } from '../../../types/sources';
+import { getPref, setPref } from '../../../../src/utils/prefs';
+import { getRecentAsync } from '../../../utils/zotero';
+import { searchTitleCreatorYear } from '../../../utils/search';
+import { logger } from '../../../../src/utils/logger';
+import { planFeaturesAtom } from '../../../atoms/profile';
+import { threadAttachmentCountAtom } from '../../../atoms/threads';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 
 const RECENT_ITEMS_LIMIT = 5;
 

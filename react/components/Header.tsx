@@ -7,7 +7,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import ThreadsMenu from './ThreadsMenu';
+import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';

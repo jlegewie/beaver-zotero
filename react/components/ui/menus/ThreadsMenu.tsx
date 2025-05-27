@@ -1,19 +1,19 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../atoms/threads';
-import MenuButton from './ui/MenuButton';
-import { MenuItem } from './ui/ContextMenu';
-import { threadService } from '../../src/services/threadService';
-import { Thread } from '../types/chat/uiTypes';
-import { ChattingIcon } from './icons';
-import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import { userAtom } from '../atoms/auth';
-import Spinner from './icons/Spinner';
-import { getDateGroup } from '../utils/dateUtils';
-import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
-import { currentSourcesAtom } from '../atoms/input';
-import { currentMessageContentAtom } from '../atoms/input';
-import { updateSourceCitationsAtom } from '../atoms/citations';
+import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallSourcesToThreadSourcesAtom, userAddedSourcesAtom } from '../../../atoms/threads';
+import MenuButton from '../MenuButton';
+import { MenuItem } from '../menu/ContextMenu';
+import { threadService } from '../../../../src/services/threadService';
+import { Thread } from '../../../types/chat/uiTypes';
+import { ChattingIcon } from '../../icons';
+import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
+import { userAtom } from '../../../atoms/auth';
+import Spinner from '../../icons/Spinner';
+import { getDateGroup } from '../../../utils/dateUtils';
+import { isPreferencePageVisibleAtom, userScrolledAtom } from '../../../atoms/ui';
+import { currentSourcesAtom } from '../../../atoms/input';
+import { currentMessageContentAtom } from '../../../atoms/input';
+import { updateSourceCitationsAtom } from '../../../atoms/citations';
 
 const MAX_THREADS = 10;
 

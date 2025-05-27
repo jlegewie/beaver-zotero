@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { ChatMessage } from '../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import ContextMenu from './ui/ContextMenu';
+import ContextMenu from './ui/menu/ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';

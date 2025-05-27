@@ -7,7 +7,7 @@ import { readerTextSelectionAtom } from '../atoms/input';
 import { generateResponseAtom } from '../atoms/generateMessages';
 import { getPref } from '../../src/utils/prefs';
 import Button from './ui/Button';
-import { MenuPosition } from './SearchMenu';
+import { MenuPosition } from './ui/menus/SearchMenu';
 import ModelSelectionButton from './ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from './MessageAttachmentDisplay';
 import { isAgentModelAtom } from '../atoms/models';

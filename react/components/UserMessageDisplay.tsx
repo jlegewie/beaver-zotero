@@ -4,7 +4,7 @@ import { useAtomValue } from 'jotai';
 import { SourceButton } from "./SourceButton";
 import { ChatMessage } from '../types/chat/uiTypes';
 import { userAddedSourcesAtom } from '../atoms/threads';
-import ContextMenu from './ui/ContextMenu';
+import ContextMenu from './ui/menu/ContextMenu';
 import useSelectionContextMenu from '../hooks/useSelectionContextMenu';
 import { InputSource } from '../types/sources';
 import { organizeSourcesByRegularItems } from '../utils/sourceUtils';
