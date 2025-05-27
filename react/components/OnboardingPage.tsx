@@ -393,7 +393,7 @@ const OnboardingPage: React.FC = () => {
                             ? `${librarySyncProgress.syncedItems.toLocaleString()} of ${librarySyncProgress.totalItems.toLocaleString()} items`
                             : undefined
                         }
-                        rightText={`${librarySyncProgress.progress}%`}
+                        rightText={`${librarySyncProgress.progress.toFixed(0)}%`}
                         rightIcon={librarySyncProgress.anyFailed ? RepeatIcon : undefined}
                         onClick={librarySyncProgress.anyFailed ? handleSyncRetryClick : undefined}
                     />
@@ -403,7 +403,7 @@ const OnboardingPage: React.FC = () => {
                         icon={getUploadIcon()}
                         title="Uploading files"
                         leftText={getUploadLeftText()}
-                        rightText={librarySyncProgress.progress < 100 ? "" : `${uploadProgress}%`}
+                        rightText={librarySyncProgress.progress < 100 ? "" : `${uploadProgress.toFixed(0)}%`}
                         progress={uploadProgress}
                         rightIcon={hasUploadFailures() ? RepeatIcon : undefined}
                         onClick={hasUploadFailures() ? handleUploadRetryClick : undefined}
@@ -414,7 +414,7 @@ const OnboardingPage: React.FC = () => {
                         icon={getIndexingIcon()}
                         title="File processing"
                         progress={fileStats.processingProgress}
-                        rightText={fileStats.totalProcessingCount === 0 ? "" : `${fileStats.progress}%`}
+                        rightText={fileStats.totalProcessingCount === 0 ? "" : `${fileStats.progress.toFixed(0)}%`}
                         leftText={getIndexingLeftText()}
                     />
 
