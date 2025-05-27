@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import ZoteroCitation from './sources/ZoteroCitation';
+import ZoteroCitation from '../sources/ZoteroCitation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 
