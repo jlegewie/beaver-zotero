@@ -49,7 +49,7 @@ const ProcessItem: React.FC<{
 }> = ({ icon, title, description, progress, leftText, rightText, fileStats, rightIcon, onClick }) => {
 
     const syncIconClassName = fileStats
-        ? `scale-90 ${fileStats.activeCount > 0 ? 'animate-spin' : ''}`
+        ? `scale-90 ${fileStats.activeProcessingCount > 0 ? 'animate-spin' : ''}`
         : '';
     
     return (
@@ -242,7 +242,7 @@ const OnboardingPage: React.FC = () => {
     const getIndexingIcon = (): React.ReactNode => {
         if (librarySyncProgress.anyFailed) return StepThreeIcon;
         if (fileStats.totalProcessingCount === 0) return StepThreeIcon;
-        if (fileStats.processingProgress >= 100) return CheckmarkIcon;
+        if (fileStats.progress >= 100) return CheckmarkIcon;
         return SpinnerIcon;
     };
 
@@ -439,7 +439,10 @@ const OnboardingPage: React.FC = () => {
                     {/* Button */}
                     <div className="display-flex flex-row items-center mb-1">
                         <div className="flex-1 font-color-secondary text-sm">
-                            {fileStats.processingProgress < 100 ? "Processing incomplete. Expect slower response times & limited search." : ""}
+                            {hasCompletedInitialUpload && fileStats.progress < 100
+                                ?"Processing incomplete. Expect slower response times & limited search."
+                                : ""
+                            }
                         </div>
                         <Button
                             variant="solid"
