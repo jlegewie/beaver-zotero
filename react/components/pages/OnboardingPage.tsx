@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
+import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, SyncIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { useUploadProgress } from '../../hooks/useUploadProgress';
-import { fileStatusStatsAtom } from "../../atoms/ui";
+import { FileStatusStats, fileStatusStatsAtom } from "../../atoms/ui";
 import {
     librariesSyncStatusAtom,
     librarySyncProgressAtom,
@@ -23,6 +23,7 @@ import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { resetFailedUploads } from '../../../src/services/FileUploader';
 import { accountService } from "../../../src/services/accountService";
+import { StatusItem } from "../ui/buttons/FileStatusButton";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
@@ -42,9 +43,15 @@ const ProcessItem: React.FC<{
     progress?: number,
     leftText?: string,
     rightText?: string,
+    fileStats?: FileStatusStats,
     rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | undefined,
     onClick?: () => void,
-}> = ({ icon, title, description, progress, leftText, rightText, rightIcon, onClick }) => {
+}> = ({ icon, title, description, progress, leftText, rightText, fileStats, rightIcon, onClick }) => {
+
+    const syncIconClassName = fileStats
+        ? `scale-90 ${fileStats.activeCount > 0 ? 'animate-spin' : ''}`
+        : '';
+    
     return (
         <div className="display-flex flex-row gap-4">
             <div className="mt-1">
@@ -68,7 +75,17 @@ const ProcessItem: React.FC<{
                         <ProgressBar progress={progress} />
                         <div className="display-flex flex-row gap-4">
                             <div className="font-color-tertiary text-base">
-                                {leftText || ""}
+                                {fileStats ? (
+                                    <div className="display-flex flex-row gap-3">
+                                        {/* <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount + fileStats.uploadPendingCount} textClassName="text-base" iconClassName="scale-90" /> */}
+                                        <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount} textClassName="text-base" iconClassName="scale-90" />
+                                        <StatusItem icon={SyncIcon} count={fileStats.activeProcessingCount} textClassName="text-base" iconClassName={syncIconClassName} />
+                                        <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} textClassName="text-base" iconClassName="scale-90 text-green-500" />
+                                        <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} textClassName="text-base" iconClassName="scale-90 text-red-500" />
+                                    </div>
+                                ) : (
+                                    leftText || ""
+                                )}
                             </div>
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
@@ -388,7 +405,7 @@ const OnboardingPage: React.FC = () => {
                         title="Syncing Zotero database"
                         progress={librarySyncProgress.progress}
                         leftText={librarySyncProgress.totalItems > 0
-                            ? `${librarySyncProgress.syncedItems.toLocaleString()} of ${librarySyncProgress.totalItems.toLocaleString()} items`
+                            ? `${librarySyncProgress.syncedItems.toLocaleString()} completed`
                             : undefined
                         }
                         rightText={`${librarySyncProgress.progress.toFixed(0)}%`}
@@ -411,9 +428,10 @@ const OnboardingPage: React.FC = () => {
                     <ProcessItem 
                         icon={getIndexingIcon()}
                         title="File processing"
-                        progress={fileStats.processingProgress}
+                        progress={fileStats.progress}
                         rightText={fileStats.totalProcessingCount === 0 ? "" : `${fileStats.progress.toFixed(0)}%`}
                         leftText={getIndexingLeftText()}
+                        fileStats={fileStats}
                     />
 
                     <div className="flex-1"/>
