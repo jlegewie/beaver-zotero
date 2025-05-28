@@ -292,6 +292,13 @@ declare namespace Zotero {
              * @param timeoutMinutes Timeout in minutes
              */
             setQueueItemTimeout(user_id: string, file_hash: string, timeoutMinutes: number): Promise<void>;
+
+            /**
+             * Get all attachments with failed upload status for a user
+             * @param user_id User ID
+             * @returns Array of AttachmentRecord objects with failed upload status
+             */
+            getFailedAttachments(user_id: string): Promise<import("../src/services/database").AttachmentRecord[]>;
         }
 
         /**

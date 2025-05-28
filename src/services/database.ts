@@ -1174,6 +1174,21 @@ export class BeaverDB {
             [timeoutMinutes, user_id, file_hash]
         );
     }
+
+    /**
+     * Get all attachments with failed upload status for a user
+     * @param user_id User ID
+     * @returns Array of AttachmentRecord objects with failed upload status
+     */
+    public async getFailedAttachments(user_id: string): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND upload_status = 'failed'
+             ORDER BY library_id, zotero_key`,
+            [user_id]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
 }
 
 /* Example Usage:
