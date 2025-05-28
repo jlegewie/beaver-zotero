@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, SyncIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
+import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, InformationCircleIcon, SyncIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, AlertIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { useUploadProgress } from '../../hooks/useUploadProgress';
 import { FileStatusStats, fileStatusStatsAtom } from "../../atoms/ui";
-import {
-    librariesSyncStatusAtom,
-    librarySyncProgressAtom,
-    LibrarySyncStatus,
-    uploadQueueStatusAtom,
-    uploadQueueTotalAtom
-} from "../../atoms/sync";
+import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { userIdAtom, logoutAtom } from "../../atoms/auth";
 import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
@@ -24,10 +18,20 @@ import { logger } from "../../../src/utils/logger";
 import { resetFailedUploads } from '../../../src/services/FileUploader';
 import { accountService } from "../../../src/services/accountService";
 import { StatusItem } from "../ui/buttons/FileStatusButton";
+import FileUploadStatus from "./FileUploadStatus";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
-const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
+// Icons
+export const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
+export const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
+export const StepOneIcon = <Icon icon={OneIcon} className="font-color-secondary scale-14" />;
+export const StepTwoIcon = <Icon icon={TwoIcon} className="font-color-secondary scale-14" />;
+export const StepThreeIcon = <Icon icon={ThreeIcon} className="font-color-secondary scale-14" />;
+export const SpinnerIcon = <Spinner className="scale-14 -mr-1" />;
+
+// Progress bar
+export const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
     <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
         <div
             className="h-full bg-secondary rounded-sm transition-width duration-500 ease-in-out"
@@ -53,7 +57,7 @@ const ProcessItem: React.FC<{
         : '';
     
     return (
-        <div className="display-flex flex-row gap-4">
+        <div className="display-flex flex-row gap-4 p-3 border-popup rounded-md bg-quinary">
             <div className="mt-1">
                 {icon}
             </div>
@@ -109,10 +113,6 @@ const OnboardingPage: React.FC = () => {
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
     const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
-    
-    // File upload state
-    const uploadQueueStatus = useAtomValue(uploadQueueStatusAtom);
-    const uploadQueueTotal = useAtomValue(uploadQueueTotalAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -208,34 +208,10 @@ const OnboardingPage: React.FC = () => {
         startUploadPolling();
     };
 
-    // Icons
-    const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
-    const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
-    const StepOneIcon = <Icon icon={OneIcon} className="font-color-secondary scale-14" />;
-    const StepTwoIcon = <Icon icon={TwoIcon} className="font-color-secondary scale-14" />;
-    const StepThreeIcon = <Icon icon={ThreeIcon} className="font-color-secondary scale-14" />;
-    const SpinnerIcon = <Spinner className="scale-14 -mr-1" />;
-
     const getSyncIcon = (): React.ReactNode => {
         if (librarySyncProgress.anyFailed) return CancelIcon;
         if (librarySyncProgress.progress < 100) return SpinnerIcon;
         if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
-        return SpinnerIcon;
-    };
-
-    const getUploadIcon = (): React.ReactNode => {
-        // Ensure library sync is complete
-        if (librarySyncProgress.anyFailed) return StepTwoIcon;
-        if (librarySyncProgress.progress < 100) return StepTwoIcon;
-
-        // Use upload stats from hook
-        if (uploadStats) {
-            const failureRate = uploadStats.total > 0 ? uploadStats.failed / uploadStats.total : 0;
-            if (failureRate > MAX_FAILED_UPLOAD_PERCENTAGE) return CancelIcon;
-            if (isUploadComplete) return CheckmarkIcon;
-        }
-        
-        if (uploadError) return CancelIcon;
         return SpinnerIcon;
     };
 
@@ -246,16 +222,6 @@ const OnboardingPage: React.FC = () => {
         return SpinnerIcon;
     };
 
-    const getUploadLeftText = (): string => {
-        if (!uploadStats) return "";
-        
-        const textParts: string[] = [];
-        if (uploadStats.total > 0) textParts.push(`${uploadStats.completed.toLocaleString()} completed`);
-        if (uploadStats.failed > 0) textParts.push(`${uploadStats.failed.toLocaleString()} failed`);
-        if (uploadStats.skipped > 0) textParts.push(`${uploadStats.skipped.toLocaleString()} skipped`);
-        return textParts.join(", ");
-    };
-
     const getIndexingLeftText = (): string => {
         if (fileStats.totalProcessingCount === 0) return "";
         const textParts: string[] = [];
@@ -264,12 +230,6 @@ const OnboardingPage: React.FC = () => {
         if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
         if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
         return textParts.join(", ");
-    };
-
-    const hasUploadFailures = (): boolean => {
-        if (!uploadStats) return false;
-        const failureRate = uploadStats.total > 0 ? uploadStats.failed / uploadStats.total : 0;
-        return failureRate > MAX_FAILED_UPLOAD_PERCENTAGE;
     };
 
     // Handle library selection change
@@ -339,7 +299,7 @@ const OnboardingPage: React.FC = () => {
             <div style={{ height: '5vh' }}></div>
 
             {/* Header section - always shown */}
-            <div className="display-flex flex-col items-start mb-4">
+            <div className="display-flex flex-col items-start mb-3">
                 <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
                 <p className="text-base font-color-secondary -mt-2">
                     {!hasAuthorizedAccess 
@@ -398,7 +358,7 @@ const OnboardingPage: React.FC = () => {
 
             {/* ------------- Step 2: Syncing Process ------------- */}
             {planSupported && hasAuthorizedAccess && (
-                <div className="display-flex flex-col gap-5">
+                <div className="display-flex flex-1 flex-col gap-4">
                     {/* Syncing your library */}
                     <ProcessItem 
                         icon={getSyncIcon()}
@@ -414,14 +374,11 @@ const OnboardingPage: React.FC = () => {
                     />
                     
                     {/* Uploading files */}
-                    <ProcessItem 
-                        icon={getUploadIcon()}
-                        title="Uploading files"
-                        leftText={getUploadLeftText()}
-                        rightText={librarySyncProgress.progress < 100 ? "" : `${uploadProgress.toFixed(0)}%`}
+                    <FileUploadStatus
+                        uploadStats={uploadStats}
+                        isUploadComplete={isUploadComplete}
+                        uploadError={uploadError}
                         progress={uploadProgress}
-                        rightIcon={hasUploadFailures() ? RepeatIcon : undefined}
-                        onClick={hasUploadFailures() ? handleUploadRetryClick : undefined}
                     />
                     
                     {/* Indexing files */}
@@ -429,7 +386,7 @@ const OnboardingPage: React.FC = () => {
                         icon={getIndexingIcon()}
                         title="File processing"
                         progress={fileStats.progress}
-                        rightText={fileStats.totalProcessingCount === 0 ? "" : `${fileStats.progress.toFixed(0)}%`}
+                        rightText={fileStats.totalProcessingCount === 0 ? "" : `${Math.min(fileStats.progress, 100).toFixed(0)}%`}
                         leftText={getIndexingLeftText()}
                         fileStats={fileStats}
                     />
