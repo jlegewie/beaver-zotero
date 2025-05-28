@@ -7,6 +7,12 @@ export interface ZoteroItemReference {
     library_id: number;
 }
 
+export interface FileHashReference {
+    file_hash: string;
+    library_id: number;
+    zotero_key: string;
+}
+
 export function createZoteroItemReference(id: string): ZoteroItemReference | null {
     const [libraryId, zoteroKey] = id.split('-');
     if (!libraryId || !zoteroKey) {

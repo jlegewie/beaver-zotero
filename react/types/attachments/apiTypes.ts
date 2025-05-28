@@ -122,12 +122,3 @@ export function isNoteAttachment(attachment: MessageAttachment): attachment is N
 export function toMessageAttachment(attachment: SourceAttachment): MessageAttachment {
     return attachment;
 }
-
-/**
- * FileHashReference represents a reference to a file hash.
- */
-export interface FileHashReference {
-    file_hash: string;
-    library_id: number;
-    zotero_key: string;
-}

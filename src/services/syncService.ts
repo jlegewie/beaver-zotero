@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { FileHashReference } from '../../react/types/attachments/apiTypes';
+import { FileHashReference } from '../../react/types/zotero';
 import { UploadQueueInput } from './database';
 import { userAtom } from '../../react/atoms/auth';
 import { store } from '../../react';
