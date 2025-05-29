@@ -21,9 +21,8 @@ const FileUploadStatus: React.FC<{
     isUploadComplete: boolean,
     uploadError: Error | null,
     uploadProgress?: number,
-    fileStats?: FileStatusStats,
     startUploadPolling: () => void,
-}> = ({ uploadStats, isUploadComplete, uploadError, uploadProgress, fileStats, startUploadPolling }) => {
+}> = ({ uploadStats, isUploadComplete, uploadError, uploadProgress, startUploadPolling }) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -82,10 +81,6 @@ const FileUploadStatus: React.FC<{
         if (uploadStats.skipped > 0) textParts.push(`${uploadStats.skipped.toLocaleString()} skipped`);
         return textParts.join(", ");
     };
-
-    const syncIconClassName = fileStats
-        ? `scale-90 ${fileStats.activeProcessingCount > 0 ? 'animate-spin' : ''}`
-        : '';
     
     return (
         <div className="display-flex flex-col gap-4 p-3 border-popup rounded-md bg-quinary min-w-0">
