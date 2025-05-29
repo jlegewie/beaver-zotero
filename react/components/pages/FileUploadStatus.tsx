@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Icon, RepeatIcon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
-import { FileStatusStats } from "../../atoms/ui";
 import IconButton from "../ui/IconButton";
 import { librarySyncProgressAtom } from "../../atoms/sync";
 import { useAtomValue } from "jotai";
-import { AttachmentUploadStatistics } from "../../../src/services/database";
 import Button from "../ui/Button";
 import { StepTwoIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { ProgressBar } from "../status/ProgressBar";
