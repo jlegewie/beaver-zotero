@@ -13,6 +13,14 @@ export interface FileHashReference {
     zotero_key: string;
 }
 
+export interface FailedItemReference extends ZoteroItemReference {
+    errorCode?: string;
+}
+
+export interface FailedFileReference extends FileHashReference {
+    errorCode?: string;
+}
+
 export function createZoteroItemReference(id: string): ZoteroItemReference | null {
     const [libraryId, zoteroKey] = id.split('-');
     if (!libraryId || !zoteroKey) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Icon, RepeatIcon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
+import { Icon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
 import { librarySyncProgressAtom } from "../../atoms/sync";
 import { useAtomValue } from "jotai";
@@ -7,7 +7,7 @@ import Button from "../ui/Button";
 import { StepThreeIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "./icons";
 import { ProgressBar } from "./ProgressBar";
 import { userIdAtom } from "../../atoms/auth";
-import { FileHashReference } from "../../types/zotero";
+import { FailedFileReference } from "../../types/zotero";
 import { logger } from "../../../src/utils/logger";
 import ZoteroAttachmentList from "../ui/ZoteroAttachmentList";
 import { attachmentsService } from "../../../src/services/attachmentsService";
@@ -19,6 +19,24 @@ import { uploadStatsAtom, isUploadCompleteAtom } from "../../atoms/status";
 
 const ITEMS_PER_PAGE = 10;
 
+export const errorMapping = {
+    "encrypted": "File is encrypted",
+    "no_text_layer": "Requires OCR",
+    "insufficient_text": "Unknown error",
+    "file_missing": "Unknown error",
+    "download_failed": "Unknown error",
+    "preprocessing_failed": "Unknown error",
+    "conversion_failed": "Unknown error",
+    "opening_failed": "Unknown error",
+    "upload_failed": "Unknown error",
+    "chunk_failed": "Unknown error",
+    "embedding_failed": "Unknown error",
+    "db_update_failed": "Unknown error",
+    "task_parsing_failed": "Unknown error",
+    "max_retries": "Unknown error",
+    "unexpected_error": "Unknown error"
+};
+
 const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingPage=false}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const uploadStats = useAtomValue(uploadStatsAtom);
@@ -26,7 +44,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
 
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
-    const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<FileHashReference[]>([]);
+    const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<FailedFileReference[]>([]);
     const [currentPage, setCurrentPage] = useState(0);
     const [hasMoreFailed, setHasMoreFailed] = useState(false);
     const [isLoadingFailed, setIsLoadingFailed] = useState(false);
@@ -52,8 +70,9 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                 return {
                     file_hash: item.file_hash || '', // Ensure file_hash is always a string
                     library_id: item.library_id,
-                    zotero_key: item.zotero_key
-                } as FileHashReference;
+                    zotero_key: item.zotero_key,
+                    errorCode: useAdvancedPipeline ? item.docling_error_code : item.md_error_code,
+                } as FailedFileReference;
             });
 
             setFailedAttachmentFiles(prevFiles => page === 0 ? newFailedFiles : [...prevFiles, ...newFailedFiles]);
@@ -68,23 +87,39 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         }
     }, [userId, isLoadingFailed, planFeatures.advancedProcessing]);
 
-    // Effect to reset failed files when fileStats.failedProcessingCount becomes 0 or user changes
+    // Effect to manage fetching and clearing failed files based on relevant state changes
     useEffect(() => {
-        if ((fileStats && fileStats.failedProcessingCount === 0) || !userId) {
+        // If no user, clear and hide
+        if (!userId) {
             setFailedAttachmentFiles([]);
             setCurrentPage(0);
             setHasMoreFailed(false);
             setShowFailedFiles(false);
+            return;
         }
-    }, [fileStats?.failedProcessingCount, userId]);
+
+        // If no failed items, clear and hide
+        if (fileStats && fileStats.failedProcessingCount === 0) {
+            setFailedAttachmentFiles([]);
+            setCurrentPage(0);
+            setHasMoreFailed(false);
+            setShowFailedFiles(false); 
+            return;
+        }
+
+        // If the section is visible and there are failed items, refresh data from page 0
+        // This handles:
+        // - Initial display when toggled open
+        // - Updates if failedProcessingCount changes while visible
+        // - Updates if userId or planFeatures.advancedProcessing changes while visible (due to fetchFailedProcessingItems dependency)
+        if (showFailedFiles && fileStats && fileStats.failedProcessingCount > 0) {
+            fetchFailedProcessingItems(0); 
+        }
+    }, [userId, fileStats?.failedProcessingCount, showFailedFiles, fetchFailedProcessingItems]);
 
     const handleToggleShowFailedFiles = () => {
-        const newShowFailedFiles = !showFailedFiles;
-        setShowFailedFiles(newShowFailedFiles);
-        if (newShowFailedFiles && failedAttachmentFiles.length === 0 && fileStats && fileStats.failedProcessingCount > 0) {
-            // Fetch initial page when opening for the first time and there are failed items
-            fetchFailedProcessingItems(0);
-        }
+        setShowFailedFiles(prevShow => !prevShow);
+        // The useEffect above will now handle fetching or clearing based on the new showFailedFiles state
     };
 
     const handleShowMoreFailed = () => {
@@ -137,10 +172,10 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         if (!fileStats) return "Loading status...";
         
         const textParts: string[] = [];
-        if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} completed`);
+        if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
         if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
         if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
-        if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
+        // if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
         
         if (textParts.length === 0 && fileStats.totalFiles > 0) return "Waiting to process...";
         if (textParts.length === 0 && fileStats.totalFiles === 0) return "No files to process.";
@@ -215,13 +250,13 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                 </Button>
                                 <div className="flex-1"/>
                                 <div className="flex-shrink-0 display-flex flex-row gap-3">
-                                    <IconButton
+                                    {/* <IconButton
                                         variant="ghost"
                                         onClick={handleRetryFailedProcessing}
                                         icon={RepeatIcon}
                                         iconClassName={`font-color-red`}
                                         className="scale-11"
-                                    />
+                                    /> */}
                                 </div>
                             </div>
                             {/* Failed files list */}
@@ -231,17 +266,19 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                         attachments={failedAttachmentFiles}
                                         maxHeight="250px"
                                     />
-                                    <Button
-                                        variant="ghost"
-                                        rightIcon={ArrowDownIcon}
-                                        loading={isLoadingFailed}
-                                        iconClassName={`scale-11 ${isLoadingFailed ? 'animate-spin' : ''}`}
-                                        className="fit-content"
-                                        onClick={handleShowMoreFailed}
-                                        disabled={isLoadingFailed || !hasMoreFailed}
-                                    >
-                                        {isLoadingFailed ? "Loading..." : "Show More"}
-                                    </Button>
+                                    {hasMoreFailed && (
+                                        <Button
+                                            variant="ghost"
+                                            rightIcon={ArrowDownIcon}
+                                            loading={isLoadingFailed}
+                                            iconClassName={`scale-11 ${isLoadingFailed ? 'animate-spin' : ''}`}
+                                            className="fit-content"
+                                            onClick={handleShowMoreFailed}
+                                            disabled={isLoadingFailed || !hasMoreFailed}
+                                        >
+                                            {isLoadingFailed ? "Loading..." : "Show More"}
+                                        </Button>
+                                    )}
                                 </div>
                             )}
                         </div>
