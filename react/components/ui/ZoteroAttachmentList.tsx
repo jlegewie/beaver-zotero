@@ -10,10 +10,12 @@ interface ItemWithSelectionId {
 
 interface ZoteroAttachmentListProps {
     attachments: FileHashReference[] | ZoteroItemReference[];
+    maxHeight?: string | number;
 }
 
 const ZoteroAttachmentList: React.FC<ZoteroAttachmentListProps> = ({
-    attachments
+    attachments,
+    maxHeight
 }) => {
     const [resolvedItems, setResolvedItems] = useState<ItemWithSelectionId[]>([]);
     const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
@@ -44,8 +46,15 @@ const ZoteroAttachmentList: React.FC<ZoteroAttachmentListProps> = ({
         Zotero.getActiveZoteroPane().itemsView.selectItem(selectionItemId);
     };
 
+    // Build container style based on maxHeight prop
+    const containerStyle = maxHeight ? { maxHeight } : {};
+    const containerClassName = `display-flex flex-col w-full -ml-1 min-w-0 ${maxHeight ? 'overflow-y-auto scrollbar' : ''}`;
+
     return (
-        <div className="display-flex flex-col w-full -ml-1 min-w-0">
+        <div 
+            className={containerClassName}
+            style={containerStyle}
+        >
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
                 const {item, selectionItemId} = itemWithSelectionId;
                 const itemId = `${item.libraryID}-${item.key}`;
