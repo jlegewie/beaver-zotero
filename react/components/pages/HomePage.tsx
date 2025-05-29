@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import Button from "../ui/Button";
-import FileStatusStats from "../ui/FileStatusStats";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
 import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
@@ -11,6 +10,9 @@ import { generateResponseAtom } from '../../atoms/generateMessages';
 import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/input";
 import { planFeaturesAtom } from "../../atoms/profile";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
+import FileProcessingStatus from "../status/FileProcessingStatus";
+import FileUploadStatus from "../status/FileUploadStatus";
+
 
 const HomePage: React.FC = () => {
     const [showFileStatus, setShowFileStatus] = useState(false);
@@ -100,7 +102,10 @@ const HomePage: React.FC = () => {
                 </div>
                 
                 {showFileStatus && (
-                    <FileStatusStats />
+                    <div className="display-flex flex-col gap-4 min-w-0 w-full">
+                        <FileUploadStatus isOnboardingPage={false} pollingInterval={3000} />
+                        <FileProcessingStatus isOnboardingPage={false} />
+                    </div>
                 )}
                 </>
             )}
