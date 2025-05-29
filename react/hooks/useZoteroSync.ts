@@ -174,9 +174,26 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         // Record the timestamp of this event
                         eventsRef.current.timestamp = Date.now();
                         
-                        if (event === 'add' || event === 'modify') {
-                            // Collect add/modify events
-                            ids.forEach(id => eventsRef.current.addModify.add(id));
+                        if (event === 'add') {
+                            // Collect add events
+                            ids.forEach(id => {
+                                eventsRef.current.addModify.add(id);
+                                eventsRef.current.delete.delete(id);
+                            });
+                        } else if (event === 'modify') {
+                            const items = await Zotero.Items.getAsync(ids as number[]);
+                            // Handle items in trash
+                            items.filter(item => item.isInTrash())
+                                .forEach(item => {
+                                    eventsRef.current.delete.set(item.id, { libraryID: item.libraryID, key: item.key });
+                                    eventsRef.current.addModify.delete(item.id);
+                                });
+                            // Handle all other items
+                            items.filter(item => !item.isInTrash())
+                                .forEach(item => {
+                                    eventsRef.current.addModify.add(item.id);
+                                    eventsRef.current.delete.delete(item.id);
+                                });
                         } else if (event === 'delete') {
                             // Collect delete events with their metadata
                             ids.forEach(id => {
@@ -184,7 +201,12 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key) {
                                         eventsRef.current.delete.set(id, { libraryID, key });
+                                        eventsRef.current.addModify.delete(id); // Ensure mutual exclusivity
+                                    } else {
+                                        logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
                                     }
+                                } else {
+                                    logger(`useZoteroSync: Missing extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
                                 }
                             });
                         }
