@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Icon, RepeatIcon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
 import { librarySyncProgressAtom } from "../../atoms/sync";
@@ -14,12 +14,16 @@ import { resetFailedUploads } from "../../../src/services/FileUploader";
 import { useUploadProgress } from "../../hooks/useUploadProgress";
 import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../../atoms/status';
 
+const ITEMS_PER_PAGE = 2;
 
 const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: number}> = ({isOnboardingPage=false, pollingInterval=1500}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
     const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<FileHashReference[]>([]);
+    const [currentPage, setCurrentPage] = useState(0);
+    const [hasMoreFailed, setHasMoreFailed] = useState(false);
+    const [isLoadingFailed, setIsLoadingFailed] = useState(false);
 
     // Upload status atoms
     const uploadStats = useAtomValue(uploadStatsAtom);
@@ -39,33 +43,61 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
         }
     );
 
-    // Effect to fetch failed uploads when the failed count changes
+    const fetchFailedUploads = useCallback(async (page: number) => {
+        if (!userId || isLoadingFailed) return;
+
+        setIsLoadingFailed(true);
+        try {
+            const result = await Zotero.Beaver.db.getFailedAttachmentsPaginated(userId, ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+            const newFailedFiles = result.attachments.map((attachment) => {
+                return {
+                    file_hash: attachment.file_hash,
+                    library_id: attachment.library_id,
+                    zotero_key: attachment.zotero_key
+                } as FileHashReference;
+            });
+
+            setFailedAttachmentFiles(prevFiles => page === 0 ? newFailedFiles : [...prevFiles, ...newFailedFiles]);
+            setHasMoreFailed(result.has_more);
+            setCurrentPage(page);
+        } catch (error) {
+            logger(`FileUploadStatus: Error fetching failed uploads: ${error}`);
+            setFailedAttachmentFiles([]);
+            setHasMoreFailed(false);
+        } finally {
+            setIsLoadingFailed(false);
+        }
+    }, [userId, isLoadingFailed]);
+
+    // Effect to reset failed files when uploadStats.failed becomes 0 or user changes
     useEffect(() => {
-        const fetchFailedUploads = async () => {
-            if (!uploadStats?.failed || uploadStats.failed === 0 || !userId) {
-                setFailedAttachmentFiles([]);
-                return;
-            }
+        if ((uploadStats && uploadStats.failed === 0) || !userId) {
+            setFailedAttachmentFiles([]);
+            setCurrentPage(0);
+            setHasMoreFailed(false);
+            setShowFailedFiles(false);
+        }
+    }, [uploadStats?.failed, userId]);
 
-            try {
-                // Get failed attachments from database
-                const attachments = await Zotero.Beaver.db.getFailedAttachments(userId);
-                const failedAttachmentFiles = attachments.map((attachment) => {
-                    return {
-                        file_hash: attachment.file_hash,
-                        library_id: attachment.library_id,
-                        zotero_key: attachment.zotero_key
-                    } as FileHashReference;
-                });
-                setFailedAttachmentFiles(failedAttachmentFiles);
-            } catch (error) {
-                logger(`FileUploadStatus: Error fetching failed uploads: ${error}`);
-                setFailedAttachmentFiles([]);
-            }
-        };
+    const handleToggleShowFailedFiles = () => {
+        const newShowFailedFiles = !showFailedFiles;
+        setShowFailedFiles(newShowFailedFiles);
+        if (newShowFailedFiles && failedAttachmentFiles.length === 0 && uploadStats && uploadStats.failed > 0) {
+            // Fetch initial page when opening for the first time and there are failed uploads
+            fetchFailedUploads(0);
+        } else if (!newShowFailedFiles) {
+            // Reset when closing, or retain state???
+            // setFailedAttachmentFiles([]);
+            // setCurrentPage(0);
+            // setHasMoreFailed(false);
+        }
+    };
 
-        fetchFailedUploads();
-    }, [uploadStats?.failed, userId]); // Dependency on failed count
+    const handleShowMoreFailed = () => {
+        if (hasMoreFailed && !isLoadingFailed) {
+            fetchFailedUploads(currentPage + 1);
+        }
+    };
 
     const getUploadIcon = (): React.ReactNode => {
         // Onboarding page: Ensure library sync is complete
@@ -149,7 +181,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                                 </div> */}
                                 <Button
                                     variant="ghost"
-                                    onClick={() => setShowFailedFiles(!showFailedFiles)}
+                                    onClick={handleToggleShowFailedFiles}
                                     rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
                                     iconClassName="mr-0 mt-015 scale-12 font-color-red"
                                 >
@@ -163,6 +195,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                                         variant="ghost"
                                         onClick={async () => {
                                             await resetFailedUploads();
+                                            setShowFailedFiles(false);
                                         }}
                                         icon={RepeatIcon}
                                         iconClassName={`font-color-red`}
@@ -179,12 +212,25 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                             </div>
                             {/* Failed files list */}
                             {showFailedFiles && (
-                                <ZoteroAttachmentList
-                                    attachments={failedAttachmentFiles}
-                                    maxHeight="250px"
-                                    // button={<Button variant="outline" onClick={() => {}}>Retry</Button>}
-                                    // onRetry={() => {}}
-                                />
+                                <div className="display-flex flex-col gap-2 w-full">
+                                    <ZoteroAttachmentList
+                                        attachments={failedAttachmentFiles}
+                                        maxHeight="250px"
+                                        // button={<Button variant="outline" onClick={() => {}}>Retry</Button>}
+                                        // onRetry={() => {}}
+                                    />
+                                    <Button
+                                        variant="ghost"
+                                        rightIcon={ArrowDownIcon}
+                                        loading={isLoadingFailed}
+                                        iconClassName={`scale-11 ${isLoadingFailed ? 'animate-spin' : ''}`}
+                                        className="fit-content"
+                                        onClick={handleShowMoreFailed}
+                                        disabled={isLoadingFailed || !hasMoreFailed}
+                                    >
+                                        {isLoadingFailed ? "Loading..." : "Show More"}
+                                    </Button>
+                                </div>
                             )}
                         </div>
                     </div>
