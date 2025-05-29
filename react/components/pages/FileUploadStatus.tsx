@@ -21,7 +21,8 @@ const FileUploadStatus: React.FC<{
     uploadError: Error | null,
     progress?: number,
     fileStats?: FileStatusStats,
-}> = ({ uploadStats, isUploadComplete, uploadError, progress, fileStats }) => {
+    startUploadPolling: () => void,
+}> = ({ uploadStats, isUploadComplete, uploadError, progress, fileStats, startUploadPolling }) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -152,7 +153,10 @@ const FileUploadStatus: React.FC<{
                                 <div className="flex-shrink-0 display-flex flex-row gap-3">
                                     <IconButton
                                         variant="ghost"
-                                        onClick={resetFailedUploads}
+                                        onClick={async () => {
+                                            await resetFailedUploads();
+                                            startUploadPolling();
+                                        }}
                                         icon={RepeatIcon}
                                         iconClassName={`font-color-red`}
                                         className="scale-11"

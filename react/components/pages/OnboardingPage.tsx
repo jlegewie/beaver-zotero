@@ -363,6 +363,7 @@ const OnboardingPage: React.FC = () => {
                             isUploadComplete={isUploadComplete}
                             uploadError={uploadError}
                             progress={uploadProgress}
+                            startUploadPolling={startUploadPolling}
                         />
                         
                         {/* Indexing files */}
