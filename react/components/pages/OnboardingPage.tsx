@@ -279,7 +279,7 @@ const OnboardingPage: React.FC = () => {
                             title="Syncing Zotero database"
                             progress={librarySyncProgress.progress}
                             leftText={librarySyncProgress.totalItems > 0
-                                ? `${librarySyncProgress.syncedItems.toLocaleString()} completed`
+                                ? `${librarySyncProgress.syncedItems.toLocaleString()} done`
                                 : undefined
                             }
                             rightText={`${librarySyncProgress.progress.toFixed(0)}%`}

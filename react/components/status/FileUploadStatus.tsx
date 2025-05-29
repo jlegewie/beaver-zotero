@@ -118,7 +118,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
         if (!uploadStats) return "";
         
         const textParts: string[] = [];
-        if (uploadStats.total > 0) textParts.push(`${uploadStats.completed.toLocaleString()} completed`);
+        if (uploadStats.total > 0) textParts.push(`${uploadStats.completed.toLocaleString()} done`);
         if (uploadStats.failed > 0) textParts.push(`${uploadStats.failed.toLocaleString()} failed`);
         if (uploadStats.skipped > 0) textParts.push(`${uploadStats.skipped.toLocaleString()} skipped`);
         return textParts.join(", ");
@@ -152,8 +152,14 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                             {uploadStats && uploadStats?.completed && (
                                 <div className="font-color-tertiary text-base">
                                     {getUploadLeftText()}
-                                    {/* {`${uploadStats?.completed.toLocaleString()} completed`} */}
                                 </div>
+                                // <div className="display-flex flex-row gap-3">
+                                //     <StatusItem icon={ClockIcon} count={uploadStats.queued} textClassName="text-base" iconClassName="scale-90" />
+                                //     <StatusItem icon={SyncIcon} count={uploadStats.processing} textClassName="text-base" iconClassName={syncIconClassName} />
+                                //     <StatusItem icon={CheckmarkCircleIcon} count={uploadStats.completed} textClassName="text-base" iconClassName="scale-90 text-green-500" />
+                                //     <StatusItem icon={CancelCircleIcon} count={uploadStats.failed} textClassName="text-base" iconClassName="scale-90 text-red-500" />
+                                // </div>
+
                             )}
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
