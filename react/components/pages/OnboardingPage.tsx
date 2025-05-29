@@ -20,6 +20,7 @@ import FileUploadStatus from "../status/FileUploadStatus";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
 import { ProgressBar } from "../status/ProgressBar";
 import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
+import FileProcessingStatus from "../status/FileProcessingStatus";
 
 
 const ProcessItem: React.FC<{
@@ -45,7 +46,7 @@ const ProcessItem: React.FC<{
             </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
                 <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                    <div className="font-color-primary text-lg">{title}</div>
+                    <div className="font-color-secondary text-lg">{title}</div>
                     <div className="flex-1"/>
                     {rightIcon && onClick && (
                         <IconButton icon={rightIcon} onClick={onClick} variant="ghost-secondary" className="scale-12" />
@@ -143,23 +144,6 @@ const OnboardingPage: React.FC = () => {
         if (librarySyncProgress.progress < 100) return SpinnerIcon;
         if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
         return SpinnerIcon;
-    };
-
-    const getIndexingIcon = (): React.ReactNode => {
-        if (librarySyncProgress.anyFailed) return StepThreeIcon;
-        if (fileStats.totalProcessingCount === 0) return StepThreeIcon;
-        if (fileStats.progress >= 100) return CheckmarkIcon;
-        return SpinnerIcon;
-    };
-
-    const getIndexingLeftText = (): string => {
-        if (fileStats.totalProcessingCount === 0) return "";
-        const textParts: string[] = [];
-        textParts.push(`${fileStats.completedFiles.toLocaleString()} completed`);
-        if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
-        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
-        if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
-        return textParts.join(", ");
     };
 
     // Handle library selection change
@@ -290,15 +274,8 @@ const OnboardingPage: React.FC = () => {
                         {/* Uploading files */}
                         <FileUploadStatus isOnboardingPage={true}/>
                         
-                        {/* Indexing files */}
-                        <ProcessItem 
-                            icon={getIndexingIcon()}
-                            title="File processing"
-                            progress={fileStats.progress}
-                            rightText={fileStats.totalProcessingCount === 0 ? "" : `${Math.min(fileStats.progress, 100).toFixed(0)}%`}
-                            leftText={getIndexingLeftText()}
-                            fileStats={fileStats}
-                        />
+                        {/* File Processing */}
+                        <FileProcessingStatus isOnboardingPage={true} />
 
                     </div>
                 )}
