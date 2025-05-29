@@ -123,8 +123,8 @@ const FileUploadStatus: React.FC<{
                 </div>
             </div>
             {/* Failed uploads */}
-            {uploadStats?.failed && uploadStats.failed > 0 && (
-                <div className="display-flex flex-col gap-4  min-w-0">
+            {uploadStats !== null && uploadStats !== undefined && typeof uploadStats.failed === 'number' && uploadStats.failed > 0 && (
+                <div className="display-flex flex-col gap-4 min-w-0">
                     <div className="display-flex flex-row gap-4  min-w-0">
                         {/* Icon */}
                         <div className="flex-shrink-0">
