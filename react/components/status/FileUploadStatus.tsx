@@ -219,17 +219,19 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                                         // button={<Button variant="outline" onClick={() => {}}>Retry</Button>}
                                         // onRetry={() => {}}
                                     />
-                                    <Button
-                                        variant="ghost"
-                                        rightIcon={ArrowDownIcon}
-                                        loading={isLoadingFailed}
-                                        iconClassName={`scale-11 ${isLoadingFailed ? 'animate-spin' : ''}`}
-                                        className="fit-content"
-                                        onClick={handleShowMoreFailed}
-                                        disabled={isLoadingFailed || !hasMoreFailed}
-                                    >
-                                        {isLoadingFailed ? "Loading..." : "Show More"}
-                                    </Button>
+                                    {hasMoreFailed && (
+                                        <Button
+                                            variant="ghost"
+                                            rightIcon={ArrowDownIcon}
+                                            loading={isLoadingFailed}
+                                            iconClassName={`scale-11 ${isLoadingFailed ? 'animate-spin' : ''}`}
+                                            className="fit-content"
+                                            onClick={handleShowMoreFailed}
+                                            disabled={isLoadingFailed || !hasMoreFailed}
+                                        >
+                                            {isLoadingFailed ? "Loading..." : "Show More"}
+                                        </Button>
+                                    )}
                                 </div>
                             )}
                         </div>
