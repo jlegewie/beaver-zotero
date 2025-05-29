@@ -11,6 +11,7 @@ import { userIdAtom } from "../../atoms/auth";
 import { FileHashReference } from "../../types/zotero";
 import { logger } from "../../../src/utils/logger";
 import ZoteroAttachmentList from "../ui/ZoteroAttachmentList";
+import { resetFailedUploads } from "../../../src/services/FileUploader";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
@@ -151,7 +152,7 @@ const FileUploadStatus: React.FC<{
                                 <div className="flex-shrink-0 display-flex flex-row gap-3">
                                     <IconButton
                                         variant="ghost"
-                                        onClick={() => {}}
+                                        onClick={resetFailedUploads}
                                         icon={RepeatIcon}
                                         iconClassName={`font-color-red`}
                                         className="scale-11"
