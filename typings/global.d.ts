@@ -299,6 +299,15 @@ declare namespace Zotero {
              * @returns Array of AttachmentRecord objects with failed upload status
              */
             getFailedAttachments(user_id: string): Promise<import("../src/services/database").AttachmentRecord[]>;
+
+            /**
+             * Get paginated failed attachments for a user
+             * @param user_id User ID
+             * @param limit Number of items per page
+             * @param offset Number of items to skip
+             * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+             */
+            getFailedAttachmentsPaginated(user_id: string, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
         }
 
         /**

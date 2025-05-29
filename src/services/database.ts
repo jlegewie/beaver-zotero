@@ -1189,6 +1189,36 @@ export class BeaverDB {
         
         return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
     }
+
+    /**
+     * Get a paginated list of attachments with failed upload status for a user.
+     * @param user_id User ID
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getFailedAttachmentsPaginated(
+        user_id: string,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND upload_status = 'failed'
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, limit + 1, offset] // Fetch one extra to check if there are more
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
 }
 
 /* Example Usage:
