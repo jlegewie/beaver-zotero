@@ -16,7 +16,7 @@ import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteA
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
-const FileUploadStatus: React.FC = () => {
+const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingPage=false}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -69,9 +69,9 @@ const FileUploadStatus: React.FC = () => {
     }, [uploadStats?.failed, userId]); // Dependency on failed count
 
     const getUploadIcon = (): React.ReactNode => {
-        // Ensure library sync is complete
-        if (librarySyncProgress.anyFailed) return StepTwoIcon;
-        if (librarySyncProgress.progress < 100) return StepTwoIcon;
+        // Onboarding page: Ensure library sync is complete
+        if (isOnboardingPage && librarySyncProgress.anyFailed) return StepTwoIcon;
+        if (isOnboardingPage && librarySyncProgress.progress < 100) return StepTwoIcon;
 
         // Use upload stats from hook
         if (uploadStats) {

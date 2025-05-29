@@ -290,7 +290,7 @@ const OnboardingPage: React.FC = () => {
                         />
                         
                         {/* Uploading files */}
-                        <FileUploadStatus />
+                        <FileUploadStatus isOnboardingPage={true}/>
                         
                         {/* Indexing files */}
                         <ProcessItem 
