@@ -15,6 +15,8 @@ import { fileStatusStatsAtom } from "../../atoms/ui";
 import { planFeaturesAtom } from "../../atoms/profile";
 import { AttachmentStatusPagedResponse } from "../../../src/services/attachmentsService";
 import { uploadStatsAtom, isUploadCompleteAtom } from "../../atoms/status";
+import Tooltip from "../ui/Tooltip";
+import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 
 
 const ITEMS_PER_PAGE = 10;
@@ -238,16 +240,24 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                         {/* Failed count and retry button */}
                         <div className="display-flex flex-col items-start gap-3 w-full min-w-0">
                             <div className="display-flex flex-row items-start gap-3 w-full">
-                                <Button
-                                    variant="ghost"
-                                    onClick={handleToggleShowFailedFiles}
-                                    rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
-                                    iconClassName="mr-0 mt-015 scale-12 font-color-red"
+                                <Tooltip 
+                                    content="Processing error codes"
+                                    customContent={<FailedProcessingTooltipContent failedCount={fileStats.failedProcessingCount} />}
+                                    showArrow={true}
+                                    disabled={fileStats.failedProcessingCount === 0}
+                                    placement="top"
                                 >
-                                    <span className="text-base font-color-red" style={{ marginLeft: '-3px' }}>
-                                        {fileStats.failedProcessingCount.toLocaleString()} Failed Items
-                                    </span>
-                                </Button>
+                                    <Button
+                                        variant="ghost"
+                                        onClick={handleToggleShowFailedFiles}
+                                        rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
+                                        iconClassName="mr-0 mt-015 scale-12 font-color-red"
+                                    >
+                                        <span className="text-base font-color-red" style={{ marginLeft: '-3px' }}>
+                                            {fileStats.failedProcessingCount.toLocaleString()} Failed Items
+                                        </span>
+                                    </Button>
+                                </Tooltip>
                                 <div className="flex-1"/>
                                 <div className="flex-shrink-0 display-flex flex-row gap-3">
                                     {/* <IconButton
