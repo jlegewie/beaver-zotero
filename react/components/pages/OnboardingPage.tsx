@@ -19,26 +19,11 @@ import { resetFailedUploads } from '../../../src/services/FileUploader';
 import { accountService } from "../../../src/services/accountService";
 import { StatusItem } from "../ui/buttons/FileStatusButton";
 import FileUploadStatus from "./FileUploadStatus";
+import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
+import { ProgressBar } from "../status/ProgressBar";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
-// Icons
-export const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
-export const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
-export const StepOneIcon = <Icon icon={OneIcon} className="font-color-secondary scale-14" />;
-export const StepTwoIcon = <Icon icon={TwoIcon} className="font-color-secondary scale-14" />;
-export const StepThreeIcon = <Icon icon={ThreeIcon} className="font-color-secondary scale-14" />;
-export const SpinnerIcon = <Spinner className="scale-14 -mr-1" />;
-
-// Progress bar
-export const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
-    <div className="w-full h-2 bg-tertiary rounded-sm overflow-hidden mt-1 mb-2" style={{ height: '8px' }}>
-        <div
-            className="h-full bg-secondary rounded-sm transition-width duration-500 ease-in-out"
-            style={{ width: `${Math.min(progress, 100)}%` }}
-        />
-    </div>
-);
 
 const ProcessItem: React.FC<{
     icon: React.ReactNode,
