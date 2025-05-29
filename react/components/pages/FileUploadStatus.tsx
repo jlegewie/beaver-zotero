@@ -14,7 +14,7 @@ import { resetFailedUploads } from "../../../src/services/FileUploader";
 import { useUploadProgress } from "../../hooks/useUploadProgress";
 import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../../atoms/status';
 
-const ITEMS_PER_PAGE = 2;
+const ITEMS_PER_PAGE = 10;
 
 const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: number}> = ({isOnboardingPage=false, pollingInterval=1500}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
