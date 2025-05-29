@@ -87,7 +87,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         } finally {
             setIsLoadingFailed(false);
         }
-    }, [userId, isLoadingFailed, planFeatures.advancedProcessing]);
+    }, [userId, planFeatures.advancedProcessing]);
 
     // Effect to manage fetching and clearing failed files based on relevant state changes
     useEffect(() => {
