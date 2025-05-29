@@ -120,10 +120,8 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with an array of attachment status responses.
      */
     async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[], includeUploadUrl: boolean = false): Promise<AttachmentStatusResponse[]> {
-        return this.post<AttachmentStatusResponse[]>('/attachments/status/batch', {
-            attachments,
-            include_upload_url: includeUploadUrl
-        });
+        const url = `/attachments/status/batch${includeUploadUrl ? '?include_upload_url=true' : ''}`;
+        return this.post<AttachmentStatusResponse[]>(url, attachments);
     }
 
     /**
