@@ -15,7 +15,7 @@ import { useUploadProgress } from "../../hooks/useUploadProgress";
 import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../../atoms/status';
 
 
-const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingPage=false}) => {
+const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: number}> = ({isOnboardingPage=false, pollingInterval=1500}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -30,7 +30,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingP
     // Upload progress hook
     useUploadProgress(
         {
-            interval: 1500,
+            interval: pollingInterval,
             autoStop: false,
             onComplete: () => {},
             onError: (error: any) => {
