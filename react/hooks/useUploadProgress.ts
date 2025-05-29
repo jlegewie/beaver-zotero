@@ -21,6 +21,21 @@ interface UseUploadProgressOptions {
 }
 
 /**
+ * Helper to compare two AttachmentUploadStatistics objects.
+ */
+function areStatsEqual(statsA: AttachmentUploadStatistics | null, statsB: AttachmentUploadStatistics | null): boolean {
+    if (statsA === statsB) return true;
+    if (!statsA || !statsB) return false;
+    return (
+        statsA.total === statsB.total &&
+        statsA.completed === statsB.completed &&
+        statsA.pending === statsB.pending &&
+        statsA.failed === statsB.failed &&
+        statsA.skipped === statsB.skipped
+    );
+}
+
+/**
 * Custom hook for polling attachment upload progress
 * 
 * @param options - Configuration options
@@ -94,25 +109,37 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
             }
             
             if (newStats) {
-                setUploadStats(newStats);
-                setUploadError(null);
+                const currentStats = store.get(uploadStatsAtom);
+                if (!areStatsEqual(currentStats, newStats)) {
+                    setUploadStats(newStats);
+                }
+
+                const currentError = store.get(uploadErrorAtom);
+                if (currentError !== null) {
+                    setUploadError(null);
+                }
                 
-                const progress = newStats.total > 0 
+                const newProgress = newStats.total > 0 
                     ? Math.round((newStats.completed / newStats.total) * 100) 
                     : 0;
-                setUploadProgress(progress);
                 
-                const uploadComplete = newStats.pending === 0 && newStats.total > 0;
-                setIsUploadComplete(uploadComplete);
+                const currentProgress = store.get(uploadProgressAtom);
+                if (currentProgress !== newProgress) {
+                    setUploadProgress(newProgress);
+                }
                 
-                if (uploadComplete) {
+                const newUploadComplete = newStats.pending === 0 && newStats.total > 0;
+                const currentUploadComplete = store.get(isUploadCompleteAtom);
+                if (currentUploadComplete !== newUploadComplete) {
+                    setIsUploadComplete(newUploadComplete);
+                }
+                
+                if (newUploadComplete) {
                     logger(`useUploadProgress: Upload completed! Final stats: ${JSON.stringify(newStats)}`);
                     optionsRef.current.onComplete?.(newStats);
                     if (optionsRef.current.autoStop) {
                         logger(`useUploadProgress: Auto-stopping polling after completion`);
                         isPollingRef.current = false;
-                    } else {
-                        logger(`useUploadProgress: Upload complete but continuing to poll (autoStop: false)`);
                     }
                 }
                 
@@ -133,7 +160,11 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
             const error = err instanceof Error ? err : new Error('Polling failed');
             if (isMountedRef.current) {
                 logger(`useUploadProgress: Polling failed: ${error.message} - stopping polling`);
-                setUploadError(error);
+                const currentError = store.get(uploadErrorAtom);
+                // Compare error messages as error objects themselves will likely always be different instances
+                if (currentError?.message !== error.message) {
+                    setUploadError(error);
+                }
                 isPollingRef.current = false;
                 optionsRef.current.onError?.(error);
             }
