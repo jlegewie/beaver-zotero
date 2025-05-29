@@ -75,13 +75,26 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         {message.icon || getDefaultIcon()}
                     </div>
                     <div className={`flex-1 text-base font-medium ${fontColor}`}>
-                        {message.title}
+                        {`${message.title} ${message.count ? `(${message.count})` : ''}`}
                     </div>
-                    <div className="flex-shrink-0">
+                    <div className="display-flex flex-row gap-2 flex-shrink-0">
+                        {message.buttonIcon && message.buttonOnClick && (
+                            <IconButton
+                                variant="ghost"
+                                icon={message.buttonIcon}
+                                onClick={() => {
+                                    if(message.buttonOnClick) {
+                                        message.buttonOnClick();
+                                        handleDismiss();
+                                    }
+                                }}
+                                iconClassName={`${fontColor} scale-11`}
+                            />
+                        )}
                         <IconButton
                             icon={CancelIcon}
                             onClick={handleDismiss}
-                            iconClassName={`${fontColor}`}
+                            iconClassName={`${fontColor} scale-11`}
                         />
                     </div>
                 </div>
