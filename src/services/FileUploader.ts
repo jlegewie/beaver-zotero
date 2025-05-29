@@ -15,6 +15,7 @@ import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
 import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType } from '../../react/atoms/sync';
 import { planFeaturesAtom } from '../../react/atoms/profile';
+import { ZoteroItemReference } from '../../react/types/zotero';
 
 /**
  * Manages file uploads from a frontend-managed queue of pending uploads.
@@ -557,6 +558,7 @@ export class FileUploader {
  */
 export const resetFailedUploads = async (): Promise<void> => {
     try {
+        // check authentication status
         const isAuthenticated = store.get(isAuthenticatedAtom);
         const user = store.get(userAtom);
 
@@ -566,28 +568,66 @@ export const resetFailedUploads = async (): Promise<void> => {
         }
         const userId = user.id;
 
+        // -------- (1) Reset failed uploads in backend --------
         const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
         logger(`File Uploader: Backend reset ${results.length} failed uploads.`, 3);
 
-        if (results.length === 0) {
-            logger(`File Uploader: No failed uploads reported by backend to reset locally.`, 3);
-            return;
+        // if (results.length > 0) {
+        //     logger(`File Uploader: No failed uploads reported by backend to reset locally.`, 3);
+        //     return;
+        // }
+
+        // Use results to reset failed uploads in local database
+        if (results.length > 0) {
+            const itemsToResetInDB: UploadQueueInput[] = results.map(result => ({
+                file_hash: result.file_hash,
+                library_id: result.library_id,
+                zotero_key: result.zotero_key
+                // Other fields like page_count, attempt_count will be set to default reset values
+                // by the Zotero.Beaver.db.resetUploads method.
+            }));
+
+            await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
+            logger(`File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
         }
 
-        const itemsToResetInDB: UploadQueueInput[] = results.map(result => ({
-            file_hash: result.file_hash,
-            library_id: result.library_id,
-            zotero_key: result.zotero_key
-            // Other fields like page_count, attempt_count will be set to default reset values
-            // by the Zotero.Beaver.db.resetUploads method.
-        }));
+        // -------- (2) Ensure integrity of local database --------
+        // Integrity check: there should be no failed attachments in the local database after reset
+        const failedAttachments = await Zotero.Beaver.db.getFailedAttachments(userId);
+        if (failedAttachments.length > 0) {
+            logger(`File Uploader: DB Integrity check found ${failedAttachments.length} failed attachments in local database, none expected.`, 3);
 
-        await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
-        logger(`File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
+            // (a) Get the status of the failed attachments from the backend
+            const results = await attachmentsService.getMultipleAttachmentsStatus(
+                failedAttachments.map(a => ({zotero_key: a.zotero_key, library_id: a.library_id} as ZoteroItemReference))
+            );
 
-        // Restart the uploader
+            // (b) Update local database
+            for (const result of results) {
+                await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
+                    upload_status: result.upload_status ?? null,
+                    md_status: result.md_status ?? null,
+                    docling_status: result.docling_status ?? null,
+                    md_error_code: result.md_error_code ?? null,
+                    docling_error_code: result.docling_error_code ?? null,
+                });
+            }
+            
+            // (c) Enqueue pending attachments for upload if they are not already in the queue
+            const pendingAttachments = results.filter(r => r.upload_status === 'pending');
+            const queueItems: UploadQueueInput[] = pendingAttachments
+                .filter(a => a.file_hash)
+                .map(a => ({
+                    file_hash: a.file_hash!,
+                    library_id: a.library_id,
+                    zotero_key: a.zotero_key,
+                }));
+            await Zotero.Beaver.db.upsertQueueItemsBatch(userId, queueItems);
+            logger(`File Uploader: Enqueued ${pendingAttachments.length} pending attachments for upload.`, 3);
+        }
+        
+        // -------- (3) Restart the uploader --------
         await fileUploader.start("manual");
-        logger(`File Uploader: Uploader restarted after resetting failed uploads.`, 3);
 
     } catch (error: any) {
         logger(`File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
