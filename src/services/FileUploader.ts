@@ -14,8 +14,9 @@ import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
 import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType } from '../../react/atoms/sync';
-import { planFeaturesAtom } from '../../react/atoms/profile';
+import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { ZoteroItemReference } from '../../react/types/zotero';
+import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 
 /**
  * Manages file uploads from a frontend-managed queue of pending uploads.
@@ -31,8 +32,8 @@ export class FileUploader {
     // queue reads
     private readonly BATCH_SIZE: number = 15;
     private readonly MAX_ATTEMPTS: number = 3;
-    private readonly INITIAL_VISIBILITY_TIMEOUT: number = 1; // 1 minute timeout for reads
-    private readonly RETRY_VISIBILITY_TIMEOUT: number = 15;  // 15 minutes timeout for retries
+    private readonly VISIBILITY_TIMEOUT: number = 0.5; // 30 seconds timeout for reads
+    private readonly VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE: number = 5;  // 5 minutes timeout for retries
 
     /**
      * Minimum interval between currentFile updates (in milliseconds)
@@ -299,7 +300,7 @@ export class FileUploader {
                     user.id, 
                     this.BATCH_SIZE, 
                     this.MAX_ATTEMPTS,
-                    this.INITIAL_VISIBILITY_TIMEOUT
+                    this.VISIBILITY_TIMEOUT
                 );
 
                 logger(`File Uploader: Read ${items.length} items from local queue`, 3);
@@ -475,18 +476,9 @@ export class FileUploader {
             logger(`File Uploader: Error uploading file for attachment ${item.zotero_key}: ${error.message}`, 1);
             Zotero.logError(error);
 
-            // If attempts are too high, treat as permanently failed
-            if (item.attempt_count >= 3) {
-                await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
-            } else {
-                // Set longer timeout for application-handled retry
-                await Zotero.Beaver.db.setQueueItemTimeout(
-                    user_id,
-                    item.file_hash,
-                    this.RETRY_VISIBILITY_TIMEOUT
-                );
-                logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.RETRY_VISIBILITY_TIMEOUT} minutes`, 2);
-            }
+            // Treat as permanently failed with message for manual retry
+            await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
+            
         } finally {
             // Clear current file when done (success or failure)
             this.updateQueueStatus({ currentFile: null });
@@ -511,13 +503,27 @@ export class FileUploader {
             this.urlCache.delete(item.file_hash);
 
             this.incrementQueueStatus({ failed: 1, pending: -1 }, true);
+
+            // Error message for manual retry (only show if user has completed onboarding)
+            if (store.get(hasCompletedOnboardingAtom)) {
+                store.set(addOrUpdateFailedUploadMessageAtom, {
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key
+                } as ZoteroItemReference);
+            }
             
             logger(`File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
             Zotero.logError(failError);
-            // Don't update local state or cleanup - this means the item will be retried later
+            // Don't update local state or cleanup - item will be retried after visibility timeout
+            await Zotero.Beaver.db.setQueueItemTimeout(
+                user_id,
+                item.file_hash,
+                this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE
+            );
+            logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE} minutes`, 2);
             // Re-throw the error so callers know the operation failed
             throw failError;
         }
