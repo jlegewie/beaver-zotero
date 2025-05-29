@@ -21,8 +21,6 @@ import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status
 import { ProgressBar } from "../status/ProgressBar";
 import { isUploadCompleteAtom } from "../../atoms/status";
 
-const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
-
 
 const ProcessItem: React.FC<{
     icon: React.ReactNode,

@@ -14,7 +14,6 @@ import { resetFailedUploads } from "../../../src/services/FileUploader";
 import { useUploadProgress } from "../../hooks/useUploadProgress";
 import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../../atoms/status';
 
-const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
 const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingPage=false}) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
@@ -75,8 +74,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingP
 
         // Use upload stats from hook
         if (uploadStats) {
-            const failureRate = uploadStats.total > 0 ? uploadStats.failed / uploadStats.total : 0;
-            if (failureRate > MAX_FAILED_UPLOAD_PERCENTAGE) return CancelIcon;
+            if (uploadStats.failed > 0) return CancelIcon;
             if (isUploadComplete) return CheckmarkIcon;
         }
         
@@ -119,8 +117,8 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingP
                         <div className="display-flex flex-row gap-4">
                             {uploadStats && uploadStats?.completed && (
                                 <div className="font-color-tertiary text-base">
-                                    {/* {getUploadLeftText()} */}
-                                    {`${uploadStats?.completed.toLocaleString()} completed`}
+                                    {getUploadLeftText()}
+                                    {/* {`${uploadStats?.completed.toLocaleString()} completed`} */}
                                 </div>
                             )}
                             <div className="flex-1"/>
