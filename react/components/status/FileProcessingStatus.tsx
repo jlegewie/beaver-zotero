@@ -195,7 +195,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
 
                     {/* Title */}
                     <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                        <div className={`${fileStats?.failedProcessingCount && fileStats.failedProcessingCount > 0 ? 'font-color-red' : 'font-color-primary'} text-lg`}>
+                        <div className={`${fileStats?.failedProcessingCount && fileStats.failedProcessingCount > 0 ? 'font-color-red' : 'font-color-secondary'} text-lg`}>
                             File Processing
                         </div>
                         <div className="flex-1"/>

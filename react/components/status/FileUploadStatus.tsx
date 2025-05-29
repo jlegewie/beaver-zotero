@@ -134,7 +134,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
 
                     {/* Title */}
                     <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                        <div className={`${uploadStats?.failed && uploadStats.failed > 0 ? 'font-color-red' : 'font-color-primary'} text-lg`}>
+                        <div className={`${uploadStats?.failed && uploadStats.failed > 0 ? 'font-color-red' : 'font-color-secondary'} text-lg`}>
                             File Uploads
                         </div>
                         <div className="flex-1"/>
