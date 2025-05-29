@@ -2,6 +2,9 @@ import { atom } from 'jotai';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { v4 as uuidv4 } from 'uuid';
+import { ZoteroItemReference } from '../types/zotero';
+import { RepeatIcon } from '../components/icons/icons';
+import { resetFailedUploads } from '../../src/services/FileUploader';
 
 /**
  * Adds a new popup message to the list.
@@ -25,6 +28,46 @@ export const addPopupMessageAtom = atom(
         });
     }
 );
+
+export const addOrUpdateFailedUploadMessageAtom = atom(
+    null,
+    async (get, set, itemRef: ZoteroItemReference) => {
+        const messageTitle = "File Upload Failed";
+        const messages = get(popupMessagesAtom);
+        const existingMessage = messages.find((msg) => msg.title?.includes(messageTitle));
+        
+        // Update existing message
+        if (existingMessage) {
+            set(popupMessagesAtom, (prevMessages) => {
+                return prevMessages.map((msg) => {
+                    if (msg.id == existingMessage.id) {
+                        return {
+                            ...msg,
+                            count: msg.count ? msg.count + 1 : 1
+                        };
+                    }
+                    return msg;
+                });
+            });
+        // Create new message
+        } else {
+            // const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(itemRef.library_id, itemRef.zotero_key);
+            // const zoteroItemTitle = zoteroItem?.attachmentFilename;
+            set(addPopupMessageAtom, {
+                type: 'error',
+                title: messageTitle,
+                text: `Failed to upload file(s). Please retry manually.`,
+                expire: false,
+                buttonIcon: RepeatIcon,
+                buttonOnClick: async () => {
+                    await resetFailedUploads();
+                },
+                count: 1
+            });
+        }
+    }
+);
+
 
 /**
  * Removes a popup message by its ID.
