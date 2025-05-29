@@ -5,7 +5,7 @@ import { Icon, InformationCircleIcon, Spinner, RepeatIcon } from '../icons/icons
 import Tooltip from './Tooltip';
 import IconButton from './IconButton';
 import { attachmentsService } from '../../../src/services/attachmentsService';
-import { resetFailedUploads } from '../../../src/services/FileUploader';
+import FileUploadStatus from '../status/FileUploadStatus';
 
 function formatCount(count: number): string {
     if (count >= 10000) {

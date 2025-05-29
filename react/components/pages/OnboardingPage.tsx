@@ -16,7 +16,7 @@ import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
 import { StatusItem } from "../ui/buttons/FileStatusButton";
-import FileUploadStatus from "./FileUploadStatus";
+import FileUploadStatus from "../status/FileUploadStatus";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
 import { ProgressBar } from "../status/ProgressBar";
 import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
