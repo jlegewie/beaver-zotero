@@ -347,7 +347,7 @@ const OnboardingPage: React.FC = () => {
                             uploadStats={uploadStats}
                             isUploadComplete={isUploadComplete}
                             uploadError={uploadError}
-                            progress={uploadProgress}
+                            uploadProgress={uploadProgress}
                             startUploadPolling={startUploadPolling}
                         />
                         

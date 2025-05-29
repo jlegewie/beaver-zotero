@@ -20,10 +20,10 @@ const FileUploadStatus: React.FC<{
     uploadStats: AttachmentUploadStatistics | null,
     isUploadComplete: boolean,
     uploadError: Error | null,
-    progress?: number,
+    uploadProgress?: number,
     fileStats?: FileStatusStats,
     startUploadPolling: () => void,
-}> = ({ uploadStats, isUploadComplete, uploadError, progress, fileStats, startUploadPolling }) => {
+}> = ({ uploadStats, isUploadComplete, uploadError, uploadProgress, fileStats, startUploadPolling }) => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -107,9 +107,9 @@ const FileUploadStatus: React.FC<{
                     </div>
 
                     {/* Progress bar and text */}
-                    {progress !== undefined && (
+                    {uploadProgress !== undefined && (
                         <div className="w-full">
-                            <ProgressBar progress={progress} />
+                            <ProgressBar progress={uploadProgress} />
                             <div className="display-flex flex-row gap-4">
                                 <div className="font-color-tertiary text-base">
                                     {/* {getUploadLeftText()} */}
