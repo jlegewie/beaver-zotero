@@ -444,19 +444,8 @@ export class FileUploader {
                     await this.markUploadCompleted(item, pageCount, user_id);
                     uploadSuccess = true;
                 } catch (uploadError: any) {
-                    if (
-                        uploadError instanceof TypeError || 
-                        (
-                            typeof uploadError === 'object' &&
-                            uploadError !== null &&
-                            'message' in uploadError &&
-                            typeof uploadError.message === 'string' &&
-                            (
-                                uploadError.message.includes('network') ||
-                                uploadError.message.includes('connection')
-                            )
-                        )
-                    ) {
+                    // Network errors
+                    if (uploadError instanceof TypeError) {
                         // Network error, retry with backoff
                         logger(`File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
                         await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
