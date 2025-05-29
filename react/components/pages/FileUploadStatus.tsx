@@ -114,21 +114,21 @@ const FileUploadStatus: React.FC = () => {
                     </div>
 
                     {/* Progress bar and text */}
-                    {uploadProgress !== undefined && (
-                        <div className="w-full">
-                            <ProgressBar progress={uploadProgress} />
-                            <div className="display-flex flex-row gap-4">
+                    <div className="w-full">
+                        <ProgressBar progress={uploadProgress} />
+                        <div className="display-flex flex-row gap-4">
+                            {uploadStats && uploadStats?.completed && (
                                 <div className="font-color-tertiary text-base">
                                     {/* {getUploadLeftText()} */}
                                     {`${uploadStats?.completed.toLocaleString()} completed`}
                                 </div>
-                                <div className="flex-1"/>
-                                <div className="font-color-tertiary text-base">
-                                    {`${Math.min(librarySyncProgress.progress, 100).toFixed(0)}%`}
-                                </div>
+                            )}
+                            <div className="flex-1"/>
+                            <div className="font-color-tertiary text-base">
+                                {`${Math.min(uploadProgress, 100).toFixed(0)}%`}
                             </div>
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
             {/* Failed uploads */}
