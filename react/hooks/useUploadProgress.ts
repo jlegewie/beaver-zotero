@@ -25,42 +25,40 @@ interface UseUploadProgressOptions {
 * 
 * @param options - Configuration options
 */
-export function useUploadProgress(
-    options: UseUploadProgressOptions = {}
-): void {
+export function useUploadProgress(options: UseUploadProgressOptions = {}): void {
+    const initializedRef = useRef(false);
+
     const {
         interval = 1500,
         autoStop = true,
         onComplete,
         onError
     } = options;
+
+    if (!initializedRef.current) {
+        logger(`useUploadProgress: Hook initialized with options: interval=${interval}, autoStop=${autoStop}`);
+        initializedRef.current = true;
+    }
     
-    logger(`useUploadProgress: Hook initialized with options: ${interval} ${autoStop}`);
+    // Use refs for values that might change
+    const optionsRef = useRef({ interval, autoStop, onComplete, onError });
+    optionsRef.current = { interval, autoStop, onComplete, onError };
     
-    // Atom setters
+    // Refs for state management
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const isMountedRef = useRef(true);
+    const isPollingRef = useRef(true);
+    const lastPollTimeRef = useRef<number>(0);
+    const isPollingInProgressRef = useRef(false);
+    
+    // Atom setters (stable references)
     const setUploadStats = useSetAtom(uploadStatsAtom);
     const setUploadError = useSetAtom(uploadErrorAtom);
     const setUploadProgress = useSetAtom(uploadProgressAtom);
     const setIsUploadComplete = useSetAtom(isUploadCompleteAtom);
     
-    // Refs for cleanup and avoiding stale closures
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const isMountedRef = useRef(true); // Initialized to true
-    const isPollingRef = useRef(true); // Always start as true
-    
-    // Effect to manage isMountedRef correctly based on component lifecycle
-    useEffect(() => {
-        // isMountedRef is true upon initialization and during the component's mounted lifecycle.
-        // This effect's cleanup function will run only when the component unmounts.
-        return () => {
-            logger(`useUploadProgress: Component unmounting, setting isMountedRef to false.`);
-            isMountedRef.current = false;
-        };
-    }, []); // Empty dependency array: runs on mount and cleans up on unmount
-
     // Fetch statistics function
     const fetchStats = useCallback(async (): Promise<AttachmentUploadStatistics | null> => {
-        logger('useUploadProgress: Fetching upload statistics');
         const userId = store.get(userIdAtom);
         
         if (!userId) {
@@ -68,11 +66,9 @@ export function useUploadProgress(
             return null;
         }
         
-        logger(`useUploadProgress: Fetching stats for user: ${userId}`);
-        
         try {
             const newStats = await Zotero.Beaver.db.getAttachmentUploadStatistics(userId);
-            logger(`useUploadProgress: Successfully fetched upload stats: ${JSON.stringify(newStats)}`);
+            logger(`useUploadProgress: Fetched stats - Total: ${newStats.total}, Completed: ${newStats.completed}, Pending: ${newStats.pending}, Failed: ${newStats.failed}`);
             return newStats;
         } catch (err) {
             const error = err instanceof Error ? err : new Error('Failed to fetch upload statistics');
@@ -83,29 +79,27 @@ export function useUploadProgress(
     
     // Polling function
     const poll = useCallback(async () => {
-        logger(`useUploadProgress: Poll cycle started, mounted: ${isMountedRef.current} isPolling: ${isPollingRef.current}`);
-        
-        if (!isMountedRef.current || !isPollingRef.current) {
-            logger(`useUploadProgress: Skipping poll - component unmounted or polling stopped. Mounted: ${isMountedRef.current}, Polling: ${isPollingRef.current}`);
+        if (!isMountedRef.current || !isPollingRef.current || isPollingInProgressRef.current) {
             return;
         }
+        
+        isPollingInProgressRef.current = true;
+        const pollStartTime = Date.now();
         
         try {
             const newStats = await fetchStats();
             
             if (!isMountedRef.current) {
-                logger(`useUploadProgress: Component unmounted during poll (after fetch), discarding results. Mounted: ${isMountedRef.current}`);
                 return;
             }
             
             if (newStats) {
-                logger(`useUploadProgress: Poll successful, updating stats. Progress: ${newStats.completed + newStats.failed + newStats.skipped}/${newStats.total} (${Math.round(((newStats.completed + newStats.failed + newStats.skipped) / newStats.total) * 100)}%)`);
-                
-                // Update atoms - ensure component is mounted before state updates
                 setUploadStats(newStats);
                 setUploadError(null);
                 
-                const progress = newStats.total > 0 ? Math.round((newStats.completed / newStats.total) * 100) : 0;
+                const progress = newStats.total > 0 
+                    ? Math.round((newStats.completed / newStats.total) * 100) 
+                    : 0;
                 setUploadProgress(progress);
                 
                 const uploadComplete = newStats.pending === 0 && newStats.total > 0;
@@ -113,11 +107,12 @@ export function useUploadProgress(
                 
                 if (uploadComplete) {
                     logger(`useUploadProgress: Upload completed! Final stats: ${JSON.stringify(newStats)}`);
-                    onComplete?.(newStats);
-                    
-                    if (autoStop) {
-                        logger(`useUploadProgress: Auto-stopping polling after completion. Mounted: ${isMountedRef.current}, Polling: ${isPollingRef.current}`);
+                    optionsRef.current.onComplete?.(newStats);
+                    if (optionsRef.current.autoStop) {
+                        logger(`useUploadProgress: Auto-stopping polling after completion`);
                         isPollingRef.current = false;
+                    } else {
+                        logger(`useUploadProgress: Upload complete but continuing to poll (autoStop: false)`);
                     }
                 }
                 
@@ -125,50 +120,50 @@ export function useUploadProgress(
                 if (newStats.pending > 0) {
                     fileUploader.start("manual");
                 }
-            } else {
-                logger(`useUploadProgress: Poll returned null stats. Mounted: ${isMountedRef.current}, Polling: ${isPollingRef.current}`);
             }
             
-            // Schedule next poll if still mounted and polling
+            // Schedule next poll with minimum interval guarantee
             if (isMountedRef.current && isPollingRef.current) {
-                logger(`useUploadProgress: Scheduling next poll in ${interval}ms`);
-                timeoutRef.current = setTimeout(poll, interval);
-            } else {
-                logger(`useUploadProgress: Not scheduling next poll. Mounted: ${isMountedRef.current}, Polling: ${isPollingRef.current}`);
+                const elapsedTime = Date.now() - pollStartTime;
+                const nextPollDelay = Math.max(0, optionsRef.current.interval - elapsedTime);
+                
+                timeoutRef.current = setTimeout(poll, nextPollDelay);
             }
         } catch (err) {
             const error = err instanceof Error ? err : new Error('Polling failed');
-            
             if (isMountedRef.current) {
-                logger(`useUploadProgress: Poll failed with error: ${error.message} - stopping polling. Mounted: ${isMountedRef.current}, Polling: ${isPollingRef.current}`);
+                logger(`useUploadProgress: Polling failed: ${error.message} - stopping polling`);
                 setUploadError(error);
-                isPollingRef.current = false; // Stop polling on error
-                onError?.(error);
-            } else {
-                logger(`useUploadProgress: Poll failed but component unmounted. Error: ${error.message}. Mounted: ${isMountedRef.current}`);
+                isPollingRef.current = false;
+                optionsRef.current.onError?.(error);
             }
+        } finally {
+            isPollingInProgressRef.current = false;
         }
-    }, [fetchStats, interval, autoStop, onComplete, onError, setUploadStats, setUploadError, setUploadProgress, setIsUploadComplete]);
+    }, [fetchStats, setUploadStats, setUploadError, setUploadProgress, setIsUploadComplete]);
     
-    // Start polling immediately when hook mounts or dependencies change
+    // Single effect for lifecycle management
     useEffect(() => {
-        logger(`useUploadProgress: Polling useEffect setup. Interval: ${interval}ms. Starting polling.`);
-        isPollingRef.current = true; // Ensure polling is active
+        isMountedRef.current = true;
+        isPollingRef.current = true;
         
-        poll(); // Start polling immediately
+        // Respect interval on initial poll
+        const timeSinceLastPoll = Date.now() - lastPollTimeRef.current;
+        const initialDelay = timeSinceLastPoll < interval ? interval - timeSinceLastPoll : 0;
+        
+        if (initialDelay > 0) {
+            timeoutRef.current = setTimeout(poll, initialDelay);
+        } else {
+            poll();
+        }
         
         return () => {
-            // This cleanup runs if:
-            // 1. Component unmounts (isMountedRef will be false due to the other effect)
-            // 2. Dependencies (poll, interval) change
-            logger(`useUploadProgress: Polling useEffect cleanup. Mounted: ${isMountedRef.current}. Clearing timeout and setting isPollingRef to false.`);
+            isMountedRef.current = false;
+            isPollingRef.current = false;
             if (timeoutRef.current) {
                 clearTimeout(timeoutRef.current);
-                logger(`useUploadProgress: Cleared timeout ${timeoutRef.current} during polling useEffect cleanup.`);
                 timeoutRef.current = null;
             }
-            // Stop the current polling logic if dependencies changed or component is unmounting.
-            isPollingRef.current = false; 
         };
-    }, [poll, interval]);
+    }, []);
 }
