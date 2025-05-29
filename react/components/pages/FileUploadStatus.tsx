@@ -13,20 +13,34 @@ import { FileHashReference } from "../../types/zotero";
 import { logger } from "../../../src/utils/logger";
 import ZoteroAttachmentList from "../ui/ZoteroAttachmentList";
 import { resetFailedUploads } from "../../../src/services/FileUploader";
+import { useUploadProgress } from "../../hooks/useUploadProgress";
+import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../../atoms/status';
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
-const FileUploadStatus: React.FC<{
-    uploadStats: AttachmentUploadStatistics | null,
-    isUploadComplete: boolean,
-    uploadError: Error | null,
-    uploadProgress?: number,
-    startUploadPolling: () => void,
-}> = ({ uploadStats, isUploadComplete, uploadError, uploadProgress, startUploadPolling }) => {
+const FileUploadStatus: React.FC = () => {
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
     const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<FileHashReference[]>([]);
+
+    // Upload status atoms
+    const uploadStats = useAtomValue(uploadStatsAtom);
+    const uploadError = useAtomValue(uploadErrorAtom);
+    const uploadProgress = useAtomValue(uploadProgressAtom);
+    const isUploadComplete = useAtomValue(isUploadCompleteAtom);
+
+    // Upload progress hook
+    useUploadProgress(
+        {
+            interval: 1500,
+            autoStop: false,
+            onComplete: () => {},
+            onError: (error: any) => {
+                logger('Upload progress polling error:', error);
+            }
+        }
+    );
 
     // Effect to fetch failed uploads when the failed count changes
     useEffect(() => {
@@ -151,7 +165,6 @@ const FileUploadStatus: React.FC<{
                                         variant="ghost"
                                         onClick={async () => {
                                             await resetFailedUploads();
-                                            startUploadPolling();
                                         }}
                                         icon={RepeatIcon}
                                         iconClassName={`font-color-red`}

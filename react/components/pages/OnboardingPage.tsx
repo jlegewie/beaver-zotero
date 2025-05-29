@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, InformationCircleIcon, SyncIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, AlertIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { useUploadProgress } from '../../hooks/useUploadProgress';
 import { FileStatusStats, fileStatusStatsAtom } from "../../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
@@ -15,12 +14,12 @@ import { syncZoteroDatabase } from "../../../src/utils/sync";
 import IconButton from "../ui/IconButton";
 import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
-import { resetFailedUploads } from '../../../src/services/FileUploader';
 import { accountService } from "../../../src/services/accountService";
 import { StatusItem } from "../ui/buttons/FileStatusButton";
 import FileUploadStatus from "./FileUploadStatus";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
 import { ProgressBar } from "../status/ProgressBar";
+import { isUploadCompleteAtom } from "../../atoms/status";
 
 const MAX_FAILED_UPLOAD_PERCENTAGE = 0.2;
 
@@ -98,6 +97,7 @@ const OnboardingPage: React.FC = () => {
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
     const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
+    const isUploadComplete = useAtomValue(isUploadCompleteAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -117,35 +117,6 @@ const OnboardingPage: React.FC = () => {
     // Processing state
     const fileStats = useAtomValue(fileStatusStatsAtom);
 
-    // Upload progress hook
-    const {
-        stats: uploadStats,
-        isPolling: isUploadPolling,
-        isLoading: isUploadLoading,
-        error: uploadError,
-        startPolling: startUploadPolling,
-        stopPolling: stopUploadPolling,
-        refresh: refreshUploadStats,
-        progress: uploadProgress,
-        isComplete: isUploadComplete
-    } = useUploadProgress(
-        {
-            interval: 1500,
-            autoStart: false,
-            autoStop: true,
-            onComplete: (stats) => {
-                // Check if upload is complete with acceptable failure rate
-                const failureRate = stats.total > 0 ? stats.failed / stats.total : 0;
-                if (failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE) {
-                    setHasCompletedInitialUpload(true);
-                }
-            },
-            onError: (error: any) => {
-                logger('Upload progress polling error:', error);
-            }
-        }
-    );
-
     // Loading states for service calls
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
@@ -156,26 +127,7 @@ const OnboardingPage: React.FC = () => {
 
         // Set hasCompletedInitialSync
         setHasCompletedInitialSync(isSyncComplete);
-
-        // Start upload polling
-        const shouldStartPolling = isSyncComplete && !isUploadPolling && !isUploadComplete && !!userId;
-        const shouldStopPolling = (!isSyncComplete || isUploadComplete) && isUploadPolling;
-        logger(`Polling: isSyncComplete: ${isSyncComplete} isUploadPolling: ${isUploadPolling} isUploadComplete: ${isUploadComplete} userId: ${userId}`);
-        logger(`Polling: shouldStartPolling: ${shouldStartPolling} shouldStopPolling: ${shouldStopPolling}`);
-        if (shouldStartPolling) {
-            startUploadPolling();
-        } else if (shouldStopPolling) {
-            stopUploadPolling();
-        }
-    }, [librarySyncProgress.progress, librarySyncProgress.anyFailed, isUploadPolling, isUploadComplete, userId, startUploadPolling, stopUploadPolling]);
-
-    // Update ready state based on upload completion and failure rate
-    useEffect(() => {
-        if (isUploadComplete && uploadStats) {
-            const failureRate = uploadStats.total > 0 ? uploadStats.failed / uploadStats.total : 0;
-            setHasCompletedInitialUpload(failureRate <= MAX_FAILED_UPLOAD_PERCENTAGE);
-        }
-    }, [isUploadComplete, uploadStats, setHasCompletedInitialUpload]);
+    }, [librarySyncProgress.progress, librarySyncProgress.anyFailed]);
 
     // Calculate progress percentages
     const calculateProgress = (current: number, total: number): number => {
@@ -186,11 +138,6 @@ const OnboardingPage: React.FC = () => {
     // Handle retry clicks
     const handleSyncRetryClick = () => {
         syncZoteroDatabase();
-    };
-
-    const handleUploadRetryClick = async () => {
-        await resetFailedUploads();
-        startUploadPolling();
     };
 
     const getSyncIcon = (): React.ReactNode => {
@@ -343,13 +290,7 @@ const OnboardingPage: React.FC = () => {
                         />
                         
                         {/* Uploading files */}
-                        <FileUploadStatus
-                            uploadStats={uploadStats}
-                            isUploadComplete={isUploadComplete}
-                            uploadError={uploadError}
-                            uploadProgress={uploadProgress}
-                            startUploadPolling={startUploadPolling}
-                        />
+                        <FileUploadStatus />
                         
                         {/* Indexing files */}
                         <ProcessItem 
@@ -402,7 +343,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!hasCompletedInitialUpload || !hasCompletedInitialSync || isCompletingOnboarding}
+                            disabled={!isUploadComplete || !hasCompletedInitialSync || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete
