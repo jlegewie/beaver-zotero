@@ -1,7 +1,6 @@
 import { atom } from "jotai";
 import { ProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 import { accountService } from "../../src/services/accountService";
-import { getPref } from "../../src/utils/prefs";
 
 // Onboarding state
 export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
@@ -15,7 +14,6 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
 });
 
 export const hasCompletedInitialSyncAtom = atom<boolean>(false);
-export const hasCompletedInitialUploadAtom = atom<boolean>(false);
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);

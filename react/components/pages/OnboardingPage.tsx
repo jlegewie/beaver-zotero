@@ -6,7 +6,7 @@ import { FileStatusStats, fileStatusStatsAtom } from "../../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { userIdAtom, logoutAtom } from "../../atoms/auth";
-import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom, hasCompletedInitialUploadAtom } from '../../atoms/profile';
+import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom } from '../../atoms/profile';
 import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
@@ -19,7 +19,7 @@ import { StatusItem } from "../ui/buttons/FileStatusButton";
 import FileUploadStatus from "./FileUploadStatus";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
 import { ProgressBar } from "../status/ProgressBar";
-import { isUploadCompleteAtom } from "../../atoms/status";
+import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
 
 
 const ProcessItem: React.FC<{
@@ -94,8 +94,8 @@ const OnboardingPage: React.FC = () => {
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
-    const [hasCompletedInitialUpload, setHasCompletedInitialUpload] = useAtom(hasCompletedInitialUploadAtom);
     const isUploadComplete = useAtomValue(isUploadCompleteAtom);
+    const uploadStats = useAtomValue(uploadStatsAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -331,13 +331,23 @@ const OnboardingPage: React.FC = () => {
 
                 {/* Syncing process button */}
                 {planSupported && hasAuthorizedAccess && (
-                    <div className="display-flex flex-row items-center">
-                        {hasCompletedInitialUpload && fileStats.progress < 100 && (
+                    <div className="display-flex flex-row items-center gap-4">
+
+                        {/* Warning messages */}
+                        {uploadStats && uploadStats.failed > 0 && (
+                            <div className="font-color-secondary text-sm">
+                                Failed to upload some files. Please retry to use them in with Beaver.
+                            </div>
+                        )}
+
+                        {isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStats.progress < 100 && (
                             <div className="font-color-secondary text-sm">
                                 Processing incomplete. Expect slower response times & limited search.
                             </div>
                         )}
                         <div className="flex-1" />
+
+                        {/* Complete onboarding button */}
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
