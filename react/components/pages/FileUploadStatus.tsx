@@ -169,6 +169,7 @@ const FileUploadStatus: React.FC<{
                             {showFailedFiles && (
                                 <ZoteroAttachmentList
                                     attachments={failedAttachmentFiles}
+                                    maxHeight="250px"
                                     // button={<Button variant="outline" onClick={() => {}}>Retry</Button>}
                                     // onRetry={() => {}}
                                 />
