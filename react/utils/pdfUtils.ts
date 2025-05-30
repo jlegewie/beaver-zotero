@@ -18,7 +18,7 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
     // If not indexed, use PDFWorker to get the page count
     try {
         // Second parameter (maxPages) as null means get all pages
-        const { totalPages } = await Zotero.PDFWorker.getFullText(item.id, null);
+        const { totalPages } = await Zotero.PDFWorker.getFullText(item.id, 1);
         return totalPages;
     } catch (e) {
         Zotero.debug('Error getting PDF page count: ' + e);
