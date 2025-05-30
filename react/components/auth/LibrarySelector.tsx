@@ -33,6 +33,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 // Get all libraries
                 const allLibraries = await Zotero.Libraries.getAll();
                 // Filter to user libraries
+                // TODO: Add support for group libraries with library.libraryType == "group"
                 const userLibraries = allLibraries.filter(library => library.libraryType === 'user');
                 
                 // Create a simple array with just id, name, isGroup
