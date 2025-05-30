@@ -1,5 +1,5 @@
 import { getItemsToSync } from "./sync";
-import { getPDFPageCount } from '../../react/utils/pdfUtils';
+import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../react/utils/pdfUtils';
 
 export interface LibraryStatistics {
     libraryID: number;
@@ -21,25 +21,40 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     const libraryStatistics = await Promise.all(userLibraries.map(async (library) => {
         // 1. Get all items from the library
         const allItems = await getItemsToSync(library.libraryID);
+        const attachments = allItems.filter(item => item.isAttachment());
+        const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
                 
         // 2. Get the page count for PDF attachments
-        let totalPageCount = 0;
-        for (const item of allItems) {
-            if (item.isPDFAttachment()) {
-                const pageCount = await getPDFPageCount(item);
-                totalPageCount += pageCount || 0;
-            }
+        const pageCountsFromFulltext = await Promise.all(pdfAttachments.map(async (item) => {
+            return {item: item, pageCount: await getPDFPageCountFromFulltext(item)};
+        }));
+
+        // Process items that need worker page count in batches of 5
+        const itemsNeedingWorkerPageCount = pageCountsFromFulltext.filter(pc => pc.pageCount === null);
+        const pageCountsFromWorker = [];
+        
+        for (let i = 0; i < itemsNeedingWorkerPageCount.length; i += 5) {
+            const batch = itemsNeedingWorkerPageCount.slice(i, i + 5);
+            const batchResults = await Promise.all(
+                batch.map(async (pc) => {
+                    return {item: pc.item, pageCount: await getPDFPageCountFromWorker(pc.item)};
+                })
+            );
+            pageCountsFromWorker.push(...batchResults);
         }
+
+        const totalPageCountFromFulltext = pageCountsFromFulltext.reduce((acc, count) => acc + (count.pageCount || 0), 0);
+        const totalPageCountFromWorker = pageCountsFromWorker.reduce((acc, count) => acc + (count.pageCount || 0), 0);
 
         return {
             libraryID: library.libraryID,
             name: library.name,
             isGroup: library.isGroup,
             itemCount: allItems.length,
-            attachmentCount: allItems.filter(item => item.isAttachment()).length,
-            pdfCount: allItems.filter(item => item.isPDFAttachment()).length,
-            imageCount: allItems.filter(item => item.isImageAttachment()).length,
-            pageCount: totalPageCount,
+            attachmentCount: attachments.length,
+            pdfCount: pdfAttachments.length,
+            imageCount: attachments.filter(item => item.isImageAttachment()).length,
+            pageCount: totalPageCountFromWorker + totalPageCountFromFulltext,
         } as LibraryStatistics;
     }));
 
