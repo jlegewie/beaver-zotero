@@ -25,3 +25,42 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
         return null;
     }
 }
+
+
+/**
+ * Get the total number of pages for a PDF attachment
+ * @param {Zotero.Item} item - The PDF attachment item
+ * @returns {Promise<Number|null>} - A promise that resolves with the page count or null if unavailable
+ */
+export async function getPDFPageCountFromFulltext(item: Zotero.Item): Promise<number | null> {
+    if (!item.isPDFAttachment()) {
+        return null;
+    }
+
+    // @ts-ignore Fulltext exists
+    const pagesInfo = await Zotero.Fulltext.getPages(item.id);
+    if (pagesInfo && pagesInfo.total) {
+        return pagesInfo.total;
+    }
+
+    return null;
+
+}
+
+/**
+ * Get the total number of pages for a PDF attachment
+ * @param {Zotero.Item} item - The PDF attachment item
+ * @returns {Promise<Number|null>} - A promise that resolves with the page count or null if unavailable
+ */
+export async function getPDFPageCountFromWorker(item: Zotero.Item): Promise<number | null> {
+    if (!item.isPDFAttachment()) {
+        return null;
+    }
+    try {
+        const { totalPages } = await Zotero.PDFWorker.getFullText(item.id, 1);
+        return totalPages;
+    } catch (e) {
+        Zotero.debug('Error getting PDF page count: ' + e);
+        return null;
+    }
+}
