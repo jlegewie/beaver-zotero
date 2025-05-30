@@ -129,7 +129,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
     };
 
     const getUploadLeftText = (): string => {
-        if (!uploadStats) return "";
+        if (uploadStats === null  || uploadStats === undefined || !uploadStats) return "";
         
         const textParts: string[] = [];
         if (uploadStats.total > 0) textParts.push(`${uploadStats.completed.toLocaleString()} done`);
@@ -163,7 +163,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                     <div className="w-full">
                         <ProgressBar progress={uploadProgress} />
                         <div className="display-flex flex-row gap-4">
-                            {uploadStats && uploadStats?.completed && (
+                            {uploadStats !== null && uploadStats !== undefined && uploadStats.completed > 0 && (
                                 <div className="font-color-tertiary text-base">
                                     {getUploadLeftText()}
                                 </div>
