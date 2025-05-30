@@ -45,14 +45,3 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
 
     return libraryStatistics;
 }
-
-
-
-
-
-
-
-
-// const syncingItemFilter = (item) => {
-//     return item.libraryID === 1 && (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment());
-// };
