@@ -3,6 +3,7 @@ import { CSSItemTypeIcon } from '../icons/icons';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { SourceAttachment } from '../../types/attachments/apiTypes';
 import { ZoteroItemReference } from '../../types/zotero';
+import { selectItemById } from '../../../src/utils/selectItem';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;
@@ -40,8 +41,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
 
     
     const handleItemClick = (selectionItemId: number) => {
-        // @ts-ignore selectItem exists
-        Zotero.getActiveZoteroPane().itemsView.selectItem(selectionItemId);
+        selectItemById(selectionItemId);
     };
 
     return (

@@ -12,6 +12,7 @@ import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { attachmentCitationsAtom } from '../../atoms/citations';
 import { AttachmentCitation } from '../../types/attachments/uiTypes';
+import { selectItem } from '../../../src/utils/selectItem';
 
 interface AssistantMessageFooterProps {
     message: ChatMessage;
@@ -62,8 +63,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             newNote.parentKey = citation.parentKey;
         }
         await newNote.saveTx();
-        // @ts-ignore selectItem exists
-        Zotero.getActiveZoteroPane().itemsView.selectItem(newNote.id);
+        selectItem(newNote);
     }
 
     return (

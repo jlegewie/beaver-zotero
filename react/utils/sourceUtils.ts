@@ -4,6 +4,7 @@ import { truncateText } from './stringUtils';
 import { syncingItemFilter } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
+import { selectItemById } from '../../src/utils/selectItem';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -255,8 +256,7 @@ export async function isSourceValid(source: InputSource): Promise<boolean> {
 export function revealSource(source: SourceAttachment) {
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
-        // @ts-ignore selectItem exists
-        Zotero.getActiveZoteroPane().itemsView.selectItem(itemID);
+        selectItemById(itemID);
     }
 }
 

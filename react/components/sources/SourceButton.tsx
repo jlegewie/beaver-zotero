@@ -11,6 +11,7 @@ import MissingSourceButton from './MissingSourceButton'
 import { usePreviewHover } from '../../hooks/usePreviewHover'
 import { activePreviewAtom } from '../../atoms/ui'
 import { getPref } from '../../../src/utils/prefs'
+import { selectItem } from '../../../src/utils/selectItem'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
@@ -86,8 +87,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 togglePinSource(source.id);
             }
             else if (item) {
-                // @ts-ignore selectItem exists
-                Zotero.getActiveZoteroPane().itemsView.selectItem(item.id);
+                selectItem(item);
             }
         }
 
