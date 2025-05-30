@@ -31,9 +31,10 @@ const ProcessItem: React.FC<{
     leftText?: string,
     rightText?: string,
     fileStats?: FileStatusStats,
+    failed?: boolean,
     rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | undefined,
     onClick?: () => void,
-}> = ({ icon, title, description, progress, leftText, rightText, fileStats, rightIcon, onClick }) => {
+}> = ({ icon, title, description, progress, leftText, rightText, fileStats, failed, rightIcon, onClick }) => {
 
     const syncIconClassName = fileStats
         ? `scale-90 ${fileStats.activeProcessingCount > 0 ? 'animate-spin' : ''}`
@@ -46,7 +47,7 @@ const ProcessItem: React.FC<{
             </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
                 <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                    <div className="font-color-secondary text-lg">{title}</div>
+                    <div className={`text-lg ${failed ? 'font-color-red' : 'font-color-secondary'}`}>{title}</div>
                     <div className="flex-1"/>
                     {rightIcon && onClick && (
                         <IconButton icon={rightIcon} onClick={onClick} variant="ghost-secondary" className="scale-12" />
@@ -269,6 +270,7 @@ const OnboardingPage: React.FC = () => {
                             rightText={`${librarySyncProgress.progress.toFixed(0)}%`}
                             rightIcon={librarySyncProgress.anyFailed ? RepeatIcon : undefined}
                             onClick={librarySyncProgress.anyFailed ? handleSyncRetryClick : undefined}
+                            failed={librarySyncProgress.anyFailed}
                         />
                         
                         {/* Uploading files */}
