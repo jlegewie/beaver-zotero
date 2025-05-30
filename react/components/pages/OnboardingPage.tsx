@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, InformationCircleIcon, SyncIcon, Icon, Spinner, ArrowRightIcon, RepeatIcon, AlertIcon, LogoutIcon, UserIcon, ThreeIcon, OneIcon, TwoIcon } from "../icons/icons";
+import { Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { FileStatusStats, fileStatusStatsAtom } from "../../atoms/ui";
+import { fileStatusStatsAtom } from "../../atoms/ui";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { userIdAtom, logoutAtom } from "../../atoms/auth";
@@ -11,81 +11,15 @@ import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
-import IconButton from "../ui/IconButton";
 import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
-import { StatusItem } from "../ui/buttons/FileStatusButton";
 import FileUploadStatus from "../status/FileUploadStatus";
-import { CancelIcon, CheckmarkIcon, SpinnerIcon, StepThreeIcon } from "../status/icons";
-import { ProgressBar } from "../status/ProgressBar";
+import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
 import FileProcessingStatus from "../status/FileProcessingStatus";
+import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 
-
-const ProcessItem: React.FC<{
-    icon: React.ReactNode,
-    title: string,
-    description?: string,
-    progress?: number,
-    leftText?: string,
-    rightText?: string,
-    fileStats?: FileStatusStats,
-    failed?: boolean,
-    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | undefined,
-    onClick?: () => void,
-}> = ({ icon, title, description, progress, leftText, rightText, fileStats, failed, rightIcon, onClick }) => {
-
-    const syncIconClassName = fileStats
-        ? `scale-90 ${fileStats.activeProcessingCount > 0 ? 'animate-spin' : ''}`
-        : '';
-    
-    return (
-        <div className="display-flex flex-row gap-4 p-3 border-popup rounded-md bg-quinary">
-            <div className="mt-1">
-                {icon}
-            </div>
-            <div className="display-flex flex-col gap-3 items-start flex-1">
-                <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                    <div className={`text-lg ${failed ? 'font-color-red' : 'font-color-secondary'}`}>{title}</div>
-                    <div className="flex-1"/>
-                    {rightIcon && onClick && (
-                        <IconButton icon={rightIcon} onClick={onClick} variant="ghost-secondary" className="scale-12" />
-                    )}
-                </div>
-                {description && (
-                    <div className="font-color-tertiary text-base">
-                        {description}
-                    </div>
-                )}
-                {progress !== undefined && (
-                    <div className="w-full">
-                        <ProgressBar progress={progress} />
-                        <div className="display-flex flex-row gap-4">
-                            <div className="font-color-tertiary text-base">
-                                {fileStats ? (
-                                    <div className="display-flex flex-row gap-3">
-                                        {/* <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount + fileStats.uploadPendingCount} textClassName="text-base" iconClassName="scale-90" /> */}
-                                        <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount} textClassName="text-base" iconClassName="scale-90" />
-                                        <StatusItem icon={SyncIcon} count={fileStats.activeProcessingCount} textClassName="text-base" iconClassName={syncIconClassName} />
-                                        <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} textClassName="text-base" iconClassName="scale-90 text-green-500" />
-                                        <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} textClassName="text-base" iconClassName="scale-90 text-red-500" />
-                                    </div>
-                                ) : (
-                                    leftText || ""
-                                )}
-                            </div>
-                            <div className="flex-1"/>
-                            <div className="font-color-tertiary text-base">
-                                {rightText || ""}
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
 
 const OnboardingPage: React.FC = () => {
     // Auth state
@@ -259,19 +193,7 @@ const OnboardingPage: React.FC = () => {
                 {planSupported && hasAuthorizedAccess && (
                     <div className="display-flex flex-col gap-4">
                         {/* Syncing your library */}
-                        <ProcessItem 
-                            icon={getSyncIcon()}
-                            title="Syncing Zotero database"
-                            progress={librarySyncProgress.progress}
-                            leftText={librarySyncProgress.totalItems > 0
-                                ? `${librarySyncProgress.syncedItems.toLocaleString()} done`
-                                : undefined
-                            }
-                            rightText={`${librarySyncProgress.progress.toFixed(0)}%`}
-                            rightIcon={librarySyncProgress.anyFailed ? RepeatIcon : undefined}
-                            onClick={librarySyncProgress.anyFailed ? handleSyncRetryClick : undefined}
-                            failed={librarySyncProgress.anyFailed}
-                        />
+                        <DatabaseSyncStatus />
                         
                         {/* Uploading files */}
                         <FileUploadStatus isOnboardingPage={true}/>
