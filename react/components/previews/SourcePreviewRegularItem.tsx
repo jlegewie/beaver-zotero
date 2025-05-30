@@ -10,6 +10,7 @@ import SourcePreviewHeading from './SourcePreviewHeading';
 import { threadAttachmentCountAtom, userAttachmentKeysAtom } from '../../atoms/threads';
 import { planFeaturesAtom } from '../../atoms/profile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
+import { logger } from '../../../src/utils/logger';
 
 interface SourcePreviewRegularItemProps {
     source: InputSource;
@@ -44,10 +45,11 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
             const validityMap: {[id: number]: boolean} = {};
             for (const child of children) {
                 try {
-                    const isValid = await isValidZoteroItem(child);
-                    validityMap[child.id] = isValid;
+                    const {valid, error} = await isValidZoteroItem(child);
+                    validityMap[child.id] = valid;
                 } catch (e) {
                     validityMap[child.id] = false;
+                    logger(`Error checking validity of child ${child.id}: ${e}`, 2);
                 }
             }
             if (isMounted) setValidItemIds(validityMap);

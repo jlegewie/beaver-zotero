@@ -210,68 +210,71 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 /**
 * Source method: Check if a source is valid
 */
-export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
+export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: boolean, error?: string}> {
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
         // (a) Pass the syncing filter
-        if (!syncingItemFilter(item)) return false;
+        if (!syncingItemFilter(item)) return {valid: false, error: "Item type not supported"};
 
         // (b) Has attachments or notes
-        if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
-        return true;
+        if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
+        return {valid: true};
     }
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
         // (a) Pass the syncing filter
-        if (!syncingItemFilter(item)) return false;
+        if (!syncingItemFilter(item)) return {valid: false, error: "Item type not supported"};
 
         // (b) Has a file
         const hasFile = await item.fileExists();
-        if (!hasFile) return false;
+        if (!hasFile) return {valid: false, error: "File does not exist"};
 
         // (c) Confirm upload status
         const userId = store.get(userIdAtom) || '';
         const attachment = await Zotero.Beaver.db.getAttachmentByZoteroKey(userId, item.libraryID, item.key);
-        if (!attachment) return false;
-        if (attachment.upload_status !== 'completed') return false;
+        if (!attachment) return {valid: false, error: "Attachment not found"};
+        if (attachment.upload_status !== 'completed') return {valid: false, error: "Attachment not uploaded"};
 
-        return true;
+        return {valid: true};
     }
 
     // ------- Annotations -------
     else if (item.isAnnotation()) {
         // (a) Check if the annotation type is valid
-        if (!isValidAnnotationType(item.annotationType)) return false;
+        if (!isValidAnnotationType(item.annotationType)) return {valid: false, error: "Invalid annotation type"};
 
         // (b) Check if annotation is empty
-        if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return false;
-        if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return false;
-        if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return false;
+        if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
+        if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
+        if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
 
         // (c) Check if the parent exists and is an attachment
         const parent = item.parentItem;
-        if (!parent || !parent.isAttachment()) return false;
+        if (!parent || !parent.isAttachment()) return {valid: false, error: "Parent item is not an attachment"};
 
         // (d) Check if the parent exists and is syncing
-        if (!syncingItemFilter(parent)) return false;
+        if (!syncingItemFilter(parent)) return {valid: false, error: "Parent item is not syncing"};
 
         // (e) Check if the parent file exists
-        return await parent.fileExists();
+        const hasFile = await parent.fileExists();
+        if (!hasFile) return {valid: false, error: "Parent file does not exist"};
+
+        return {valid: true};
     }
 
     // ------- Notes -------
     else if (item.isNote()) {
-        return false;
+        return {valid: false, error: "Notes not supported"};
     }
 
-    return false;
+    return {valid: false, error: "Invalid item type"};
 }
 
-export async function isSourceValid(source: InputSource): Promise<boolean> {
+export async function isSourceValid(source: InputSource): Promise<{valid: boolean, error?: string}> {
     const item = getZoteroItem(source);
-    if (!item) return false;
+    if (!item) return {valid: false, error: "Item not found"};
     return await isValidZoteroItem(item);
 }
 

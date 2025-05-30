@@ -220,7 +220,7 @@ const AddSourcesMenu: React.FC<{
         const source: InputSource = await createSourceFromItem(item, true);
         
         // Determine item status
-        const isValid = await isSourceValid(source);
+        const {valid: isValid, error: invalidReason} = await isSourceValid(source);
         const isInSources = sources.some(
             (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
         );

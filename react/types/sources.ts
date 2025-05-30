@@ -11,6 +11,8 @@ export interface InputSource {
     childItemKeys: string[];  // Keys of child items
     timestamp: number;        // Creation timestamp
     textSelection?: TextSelection;
+    isValid?: boolean;         // If true, the source is valid
+    invalidReason?: string;    // Reason for invalidity (if isValid is false)
 }
 
 export type ReaderSource = InputSource & { type: "reader" };

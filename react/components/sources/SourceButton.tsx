@@ -12,6 +12,7 @@ import { usePreviewHover } from '../../hooks/usePreviewHover'
 import { activePreviewAtom } from '../../atoms/ui'
 import { getPref } from '../../../src/utils/prefs'
 import { selectItem } from '../../../src/utils/selectItem'
+import { logger } from '../../../src/utils/logger'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
@@ -34,6 +35,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
 
         // States
         const [isValid, setIsValid] = useState(true);
+        const [invalidReason, setInvalidReason] = useState<string | null>(null);
         const [displayName, setDisplayName] = useState<string>('');
         const removeSource = useSetAtom(removeSourceAtom);
         const setActivePreview = useSetAtom(activePreviewAtom);
@@ -68,7 +70,12 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Update the validation status when the source changes
         useEffect(() => {
             const checkSourceValidity = async () => {
-                setIsValid(await isSourceValid(source));
+                const {valid, error} = await isSourceValid(source);
+                setIsValid(valid);
+                if (!valid) {
+                    setInvalidReason(error || "Unknown error");
+                    logger(`Error checking validity of source ${source.id}: ${error}`, 2);
+                }
             }
             checkSourceValidity();
         }, [source])

@@ -70,7 +70,15 @@ function flattenSources(
 async function validateSources(
     sources: InputSource[]
 ): Promise<InputSource[]> {
-    const validSources = await Promise.all(sources.filter(async (s) => await isSourceValid(s)));
+    const validations = await Promise.all(sources.map(async (s) => {
+        const res = await isSourceValid(s);
+        return { source: s, isValid: res.valid };
+    }));
+
+    const validSources = validations
+        .filter(v => v.isValid)
+        .map(v => v.source);
+
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
 }
 

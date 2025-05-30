@@ -50,6 +50,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
         const [derivedAnnotation, setDerivedAnnotation] = useState<Annotation | null>(null);
         const [isValid, setIsValid] = useState(true);
+        const [invalidReason, setInvalidReason] = useState<string | null>(null);
 
         // Use the custom hook for hover preview logic
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
@@ -82,9 +83,14 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
             // Perform validation if we have a zoteroItem
             const checkValidity = async () => {
                 if (zoteroItem) {
-                    setIsValid(await isValidZoteroItem(zoteroItem));
+                    const {valid, error} = await isValidZoteroItem(zoteroItem);
+                    setIsValid(valid);
+                    if (!valid) {
+                        setInvalidReason(error || "Unknown error");
+                    }
                 } else {
                     setIsValid(false);
+                    setInvalidReason("Item not found");
                 }
             };
             checkValidity();
