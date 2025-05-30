@@ -157,14 +157,14 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         if (isOnboardingPage) {
             if (librarySyncProgress.anyFailed) return StepThreeIcon;
             if (librarySyncProgress.progress < 100) return StepThreeIcon;
-            if (uploadStats && uploadStats.failed > 0) return StepThreeIcon;
-            if (!isUploadComplete) return StepThreeIcon;
+            // if (uploadStats && uploadStats.failed > 0) return StepThreeIcon;
         }
 
         // Use file processing stats
         if (fileStats) {
-            if (fileStats.failedProcessingCount > 0) return CancelIcon;
-            if (fileStats.progress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0) return CheckmarkIcon;
+            const complete = fileStats.processingProgress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
+            if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
+            if (complete) return CheckmarkIcon;
         }
         
         return SpinnerIcon; // Default to spinner if still processing or stats are unavailable
