@@ -333,6 +333,8 @@ export async function syncItemsToBackend(
     let attachmentCount = 0;
     let syncId = undefined;
     let processedCount = 0;
+    let syncCompleted = false; // Track if sync was explicitly completed
+    let syncFailed = false;    // Track if sync failed
     
     // Set initial progress
     if (onProgress) onProgress(0, totalItems);
@@ -382,23 +384,13 @@ export async function syncItemsToBackend(
                 onProgress(processedCount, totalItems);
             }
             
-            // If this is the last batch, mark sync as completed
-            if (i + batchSize >= items.length) {
-                onStatusChange?.('completed');
-                // Report 100% completion at the end for consistency
-                if (onProgress) {
-                    onProgress(totalItems, totalItems);
-                }
-            }
-            
             continue;
         }
 
         // Update attachment count
         attachmentCount += attachmentsDataFiltered.length;
 
-        // sync options
-        const createLog = i === 0;
+        const createLog = !syncId;
         const closeLog = i + batchSize >= items.length;
 
         try {
@@ -502,10 +494,10 @@ export async function syncItemsToBackend(
                 }
             }
             
-            // If this is the last batch and successful
+            // Track if sync was completed in this batch
             if (closeLog && batchResult.sync_status === 'completed') {
+                syncCompleted = true;
                 onStatusChange?.('completed');
-                // Report 100% completion at the end for consistency
                 if (onProgress) {
                     onProgress(totalItems, totalItems);
                 }
@@ -513,10 +505,35 @@ export async function syncItemsToBackend(
         } catch (error: any) {
             logger(`Beaver Sync: Error processing batch: ${error.message}`, 1);
             Zotero.logError(error);
+            syncFailed = true;        // ← Mark sync as failed
             onStatusChange?.('failed');
             break;
         }
-
+    }
+    
+    // Only complete sync if we have a syncId, didn't complete, AND didn't fail
+    if (syncId && !syncCompleted && !syncFailed) {
+        try {
+            logger(`Beaver Sync: Completing sync ${syncId} after processing all batches`, 3);
+            await syncService.completeSync(syncId);
+            onStatusChange?.('completed');
+            if (onProgress) {
+                onProgress(totalItems, totalItems);
+            }
+        } catch (error: any) {
+            logger(`Beaver Sync: Error completing sync: ${error.message}`, 1);
+            onStatusChange?.('failed'); // ← Set failed status if completion fails
+        }
+    } else if (!syncId && !syncFailed && processedCount === totalItems && totalItems > 0) {
+        // This condition implies all items were processed (e.g., filtered out locally),
+        // no new syncId was established with the backend for this operation,
+        // and no errors occurred during local processing.
+        // totalItems > 0 ensures this block is for when there were items to begin with.
+        logger(`Beaver Sync: All ${totalItems} items processed locally (e.g., filtered due to no changes), no backend sync activity initiated for this set. Marking as complete.`, 3);
+        onStatusChange?.('completed');
+        if (onProgress) {
+            onProgress(totalItems, totalItems); // Ensure 100% progress
+        }
     }
 }
 
