@@ -5,6 +5,8 @@ import { syncingItemFilter } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
+import { userIdAtom } from '../atoms/auth';
+import { store } from '../index';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -226,7 +228,16 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
         if (!syncingItemFilter(item)) return false;
 
         // (b) Has a file
-        return await item.fileExists();
+        const hasFile = await item.fileExists();
+        if (!hasFile) return false;
+
+        // (c) Confirm upload status
+        const userId = store.get(userIdAtom) || '';
+        const attachment = await Zotero.Beaver.db.getAttachmentByZoteroKey(userId, item.libraryID, item.key);
+        if (!attachment) return false;
+        if (attachment.upload_status !== 'completed') return false;
+
+        return true;
     }
 
     // ------- Annotations -------
