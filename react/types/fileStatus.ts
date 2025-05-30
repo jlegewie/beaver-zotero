@@ -10,26 +10,25 @@ export interface FileStatus {
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
-    
+    upload_skipped: number;
+
     // Markdown processing status
     md_unavailable: number;
     md_balance_insufficient: number;
     md_queued: number;
     md_processing: number;
-    md_converted: number;
-    md_chunked: number;
     md_embedded: number;
     md_failed: number;
+    md_skipped: number;
 
     // Docling processing status
     docling_unavailable: number;
     docling_balance_insufficient: number;
     docling_queued: number;
     docling_processing: number;
-    docling_converted: number;
-    docling_chunked: number;
     docling_embedded: number;
     docling_failed: number;
+    docling_skipped: number;
 
     // Timestamp for the last update
     last_updated_at: string; // ISO 8601 timestamp string

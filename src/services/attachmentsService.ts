@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 
 // processing_status from backend
-export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "converted" | "chunked" | "embedded" | "failed";
+export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "embedded" | "failed" | "skipped";
 // upload_status_literal from backend
 export type UploadStatus = "pending" | "completed" | "failed" | "skipped";
 

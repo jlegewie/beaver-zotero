@@ -112,8 +112,6 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             case 'queued':
                 return { text: 'Waiting for processing...', showButton: false };
             case 'processing':
-            case 'converted':
-            case 'chunked':
                 return { text: 'Processing...', showButton: false };
             case 'embedded':
                 return {
@@ -128,6 +126,8 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                         await fileUploader.start("manual");
                     }
                 };
+            case 'skipped':
+                return { text: 'Skipped', showButton: false };
             case 'failed': {
                 // Error code if any
                 const errorDescription = errorMapping[errorCode as keyof typeof errorMapping] || "Unexpected error";

@@ -29,20 +29,19 @@ export const useFileStatus = (): void => {
         upload_pending: Number(statusData.upload_pending || 0),
         upload_completed: Number(statusData.upload_completed || 0),
         upload_failed: Number(statusData.upload_failed || 0),
+        upload_skipped: Number(statusData.upload_skipped || 0),
         md_unavailable: Number(statusData.md_unavailable || 0),
         md_queued: Number(statusData.md_queued || 0),
         md_processing: Number(statusData.md_processing || 0),
-        md_converted: Number(statusData.md_converted || 0),
-        md_chunked: Number(statusData.md_chunked || 0),
         md_embedded: Number(statusData.md_embedded || 0),
         md_failed: Number(statusData.md_failed || 0),
+        md_skipped: Number(statusData.md_skipped || 0),
         docling_unavailable: Number(statusData.docling_unavailable || 0),
         docling_queued: Number(statusData.docling_queued || 0),
         docling_processing: Number(statusData.docling_processing || 0),
-        docling_converted: Number(statusData.docling_converted || 0),
-        docling_chunked: Number(statusData.docling_chunked || 0),
         docling_embedded: Number(statusData.docling_embedded || 0),
         docling_failed: Number(statusData.docling_failed || 0),
+        docling_skipped: Number(statusData.docling_skipped || 0),
     });
 
     useEffect(() => {

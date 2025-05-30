@@ -55,6 +55,7 @@ export interface FileStatusStats {
     totalFiles: number;
     completedFiles: number;
     failedProcessingCount: number;
+    skippedProcessingCount: number;
     activeProcessingCount: number;
     totalProcessingCount: number;
     processingProgress: number;
@@ -65,6 +66,7 @@ export interface FileStatusStats {
     queuedProcessingCount: number;
     uploadCompletedCount: number;
     uploadFailedCount: number;
+    uploadSkippedCount: number;
 }
 
 
@@ -80,10 +82,12 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const uploadPendingCount = fileStatus?.upload_pending || 0;
         const uploadCompletedCount = fileStatus?.upload_completed || 0;
         const uploadFailedCount = fileStatus?.upload_failed || 0;
+        const uploadSkippedCount = fileStatus?.upload_skipped || 0;
 
         // Processing stats
+        const skippedProcessingCount = fileStatus?.md_skipped || 0;
         const failedProcessingCount = fileStatus?.md_failed || 0;
-        const activeProcessingCount = (fileStatus?.md_processing || 0) + (fileStatus?.md_chunked || 0) + (fileStatus?.md_converted || 0);
+        const activeProcessingCount = (fileStatus?.md_processing || 0);
         const queuedProcessingCount = fileStatus?.md_queued || 0;
         const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles;
         const processingProgress = totalProcessingCount > 0
@@ -104,6 +108,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
             totalFiles,
             completedFiles,
             failedProcessingCount,
+            skippedProcessingCount,
             activeProcessingCount,
             totalProcessingCount,
             processingProgress,
@@ -114,6 +119,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
             queuedProcessingCount,
             uploadCompletedCount,
             uploadFailedCount,
+            uploadSkippedCount,
         } as FileStatusStats;
     }
 );
