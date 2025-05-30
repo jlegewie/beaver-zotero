@@ -209,38 +209,44 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 * Source method: Check if a source is valid
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
-    
+
     // ------- Regular items -------
     if (item.isRegularItem()) {
+        // (a) Pass the syncing filter
         if (!syncingItemFilter(item)) return false;
+
+        // (b) Has attachments or notes
         if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
         return true;
     }
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
+        // (a) Pass the syncing filter
         if (!syncingItemFilter(item)) return false;
-        if (item.isAttachment()) return await item.fileExists();
+
+        // (b) Has a file
+        return await item.fileExists();
     }
 
     // ------- Annotations -------
     else if (item.isAnnotation()) {
-        // Check if the annotation type is valid
+        // (a) Check if the annotation type is valid
         if (!isValidAnnotationType(item.annotationType)) return false;
 
-        // Check if annotation is empty
+        // (b) Check if annotation is empty
         if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return false;
         if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return false;
         if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return false;
 
-        // Check if the parent exists and is an attachment
+        // (c) Check if the parent exists and is an attachment
         const parent = item.parentItem;
         if (!parent || !parent.isAttachment()) return false;
 
-        // Check if the parent exists and is syncing
+        // (d) Check if the parent exists and is syncing
         if (!syncingItemFilter(parent)) return false;
 
-        // Check if the parent file exists
+        // (e) Check if the parent file exists
         return await parent.fileExists();
     }
 
