@@ -2,7 +2,7 @@
  * FileUploader.ts
  *
  * A uploader that processes Zotero file attachments in batches using a queue. 
- * It reads pending items from the local SQLite database, requests upload URLs on-demand,
+ * It reads pending items from the local SQLite database,
  * handles retries, and updates progress based on local queue status. 
  */
 
@@ -10,12 +10,13 @@ import PQueue from 'p-queue';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
-import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
+import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
 import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { ZoteroItemReference } from '../../react/types/zotero';
+import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 
 /**
@@ -40,11 +41,6 @@ export class FileUploader {
      */
     private readonly MIN_FILE_UPDATE_INTERVAL: number = 200;
     private lastFileUpdateTime: number = 0;
-
-    /**
-     * URL cache to store upload URLs with expiration times
-     */
-    private urlCache: Map<string, { url: string; expiresAt: Date }> = new Map();
 
     /**
      * Updates the upload queue status atom
@@ -91,89 +87,6 @@ export class FileUploader {
         this.updateQueueStatus({ currentFile: libraryId + "-" + zoteroKey });
     }
 
-    /**
-     * Gets upload URL for a single file hash with caching
-     * @param fileHash The file hash to get URL for
-     * @returns Upload URL or null if failed
-     */
-    private async getUploadUrl(fileHash: string): Promise<string | null> {
-        // Check cache first with 30-minute safety buffer
-        const cached = this.urlCache.get(fileHash);
-        if (cached) {
-            const safetyBuffer = 30 * 60 * 1000; // 30 minutes in milliseconds
-            if (new Date().getTime() < cached.expiresAt.getTime() - safetyBuffer) {
-                return cached.url;
-            } else {
-                // Remove expired URL from cache
-                this.urlCache.delete(fileHash);
-            }
-        }
-
-        try {
-            // Request new URL from backend
-            const urlResponse = await attachmentsService.getUploadUrls([fileHash]);
-            const uploadUrl = urlResponse[fileHash];
-            
-            if (uploadUrl) {
-                // Cache the URL for 90 minutes (30 minutes before the 2-hour expiration)
-                const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
-                this.urlCache.set(fileHash, { url: uploadUrl, expiresAt });
-                return uploadUrl;
-            }
-            
-            return null;
-        } catch (error: any) {
-            logger(`File Uploader: Error getting upload URL for ${fileHash}: ${error.message}`, 1);
-            return null;
-        }
-    }
-
-    /**
-     * Gets upload URLs for multiple items with caching
-     * @param items Array of queue items to get URLs for
-     * @returns Map of fileHash to URL for all items
-     */
-    private async getUploadUrls(items: UploadQueueRecord[]): Promise<Map<string, string>> {
-        const urlMap = new Map<string, string>();
-        const itemsNeedingUrls: UploadQueueRecord[] = [];
-        
-        // Check cache for existing valid URLs
-        const safetyBuffer = 30 * 60 * 1000; // 30 minutes in milliseconds
-        for (const item of items) {
-            const cached = this.urlCache.get(item.file_hash);
-            if (cached && new Date().getTime() < cached.expiresAt.getTime() - safetyBuffer) {
-                urlMap.set(item.file_hash, cached.url);
-            } else {
-                // Remove expired URL from cache
-                if (cached) {
-                    this.urlCache.delete(item.file_hash);
-                }
-                itemsNeedingUrls.push(item);
-            }
-        }
-
-        // Request new URLs in batch if needed
-        if (itemsNeedingUrls.length > 0) {
-            try {
-                const fileHashes = itemsNeedingUrls.map(item => item.file_hash);
-                const urlResponse = await attachmentsService.getUploadUrls(fileHashes);
-                
-                // Cache new URLs and add to result map
-                const expiresAt = new Date(Date.now() + 90 * 60 * 1000); // 90 minutes
-                for (const item of itemsNeedingUrls) {
-                    const uploadUrl = urlResponse[item.file_hash];
-                    if (uploadUrl) {
-                        this.urlCache.set(item.file_hash, { url: uploadUrl, expiresAt });
-                        urlMap.set(item.file_hash, uploadUrl);
-                    }
-                }
-            } catch (error: any) {
-                logger(`File Uploader: Error getting batch upload URLs: ${error.message}`, 1);
-            }
-        }
-
-        return urlMap;
-    }
 
     /**
      * Calculate the total number of unique files that need uploading for this session
@@ -310,22 +223,6 @@ export class FileUploader {
                     break;
                 }
 
-                // Get upload URLs for all items
-                const urlMap = await this.getUploadUrls(items);
-
-                // Separate items with and without URLs
-                const itemsWithUrls = items.filter(item => urlMap.has(item.file_hash));
-                const itemsWithoutUrls = items.filter(item => !urlMap.has(item.file_hash));
-
-                // Mark items without URLs as failed (they can't be processed)
-                for (const item of itemsWithoutUrls) {
-                    try {
-                        await this.handlePermanentFailure(item, user.id, "Unable to get upload URL");
-                    } catch (error: any) {
-                        logger(`Failed to mark item ${item.zotero_key} as failed: ${error.message}`, 2);
-                    }
-                }
-
                 // Only recalculate pending periodically or when needed
                 if (Date.now() - lastPendingUpdate > 30000) { // Every 30 seconds
                     const pending = await this.calculatePendingItems(user.id);
@@ -338,9 +235,8 @@ export class FileUploader {
                 errorBackoffTime = ERROR_BACKOFF_TIME;
 
                 // Add each upload task to the concurrency queue
-                for (const item of itemsWithUrls) {
-                    const uploadUrl = urlMap.get(item.file_hash)!;
-                    this.uploadQueue.add(() => this.uploadFile(item, uploadUrl, user.id));
+                for (const item of items) {
+                    this.uploadQueue.add(() => this.uploadFile(item, user.id));
                 }
 
                 // Wait for these uploads to finish before reading the next batch
@@ -372,12 +268,19 @@ export class FileUploader {
      * Uploads a single file item. 
      * On success, the item is marked completed; on failure, we may retry or fail permanently.
      */
-    private async uploadFile(item: UploadQueueRecord, uploadUrl: string, user_id: string): Promise<void> {
+    private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
         try {
             // Update current file being processed
             this.updateCurrentAttachment(item.library_id, item.zotero_key);
             
             logger(`File Uploader: Uploading file for ${item.zotero_key}`, 3);
+
+            // Get the user ID from the store
+            const userId = store.get(userIdAtom);
+            if (!userId) {
+                logger('File Uploader: No user ID found. Stopping.', 3);
+                throw new Error('No user ID found');
+            }
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
@@ -418,26 +321,35 @@ export class FileUploader {
             let uploadSuccess = false;
             let attempt = 0;
             const maxUploadAttempts = 3;
-            
+            const storagePath = `${userId}/attachments/${item.file_hash}/original`;
+
             while (!uploadSuccess && attempt < maxUploadAttempts) {
                 attempt++;
                 try {
-                    const response = await fetch(uploadUrl, {
-                        method: 'PUT',
-                        body: blob,
-                        headers: { 'Content-Type': mimeType }
-                    });
+                    logger(`File Uploader: Uploading file to ${storagePath}`, 3);
+                    const { data, error } = await supabase
+                        .storage
+                        .from('files')
+                        .upload(storagePath, blob, {
+                            cacheControl: '3600',
+                            upsert: true
+                        });
 
-                    if (!response.ok) {
-                        if (response.status >= 500) {
-                            // Server error - may be temporary
-                            logger(`File Uploader: Server error ${response.status} on attempt ${attempt}, will retry`, 2);
-                            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
-                            continue;
-                        } else {
-                            // Client error - likely permanent
-                            throw new Error(`Upload failed with status ${response.status}`);
-                        }
+                    if (error) {
+                        // Retry with backoff
+                        logger(`File Uploader: Server error ${JSON.stringify(error)} on attempt ${attempt}, will retry`, 2);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                        continue;
+
+                        // if (error.statusCode >= 500) {
+                        //     // Server error - may be temporary
+                        //     logger(`File Uploader: Server error ${response.error.status} on attempt ${attempt}, will retry`, 2);
+                        //     await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                        //     continue;
+                        // } else {
+                        //     // Client error - likely permanent
+                        //     throw new Error(`Upload failed with status ${response.status}`);
+                        // }
                     }
                     
                     // Mark upload as completed
@@ -488,9 +400,6 @@ export class FileUploader {
             // Only if backend call succeeds, update local state
             await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
             
-            // Remove URL from cache
-            this.urlCache.delete(item.file_hash);
-
             this.incrementQueueStatus({ failed: 1, pending: -1 }, true);
 
             // Error message for manual retry (only show if user has completed onboarding)
@@ -528,9 +437,6 @@ export class FileUploader {
 
             // Only if backend call succeeds, update local state and cleanup
             await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
-
-            // Remove URL from cache only after successful backend update
-            this.urlCache.delete(item.file_hash);
 
             logger(`File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
             
