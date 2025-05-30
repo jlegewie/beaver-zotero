@@ -209,18 +209,21 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 * Source method: Check if a source is valid
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
-    // Regular items have to pass the syncingItemFilter and have attachments or notes
+    
+    // ------- Regular items -------
     if (item.isRegularItem()) {
         if (!syncingItemFilter(item)) return false;
         if ((item.getAttachments().length + item.getNotes().length) == 0) return false;
         return true;
-    } 
-    // Attachments have to pass the syncingItemFilter and exist
+    }
+
+    // ------- Attachments -------
     else if (item.isAttachment()) {
         if (!syncingItemFilter(item)) return false;
         if (item.isAttachment()) return await item.fileExists();
     }
-    // Annotation item parent have to pass the syncing filter and exist
+
+    // ------- Annotations -------
     else if (item.isAnnotation()) {
         // Check if the annotation type is valid
         if (!isValidAnnotationType(item.annotationType)) return false;
@@ -240,10 +243,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<boolean> {
         // Check if the parent file exists
         return await parent.fileExists();
     }
-    // Notes are invalid (NoteAttachments are not yet supported)
+
+    // ------- Notes -------
     else if (item.isNote()) {
         return false;
     }
+
     return false;
 }
 
