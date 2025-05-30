@@ -3,10 +3,10 @@ import { logger } from "./logger";
 /**
  * Enhanced item selection that ensures the item is visible before selecting it
  * @param {number} itemId - The ID of the item to select
-
+ * @param {boolean} changeView - Whether to change the view to the library root
  * @returns {Promise<boolean>} - True if item was successfully selected, false otherwise
  */
-export async function selectItem(itemId: number) {
+export async function selectItem(itemId: number, changeView: boolean = true) {
     if (!itemId) return false;
 
     // Get the item to check its properties
@@ -19,7 +19,7 @@ export async function selectItem(itemId: number) {
     // Check if item is in the currently visible collection/library
     const isItemVisible = await checkItemVisibility(itemId);
     
-    if (!isItemVisible) {        
+    if (!isItemVisible && changeView) {        
         // Switch to the item's library root
         const success = await switchToLibraryRoot(item.libraryID);
         if (!success) {
