@@ -131,9 +131,10 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             return iconElement
         }
 
-        return (
+        const sourceButton = (
             <button
                 ref={ref}
+                style={{height: '22px !important'}}
                 {...hoverEventHandlers}
                 className={
                     `variant-outline source-button
@@ -154,5 +155,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 {updateSourcesFromZoteroSelection && !disabled && source.pinned && <ZoteroIcon icon={ZOTERO_ICONS.PIN} size={12} className="-mr-015" />}
             </button>
         )
+
+        return sourceButton;
     }
 )
