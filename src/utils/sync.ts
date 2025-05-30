@@ -643,6 +643,7 @@ export async function performInitialSync(
     } catch (error: any) {
         logger('Beaver Sync: Error during initial sync: ' + error.message, 1);
         Zotero.logError(error);
+        updateLibrarySyncStatus(libraryID, { status: 'failed' });
         throw error;
     }
 }
