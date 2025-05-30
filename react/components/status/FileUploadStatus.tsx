@@ -175,23 +175,23 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                     <div className="display-flex flex-row gap-4  min-w-0">
                         {/* Icon */}
                         <div className="flex-shrink-0">
-                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-red" />
+                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-secondary" />
                         </div>
                         
                         {/* Failed count and retry button */}
                         <div className="display-flex flex-col items-start gap-3 w-full min-w-0">
                             <div className="display-flex flex-row items-start gap-3 w-full">
                                 
-                                {/* <div className={`flex-1 text-base font-medium font-color-red`}>
+                                {/* <div className={`flex-1 text-base font-medium`}>
                                     {uploadStats?.failed} failed uploads
                                 </div> */}
                                 <Button
                                     variant="ghost"
                                     onClick={handleToggleShowFailedFiles}
                                     rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
-                                    iconClassName="mr-0 mt-015 scale-12 font-color-red"
+                                    iconClassName="mr-0 mt-015 scale-12"
                                 >
-                                    <span className="text-base font-color-red" style={{ marginLeft: '-3px' }}>
+                                    <span className="text-base" style={{ marginLeft: '-3px' }}>
                                         {uploadStats?.failed.toLocaleString()} Failed Uploads
                                     </span>
                                 </Button>
@@ -204,7 +204,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                                             setShowFailedFiles(false);
                                         }}
                                         icon={RepeatIcon}
-                                        iconClassName={`font-color-red`}
+                                        iconClassName="font-color-secondary"
                                         className="scale-11"
                                     />
                                     {/* <Button

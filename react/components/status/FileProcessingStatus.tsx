@@ -234,7 +234,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                     <div className="display-flex flex-row gap-4  min-w-0">
                         {/* Icon */}
                         <div className="flex-shrink-0">
-                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-red" />
+                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-secondary" />
                         </div>
                         
                         {/* Failed count and retry button */}
@@ -251,9 +251,9 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                         variant="ghost"
                                         onClick={handleToggleShowFailedFiles}
                                         rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
-                                        iconClassName="mr-0 mt-015 scale-12 font-color-red"
+                                        iconClassName="mr-0 mt-015 scale-12"
                                     >
-                                        <span className="text-base font-color-red" style={{ marginLeft: '-3px' }}>
+                                        <span className="text-base" style={{ marginLeft: '-3px' }}>
                                             {fileStats.failedProcessingCount.toLocaleString()} Failed Items
                                         </span>
                                     </Button>
@@ -264,7 +264,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                         variant="ghost"
                                         onClick={handleRetryFailedProcessing}
                                         icon={RepeatIcon}
-                                        iconClassName={`font-color-red`}
+                                        iconClassName="font-color-secondary"
                                         className="scale-11"
                                     /> */}
                                 </div>
