@@ -39,6 +39,41 @@ export async function selectItemById(itemId: number, changeView: boolean = true)
 }
 
 /**
+ * Enhanced item selection that ensures the item is visible before selecting it
+ * @param {Zotero.Item} item - The item to select
+ * @param {boolean} changeView - Whether to change the view to the library root
+ * @returns {Promise<boolean>} - True if item was successfully selected, false otherwise
+ */
+export async function selectItem(item: Zotero.Item, changeView: boolean = true) {
+    if (!item) return false;
+
+    const zoteroPane = Zotero.getActiveZoteroPane();
+    if (!zoteroPane || !zoteroPane.collectionsView) return false;
+
+    // Check if item is in the currently visible collection/library
+    const isItemVisible = await checkItemVisibility(item.id);
+    
+    if (!isItemVisible && changeView) {        
+        // Switch to the item's library root
+        const success = await switchToLibraryRoot(item.libraryID);
+        if (!success) {
+            logger(`Failed to switch to library ${item.libraryID}`, 2);
+            return false;
+        }
+    }
+
+    // Now select the item using the existing Zotero method
+    try {
+        const result = await zoteroPane.selectItem(item.id);
+        return !!result;
+    } catch (error) {
+        logger(`Error selecting item ${item.id}: ${error}`, 2);
+        return false;
+    }
+}
+
+
+/**
  * Check if an item is visible in the current collection/library view
  * @param {number} itemId - The ID of the item to check
  * @returns {Promise<boolean>} - True if item is visible, false otherwise
