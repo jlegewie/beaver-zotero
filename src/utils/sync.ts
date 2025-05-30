@@ -343,12 +343,18 @@ export async function syncItemsToBackend(
         logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batch.length} items)`, 4);
     
         // Transform Zotero items to our format
-        const itemsData = await Promise.all(batch.filter(item => item.isRegularItem()).map(extractItemData));
-        const attachmentsData = await Promise.all(batch.filter(item => item.isAttachment()).map(extractAttachmentData).filter(Boolean)) as AttachmentData[];
+        const itemsData = (await Promise.all(batch.filter(item => item.isRegularItem())
+            .map(extractItemData)))
+            .filter((item) => item !== null) as ItemData[];
+        const attachmentsData = (await Promise.all(batch.filter(item => item.isAttachment())
+            .map(extractAttachmentData)))
+            .filter((att) => att !== null) as AttachmentData[];
+        logger(`Beaver Sync: Converted ${itemsData.length} items and ${attachmentsData.length} attachments to our format`, 4);
 
         // Get database items and attachments
         const itemsDB = await Zotero.Beaver.db.getItemsByZoteroKeys(user.id, libraryID, itemsData.map(item => item.zotero_key));
         const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(user.id, libraryID, attachmentsData.map(att => att.zotero_key));
+        logger(`Beaver Sync: Retrieved ${itemsDB.length} items and ${attachmentsDB.length} attachments from local database`, 3);
 
         // Filter out items where the metadata_hash did not change
         const itemsDataFiltered = itemsData.filter((item) => {
@@ -363,6 +369,7 @@ export async function syncItemsToBackend(
             if (!attDB) return true;
             return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
         });
+        logger(`Beaver Sync: Filtered out ${itemsData.length - itemsDataFiltered.length} items and ${attachmentsData.length - attachmentsDataFiltered.length} attachments`, 4);
 
         // If there are no items or attachments to sync, skip the batch
         if (attachmentsDataFiltered.length === 0 && itemsDataFiltered.length === 0) {
@@ -402,6 +409,7 @@ export async function syncItemsToBackend(
             
             while (attempts < maxAttempts) {
                 try {
+                    logger(`Beaver Sync: Sending batch to backend`, 4);
                     batchResult = await syncService.processItemsBatch(
                         libraryID,
                         itemsDataFiltered,
@@ -440,6 +448,7 @@ export async function syncItemsToBackend(
 
             // Update database items
             if (batchResult.items.length > 0) {
+                logger(`Beaver Sync: Updating local database items`, 2);
                 const items = batchResult.items.map(item => ({
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
