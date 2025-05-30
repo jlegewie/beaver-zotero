@@ -79,6 +79,20 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
         }
     }, [uploadStats?.failed, userId]);
 
+    // Update hasMoreFailed when the total failed count changes
+    useEffect(() => {
+        // Re-evaluate hasMoreFailed when the total failed count changes
+        if (showFailedFiles && uploadStats && uploadStats.failed > 0) {
+            const currentlyFetchedCount = failedAttachmentFiles.length;
+            const totalFailedCount = uploadStats.failed;
+            
+            // If total count exceeds what we've fetched, there might be more pages
+            if (totalFailedCount > currentlyFetchedCount) {
+                setHasMoreFailed(true);
+            }
+        }
+    }, [uploadStats?.failed, failedAttachmentFiles.length, showFailedFiles]);
+
     const handleToggleShowFailedFiles = () => {
         const newShowFailedFiles = !showFailedFiles;
         setShowFailedFiles(newShowFailedFiles);

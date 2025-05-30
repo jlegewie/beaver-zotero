@@ -119,6 +119,20 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         }
     }, [userId, fileStats?.failedProcessingCount, showFailedFiles, fetchFailedProcessingItems]);
 
+    // Update hasMoreFailed when the total failed count changes
+    useEffect(() => {
+        // Re-evaluate hasMoreFailed when the total failed count changes
+        if (showFailedFiles && fileStats && fileStats.failedProcessingCount > 0) {
+            const currentlyFetchedCount = failedAttachmentFiles.length;
+            const totalFailedCount = fileStats.failedProcessingCount;
+            
+            // If total count exceeds what we've fetched, there might be more pages
+            if (totalFailedCount > currentlyFetchedCount) {
+                setHasMoreFailed(true);
+            }
+        }
+    }, [fileStats?.failedProcessingCount, failedAttachmentFiles.length, showFailedFiles]);
+
     const handleToggleShowFailedFiles = () => {
         setShowFailedFiles(prevShow => !prevShow);
         // The useEffect above will now handle fetching or clearing based on the new showFailedFiles state
