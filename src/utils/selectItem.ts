@@ -6,7 +6,7 @@ import { logger } from "./logger";
  * @param {boolean} changeView - Whether to change the view to the library root
  * @returns {Promise<boolean>} - True if item was successfully selected, false otherwise
  */
-export async function selectItem(itemId: number, changeView: boolean = true) {
+export async function selectItemById(itemId: number, changeView: boolean = true) {
     if (!itemId) return false;
 
     // Get the item to check its properties

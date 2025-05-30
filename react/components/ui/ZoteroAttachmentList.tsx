@@ -3,6 +3,7 @@ import { CSSItemTypeIcon } from '../icons/icons';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { FailedFileReference, FailedItemReference } from '../../types/zotero';
 import { errorMapping } from '../status/FileProcessingStatus';
+import { selectItemById } from '../../../src/utils/selectItem';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;
@@ -43,9 +44,7 @@ const ZoteroAttachmentList: React.FC<ZoteroAttachmentListProps> = ({
 
     
     const handleItemClick = (selectionItemId: number) => {
-        // TODO: Go to library view if in reader view
-        // @ts-ignore selectItem exists
-        Zotero.getActiveZoteroPane().itemsView.selectItem(selectionItemId);
+        selectItemById(selectionItemId);
     };
 
     // Build container style based on maxHeight prop
