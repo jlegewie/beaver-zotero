@@ -3,8 +3,7 @@ import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
-import { ItemRecord, AttachmentRecord } from '../services/database';
-import { userAtom } from "../../react/atoms/auth";
+import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { getPref, setPref } from './prefs';
 import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
@@ -324,8 +323,8 @@ export async function syncItemsToBackend(
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 200
 ) {
-    const user = store.get(userAtom);
-    if (!user) {
+    const userId = store.get(userIdAtom);
+    if (!userId) {
         logger('Beaver Sync: No user found', 1);
         return;
     }
@@ -333,204 +332,180 @@ export async function syncItemsToBackend(
     const totalItems = items.length;
     onStatusChange?.('in_progress');
     
-    // ------- PHASE 1: Transform and filter ALL items upfront -------
-    logger(`Beaver Sync: Transforming and filtering ${totalItems} items...`, 3);
-    
-    // Transform all items to our format
-    const regularItems = items.filter(item => item.isRegularItem());
-    const attachmentItems = items.filter(item => item.isAttachment());
-    
-    const [allItemsData, allAttachmentsData] = await Promise.all([
-        Promise.all(regularItems.map(extractItemData)).then(data => 
-            data.filter((item) => item !== null) as ItemData[]
-        ),
-        Promise.all(attachmentItems.map(extractAttachmentData)).then(data => 
-            data.filter((att) => att !== null) as AttachmentData[]
-        )
-    ]);
-    
-    logger(`Beaver Sync: Transformed ${allItemsData.length} items and ${allAttachmentsData.length} attachments`, 4);
-    
-    // Get local database records
-    const [allItemsDB, allAttachmentsDB] = await Promise.all([
-        allItemsData.length > 0
-            ? Zotero.Beaver.db.getItemsByZoteroKeys(user.id, libraryID, allItemsData.map(item => item.zotero_key))
-            : Promise.resolve([]),
-        allAttachmentsData.length > 0
-            ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(user.id, libraryID, allAttachmentsData.map(att => att.zotero_key))
-            : Promise.resolve([])
-    ]);
-    
-    // Filter out items that haven't changed
-    const itemsDBMap = new Map(allItemsDB.map(item => [item.zotero_key, item]));
-    const attachmentsDBMap = new Map(allAttachmentsDB.map(att => [att.zotero_key, att]));
-
-    const itemsNeedingSync = allItemsData.filter((item) => {
-        const itemDB = itemsDBMap.get(item.zotero_key);
-        if (!itemDB) return true;
-        return itemDB.item_metadata_hash !== item.item_metadata_hash;
-    });
-
-    const attachmentsNeedingSync = allAttachmentsData.filter((att) => {
-        const attDB = attachmentsDBMap.get(att.zotero_key);
-        if (!attDB) return true;
-        return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
-    });
-    
-    const totalNeedingSync = itemsNeedingSync.length + attachmentsNeedingSync.length;
-    const totalFiltered = (allItemsData.length - itemsNeedingSync.length) + 
-                          (allAttachmentsData.length - attachmentsNeedingSync.length);
-    
-    logger(`Beaver Sync: ${totalNeedingSync} items need syncing, ${totalFiltered} filtered out (no changes)`, 3);
-    
-    // If nothing needs syncing, mark as completed
-    if (totalNeedingSync === 0) {
-        logger(`Beaver Sync: All items up to date, marking as completed`, 3);
+    if (totalItems === 0) {
+        logger(`Beaver Sync: No items to process`, 3);
         onStatusChange?.('completed');
-        if (onProgress) onProgress(totalItems, totalItems);
+        if (onProgress) onProgress(0, 0);
         return;
     }
 
-    // ------- PHASE 2: Process filtered items in batches -------
-    // Set initial progress to 0 for items needing sync before starting batch processing
-    if (onProgress) {
-        onProgress(0, totalItems);
-    }
-    logger(`Beaver Sync: Processing ${totalNeedingSync} items in batches of ${batchSize}`, 3);
+    logger(`Beaver Sync: Processing ${totalItems} items in batches of ${batchSize}`, 3);
     
     let syncId = undefined;
-    let processedCount = 0;
+    let overallProcessedCount = 0;
     let syncCompleted = false;
     let syncFailed = false;
+    let totalItemsSentToBackend = 0;
     
-    interface ProcessableItem {
-        type: 'item' | 'attachment';
-        data: ItemData | AttachmentData;
-    }
-
-    const itemsToProcess: ProcessableItem[] = [
-        ...itemsNeedingSync.map(item => ({ type: 'item' as const, data: item })),
-        ...attachmentsNeedingSync.map(att => ({ type: 'attachment' as const, data: att }))
-    ];
-    
-    for (let i = 0; i < itemsToProcess.length; i += batchSize) {
-        const batchItems = itemsToProcess.slice(i, i + batchSize);
-        const batchItemsData = batchItems.filter(item => item.type === 'item').map(item => item.data) as ItemData[];
-        const batchAttachmentsData = batchItems.filter(item => item.type === 'attachment').map(item => item.data) as AttachmentData[];
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batchItems = items.slice(i, i + batchSize);
         
-        const createLog = !syncId;
-        const closeLog = i + batchSize >= itemsToProcess.length;
-        
-        logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(itemsToProcess.length/batchSize)} (${batchItemsData.length} items, ${batchAttachmentsData.length} attachments)`, 4);
+        logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batchItems.length} items)`, 4);
         
         try {
-            // Send batch to backend
-            let attempts = 0;
-            const maxAttempts = 3;
-            let batchResult = null;
+            // ------- Transform items in this batch -------
+            const regularItems = batchItems.filter(item => item.isRegularItem());
+            const attachmentItems = batchItems.filter(item => item.isAttachment());
             
-            while (attempts < maxAttempts) {
-                try {
-                    logger(`Beaver Sync: Sending batch to backend (${batchItemsData.length} items, ${batchAttachmentsData.length} attachments, attempt ${attempts + 1}/${maxAttempts})`, 4);
-                    batchResult = await syncService.processItemsBatch(
-                        libraryID,
-                        batchItemsData,
-                        batchAttachmentsData,
-                        syncType,
-                        createLog,
-                        closeLog,
-                        syncId
-                    );
-                    break; // Success, exit retry loop
-                } catch (retryError) {
-                    attempts++;
-                    if (attempts >= maxAttempts) {
-                        throw retryError; // Rethrow if max attempts reached
-                    }
-                    
-                    // Wait before retrying (exponential backoff)
-                    const delay = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
-                    logger(`Beaver Sync: Batch processing attempt ${attempts}/${maxAttempts} failed, retrying in ${delay}ms...`, 2);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
-    
-            // Process batch result
-            if (!batchResult) {
-                throw new Error("Failed to process batch after multiple attempts");
-            }
+            const [batchItemsData, batchAttachmentsData] = await Promise.all([
+                Promise.all(regularItems.map(extractItemData)).then(data => 
+                    data.filter((item) => item !== null) as ItemData[]
+                ),
+                Promise.all(attachmentItems.map(extractAttachmentData)).then(data => 
+                    data.filter((att) => att !== null) as AttachmentData[]
+                )
+            ]);
             
-            syncId = batchResult.sync_id;
-            if (batchResult.sync_status === 'failed') {
-                onStatusChange?.('failed');
-                const error = new Error(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(itemsToProcess.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`);
-                Zotero.logError(error);
-                throw new Error("Syncing status is failed");
-            }
+            // ------- Get database records for this batch -------
+            const [batchItemsDB, batchAttachmentsDB] = await Promise.all([
+                batchItemsData.length > 0
+                    ? Zotero.Beaver.db.getItemsByZoteroKeys(userId, libraryID, batchItemsData.map(item => item.zotero_key))
+                    : Promise.resolve([]),
+                batchAttachmentsData.length > 0
+                    ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
+                    : Promise.resolve([])
+            ]);
+            
+            // ------- Filter items that need syncing in this batch -------
+            const itemsDBMap = new Map(batchItemsDB.map(item => [item.zotero_key, item]));
+            const attachmentsDBMap = new Map(batchAttachmentsDB.map(att => [att.zotero_key, att]));
 
-            // Update database items
-            if (batchResult.items.length > 0) {
-                logger(`Beaver Sync: Updating local database items`, 2);
-                const items = batchResult.items.map(item => ({
-                    library_id: item.library_id,
-                    zotero_key: item.zotero_key,
-                    item_metadata_hash: item.metadata_hash
-                }));
-                await Zotero.Beaver.db.upsertItemsBatch(user.id, items);
-            }
+            const itemsNeedingSync = batchItemsData.filter((item) => {
+                const itemDB = itemsDBMap.get(item.zotero_key);
+                if (!itemDB) return true;
+                return itemDB.item_metadata_hash !== item.item_metadata_hash;
+            });
 
-            // Update database attachments and add items to upload queue
-            if (batchResult.attachments.length > 0) {
-                // Update database attachments
-                logger(`Beaver Sync: Updating local database attachments`, 2);
-                const attachments = batchResult.attachments.map(attachment => ({
-                    library_id: attachment.library_id,
-                    zotero_key: attachment.zotero_key,
-                    attachment_metadata_hash: attachment.metadata_hash,
-                    file_hash: attachment.file_hash,
-                    upload_status: attachment.upload_status || 'pending',
-                }));
-                await Zotero.Beaver.db.upsertAttachmentsBatch(user.id, attachments);
+            const attachmentsNeedingSync = batchAttachmentsData.filter((att) => {
+                const attDB = attachmentsDBMap.get(att.zotero_key);
+                if (!attDB) return true;
+                return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
+            });
+            
+            const batchNeedingSync = itemsNeedingSync.length + attachmentsNeedingSync.length;
+            const batchFiltered = (batchItemsData.length - itemsNeedingSync.length) + 
+                                  (batchAttachmentsData.length - attachmentsNeedingSync.length);
+            
+            logger(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}: ${batchNeedingSync} items need syncing, ${batchFiltered} filtered out (no changes)`, 4);
+            
+            // ------- Send to backend only if items need syncing -------
+            if (batchNeedingSync > 0) {
+                const createLog = !syncId;
+                const closeLog = i + batchSize >= items.length; // Close if this is the last batch
                 
-                // Add items to upload queue
-                // TODO: Check on file size and page count limits here! Set status to 'skipped' if not meeting limits
-                const uploadQueueItems = batchResult.attachments
-                    .filter(attachment => attachment.needs_upload)
-                    .map(attachment => ({
-                        file_hash: attachment.file_hash,
-                        user_id: user.id,
-                        // page_count
-                        // file_size
+                let attempts = 0;
+                const maxAttempts = 3;
+                let batchResult = null;
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        logger(`Beaver Sync: Sending batch to backend (${itemsNeedingSync.length} items, ${attachmentsNeedingSync.length} attachments, attempt ${attempts + 1}/${maxAttempts})`, 4);
+                        batchResult = await syncService.processItemsBatch(
+                            libraryID,
+                            itemsNeedingSync,
+                            attachmentsNeedingSync,
+                            syncType,
+                            createLog,
+                            closeLog,
+                            syncId
+                        );
+                        break; // Success, exit retry loop
+                    } catch (retryError) {
+                        attempts++;
+                        if (attempts >= maxAttempts) {
+                            throw retryError; // Rethrow if max attempts reached
+                        }
+                        
+                        // Wait before retrying (exponential backoff)
+                        const delay = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
+                        logger(`Beaver Sync: Batch processing attempt ${attempts}/${maxAttempts} failed, retrying in ${delay}ms...`, 2);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+        
+                // Process batch result
+                if (!batchResult) {
+                    throw new Error("Failed to process batch after multiple attempts");
+                }
+                if (batchResult.sync_status === 'failed') {
+                    onStatusChange?.('failed');
+                    const error = new Error(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`);
+                    Zotero.logError(error);
+                    throw new Error("Syncing status is failed");
+                }
+                
+                // Set sync ID from batch result
+                syncId = batchResult.sync_id;
+                
+                // Update database items
+                if (batchResult.items.length > 0) {
+                    logger(`Beaver Sync: Updating local database items`, 2);
+                    const items = batchResult.items.map(item => ({
+                        library_id: item.library_id,
+                        zotero_key: item.zotero_key,
+                        item_metadata_hash: item.metadata_hash
+                    }));
+                    await Zotero.Beaver.db.upsertItemsBatch(userId, items);
+                }
+
+                // Update database attachments and add items to upload queue
+                if (batchResult.attachments.length > 0) {
+                    // Update database attachments
+                    logger(`Beaver Sync: Updating local database attachments`, 2);
+                    const attachments = batchResult.attachments.map(attachment => ({
                         library_id: attachment.library_id,
                         zotero_key: attachment.zotero_key,
+                        attachment_metadata_hash: attachment.metadata_hash,
+                        file_hash: attachment.file_hash,
+                        upload_status: attachment.upload_status || 'pending',
                     }));
-                logger(`Beaver Sync: Adding ${uploadQueueItems.length} items to upload queue`, 2);
-                await Zotero.Beaver.db.upsertQueueItemsBatch(user.id, uploadQueueItems);
+                    await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachments);
+                    
+                    // Add items to upload queue
+                    // TODO: Check on file size and page count limits here! Set status to 'skipped' if not meeting limits
+                    const uploadQueueItems = batchResult.attachments
+                        .filter(attachment => attachment.needs_upload)
+                        .map(attachment => ({
+                            file_hash: attachment.file_hash,
+                            user_id: userId,
+                            // page_count
+                            // file_size
+                            library_id: attachment.library_id,
+                            zotero_key: attachment.zotero_key,
+                        }));
+                    logger(`Beaver Sync: Adding ${uploadQueueItems.length} items to upload queue`, 2);
+                    await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uploadQueueItems);
 
-                // Start file uploader if there are attachments to upload
-                logger(`Beaver Sync: Starting file uploader`, 2);
-                await fileUploader.start(syncType === 'initial' ? "initial" : "background");
-            }
+                    // Start file uploader if there are attachments to upload
+                    logger(`Beaver Sync: Starting file uploader`, 2);
+                    await fileUploader.start(syncType === 'initial' ? "initial" : "background");
+                }
 
-            // Update progress based on items that actually needed syncing
-            const batchProcessed = batchItems.length;
-            processedCount += batchProcessed;
-            
-            // Report progress against total items that needed syncing
-            if (onProgress) {
-                // Convert back to original item count for UI consistency
-                const overallProgress = Math.round((processedCount / totalNeedingSync) * totalItems);
-                onProgress(Math.min(overallProgress, totalItems), totalItems);
-            }
-            
-            // Track if sync was completed in this batch
-            if (closeLog && batchResult.sync_status === 'completed') {
-                syncCompleted = true;
-                onStatusChange?.('completed');
-                if (onProgress) {
-                    onProgress(totalItems, totalItems);
+                totalItemsSentToBackend += batchNeedingSync;
+                
+                // Track if sync was completed in this batch
+                if (closeLog && batchResult.sync_status === 'completed') {
+                    syncCompleted = true;
+                    onStatusChange?.('completed');
                 }
             }
+            
+            // Update progress for this batch
+            overallProcessedCount += batchItems.length;
+            if (onProgress) {
+                onProgress(overallProcessedCount, totalItems);
+            }
+            
         } catch (error: any) {
             logger(`Beaver Sync: Error processing batch: ${error.message}`, 1);
             Zotero.logError(error);
@@ -540,8 +515,14 @@ export async function syncItemsToBackend(
         }
     }
     
-    // Only complete sync if we have a syncId, didn't complete, AND didn't fail
-    if (syncId && !syncCompleted && !syncFailed) {
+    // Handle completion logic
+    if (totalItemsSentToBackend === 0) {
+        // No items needed syncing
+        logger(`Beaver Sync: All items up to date, marking as completed`, 3);
+        onStatusChange?.('completed');
+        if (onProgress) onProgress(totalItems, totalItems);
+    } else if (syncId && !syncCompleted && !syncFailed) {
+        // Complete sync if we have a syncId but didn't complete yet
         try {
             logger(`Beaver Sync: Completing sync ${syncId} after processing all batches`, 3);
             await syncService.completeSync(syncId);
@@ -551,14 +532,11 @@ export async function syncItemsToBackend(
             }
         } catch (error: any) {
             logger(`Beaver Sync: Error completing sync: ${error.message}`, 1);
-            onStatusChange?.('failed'); // ← Set failed status if completion fails
+            onStatusChange?.('failed');
         }
-    } else if (!syncId && !syncFailed && processedCount === totalNeedingSync && totalItems > 0 && totalNeedingSync > 0) {
-        // SCENARIO: All items that needed syncing were processed successfully,
-        // but no backend sync session was established (possibly because backend 
-        // determined no server-side changes were needed).
-        // This is a valid completion state.
-        logger(`Beaver Sync: All ${totalNeedingSync} items requiring sync were processed; no backend sync session established or required for this set, and no errors occurred. Marking as complete.`, 3);
+    } else if (!syncId && !syncFailed && overallProcessedCount === totalItems && totalItems > 0 && totalItemsSentToBackend > 0) {
+        // All items processed successfully but no backend sync session was established
+        logger(`Beaver Sync: All ${totalItemsSentToBackend} items requiring sync were processed; no backend sync session established or required for this set, and no errors occurred. Marking as complete.`, 3);
         onStatusChange?.('completed');
         if (onProgress) {
             onProgress(totalItems, totalItems);
