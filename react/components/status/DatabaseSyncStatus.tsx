@@ -1,5 +1,6 @@
 import React from "react";
 import { RepeatIcon } from "../icons/icons";
+import Tooltip from "../ui/Tooltip";
 import IconButton from "../ui/IconButton";
 import { ProgressBar } from "../status/ProgressBar";
 import { librarySyncProgressAtom } from "../../atoms/sync";
@@ -38,7 +39,9 @@ export const DatabaseSyncStatus: React.FC = () => {
                     <div className={`text-lg ${librarySyncProgress.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero database</div>
                     <div className="flex-1"/>
                     {librarySyncProgress.anyFailed && (
-                        <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
+                        <Tooltip content="Retry syncing" showArrow singleLine>
+                            <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
+                        </Tooltip>
                     )}
                 </div>
                 {librarySyncProgress.progress !== undefined && (
