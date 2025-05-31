@@ -486,8 +486,17 @@ export async function syncItemsToBackend(
                         }));
                     
                     if (uploadQueueItems.length > 0) {
-                        logger(`Beaver Sync: Adding/updating ${uploadQueueItems.length} items in upload queue`, 2);
-                        await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uploadQueueItems);
+                        // Deduplicate uploadQueueItems by file_hash, keeping the first occurrence
+                        const uniqueUploadQueueItemsMap = new Map();
+                        uploadQueueItems.forEach(item => {
+                            if (!uniqueUploadQueueItemsMap.has(item.file_hash)) {
+                                uniqueUploadQueueItemsMap.set(item.file_hash, item);
+                            }
+                        });
+                        const uniqueUploadQueueItems = Array.from(uniqueUploadQueueItemsMap.values());
+
+                        logger(`Beaver Sync: Adding/updating ${uniqueUploadQueueItems.length} items in upload queue (after deduplication)`, 2);
+                        await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
 
                         // Start file uploader if there are attachments to upload (or newly added to queue)
                         logger(`Beaver Sync: Starting file uploader`, 2);
