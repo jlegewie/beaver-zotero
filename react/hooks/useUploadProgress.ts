@@ -102,13 +102,14 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
         const pollStartTime = Date.now();
         
         try {
+            const userId = store.get(userIdAtom);
             const newStats = await fetchStats();
             
             if (!isMountedRef.current) {
                 return;
             }
             
-            if (newStats) {
+            if (newStats && userId) {
                 const currentStats = store.get(uploadStatsAtom);
                 if (!areStatsEqual(currentStats, newStats)) {
                     setUploadStats(newStats);
@@ -134,6 +135,31 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
                     setIsUploadComplete(newUploadComplete);
                 }
                 
+                // INTEGRITY CHECK: Fix orphaned pending attachments
+                if (newStats.pending > 0) {
+                    try {
+                        const queueTotal = await Zotero.Beaver.db.getTotalQueueItems(userId);
+                        
+                        if (queueTotal === 0 && newStats.pending > 0) {
+                            logger(`useUploadProgress: Integrity issue detected - ${newStats.pending} pending attachments but no queue items. Attempting fix...`, 2);
+                            
+                            const fixedCount = await Zotero.Beaver.db.fixPendingAttachmentsWithoutQueue(userId);
+                            
+                            if (fixedCount > 0) {
+                                logger(`useUploadProgress: Fixed ${fixedCount} orphaned pending attachments`, 3);
+                                // Start the file uploader since we just added items to the queue
+                                await fileUploader.start("manual");
+                            }
+                        } else if (queueTotal > 0) {
+                            // Normal case: there are items in queue, start uploader if not already running
+                            await fileUploader.start("manual");
+                        }
+                    } catch (integrityError: any) {
+                        logger(`useUploadProgress: Error during integrity check: ${integrityError.message}`, 1);
+                        // Don't throw - continue with normal polling
+                    }
+                }
+                
                 if (newUploadComplete) {
                     logger(`useUploadProgress: Upload completed! Final stats: ${JSON.stringify(newStats)}`);
                     optionsRef.current.onComplete?.(newStats);
@@ -141,11 +167,6 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
                         logger(`useUploadProgress: Auto-stopping polling after completion`);
                         isPollingRef.current = false;
                     }
-                }
-                
-                // Start file uploader if there are pending files
-                if (newStats.pending > 0) {
-                    fileUploader.start("manual");
                 }
             }
             
