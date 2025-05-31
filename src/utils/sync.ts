@@ -462,33 +462,37 @@ export async function syncItemsToBackend(
                 if (batchResult.attachments.length > 0) {
                     // Update database attachments
                     logger(`Beaver Sync: Updating local database attachments`, 2);
-                    const attachments = batchResult.attachments.map(attachment => ({
+                    const attachmentsForDB = batchResult.attachments.map(attachment => ({
                         library_id: attachment.library_id,
                         zotero_key: attachment.zotero_key,
                         attachment_metadata_hash: attachment.metadata_hash,
                         file_hash: attachment.file_hash,
                         upload_status: attachment.upload_status || 'pending',
                     }));
-                    await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachments);
-                    
+                    await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
+
                     // Add items to upload queue
                     // TODO: Check on file size and page count limits here! Set status to 'skipped' if not meeting limits
                     const uploadQueueItems = batchResult.attachments
-                        .filter(attachment => attachment.needs_upload)
+                        // .filter(attachment => attachment.needs_upload)
+                        .filter(attachment => {
+                            const effectiveUploadStatus = attachment.upload_status || 'pending';
+                            return effectiveUploadStatus === 'pending' && attachment.file_hash;
+                        })
                         .map(attachment => ({
-                            file_hash: attachment.file_hash,
-                            user_id: userId,
-                            // page_count
-                            // file_size
+                            file_hash: attachment.file_hash!,
                             library_id: attachment.library_id,
                             zotero_key: attachment.zotero_key,
                         }));
-                    logger(`Beaver Sync: Adding ${uploadQueueItems.length} items to upload queue`, 2);
-                    await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uploadQueueItems);
+                    
+                    if (uploadQueueItems.length > 0) {
+                        logger(`Beaver Sync: Adding/updating ${uploadQueueItems.length} items in upload queue`, 2);
+                        await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uploadQueueItems);
 
-                    // Start file uploader if there are attachments to upload
-                    logger(`Beaver Sync: Starting file uploader`, 2);
-                    await fileUploader.start(syncType === 'initial' ? "initial" : "background");
+                        // Start file uploader if there are attachments to upload (or newly added to queue)
+                        logger(`Beaver Sync: Starting file uploader`, 2);
+                        await fileUploader.start(syncType === 'initial' ? "initial" : "background");
+                    }
                 }
 
                 totalItemsSentToBackend += batchNeedingSync;
