@@ -66,6 +66,7 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
     const lastPollTimeRef = useRef<number>(0);
     const isPollingInProgressRef = useRef(false);
     const lastIntegrityCheckRef = useRef<number>(0);
+    const isIntegrityCheckInProgressRef = useRef(false);
     const INTEGRITY_CHECK_INTERVAL = 10000; // 10 seconds
     
     // Atom setters (stable references)
@@ -143,7 +144,12 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
                     const shouldRunIntegrityCheck = now - lastIntegrityCheckRef.current > INTEGRITY_CHECK_INTERVAL;
                     
                     if (shouldRunIntegrityCheck) {
-                        lastIntegrityCheckRef.current = now;
+                        if (isIntegrityCheckInProgressRef.current) {
+                            logger('useUploadProgress: Integrity check already in progress, skipping');
+                            return;
+                        }
+                        
+                        isIntegrityCheckInProgressRef.current = true;
                         try {
                             const queueTotal = await Zotero.Beaver.db.getTotalQueueItems(userId);
                             
@@ -164,6 +170,8 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
                         } catch (integrityError: any) {
                             logger(`useUploadProgress: Error during integrity check: ${integrityError.message}`, 1);
                             // Don't throw - continue with normal polling
+                        } finally {
+                            isIntegrityCheckInProgressRef.current = false;
                         }
                     } else {
                         // Normal case: just start uploader if queue has items
