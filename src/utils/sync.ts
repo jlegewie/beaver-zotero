@@ -465,7 +465,7 @@ export async function syncItemsToBackend(
                 onStatusChange?.('failed');
                 const error = new Error(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(itemsToProcess.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`);
                 Zotero.logError(error);
-                break;
+                throw new Error("Syncing status is failed");
             }
 
             // Update database items
