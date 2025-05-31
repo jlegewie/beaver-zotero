@@ -28,8 +28,6 @@ export const DatabaseSyncStatus: React.FC = () => {
         return SpinnerIcon;
     };
 
-    const rightIcon = librarySyncProgress.anyFailed ? RepeatIcon : undefined;
-
     return (
         <div className="display-flex flex-row gap-4 p-3 border-popup rounded-md bg-quinary">
             <div className="mt-1">
@@ -39,8 +37,8 @@ export const DatabaseSyncStatus: React.FC = () => {
                 <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
                     <div className={`text-lg ${librarySyncProgress.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero database</div>
                     <div className="flex-1"/>
-                    {rightIcon && librarySyncProgress.anyFailed && (
-                        <IconButton icon={rightIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
+                    {librarySyncProgress.anyFailed && (
+                        <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
                     )}
                 </div>
                 {librarySyncProgress.progress !== undefined && (
