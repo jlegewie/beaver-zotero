@@ -516,7 +516,7 @@ export async function syncItemsToBackend(
     }
     
     // Handle completion logic
-    if (totalItemsSentToBackend === 0) {
+    if (totalItemsSentToBackend === 0 && !syncFailed) {
         // No items needed syncing
         logger(`Beaver Sync: All items up to date, marking as completed`, 3);
         onStatusChange?.('completed');
