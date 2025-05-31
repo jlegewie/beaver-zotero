@@ -1219,6 +1219,147 @@ export class BeaverDB {
             has_more: rows.length > limit,
         };
     }
+
+    /**
+     * Get all attachments by upload status for a user
+     * @param user_id User ID
+     * @param status Upload status to filter by
+     * @returns Array of AttachmentRecord objects
+     */
+    public async getAttachmentsByUploadStatus(user_id: string, status: UploadStatus): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND upload_status = ?
+             ORDER BY library_id, zotero_key`,
+            [user_id, status]
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get a paginated list of attachments by upload status for a user.
+     * @param user_id User ID
+     * @param status Upload status to filter by
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getAttachmentsByUploadStatusPaginated(
+        user_id: string,
+        status: UploadStatus,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND upload_status = ?
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, status, limit + 1, offset]
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
+
+    /**
+     * Get all attachments by MD status for a user
+     * @param user_id User ID
+     * @param status MD status to filter by
+     * @returns Array of AttachmentRecord objects
+     */
+    public async getAttachmentsByMdStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND md_status = ?
+             ORDER BY library_id, zotero_key`,
+            [user_id, status]
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get a paginated list of attachments by MD status for a user.
+     * @param user_id User ID
+     * @param status MD status to filter by
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getAttachmentsByMdStatusPaginated(
+        user_id: string,
+        status: ProcessingStatus,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND md_status = ?
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, status, limit + 1, offset]
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
+
+    /**
+     * Get all attachments by Docling status for a user
+     * @param user_id User ID
+     * @param status Docling status to filter by
+     * @returns Array of AttachmentRecord objects
+     */
+    public async getAttachmentsByDoclingStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND docling_status = ?
+             ORDER BY library_id, zotero_key`,
+            [user_id, status]
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get a paginated list of attachments by Docling status for a user.
+     * @param user_id User ID
+     * @param status Docling status to filter by
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getAttachmentsByDoclingStatusPaginated(
+        user_id: string,
+        status: ProcessingStatus,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND docling_status = ?
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, status, limit + 1, offset]
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
 }
 
 /* Example Usage:

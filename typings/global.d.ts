@@ -308,6 +308,60 @@ declare namespace Zotero {
              * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
              */
             getFailedAttachmentsPaginated(user_id: string, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+
+            /**
+             * Get all attachments by upload status for a user
+             * @param user_id User ID
+             * @param status Upload status to filter by
+             * @returns Array of AttachmentRecord objects
+             */
+            getAttachmentsByUploadStatus(user_id: string, status: import("../src/services/attachmentsService").UploadStatus): Promise<import("../src/services/database").AttachmentRecord[]>;
+
+            /**
+             * Get a paginated list of attachments by upload status for a user.
+             * @param user_id User ID
+             * @param status Upload status to filter by
+             * @param limit Number of items per page
+             * @param offset Number of items to skip
+             * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+             */
+            getAttachmentsByUploadStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").UploadStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+
+            /**
+             * Get all attachments by MD status for a user
+             * @param user_id User ID
+             * @param status MD status to filter by
+             * @returns Array of AttachmentRecord objects
+             */
+            getAttachmentsByMdStatus(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus): Promise<import("../src/services/database").AttachmentRecord[]>;
+
+            /**
+             * Get a paginated list of attachments by MD status for a user.
+             * @param user_id User ID
+             * @param status MD status to filter by
+             * @param limit Number of items per page
+             * @param offset Number of items to skip
+             * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+             */
+            getAttachmentsByMdStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+
+            /**
+             * Get all attachments by Docling status for a user
+             * @param user_id User ID
+             * @param status Docling status to filter by
+             * @returns Array of AttachmentRecord objects
+             */
+            getAttachmentsByDoclingStatus(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus): Promise<import("../src/services/database").AttachmentRecord[]>;
+
+            /**
+             * Get a paginated list of attachments by Docling status for a user.
+             * @param user_id User ID
+             * @param status Docling status to filter by
+             * @param limit Number of items per page
+             * @param offset Number of items to skip
+             * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+             */
+            getAttachmentsByDoclingStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
         }
 
         /**
