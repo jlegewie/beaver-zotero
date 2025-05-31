@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
-import IconButton from "../ui/IconButton";
-import { librarySyncProgressAtom } from "../../atoms/sync";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 import { StepThreeIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "./icons";
@@ -14,7 +12,6 @@ import { attachmentsService } from "../../../src/services/attachmentsService";
 import { fileStatusStatsAtom } from "../../atoms/ui";
 import { planFeaturesAtom } from "../../atoms/profile";
 import { AttachmentStatusPagedResponse } from "../../../src/services/attachmentsService";
-import { uploadStatsAtom, isUploadCompleteAtom } from "../../atoms/status";
 import Tooltip from "../ui/Tooltip";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 
@@ -39,10 +36,7 @@ export const errorMapping = {
     "unexpected_error": "Unknown error"
 };
 
-const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboardingPage=false}) => {
-    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
-    const uploadStats = useAtomValue(uploadStatsAtom);
-    const isUploadComplete = useAtomValue(isUploadCompleteAtom);
+const FileProcessingStatus: React.FC = () => {
 
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
@@ -167,19 +161,12 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
     };
 
     const getProcessingIcon = (): React.ReactNode => {
-        // Onboarding page: Ensure library sync and uploads are complete
-        if (isOnboardingPage) {
-            if (librarySyncProgress.anyFailed) return StepThreeIcon;
-            if (librarySyncProgress.progress < 100) return StepThreeIcon;
-            // if (uploadStats && uploadStats.failed > 0) return StepThreeIcon;
-        }
-
-        // Use file processing stats
-        if (fileStats) {
-            const complete = fileStats.processingProgress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
-            if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
-            if (complete) return CheckmarkIcon;
-        }
+        if (!fileStats) return StepThreeIcon;
+        if (!fileStats.completedFiles && !fileStats.failedProcessingCount && !fileStats.activeProcessingCount) return StepThreeIcon;
+        
+        const complete = fileStats.processingProgress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
+        if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
+        if (complete) return CheckmarkIcon;
         
         return SpinnerIcon; // Default to spinner if still processing or stats are unavailable
     };
@@ -189,8 +176,8 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
         
         const textParts: string[] = [];
         if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
-        if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
-        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} active`);
+        // if (fileStats.failedProcessingCount > 0) textParts.push(`${fileStats.failedProcessingCount.toLocaleString()} failed`);
+        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} processing`);
         // if (fileStats.queuedProcessingCount > 0) textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
         
         if (textParts.length === 0 && fileStats.totalFiles > 0) return "Waiting to process...";
@@ -209,7 +196,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
 
                     {/* Title */}
                     <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                        <div className={`${fileStats?.failedProcessingCount && fileStats.failedProcessingCount > 0 ? 'font-color-red' : 'font-color-secondary'} text-lg`}>
+                        <div className="font-color-secondary text-lg">
                             File Processing
                         </div>
                         <div className="flex-1"/>
@@ -265,9 +252,9 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                         variant="ghost"
                                         onClick={handleToggleShowFailedFiles}
                                         rightIcon={showFailedFiles ? ArrowDownIcon : ArrowRightIcon}
-                                        iconClassName="mr-0 mt-015 scale-12"
+                                        iconClassName="mr-0 mt-015 scale-12 font-color-red"
                                     >
-                                        <span className="text-base" style={{ marginLeft: '-3px' }}>
+                                        <span className="text-base font-color-red" style={{ marginLeft: '-3px' }}>
                                             {fileStats.failedProcessingCount.toLocaleString()} Failed Items
                                         </span>
                                     </Button>

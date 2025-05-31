@@ -103,8 +103,8 @@ const HomePage: React.FC = () => {
                 
                 {showFileStatus && (
                     <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                        <FileUploadStatus isOnboardingPage={false} pollingInterval={3000} />
-                        <FileProcessingStatus isOnboardingPage={false} />
+                        <FileUploadStatus pollingInterval={3000} />
+                        <FileProcessingStatus />
                     </div>
                 )}
                 </>

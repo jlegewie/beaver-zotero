@@ -196,10 +196,10 @@ const OnboardingPage: React.FC = () => {
                         <DatabaseSyncStatus />
                         
                         {/* Uploading files */}
-                        <FileUploadStatus isOnboardingPage={true}/>
+                        <FileUploadStatus />
                         
                         {/* File Processing */}
-                        <FileProcessingStatus isOnboardingPage={true} />
+                        <FileProcessingStatus />
 
                     </div>
                 )}

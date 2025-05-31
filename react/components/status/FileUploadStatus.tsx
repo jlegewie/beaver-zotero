@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Icon, RepeatIcon, AlertIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
-import { librarySyncProgressAtom } from "../../atoms/sync";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 import { StepTwoIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "./icons";
@@ -16,8 +15,7 @@ import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteA
 
 const ITEMS_PER_PAGE = 10;
 
-const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: number}> = ({isOnboardingPage=false, pollingInterval=1500}) => {
-    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
+const FileUploadStatus: React.FC<{ pollingInterval?: number}> = ({pollingInterval=1500}) => {
     const [showFailedFiles, setShowFailedFiles] = useState(false);
     const userId = useAtomValue(userIdAtom);
     const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<FileHashReference[]>([]);
@@ -114,9 +112,8 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
     };
 
     const getUploadIcon = (): React.ReactNode => {
-        // Onboarding page: Ensure library sync is complete
-        if (isOnboardingPage && librarySyncProgress.anyFailed) return StepTwoIcon;
-        if (isOnboardingPage && librarySyncProgress.progress < 100) return StepTwoIcon;
+        if (!uploadStats) return StepTwoIcon;
+        if (!uploadStats.completed && !uploadStats.failed && !uploadStats.skipped) return StepTwoIcon;
 
         // Use upload stats from hook
         if (uploadStats) {
@@ -129,7 +126,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
     };
 
     const getUploadLeftText = (): string => {
-        if (uploadStats === null  || uploadStats === undefined || !uploadStats) return "";
+        if (uploadStats === null  || uploadStats === undefined || !uploadStats) return "Waiting to upload...";
         
         const textParts: string[] = [];
         if (uploadStats.total > 0) textParts.push(`${uploadStats.completed.toLocaleString()} done`);
