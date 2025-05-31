@@ -362,6 +362,13 @@ declare namespace Zotero {
              * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
              */
             getAttachmentsByDoclingStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+
+            /**
+             * Fix pending attachments without queue entries
+             * @param user_id User ID
+             * @returns Number of attachments fixed
+             */
+            fixPendingAttachmentsWithoutQueue(user_id: string): Promise<number>;
         }
 
         /**

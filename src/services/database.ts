@@ -1360,6 +1360,52 @@ export class BeaverDB {
             has_more: rows.length > limit,
         };
     }
+
+    /**
+     * Fix integrity issue: Find pending attachments that don't have corresponding upload_queue entries
+     * and add them to the upload_queue table.
+     * @param user_id User ID
+     * @returns Number of attachments fixed
+     */
+    public async fixPendingAttachmentsWithoutQueue(user_id: string): Promise<number> {
+        try {
+            // Find pending attachments whose file_hash is not in upload_queue
+            const orphanedAttachments = await this.conn.queryAsync(
+                `SELECT DISTINCT a.file_hash, a.library_id, a.zotero_key 
+                 FROM attachments a
+                 WHERE a.user_id = ? 
+                   AND a.upload_status = 'pending' 
+                   AND a.file_hash IS NOT NULL
+                   AND a.file_hash NOT IN (
+                     SELECT uq.file_hash FROM upload_queue uq WHERE uq.user_id = ?
+                   )`,
+                [user_id, user_id]
+            );
+
+            if (orphanedAttachments.length === 0) {
+                return 0;
+            }
+
+            logger(`Beaver DB: Found ${orphanedAttachments.length} pending attachments without queue entries, fixing...`, 2);
+
+            // Add these attachments to the upload queue
+            const queueItems: UploadQueueInput[] = orphanedAttachments.map((row: any) => ({
+                file_hash: row.file_hash,
+                library_id: row.library_id,
+                zotero_key: row.zotero_key,
+                // Other fields will use defaults: queue_visibility = now, attempt_count = 0
+            }));
+
+            await this.upsertQueueItemsBatch(user_id, queueItems);
+
+            logger(`Beaver DB: Successfully added ${orphanedAttachments.length} orphaned attachments to upload queue`, 3);
+            return orphanedAttachments.length;
+
+        } catch (error: any) {
+            logger(`Beaver DB: Error fixing pending attachments without queue entries: ${error.message}`, 1);
+            return 0;
+        }
+    }
 }
 
 /* Example Usage:
