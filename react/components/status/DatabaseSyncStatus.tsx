@@ -1,8 +1,6 @@
 import React from "react";
-import { CheckmarkCircleIcon, CancelCircleIcon, ClockIcon, SyncIcon, RepeatIcon } from "../icons/icons";
-import { FileStatusStats } from "../../atoms/ui";
+import { RepeatIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
-import { StatusItem } from "../ui/buttons/FileStatusButton";
 import { ProgressBar } from "../status/ProgressBar";
 import { librarySyncProgressAtom } from "../../atoms/sync";
 import { useAtomValue } from "jotai";
