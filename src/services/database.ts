@@ -1371,15 +1371,14 @@ export class BeaverDB {
         try {
             // Find pending attachments whose file_hash is not in upload_queue
             const orphanedAttachments = await this.conn.queryAsync(
-                `SELECT DISTINCT a.file_hash, a.library_id, a.zotero_key 
+                `SELECT DISTINCT a.file_hash, a.library_id, a.zotero_key
                  FROM attachments a
-                 WHERE a.user_id = ? 
-                   AND a.upload_status = 'pending' 
+                 LEFT JOIN upload_queue uq ON a.user_id = uq.user_id AND a.file_hash = uq.file_hash
+                 WHERE a.user_id = ?
+                   AND a.upload_status = 'pending'
                    AND a.file_hash IS NOT NULL
-                   AND a.file_hash NOT IN (
-                     SELECT uq.file_hash FROM upload_queue uq WHERE uq.user_id = ?
-                   )`,
-                [user_id, user_id]
+                   AND uq.file_hash IS NULL`, // This condition selects attachments not in upload_queue
+                [user_id]
             );
 
             if (orphanedAttachments.length === 0) {
