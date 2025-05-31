@@ -230,7 +230,7 @@ const FileProcessingStatus: React.FC<{isOnboardingPage?: boolean}> = ({isOnboard
                                 </div>
                                 <div className="flex-1"/>
                                 <div className="font-color-tertiary text-base">
-                                    {`${Math.min(fileStats.progress, 100).toFixed(0)}%`}
+                                    {`${Math.min(fileStats.progress, 100).toFixed(1)}%`}
                                 </div>
                             </div>
                         </div>

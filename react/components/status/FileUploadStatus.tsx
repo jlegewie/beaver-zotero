@@ -177,7 +177,7 @@ const FileUploadStatus: React.FC<{isOnboardingPage?: boolean, pollingInterval?: 
                             )}
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
-                                {`${Math.min(uploadProgress, 100).toFixed(0)}%`}
+                                {`${Math.min(uploadProgress, 100).toFixed(1)}%`}
                             </div>
                         </div>
                     </div>

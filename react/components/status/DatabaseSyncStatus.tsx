@@ -54,7 +54,7 @@ export const DatabaseSyncStatus: React.FC = () => {
                             </div>
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
-                                {librarySyncProgress ? librarySyncProgress.progress.toFixed(0) + "%" : ""}
+                                {librarySyncProgress ? librarySyncProgress.progress.toFixed(1) + "%" : ""}
                             </div>
                         </div>
                     </div>
