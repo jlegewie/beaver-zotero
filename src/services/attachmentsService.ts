@@ -31,6 +31,7 @@ export interface UploadFailedResponse {
  */
 export interface CompleteUploadRequest {
     file_hash: string;
+    mime_type: string;
     page_count: number | null;
 }
 
@@ -172,9 +173,10 @@ export class AttachmentsService extends ApiService {
      * @param pageCount The number of pages in the file
      * @returns Promise with the upload completed response
      */
-    async markUploadCompleted(fileHash: string, pageCount: number | null): Promise<CompleteUploadResult> {
+    async markUploadCompleted(fileHash: string, mimeType: string, pageCount: number | null): Promise<CompleteUploadResult> {
         const request: CompleteUploadRequest = {
             file_hash: fileHash,
+            mime_type: mimeType,
             page_count: pageCount
         };
         return this.post<CompleteUploadResult>('/attachments/complete-upload', request);

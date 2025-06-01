@@ -290,8 +290,11 @@ export class FileUploader {
                 return;
             }
 
-            // Get the page count for PDF attachments
-            const pageCount = await getPDFPageCount(attachment);
+            // File metadata
+            // const mimeType = Zotero.MIME.getMIMETypeFromFile(filePath);
+            const mimeType = attachment.attachmentContentType;
+            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+            // const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
 
             // Get the file path for the attachment
             let filePath: string | null = null;
@@ -313,8 +316,7 @@ export class FileUploader {
                 return;
             }
             
-            // const mimeType = Zotero.MIME.getMIMETypeFromFile(filePath);
-            const mimeType = attachment.attachmentContentType;
+            // Create a blob from the file array buffer with the mime type
             const blob = new Blob([fileArrayBuffer], { type: mimeType });
 
             // Perform the file upload with retry for network issues
@@ -353,7 +355,7 @@ export class FileUploader {
                     }
                     
                     // Mark upload as completed
-                    await this.markUploadCompleted(item, pageCount, user_id);
+                    await this.markUploadCompleted(item, mimeType, pageCount, user_id);
                     uploadSuccess = true;
                 } catch (uploadError: any) {
                     // Network errors
@@ -430,10 +432,10 @@ export class FileUploader {
     /**
      * Marks upload as completed in backend first, then updates local state only if successful
      */
-    private async markUploadCompleted(item: UploadQueueRecord, pageCount: number | null, user_id: string): Promise<void> {
+    private async markUploadCompleted(item: UploadQueueRecord, mimeType: string, pageCount: number | null, user_id: string): Promise<void> {
         try {
             // First, notify backend of completion
-            await attachmentsService.markUploadCompleted(item.file_hash, pageCount);
+            await attachmentsService.markUploadCompleted(item.file_hash, mimeType, pageCount);
 
             // Only if backend call succeeds, update local state and cleanup
             await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
