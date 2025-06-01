@@ -124,7 +124,7 @@ export function useUploadProgress(options: UseUploadProgressOptions = {}): void 
                 }
                 
                 const newProgress = newStats.total > 0 
-                    ? Math.round(((newStats.completed + newStats.failed + newStats.skipped) / newStats.total) * 100) 
+                    ? Math.round(((newStats.completed + newStats.failed + newStats.skipped) / newStats.total) * 1000) / 10
                     : 0;
                 
                 const currentProgress = store.get(uploadProgressAtom);
