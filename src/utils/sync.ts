@@ -468,10 +468,8 @@ export async function syncItemsToBackend(
                     // Add items to upload queue
                     // TODO: Check on file size and page count limits here! Set status to 'skipped' if not meeting limits
                     const uploadQueueItems = batchResult.attachments
-                        // .filter(attachment => attachment.needs_upload)
                         .filter(attachment => {
-                            const effectiveUploadStatus = attachment.upload_status || 'pending';
-                            return effectiveUploadStatus === 'pending' && attachment.file_hash;
+                            return attachment.upload_status === 'pending' && attachment.file_hash;
                         })
                         .map(attachment => ({
                             file_hash: attachment.file_hash!,
