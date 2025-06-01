@@ -291,8 +291,7 @@ export class FileUploader {
             }
 
             // File metadata
-            // const mimeType = Zotero.MIME.getMIMETypeFromFile(filePath);
-            const mimeType = attachment.attachmentContentType;
+            let mimeType = attachment.attachmentContentType;
             const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
             // const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
 
@@ -303,6 +302,21 @@ export class FileUploader {
                 logger(`File Uploader: File path not found for attachment: ${item.zotero_key}`, 1);
                 await this.handlePermanentFailure(item, user_id, "File path not found");
                 return;
+            }
+
+            // Validate/correct MIME type by checking actual file if needed
+            if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
+                try {
+                    const detectedMimeType = await Zotero.MIME.getMIMETypeFromFile(filePath);
+                    if (detectedMimeType) {
+                        mimeType = detectedMimeType;
+                        logger(`File Uploader: Corrected MIME type from '${attachment.attachmentContentType}' to '${mimeType}' for ${item.zotero_key}`, 2);
+                    }
+                } catch (error) {
+                    logger(`File Uploader: Failed to detect MIME type for ${item.zotero_key}, using stored type`, 2);
+                    // Fall back to stored type or default
+                    mimeType = attachment.attachmentContentType || 'application/octet-stream';
+                }
             }
 
             // Read file content
