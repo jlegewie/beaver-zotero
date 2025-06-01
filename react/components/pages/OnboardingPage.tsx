@@ -167,6 +167,9 @@ const OnboardingPage: React.FC = () => {
                         <div className="text-base font-color-secondary">
                             Your plan does not support the features required for Beaver. Please upgrade your plan to continue.
                         </div>
+                        <div className="display-flex flex-row gap-3">
+                            <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button>
+                        </div>
                     </div>
                 )}
 
@@ -210,8 +213,8 @@ const OnboardingPage: React.FC = () => {
                 {/* Plan not supported buttons */}
                 {!planSupported && (
                     <div className="display-flex flex-row items-center gap-3">
-                        <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button>
-                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
+                        <div className="flex-1" />
+                        <Button variant="solid" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
                 )}
 
