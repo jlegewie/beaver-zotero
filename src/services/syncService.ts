@@ -31,31 +31,26 @@ export interface ItemBatchRequest {
 }
 
 export interface ItemResult {
+    item_id: string;
     library_id: number;
     zotero_key: string;
     metadata_hash: string;
-    success: boolean;
 }
 
 export interface AttachmentResult {
+    attachment_id: string;
     library_id: number;
     zotero_key: string;
-    metadata_hash: string;
     file_hash: string;
-    needs_upload: boolean;
     upload_status: UploadStatus;
-    success: boolean;
+    metadata_hash: string;
 }
 
-export interface BatchResult {
+export interface SyncItemsResponse {
     sync_id: string;
     sync_status: "in_progress" | "completed" | "failed";
     items: ItemResult[];
     attachments: AttachmentResult[];
-    processed: number;
-    success: number;
-    failed: number;
-    failed_keys: string[];
 }
 
 export interface SyncCompleteResponse {
@@ -131,7 +126,7 @@ export class SyncService extends ApiService {
         createLog: boolean,
         closeLog: boolean,
         syncId?: string,
-    ): Promise<BatchResult> {
+    ): Promise<SyncItemsResponse> {
         const payload: ItemBatchRequest = {
             library_id: libraryId,
             items: items,
@@ -142,7 +137,7 @@ export class SyncService extends ApiService {
             close_log: closeLog
         };
         if (syncId) payload.sync_id = syncId;
-        return this.post<BatchResult>('/zotero/sync/items', payload);
+        return this.post<SyncItemsResponse>('/zotero/sync/items', payload);
     }
 
     /**

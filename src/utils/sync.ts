@@ -433,15 +433,9 @@ export async function syncItemsToBackend(
                     }
                 }
         
-                // Process batch result
-                if (!batchResult) {
+                // Process batch result (should never happen)
+                if (!batchResult || batchResult.sync_status === 'failed') {
                     throw new Error("Failed to process batch after multiple attempts");
-                }
-                if (batchResult.sync_status === 'failed') {
-                    onStatusChange?.('failed');
-                    const error = new Error(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} failed. Failed keys: ${batchResult.failed_keys}`);
-                    Zotero.logError(error);
-                    throw new Error("Syncing status is failed");
                 }
                 
                 // Set sync ID from batch result
