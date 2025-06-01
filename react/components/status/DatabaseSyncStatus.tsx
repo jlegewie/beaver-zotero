@@ -3,17 +3,34 @@ import { RepeatIcon } from "../icons/icons";
 import Tooltip from "../ui/Tooltip";
 import IconButton from "../ui/IconButton";
 import { ProgressBar } from "../status/ProgressBar";
-import { librarySyncProgressAtom } from "../../atoms/sync";
-import { useAtomValue } from "jotai";
+import { librarySyncProgressAtom, librariesSyncStatusAtom } from "../../atoms/sync";
+import { useAtomValue, useSetAtom } from "jotai";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
+import { LibrarySyncStatus } from "../../atoms/sync";
 
 
 export const DatabaseSyncStatus: React.FC = () => {
 
     const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
+    const setLibrariesSyncStatus = useSetAtom(librariesSyncStatusAtom);
 
     const handleSyncRetryClick = () => {
+        setLibrariesSyncStatus(currentStatus => {
+            const newStatus: Record<number, LibrarySyncStatus> = {};
+            for (const libIdStr in currentStatus) {
+                const libId = Number(libIdStr);
+                const existingLibStatus = currentStatus[libId];
+                if (existingLibStatus) {
+                    newStatus[libId] = {
+                        ...existingLibStatus, // Preserves libraryID, libraryName, itemCount
+                        syncedCount: 0,
+                        status: 'in_progress',
+                    };
+                }
+            }
+            return newStatus;
+        });
         syncZoteroDatabase();
     };
     
