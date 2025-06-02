@@ -7,6 +7,7 @@ import { CitationService } from "./services/CitationService";
 import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttachmentPane'
 import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
+import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 
 const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -215,6 +216,9 @@ async function onShutdown(): Promise<void> {
 			}
 		}
 		attachmentPanes.clear();
+
+		// Global cleanup of all attachment pane patches
+		cleanupAllAttachmentPanePatches();
 
 		// Call UIManager cleanup
 		if (uiManager) {

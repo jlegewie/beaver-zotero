@@ -55,6 +55,7 @@ export function unpatch(functions?: Trampoline[]) {
 export class ZoteroAttachmentPane {
     private observer: MutationObserver | null = null;
     private patched = false;
+    private patches: Trampoline[] = []; // Track patches for this instance
     private Zotero;
     private window: Window;
     private document: Document;
@@ -233,7 +234,7 @@ export class ZoteroAttachmentPane {
 
             // Execute the async update function
             updateStatus();
-        });
+        }, this.patches); // Pass this.patches to track the specific patches for this instance
 
         this.patched = true;
         ztoolkit.log('ZoteroAttachmentPane: Patching complete.');
@@ -268,11 +269,28 @@ export class ZoteroAttachmentPane {
 
     public unload(): void {
         ztoolkit.log('ZoteroAttachmentPane: Unloading...');
+        
+        // Remove DOM elements
         const beaverRow = this.document.querySelector('#beaverStatusRow');
         beaverRow?.remove();
+        
+        // Disable all patches created by this instance
+        if (this.patches.length > 0) {
+            ztoolkit.log(`ZoteroAttachmentPane: Disabling ${this.patches.length} patches.`);
+            unpatch(this.patches);
+            this.patches = []; // Clear the array
+        }
+        
         this.patched = false; // Reset patch status
         ztoolkit.log('ZoteroAttachmentPane: Unloaded.');
     }
+}
+
+// Add a global cleanup function to disable all patches
+export function cleanupAllAttachmentPanePatches(): void {
+    ztoolkit.log('ZoteroAttachmentPane: Disabling all global patches...');
+    unpatch(); // Disable all patches in the global trampolines array
+    ztoolkit.log('ZoteroAttachmentPane: All global patches disabled.');
 }
 
 // Helper function to be called when a Zotero window loads
