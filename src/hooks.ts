@@ -6,6 +6,7 @@ import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttachmentPane'
 import { BeaverDB } from "./services/database";
+import { uiManager } from "../react/ui/UIManager";
 
 const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -183,6 +184,8 @@ function unloadKatexStylesheet() {
 
 async function onShutdown(): Promise<void> {
 	try {
+		ztoolkit.log("Cleaning up Beaver during shutdown.");
+		
 		// Close database connection if it exists
 		if (addon.db) {
 			await addon.db.closeDatabase();
@@ -212,6 +215,15 @@ async function onShutdown(): Promise<void> {
 			}
 		}
 		attachmentPanes.clear();
+
+		// Call UIManager cleanup
+		if (uiManager) {
+            uiManager.cleanup();
+            ztoolkit.log("UIManager cleanup executed.");
+        } else {
+            ztoolkit.log("UIManager instance not found during shutdown.");
+        }
+
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}
