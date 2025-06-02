@@ -138,6 +138,17 @@ const OnboardingPage: React.FC = () => {
             setIsCompletingOnboarding(false);
         }
     };
+
+    const getFooterMessage = () => {
+        if (!isUploadComplete || !hasCompletedInitialSync) {
+            return "Please wait for the database sync and file upload to complete.";
+        } else if (uploadStats && uploadStats.failed > 0) {
+            return "Failed to upload some files. Please retry to use them with Beaver."
+        } else if (isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStats.progress < 100) {
+            return "Processing incomplete. Expect slower response times & limited search."
+        }
+        return "";
+    };
     
     return (
         <div 
@@ -237,18 +248,11 @@ const OnboardingPage: React.FC = () => {
                 {planSupported && hasAuthorizedAccess && (
                     <div className="display-flex flex-row items-center gap-4">
 
-                        {/* Warning messages */}
-                        {uploadStats && uploadStats.failed > 0 && (
-                            <div className="font-color-secondary text-sm">
-                                Failed to upload some files. Please retry to use them in with Beaver.
-                            </div>
-                        )}
+                        {/* Footer message */}
+                        <div className="font-color-secondary text-sm">
+                            {getFooterMessage()}
+                        </div>
 
-                        {isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStats.progress < 100 && (
-                            <div className="font-color-secondary text-sm">
-                                Processing incomplete. Expect slower response times & limited search.
-                            </div>
-                        )}
                         <div className="flex-1" />
 
                         {/* Complete onboarding button */}
