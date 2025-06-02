@@ -206,6 +206,12 @@ class UIManager {
         if (win && this.originalOnChangeSidebarWidth) {
             Zotero.Reader.onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
         }
+        if (win) {
+            const chatToggleButton = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
+            if (chatToggleButton) {
+                chatToggleButton.remove();
+            }
+        }
     }
 
     // Store the original handler
