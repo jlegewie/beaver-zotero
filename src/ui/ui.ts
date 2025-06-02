@@ -7,9 +7,21 @@ import { getPref } from "../utils/prefs";
 // Create a single instance of keyboard manager
 const keyboardManager = new KeyboardManager();
 
+interface BeaverWindow extends Window {
+    ReactDOM?: {
+        unmountComponentAtNode: (container: Element) => boolean;
+    };
+    renderAiSidebar?: (container: Element, location: string) => void;
+    renderGlobalInitializer?: (container: Element) => void;
+    __beaverEventBus?: any;
+    // Unmount functions if not using ReactDOM directly?
+    // unmountBeaverAiSidebar?: (container: Element) => void;
+    // unmountGlobalInitializer?: (container: Element) => void;
+}
+
 export class BeaverUIFactory {
 
-    static registerChatPanel(win: Window) {
+    static registerChatPanel(win: BeaverWindow) {
         // Remove existing panel if present
         this.removeChatPanel(win);
 
@@ -87,7 +99,7 @@ export class BeaverUIFactory {
         };
     }
 
-    private static addToolbarButton(win: Window) {
+    private static addToolbarButton(win: BeaverWindow) {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
@@ -113,9 +125,52 @@ export class BeaverUIFactory {
         }
     }
 
-    static removeChatPanel(win: Window) {
-        const elementIds = ["beaver-pane-library", "beaver-pane-reader", "zotero-beaver-tb-chat-toggle", "beaver-tb-separator"];
-        elementIds.forEach(id => win.document.getElementById(id)?.remove());
+    static removeChatPanel(win: BeaverWindow) {
+        Zotero.debug("[Beaver] BeaverUIFactory.removeChatPanel called.");
+
+        // Unmount React components
+        if (win.ReactDOM && typeof win.ReactDOM.unmountComponentAtNode === 'function') {
+            const reactRootIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
+            reactRootIds.forEach(id => {
+                const element = win.document.getElementById(id);
+                if (element && win.ReactDOM) {
+                    try {
+                        win.ReactDOM.unmountComponentAtNode(element);
+                        Zotero.debug(`[Beaver] Unmounted React component from #${id}`);
+                    } catch (e: any) {
+                        Zotero.debug(`[Beaver] Error unmounting React component from #${id}: ${e.message}`);
+                    }
+                }
+            });
+        } else {
+            Zotero.debug("[Beaver] ReactDOM.unmountComponentAtNode not available on window object during cleanup.");
+        }
+
+        const elementIds = [
+            "beaver-pane-library", 
+            "beaver-pane-reader", 
+            "zotero-beaver-tb-chat-toggle", 
+            "beaver-tb-separator",
+            "beaver-global-initializer-root" // This is the div container for the global initializer
+        ];
+        elementIds.forEach(id => {
+            const element = win.document.getElementById(id);
+            if (element) {
+                element.remove();
+                Zotero.debug(`[Beaver] Removed element #${id}`);
+            } else {
+                Zotero.debug(`[Beaver] Element #${id} not found for removal.`);
+            }
+        });
+
+        // Remove the React bundle script tag
+        const scriptTag = win.document.querySelector('script[src="chrome://beaver/content/reactBundle.js"]');
+        if (scriptTag) {
+            scriptTag.remove();
+            Zotero.debug("[Beaver] Removed React bundle script tag.");
+        } else {
+            Zotero.debug("[Beaver] React bundle script tag not found for removal.");
+        }
     }
 
     static registerExtraColumn() {
