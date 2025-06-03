@@ -107,7 +107,7 @@ export class SimplifiedFileUploader {
         // Completion and error events
         this.queue.on('completed', async (result: { taskItem: UploadQueueRecord; taskSuccess: boolean }) => {
             if (result.taskSuccess) {
-                await this.markUploadCompleted(result.taskItem);
+                await this.markUploadCompleted(result.taskItem, 'application/pdf');
             } else {
                 this.updateStatus('skipped');
                 logger(`Beaver File Uploader: Upload task for ${result.taskItem.zotero_key} reported as not successful by uploadToStorage but did not throw. Marked as skipped.`, 2);
@@ -266,10 +266,10 @@ export class SimplifiedFileUploader {
     /**
      * Marks upload as completed in backend first, then updates local state only if successful
      */
-    private async markUploadCompleted(item: UploadQueueRecord): Promise<void> {
+    private async markUploadCompleted(item: UploadQueueRecord, mimeType: string): Promise<void> {
         try {
             // First, notify backend of completion
-            await attachmentsService.markUploadCompleted(item.file_hash, item.page_count);
+            await attachmentsService.markUploadCompleted(item.file_hash, mimeType, item.page_count);
 
             // Only if backend call succeeds, update local state and cleanup
             await Zotero.Beaver.db.completeQueueItem(this.user_id || '', item.file_hash);
