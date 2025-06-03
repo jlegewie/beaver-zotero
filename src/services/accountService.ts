@@ -32,10 +32,17 @@ export class AccountService extends ApiService {
 
     /**
      * Sets the user's authorization status to authorized and records consent timestamp
+     * @param requireOnboarding Whether the user needs to complete onboarding
      * @returns Promise with the response message
      */
-    async authorizeAccess(): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/account/authorize', {});
+    async authorizeAccess(requireOnboarding: boolean = true): Promise<{ message: string }> {
+        const params = new URLSearchParams();
+        if (requireOnboarding) {
+            params.append('require_onboarding', 'true');
+        }
+        
+        const url = '/account/authorize' + (params.toString() ? '?' + params.toString() : '');
+        return this.post<{ message: string }>(url, {});
     }
 
     /**

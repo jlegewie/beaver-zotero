@@ -105,7 +105,7 @@ const OnboardingPage: React.FC = () => {
                                 libraryName: library?.name || '',
                                 itemCount: library?.itemCount || 0,
                                 syncedCount: 0,
-                                status: 'idle',
+                                status: library?.itemCount && library.itemCount > 0 ? 'idle' : 'completed',
                             } as LibrarySyncStatus
                         ];
                     })
@@ -116,7 +116,8 @@ const OnboardingPage: React.FC = () => {
             setLibrariesSyncStatus(selectedLibraries);
             
             // Call the service to authorize access
-            await accountService.authorizeAccess();
+            const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
+            await accountService.authorizeAccess(requireOnboarding);
         } catch (error) {
             logger(`OnboardingPage: Error authorizing access: ${error}`);
         } finally {
