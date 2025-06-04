@@ -8,6 +8,7 @@ import { fileUploader } from './FileUploader';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, AttachmentData } from '../../react/types/zotero';
 import { logger } from '../utils/logger';
+import { ZoteroItemReference } from '../../react/types/zotero';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -67,10 +68,9 @@ export interface ItemDeleteRequest {
     zotero_keys: string[];
 }
 
-export interface DeleteResult {
-    requested: number;
-    deleted: number;
-    failed: number;
+export interface DeleteZoteroDataResponse {
+    items: ZoteroItemReference[];
+    attachments: ZoteroItemReference[];
 }
 
 // Add these interfaces after the existing interfaces
@@ -172,12 +172,14 @@ export class SyncService extends ApiService {
      * @param zoteroKeys Array of Zotero keys to delete
      * @returns Promise with the deletion result
      */
-    async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteResult> {
-        return this.post<DeleteResult>('/zotero/sync/items/delete', {
+    async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteZoteroDataResponse> {
+        return this.post<DeleteZoteroDataResponse>('/zotero/sync/items/delete', {
             library_id: libraryId,
             zotero_keys: zoteroKeys
         });
     }
+
+    
 
     /**
      * Forces update of an attachment's file hash

@@ -123,8 +123,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
                 logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
-                await syncService.deleteItems(libraryID, keys);
-                await Zotero.Beaver.db.deleteByLibraryAndKeys(user.id, libraryID, keys);
+                const response = await syncService.deleteItems(libraryID, keys);
+                // Update local database
+                const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
+                if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(user.id, libraryID, allKeys);
             }
         } catch (error: any) {
             logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);
