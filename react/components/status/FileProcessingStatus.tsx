@@ -235,7 +235,7 @@ const FileProcessingStatus: React.FC = () => {
                     <div className="display-flex flex-row gap-4  min-w-0">
                         {/* Icon */}
                         <div className="flex-shrink-0">
-                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-secondary" />
+                            <Icon icon={AlertIcon} className="scale-12 mt-15 font-color-red" />
                         </div>
                         
                         {/* Failed count and retry button */}
