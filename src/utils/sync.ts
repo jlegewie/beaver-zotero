@@ -20,7 +20,7 @@ export type ItemFilterFunction = (item: Zotero.Item) => boolean;
  * @returns true if the item should be synced
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
-    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment() && !item.isInTrash());
+    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) && !item.isInTrash();
 };
 
 /**
@@ -404,7 +404,7 @@ export async function syncItemsToBackend(
                 const closeLog = i + batchSize >= items.length; // Close if this is the last batch
                 
                 let attempts = 0;
-                const maxAttempts = 3;
+                const maxAttempts = 1;
                 let batchResult = null;
                 
                 while (attempts < maxAttempts) {
