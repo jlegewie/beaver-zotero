@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from '../icons/icons';
-import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { FailedFileReference, FailedItemReference } from '../../types/zotero';
-import { errorMapping } from '../status/FileProcessingStatus';
+import { errorMapping } from '../../atoms/files';
 import { selectItemById } from '../../../src/utils/selectItem';
 
 interface ItemWithSelectionId {

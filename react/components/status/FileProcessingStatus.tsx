@@ -18,33 +18,6 @@ import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent
 
 const ITEMS_PER_PAGE = 10;
 
-// Mapping of error codes to user error messages (covers error codes from ProcessingErrorCode pydantic model)
-export const errorMapping = {
-    "queue_failed": "Unexpected error",
-    "queue_failed_invalid_user": "Unexpected error",
-    "queue_failed_invalid_file_type": "File Type not supported",
-    "queue_failed_invalid_page_count": "Unable to determine page count",
-    "queue_failed_exceeds_plan_page_limit": "Page count exceeds limit",
-    "queue_failed_file_too_large": "File size exceeds limit",
-    "queue_failed_database_error": "Unexpected error",
-    "encrypted": "File is encrypted",
-    "no_text_layer": "File requires OCR",
-    "insufficient_text": "Insufficient text",
-    "file_missing": "File missing",
-    "download_failed": "Unexpected error",
-    "preprocessing_failed": "Unexpected error",
-    "conversion_failed": "Unexpected error",
-    "opening_failed": "Unexpected error",
-    "upload_failed": "Unexpected error",
-    "chunk_failed": "Unexpected error",
-    "embedding_failed": "Unexpected error",
-    "db_update_failed": "Unexpected error",
-    "task_parsing_failed": "Unexpected error",
-    "max_retries": "Unexpected error",
-    "timeout": "Unexpected error",
-    "unexpected_error": "Unexpected error"
-}
-
 const FileProcessingStatus: React.FC = () => {
 
     const [showFailedFiles, setShowFailedFiles] = useState(false);
@@ -238,6 +211,7 @@ const FileProcessingStatus: React.FC = () => {
                      )}
                 </div>
             </div>
+
             {/* Failed processing items */}
             {fileStats !== null && fileStats !== undefined && typeof fileStats.failedProcessingCount === 'number' && fileStats.failedProcessingCount > 0 && (
                 <div className="display-flex flex-col gap-4 min-w-0">
