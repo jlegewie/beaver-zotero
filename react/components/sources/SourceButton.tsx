@@ -13,6 +13,7 @@ import { activePreviewAtom } from '../../atoms/ui'
 import { getPref } from '../../../src/utils/prefs'
 import { selectItem } from '../../../src/utils/selectItem'
 import { logger } from '../../../src/utils/logger'
+import Tooltip from '../ui/Tooltip'
 
 const MAX_SOURCEBUTTON_TEXT_LENGTH = 20;
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
@@ -156,6 +157,14 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             </button>
         )
 
-        return sourceButton;
+        return (
+            !isValid ?
+                <Tooltip content={invalidReason} singleLine={true} placement="top" width="200px">
+                    {sourceButton}
+                </Tooltip>
+            :
+                sourceButton
+        )
+
     }
 )

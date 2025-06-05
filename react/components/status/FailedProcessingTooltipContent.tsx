@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { errorCodeStatsAtom, errorCodeLastFetchedAtom, aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/ui';
+import { errorCodeStatsAtom, errorCodeLastFetchedAtom, aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
 import { attachmentsService } from '../../../src/services/attachmentsService';
 import { errorMapping } from './FileProcessingStatus';

@@ -32,4 +32,24 @@ export interface FileStatus {
 
     // Timestamp for the last update
     last_updated_at: string; // ISO 8601 timestamp string
-} 
+}
+
+// Aggregated file processing status stats
+export interface FileStatusStats {
+    fileStatusAvailable: boolean;
+    totalFiles: number;
+    completedFiles: number;
+    failedProcessingCount: number;
+    skippedProcessingCount: number;
+    activeProcessingCount: number;
+    totalProcessingCount: number;
+    processingProgress: number;
+    progress: number;
+    failedCount: number;
+    activeCount: number;
+    uploadPendingCount: number;
+    queuedProcessingCount: number;
+    uploadCompletedCount: number;
+    uploadFailedCount: number;
+    uploadSkippedCount: number;
+}

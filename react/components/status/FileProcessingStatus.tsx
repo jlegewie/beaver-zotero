@@ -9,7 +9,7 @@ import { FailedFileReference } from "../../types/zotero";
 import { logger } from "../../../src/utils/logger";
 import ZoteroAttachmentList from "../ui/ZoteroAttachmentList";
 import { attachmentsService } from "../../../src/services/attachmentsService";
-import { fileStatusStatsAtom } from "../../atoms/ui";
+import { fileStatusStatsAtom } from "../../atoms/files";
 import { planFeaturesAtom } from "../../atoms/profile";
 import { AttachmentStatusPagedResponse } from "../../../src/services/attachmentsService";
 import Tooltip from "../ui/Tooltip";
