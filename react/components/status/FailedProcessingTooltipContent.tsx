@@ -23,7 +23,10 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
             setError(null);
             attachmentsService.getErrorCodeStats('md')
                 .then(stats => {
-                    setErrorCodeStats(stats);
+                    setErrorCodeStats(stats.reduce((acc, stat) => {
+                        acc[stat.error_code] = stat.count;
+                        return acc;
+                    }, {} as Record<string, number>));
                     setErrorCodeLastFetched(failedCount);
                 })
                 .catch(err => {

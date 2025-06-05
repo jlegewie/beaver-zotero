@@ -35,6 +35,12 @@ export interface CompleteUploadRequest {
     page_count: number | null;
 }
 
+export interface ErrorCodeStats {
+    error_code: string;
+    status: ProcessingStatus;
+    count: number;
+}
+
 /**
  * Response from marking an upload as completed
  */
@@ -151,8 +157,8 @@ export class AttachmentsService extends ApiService {
      * @param type The type of processing ('md' or 'docling') to get stats for.
      * @returns Promise resolving to an object mapping error codes to their counts.
      */
-    async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<Record<string, number>> {
-        return this.get<Record<string, number>>(`/attachments/error-code-stats/${type}`);
+    async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<ErrorCodeStats[]> {
+        return this.get<ErrorCodeStats[]>(`/attachments/error-code-stats/${type}`);
     }
 
     /**
