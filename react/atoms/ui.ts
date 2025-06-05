@@ -4,6 +4,7 @@ import { FileStatus } from '../types/fileStatus';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage } from '../types/popupMessage';
 import { uploadQueueStatusAtom } from './sync';
+import { planFeaturesAtom } from './profile';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -72,11 +73,14 @@ export interface FileStatusStats {
 
 export const fileStatusStatsAtom = atom<FileStatusStats>(
     (get) => {
+        const planFeatures = get(planFeaturesAtom);
+        const useAdvancedPipeline = planFeatures.advancedProcessing;
+
         const fileStatus = get(fileStatusAtom);
         
         // Total files
         const totalFiles = fileStatus?.total_files || 0;
-        const completedFiles = fileStatus?.md_embedded || 0;
+        const completedFiles = useAdvancedPipeline ? (fileStatus?.docling_embedded || 0) : (fileStatus?.md_embedded || 0);
         
         // Upload stats
         const uploadPendingCount = fileStatus?.upload_pending || 0;
@@ -85,10 +89,10 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const uploadSkippedCount = fileStatus?.upload_skipped || 0;
 
         // Processing stats
-        const skippedProcessingCount = fileStatus?.md_skipped || 0;
-        const failedProcessingCount = fileStatus?.md_failed || 0;
-        const activeProcessingCount = (fileStatus?.md_processing || 0);
-        const queuedProcessingCount = fileStatus?.md_queued || 0;
+        const skippedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_skipped || 0 : fileStatus?.md_skipped || 0;
+        const failedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_failed || 0 : fileStatus?.md_failed || 0;
+        const activeProcessingCount = (useAdvancedPipeline ? fileStatus?.docling_processing || 0 : fileStatus?.md_processing || 0);
+        const queuedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_queued || 0 : fileStatus?.md_queued || 0;
         const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles;
         const processingProgress = totalProcessingCount > 0
             ? Math.min(((failedProcessingCount + completedFiles) / totalProcessingCount) * 100, 100)
