@@ -5,6 +5,8 @@ import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage } from '../types/popupMessage';
 import { uploadQueueStatusAtom } from './sync';
 import { planFeaturesAtom } from './profile';
+import { ErrorCodeStats } from 'src/services/attachmentsService';
+import { errorMapping } from '../components/status/FileProcessingStatus';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -48,8 +50,35 @@ export const syncErrorAtom = atom(
 
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
-export const errorCodeStatsAtom = atom<Record<string, number> | null>(null);
+export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
 export const errorCodeLastFetchedAtom = atom<number | null>(null);
+
+
+export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, number>>((get) => {
+    const errorCodeStats = get(errorCodeStatsAtom);
+    if (!errorCodeStats) return {};
+    const aggregatedStats: Record<string, number> = {};
+    for (const errorCodeStat of errorCodeStats) {
+        if(errorCodeStat.status !== "failed") continue;
+        const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
+        aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
+    }
+    return aggregatedStats;
+});
+
+export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, number>>((get) => {
+    const errorCodeStats = get(errorCodeStatsAtom);
+    if (!errorCodeStats) return {};
+    const aggregatedStats: Record<string, number> = {};
+    for (const errorCodeStat of errorCodeStats) {
+        if(errorCodeStat.status !== "skipped") continue;
+        const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
+        aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
+    }
+    return aggregatedStats;
+});
+
+
 
 export interface FileStatusStats {
     fileStatusAvailable: boolean;

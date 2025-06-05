@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useAtom } from 'jotai';
-import { errorCodeStatsAtom, errorCodeLastFetchedAtom } from '../../atoms/ui';
+import { useAtom, useAtomValue } from 'jotai';
+import { errorCodeStatsAtom, errorCodeLastFetchedAtom, aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/ui';
 import { Spinner } from '../icons/icons';
 import { attachmentsService } from '../../../src/services/attachmentsService';
 import { errorMapping } from './FileProcessingStatus';
@@ -13,6 +13,7 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [errorCodeLastFetched, setErrorCodeLastFetched] = useAtom(errorCodeLastFetchedAtom);
+    const aggregatedErrorMessagesForFailedFiles = useAtomValue(aggregatedErrorMessagesForFailedFilesAtom);
 
     useEffect(() => {
         const shouldFetch = failedCount > 0 &&
@@ -23,10 +24,7 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
             setError(null);
             attachmentsService.getErrorCodeStats('md')
                 .then(stats => {
-                    setErrorCodeStats(stats.reduce((acc, stat) => {
-                        acc[stat.error_code] = stat.count;
-                        return acc;
-                    }, {} as Record<string, number>));
+                    setErrorCodeStats(stats);
                     setErrorCodeLastFetched(failedCount);
                 })
                 .catch(err => {
@@ -45,16 +43,6 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
         }
     }, [failedCount, errorCodeStats, setErrorCodeStats, setErrorCodeLastFetched]); // Re-run effect if count or stats atom changes
 
-
-    // Aggregate error codes based on errorMapping
-    const aggregatedStats: Record<string, number> = {};
-    if (errorCodeStats) {
-        for (const [code, count] of Object.entries(errorCodeStats)) {
-            const message = errorMapping[code as keyof typeof errorMapping] || "Unexpected error";
-            aggregatedStats[message] = (aggregatedStats[message] || 0) + count;
-        }
-    }
-
     // Display error codes and counts
     return (
         <div className="display-flex flex-col gap-1">
@@ -67,10 +55,10 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
             }
             {!isLoading && error && <div className="text-base font-color-secondary mb-1">{error}</div>}
             {!isLoading && !error && (
-                (!errorCodeStats || Object.keys(aggregatedStats).length === 0) ? (
+                (!errorCodeStats || Object.keys(aggregatedErrorMessagesForFailedFiles).length === 0) ? (
                     <div className="text-base font-color-secondary">No specific error details available.</div>
                 ) : (
-                    Object.entries(aggregatedStats).map(([message, count]) => (
+                    Object.entries(aggregatedErrorMessagesForFailedFiles).map(([message, count]) => (
                         <div key={message} className="display-flex justify-between items-center text-base whitespace-nowrap">
                             <span className="font-color-tertiary mr-4">{message}:</span>
                             <span className="font-color-secondary font-mono">{count}</span>

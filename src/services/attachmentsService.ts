@@ -35,6 +35,9 @@ export interface CompleteUploadRequest {
     page_count: number | null;
 }
 
+/**
+ * ErrorCodeStats represents the statistics for error codes encountered during processing.
+ */
 export interface ErrorCodeStats {
     error_code: string;
     status: ProcessingStatus;
