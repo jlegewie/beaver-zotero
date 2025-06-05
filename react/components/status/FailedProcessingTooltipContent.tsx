@@ -1,47 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
-import { errorCodeStatsAtom, errorCodeLastFetchedAtom, aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/files';
+import React from 'react';
+import { useAtomValue } from 'jotai';
+import { aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
-import { attachmentsService } from '../../../src/services/attachmentsService';
-import { errorMapping } from './FileProcessingStatus';
+import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 
 /**
  * Tooltip content component for displaying processing error codes.
  */
-export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> = ({ failedCount }) => {
-    const [errorCodeStats, setErrorCodeStats] = useAtom(errorCodeStatsAtom);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [errorCodeLastFetched, setErrorCodeLastFetched] = useAtom(errorCodeLastFetchedAtom);
+export const FailedProcessingTooltipContent: React.FC = () => {
+    const { isLoading, error } = useErrorCodeStats();
     const aggregatedErrorMessagesForFailedFiles = useAtomValue(aggregatedErrorMessagesForFailedFilesAtom);
-
-    useEffect(() => {
-        const shouldFetch = failedCount > 0 &&
-                            (errorCodeStats === null || !errorCodeLastFetched || failedCount !== errorCodeLastFetched);
-
-        if (shouldFetch) {
-            setIsLoading(true);
-            setError(null);
-            attachmentsService.getErrorCodeStats('md')
-                .then(stats => {
-                    setErrorCodeStats(stats);
-                    setErrorCodeLastFetched(failedCount);
-                })
-                .catch(err => {
-                    console.error("Failed to fetch error code stats:", err);
-                    setError("Could not load details.");
-                    // Optionally clear stats if fetch fails
-                    // setErrorCodeStats(null);
-                })
-                .finally(() => {
-                    setIsLoading(false);
-                });
-        } else if (failedCount === 0 && errorCodeStats !== null) {
-            // Reset stats if failed count goes to 0
-            setErrorCodeStats(null);
-            setErrorCodeLastFetched(null);
-        }
-    }, [failedCount, errorCodeStats, setErrorCodeStats, setErrorCodeLastFetched]); // Re-run effect if count or stats atom changes
 
     // Display error codes and counts
     return (
@@ -55,7 +23,7 @@ export const FailedProcessingTooltipContent: React.FC<{ failedCount: number }> =
             }
             {!isLoading && error && <div className="text-base font-color-secondary mb-1">{error}</div>}
             {!isLoading && !error && (
-                (!errorCodeStats || Object.keys(aggregatedErrorMessagesForFailedFiles).length === 0) ? (
+                (!aggregatedErrorMessagesForFailedFiles || Object.keys(aggregatedErrorMessagesForFailedFiles).length === 0) ? (
                     <div className="text-base font-color-secondary">No specific error details available.</div>
                 ) : (
                     Object.entries(aggregatedErrorMessagesForFailedFiles).map(([message, count]) => (

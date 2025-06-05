@@ -252,7 +252,7 @@ const FileProcessingStatus: React.FC = () => {
                             <div className="display-flex flex-row items-start gap-3 w-full">
                                 <Tooltip 
                                     content="Processing error codes"
-                                    customContent={<FailedProcessingTooltipContent failedCount={fileStats.failedProcessingCount} />}
+                                    customContent={<FailedProcessingTooltipContent />}
                                     showArrow={true}
                                     disabled={fileStats.failedProcessingCount === 0}
                                     placement="top"

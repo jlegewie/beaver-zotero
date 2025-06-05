@@ -13,7 +13,7 @@ import { SyncStatus } from './ui';
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
-export const errorCodeLastFetchedAtom = atom<number | null>(null);
+export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number } | null>(null);
 
 // Aggregated error messages for failed and skipped files
 export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, number>>((get) => {
