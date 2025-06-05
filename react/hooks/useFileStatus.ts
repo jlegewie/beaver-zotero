@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { fileStatusAtom } from '../atoms/ui';
+import { fileStatusAtom } from '../atoms/files';
 import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
