@@ -38,8 +38,9 @@ const FileProcessingStatus: React.FC = () => {
         setIsLoadingFailed(true);
         try {
             const useAdvancedPipeline = planFeatures.advancedProcessing;
-            const result: AttachmentStatusPagedResponse = await attachmentsService.getFailedAttachments(
-                useAdvancedPipeline,
+            const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
+                "failed",
+                useAdvancedPipeline ? "advanced" : "basic",
                 page + 1, // API is 1-based
                 ITEMS_PER_PAGE 
             );

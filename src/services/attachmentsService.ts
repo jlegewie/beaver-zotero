@@ -306,24 +306,27 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Fetches attachments with failed processing status.
-     * @param useAdvancedPipeline If true, check docling_status for failures; if false, check md_status for failures
+     * Fetches attachments by processing status.
+     * @param status The processing status to filter by
+     * @param pipeline The pipeline type ("basic" or "advanced", default: "basic")
      * @param page Page number (1-based, default: 1)
      * @param pageSize Number of items per page (default: 50, max: 100)
-     * @returns Promise with paginated list of failed attachments
+     * @returns Promise with paginated list of attachments with the specified status
      */
-    async getFailedAttachments(
-        useAdvancedPipeline: boolean = false,
+    async getAttachmentsByStatus(
+        status: ProcessingStatus,
+        pipeline: "basic" | "advanced" = "basic",
         page: number = 1,
         pageSize: number = 50
     ): Promise<AttachmentStatusPagedResponse> {
         const params = new URLSearchParams({
-            use_advanced_pipeline: useAdvancedPipeline.toString(),
+            status: status,
+            pipeline: pipeline,
             page: page.toString(),
             page_size: pageSize.toString()
         });
         
-        const url = `/attachments/status/failed?${params.toString()}`;
+        const url = `/attachments/by-status?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
     }
 }
