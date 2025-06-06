@@ -142,7 +142,7 @@ const OnboardingPage: React.FC = () => {
 
     const getFooterMessage = () => {
         if (!isUploadComplete || !hasCompletedInitialSync) {
-            return "Please wait for the database sync and file upload to complete.";
+            return "Please wait for the file uploads to complete.";
         } else if (uploadStats && uploadStats.failed > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
         } else if (isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStats.progress < 100) {
