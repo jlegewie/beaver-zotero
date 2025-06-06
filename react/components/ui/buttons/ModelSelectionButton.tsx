@@ -175,10 +175,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         return items;
     }, [availableModels, updateSelectedModel, selectedModel]);
 
-    const hasAnyKey = 
-        !!getPref('googleGenerativeAiApiKey') || 
-        !!getPref('openAiApiKey') || 
-        !!getPref('anthropicApiKey');
+    const hasAnyKey = availableModels.length > 0;
     const isButtonDisabled = !hasAnyKey;
 
     const getButtonLabel = () => {
@@ -225,7 +222,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             iconClassName="scale-11 -mr-015"
             rightIconClassName="scale-11 -ml-1"
             ariaLabel="Select AI Model"
-            tooltipContent={isButtonDisabled ? 'Add your own API keys to select a model' : 'Choose AI model'}
+            tooltipContent={isButtonDisabled ? 'No models available' : 'Choose AI model'}
             showArrow={false}
             disabled={isLoading || isButtonDisabled}
             onAfterClose={handleAfterClose}
