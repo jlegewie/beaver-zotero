@@ -1,14 +1,14 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { aggregatedErrorMessagesForFailedFilesAtom } from '../../atoms/files';
+import { aggregatedErrorMessagesForFailedFilesAtom, errorCodeStatsErrorAtom, errorCodeStatsIsLoadingAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
-import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 
 /**
  * Tooltip content component for displaying processing error codes.
  */
 export const FailedProcessingTooltipContent: React.FC = () => {
-    const { isLoading, error } = useErrorCodeStats();
+    const isLoading = useAtomValue(errorCodeStatsIsLoadingAtom);
+    const error = useAtomValue(errorCodeStatsErrorAtom);
     const aggregatedErrorMessagesForFailedFiles = useAtomValue(aggregatedErrorMessagesForFailedFilesAtom);
 
     // Display error codes and counts

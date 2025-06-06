@@ -7,8 +7,10 @@ import { fileStatusStatsAtom } from "../../atoms/files";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import ExpandableAttachmentList from "./ExpandableAttachmentList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
+import { useErrorCodeStats } from "../../hooks/useErrorCodeStats";
 
 const FileProcessingStatus: React.FC = () => {
+    useErrorCodeStats();
     const fileStats = useAtomValue(fileStatusStatsAtom);
 
     const getProcessingIcon = (): React.ReactNode => {
