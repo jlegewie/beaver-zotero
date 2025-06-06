@@ -13,7 +13,7 @@ export const errorMapping = {
     "queue_failed": "Unexpected error",
     "queue_failed_invalid_user": "Unexpected error",
     "queue_failed_invalid_file_type": "File Type not supported",
-    "queue_failed_invalid_page_count": "Unable to determine page count",
+    "queue_failed_invalid_page_count": "Unable to read file",
     "queue_failed_exceeds_plan_page_limit": "Page count exceeds limit",
     "queue_failed_file_too_large": "File size exceeds limit",
     "queue_failed_database_error": "Unexpected error",
@@ -90,9 +90,9 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const failedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_failed || 0 : fileStatus?.md_failed || 0;
         const activeProcessingCount = (useAdvancedPipeline ? fileStatus?.docling_processing || 0 : fileStatus?.md_processing || 0);
         const queuedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_queued || 0 : fileStatus?.md_queued || 0;
-        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles;
+        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles + skippedProcessingCount
         const processingProgress = totalProcessingCount > 0
-            ? Math.min(((failedProcessingCount + completedFiles) / totalProcessingCount) * 100, 100)
+            ? Math.min((completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100, 100)
             : 0;
 
         // combined stats
@@ -100,8 +100,8 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const activeCount = uploadPendingCount + activeProcessingCount;
         
         // Progress
-        const progress = totalFiles > 0
-                ? (completedFiles / (totalFiles - failedProcessingCount - (fileStatus?.upload_failed || 0))) * 100
+        const progress = totalProcessingCount > 0
+                ? (completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100
                 : 0;
 
         return {

@@ -18,7 +18,7 @@ const FileProcessingStatus: React.FC = () => {
         if (!fileStats.completedFiles && !fileStats.failedProcessingCount && !fileStats.activeProcessingCount) return StepThreeIcon;
         
         const complete = fileStats.processingProgress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
-        if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
+        // if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
         if (complete) return CheckmarkIcon;
         
         return SpinnerIcon; // Default to spinner if still processing or stats are unavailable
@@ -31,8 +31,8 @@ const FileProcessingStatus: React.FC = () => {
         if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
         if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} processing`);
         
-        if (textParts.length === 0 && fileStats.totalFiles > 0) return "Waiting to process...";
-        if (textParts.length === 0 && fileStats.totalFiles === 0) return "No files to process.";
+        if (textParts.length === 0 && fileStats.totalProcessingCount > 0) return "Waiting to process...";
+        if (textParts.length === 0 && fileStats.totalProcessingCount === 0) return "No files to process.";
 
         return textParts.join(", ");
     };
@@ -57,27 +57,27 @@ const FileProcessingStatus: React.FC = () => {
                         <div className="flex-1"/>
                         {fileStats && (
                             <div className="font-color-tertiary text-base">
-                                {fileStats.totalFiles.toLocaleString()} Files
+                                {fileStats.totalProcessingCount.toLocaleString()} Files
                             </div>
                         )}
                     </div>
 
                     {/* Progress bar and text */}
-                    {fileStats && fileStats.totalFiles > 0 && (
+                    {fileStats && fileStats.totalProcessingCount > 0 && (
                         <div className="w-full">
-                            <ProgressBar progress={fileStats.progress} />
+                            <ProgressBar progress={fileStats.processingProgress} />
                             <div className="display-flex flex-row gap-4">
                                 <div className="font-color-tertiary text-base">
                                     {getProcessingLeftText()}
                                 </div>
                                 <div className="flex-1"/>
                                 <div className="font-color-tertiary text-base">
-                                    {`${Math.min(fileStats.progress, 100).toFixed(1)}%`}
+                                    {`${Math.min(fileStats.processingProgress, 100).toFixed(1)}%`}
                                 </div>
                             </div>
                         </div>
                     )}
-                     {fileStats && fileStats.totalFiles === 0 && (
+                     {fileStats && fileStats.totalProcessingCount === 0 && (
                          <div className="font-color-tertiary text-base w-full">
                             {getProcessingLeftText()}
                         </div>
@@ -90,7 +90,7 @@ const FileProcessingStatus: React.FC = () => {
                 <ExpandableAttachmentList
                     status="skipped"
                     count={fileStats.skippedProcessingCount}
-                    title="Skipped Items"
+                    title="Skipped Files"
                     tooltipTitle="Processing skip reasons"
                     tooltipContent={<SkippedProcessingTooltipContent />}
                     icon={InformationCircleIcon}
@@ -102,7 +102,7 @@ const FileProcessingStatus: React.FC = () => {
                 <ExpandableAttachmentList
                     status="failed"
                     count={fileStats.failedProcessingCount}
-                    title="Failed Items"
+                    title="Failed Files"
                     tooltipTitle="Processing error codes"
                     tooltipContent={<FailedProcessingTooltipContent />}
                     icon={AlertIcon}
