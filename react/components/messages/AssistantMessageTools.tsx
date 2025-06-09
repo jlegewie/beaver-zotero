@@ -95,7 +95,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
                     ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
                     ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
                 `}
-                style={{ maxHeight: '5rem', padding: '4px 6px' }}
+                style={{ padding: '4px 6px' }}
                 disabled={isButtonDisabled && !canToggleResults}
             >
                 <div className="display-flex flex-row px-3 gap-2">
