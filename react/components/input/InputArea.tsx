@@ -39,6 +39,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     useEffect(() => {
         inputRef.current?.focus();
     }, []);
+
+    useEffect(() => {
+        if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+            if (messageContent) {
+                inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
+            }
+        }
+    }, [messageContent]);
     
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
