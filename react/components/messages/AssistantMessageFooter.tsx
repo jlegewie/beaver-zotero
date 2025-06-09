@@ -72,7 +72,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                 className={`
                     display-flex flex-row items-center pt-2 mr-4
                     ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
-                    ${message.status === 'in_progress' ? 'hidden' : ''}
+                    ${message.status === 'in_progress' || (message.tool_calls && message.tool_calls.length > 0 && message.tool_calls.map(call => call.status).includes('in_progress'))
+                        ? 'hidden'
+                        : ''
+                    }
                 `}
             >
                 {/* Sources button */}
