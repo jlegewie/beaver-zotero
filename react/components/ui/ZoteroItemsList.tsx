@@ -18,7 +18,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     messageAttachments
 }) => {
     const [resolvedItems, setResolvedItems] = useState<ItemWithSelectionId[]>([]);
-    const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+    const [hoveredItemId, setHoveredItemId] = useState<number | null>(null);
 
     // Fetch Zotero items when results are visible
     useEffect(() => {
@@ -48,15 +48,14 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
         <div className="min-w-0">
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
                 const {item, selectionItemId} = itemWithSelectionId;
-                const itemId = `${item.libraryID}-${item.key}`;
-                const isHovered = hoveredItemId === itemId;
+                const isHovered = hoveredItemId === selectionItemId;
                 
                 return (
                     <div
-                        key={itemId} 
+                        key={selectionItemId} 
                         className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
                         onClick={() => handleItemClick(selectionItemId)}
-                        onMouseEnter={() => setHoveredItemId(itemId)}
+                        onMouseEnter={() => setHoveredItemId(selectionItemId)}
                         onMouseLeave={() => setHoveredItemId(null)}
                         title="Click to reveal in Zotero"
                     >
