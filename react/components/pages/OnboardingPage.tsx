@@ -190,7 +190,7 @@ const OnboardingPage: React.FC = () => {
                     <div className="display-flex flex-col gap-3">
                         <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
                         <div className="text-base font-color-secondary">
-                            Select the libraries you want to sync with Beaver. By continuing, you authorize 
+                            Select the libraries you want to sync with Beaver. By continuing, you link this Zotero account to your Beaver account and authorize 
                             Beaver to access your selected libraries, upload your PDFs, and index your files 
                             for enhanced search capabilities.
                         </div>

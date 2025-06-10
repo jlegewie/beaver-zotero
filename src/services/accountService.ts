@@ -1,6 +1,14 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ProfileWithPlan } from '../../react/types/profile';
+import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
+
+interface AuthorizationRequest {
+    zotero_local_id: string;
+    zotero_user_id: string | undefined;
+    require_onboarding: boolean;
+}
+
 
 /**
  * Account-specific API service that extends the base API service
@@ -36,13 +44,12 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async authorizeAccess(requireOnboarding: boolean = true): Promise<{ message: string }> {
-        const params = new URLSearchParams();
-        if (requireOnboarding) {
-            params.append('require_onboarding', 'true');
-        }
-        
-        const url = '/account/authorize' + (params.toString() ? '?' + params.toString() : '');
-        return this.post<{ message: string }>(url, {});
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/account/authorize', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+            require_onboarding: requireOnboarding
+        } as AuthorizationRequest);
     }
 
     /**
