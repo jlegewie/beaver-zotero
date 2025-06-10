@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { ApiError, ServerError } from '../../react/types/apiErrors';
 
 /**
 * Base API service that handles authentication and common HTTP methods
@@ -32,6 +33,17 @@ export class ApiService {
     }
     
     /**
+    * Handles API response errors and throws appropriate custom errors
+    */
+    private handleApiError(response: Response): never {
+        if (response.status >= 500) {
+            throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
+        } else {
+            throw new ApiError(response.status, response.statusText);
+        }
+    }
+    
+    /**
     * Performs a GET request
     */
     async get<T>(endpoint: string): Promise<T> {
@@ -42,7 +54,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            throw new Error(`API error: ${response.status} - ${response.statusText}`);
+            this.handleApiError(response);
         }
         
         return response.json() as Promise<T>;
@@ -60,7 +72,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            throw new Error(`API error: ${response.status} - ${response.statusText}`);
+            this.handleApiError(response);
         }
         
         return response.json() as Promise<T>;
@@ -78,7 +90,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            throw new Error(`API error: ${response.status} - ${response.statusText}`);
+            this.handleApiError(response);
         }
         
         return response.json() as Promise<T>;
@@ -95,7 +107,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            throw new Error(`API error: ${response.status} - ${response.statusText}`);
+            this.handleApiError(response);
         }
         
         return;

@@ -2,6 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
+import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
@@ -9,6 +10,10 @@ interface AuthorizationRequest {
     require_onboarding: boolean;
 }
 
+interface ProfileRequest {
+    zotero_local_id: string;
+    zotero_user_id: string | undefined;
+}
 
 /**
  * Account-specific API service that extends the base API service
@@ -35,7 +40,21 @@ export class AccountService extends ApiService {
      * @returns Promise with the profile data
      */
     async getProfileWithPlan(): Promise<ProfileWithPlan> {
-        return this.get<ProfileWithPlan>('/account/profile');
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        
+        try {
+            return await this.post<ProfileWithPlan>('/account/profile', {
+                zotero_local_id: localUserKey,
+                zotero_user_id: userID
+            } as ProfileRequest);
+        } catch (error) {
+            // Handle profile-specific 403 errors as Zotero instance mismatch
+            if (error instanceof ApiError && error.status === 403) {
+                throw new ZoteroInstanceMismatchError();
+            }
+            // Re-throw other errors as-is
+            throw error;
+        }
     }
 
     /**

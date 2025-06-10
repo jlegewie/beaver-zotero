@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../ui/Button'
 import { getPref, setPref } from '../../../src/utils/prefs'
-import { useAtomValue } from 'jotai'
-import { isProfileLoadedAtom } from '../../atoms/profile'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { isProfileLoadedAtom, isProfileInvalidAtom } from '../../atoms/profile'
 
 const PROFILE_LOAD_TIMEOUT = 10000; // 10 second timeout
 
@@ -18,6 +18,8 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
     const [isLoading, setIsLoading] = useState(false)
     const [isWaitingForProfile, setIsWaitingForProfile] = useState(false)
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
+    const isProfileInvalid = useAtomValue(isProfileInvalidAtom)
+    const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom)
 
     useEffect(() => {
         emailInputRef?.current?.focus();
@@ -46,11 +48,21 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
             setIsLoading(false);
         }
     }, [isWaitingForProfile, isProfileLoaded]);
+
+    // Handle profile invalid state (Zotero instance mismatch)
+    useEffect(() => {
+        if (isProfileInvalid) {
+            setErrorMsg('This Zotero instance is not linked to your account. Please try signing in from the correct Zotero instance.');
+            setIsWaitingForProfile(false);
+            setIsLoading(false);
+        }
+    }, [isProfileInvalid, setErrorMsg]);
     
     const handleSignIn = async (e: React.FormEvent) => {
         e.preventDefault()
         setErrorMsg(null)
         setIsLoading(true)
+        setIsProfileInvalid(false);
 
         // Check if Zotero instance is already associated with another account
         const storedUserEmail = getPref("userEmail");

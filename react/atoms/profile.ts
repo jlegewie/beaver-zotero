@@ -16,6 +16,7 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
 export const hasCompletedInitialSyncAtom = atom<boolean>(false);
 
 // Profile and plan state
+export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 
@@ -29,8 +30,13 @@ export const fetchProfileWithPlanAtom = atom(
     async (get, set) => {
         try {
             const profileFetched = await accountService.getProfileWithPlan();
+            if (!profileFetched) {
+                set(isProfileInvalidAtom, true);
+                return;
+            }
             set(profileWithPlanAtom, profileFetched);
             set(isProfileLoadedAtom, true);
+            set(isProfileInvalidAtom, false);
         } catch (error: any) {
             Zotero.debug('Error fetching profile:', error, 3);
         }

@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { fileUploader } from '../../src/services/FileUploader';
-import { isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
-import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
+import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
+import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { supabase } from '../../src/services/supabaseClient';
 import { ProfileModel, SafeProfileModel } from '../types/profile';
 import { logger } from '../../src/utils/logger';
+import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 
 // Helper function to strip sensitive fields (optional, but cleans up the callback)
 const toSafeProfileModel = (profile: ProfileModel): SafeProfileModel => {
@@ -27,7 +28,9 @@ const toSafeProfileModel = (profile: ProfileModel): SafeProfileModel => {
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
-    const [isProfileLoaded, setIsProfileLoaded] = useAtom(isProfileLoadedAtom);
+    const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
+    const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
+    const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
     const channelRef = useRef<RealtimeChannel | null>(null);
@@ -40,6 +43,7 @@ export const useProfileSync = () => {
                 const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
                 setProfileWithPlan(fetchedProfileWithPlan);
                 setIsProfileLoaded(true);
+                setIsProfileInvalid(false);
                 logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
                 // --- Realtime Setup ---
@@ -117,7 +121,16 @@ export const useProfileSync = () => {
                                             await fileUploader.start();
                                         }
                                     } catch (error: any) {
-                                        logger(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);
+                                        if (error instanceof ZoteroInstanceMismatchError) {
+                                            logger(`useProfileSync: Zotero instance mismatch during refetch for ${userId}. Signing out user.`, 2);
+                                            // setIsProfileInvalid(true);
+                                            // logout();
+                                        } else if (error instanceof ServerError) {
+                                            logger(`useProfileSync: Server error during refetch for ${userId}: ${error.message}`, 3);
+                                            logger(`useProfileSync: Keeping current profile state due to server error during refetch.`);
+                                        } else {
+                                            logger(`useProfileSync: Error refetching ProfileWithPlan after update check for ${userId}: ${error?.message}`, 3);
+                                        }
                                     }
                                 })();
                             }
@@ -135,8 +148,23 @@ export const useProfileSync = () => {
                 channelRef.current = newChannel;
 
             } catch (error: any) {
-                logger(`useProfileSync: Error during initial fetch for ${userId}: ${error?.message}`, 3);
-                setProfileWithPlan(null);
+                if (error instanceof ZoteroInstanceMismatchError) {
+                    logger(`useProfileSync: Zotero instance mismatch for ${userId}. Signing out user.`, 2);
+                    setIsProfileInvalid(true);
+                    logout();
+                    return;
+                } else if (error instanceof ServerError) {
+                    logger(`useProfileSync: Server error during initial fetch for ${userId}: ${error.message}`, 3);
+                    setProfileWithPlan(null);
+                    setIsProfileLoaded(false);
+                    // Don't sign out for server errors - could be temporary
+                } else {
+                    logger(`useProfileSync: Error during initial fetch for ${userId}: ${error?.message}`, 3);
+                    setProfileWithPlan(null);
+                    setIsProfileLoaded(false);
+                }
+                
+                // Clean up realtime subscription on any error
                 if (channelRef.current) {
                     await channelRef.current.unsubscribe();
                     supabase.realtime.removeChannel(channelRef.current);
@@ -172,5 +200,5 @@ export const useProfileSync = () => {
                 logger(`useProfileSync: Cleanup called, no active channel to remove.`);
             }
         };
-    }, [isAuthenticated, user, setProfileWithPlan]);
+    }, [isAuthenticated, user, setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid]);
 };
