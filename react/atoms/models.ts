@@ -9,7 +9,7 @@ import { logger } from '../../src/utils/logger';
 export type ProviderType = "anthropic" | "google" | "openai";
 
 /**
- * Model interface representing an AI model for chat completion
+ * ModelConfig interface representing an AI model for chat completion
  * @property id - Unique identifier for the model
  * @property provider - The provider of the model (anthropic, google, openai)
  * @property model_id - The provider's model identifier used in API calls
@@ -19,7 +19,7 @@ export type ProviderType = "anthropic" | "google" | "openai";
  * @property app_key - Whether the model is available with the app's API key (no user key needed)
  * @property default - Whether this is the default model for fallback situations
  */
-export interface Model {
+export interface ModelConfig {
     id: string;
     provider: ProviderType;
     name: string;
@@ -35,7 +35,7 @@ export interface Model {
  * Default model used when no models are available or when a previously
  * selected model becomes unavailable. This serves as a fallback option.
  */
-export const DEFAULT_MODEL: Model = {
+export const DEFAULT_MODEL: ModelConfig = {
     id: "6c750f70",
     provider: 'google',
     name: 'Gemini 2.0 Flash',
@@ -44,16 +44,16 @@ export const DEFAULT_MODEL: Model = {
     reasoning_model: false,
     app_key: true,
     default: true
-} as Model;
+} as ModelConfig;
 
 /**
  * Core atoms for model state management
  */
 // Stores all models supported by the backend
-export const supportedModelsAtom = atom<Model[]>([]);
+export const supportedModelsAtom = atom<ModelConfig[]>([]);
 
 // Stores the currently selected model
-export const selectedModelAtom = atom<Model>(DEFAULT_MODEL);
+export const selectedModelAtom = atom<ModelConfig>(DEFAULT_MODEL);
 
 /**
  * Derived atom that indicates if the selected model has agent capabilities
@@ -97,7 +97,7 @@ export const initModelsAtom = atom(
     null,
     async (get, set) => {
         // Load supportedModels from prefs
-        let cachedModels: Model[] = [];
+        let cachedModels: ModelConfig[] = [];
         try {
             const cachedModelsPref = getPref('supportedModels');
             if (cachedModelsPref) {
@@ -214,7 +214,7 @@ export const fetchModelsAtom = atom(
 // Atom to update selected model
 export const updateSelectedModelAtom = atom(
     null,
-    (_, set, model: Model) => {
+    (_, set, model: ModelConfig) => {
         set(selectedModelAtom, model);
         setPref('lastUsedModel', JSON.stringify(model));
     }

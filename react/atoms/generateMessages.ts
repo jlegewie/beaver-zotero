@@ -26,7 +26,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
-import { Model, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
+import { ModelConfig, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
@@ -339,7 +339,7 @@ function _processChatCompletionViaBackend(
     attachments: MessageAttachment[],
     readerState: ReaderState | null,
     isLibrarySearch: boolean,
-    model: Model,
+    model: ModelConfig,
     set: any,
     get: any
 ) {
@@ -357,7 +357,7 @@ function _processChatCompletionViaBackend(
         // If no API key available, find default model from supported models
         if (!userApiKey) {
             const supportedModels = get(supportedModelsAtom);
-            model = supportedModels.find((m: Model) => m.default) || DEFAULT_MODEL;
+            model = supportedModels.find((m: ModelConfig) => m.default) || DEFAULT_MODEL;
         }
     }
 
