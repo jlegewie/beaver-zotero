@@ -33,6 +33,12 @@ const getErrorMessage = (errorType: string) => {
             return "AI service problem. Please try again later.";
         case 'app_key_limit_exceeded':
             return "Monthly chat limit reached. Add your own API key in settings.";
+        case 'user_key_failed_unexpected':
+            return "Unexpected error with your API key.";
+        case 'user_key_rate_limit_exceeded':
+            return "Your API key hit its usage limit.";
+        case 'user_key_failed':
+            return "Your API key didn't work. Please check it's correct.";
         case 'server_error':
             return "AI service error. Please try again later.";
         default:
@@ -43,7 +49,11 @@ const getErrorMessage = (errorType: string) => {
 export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
-    const showSettingsButton = errorType === 'app_key_limit_exceeded';
+    const showSettingsButton =
+        errorType === 'app_key_limit_exceeded' ||
+        errorType === 'user_key_failed_unexpected' ||
+        errorType === 'user_key_rate_limit_exceeded' ||
+        errorType === 'user_key_failed';
     
     return (
         <div
@@ -57,10 +67,10 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                         <div>Error</div>
                         <div className="flex-1"/>
                         {showSettingsButton &&
-                            <Button variant="outline" className="scale-90" rightIcon={KeyIcon} onClick={() => {
+                            <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
-                                API Key
+                                Update API Key
                             </Button>
                         }
                     </div>
@@ -75,15 +85,15 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
 const getWarning = (type: string) => {
   switch (type) {
     case 'user_key_failed_unexpected':
-      return "Unexpected error with your API key. Switched to app's backup key and default model.";
+      return "Unexpected error with your API key.";
     case 'user_key_rate_limit_exceeded':
-      return "Your API key hit its usage limit. Switched to app's backup key and default model.";
+      return "Your API key hit its usage limit.";
     case 'user_key_failed':
-      return "Your API key didn't work. Please check it's correct. Using app's backup key and default model.";
+      return "Your API key didn't work. Please check it's correct.";
     case 'missing_attachments':
       return "Unable to process the following attachments:";
     default:
-      return "Problem with your API key. Using app's backup key and default model.";
+      return "Problem with your API key.";
   }
 };
 
