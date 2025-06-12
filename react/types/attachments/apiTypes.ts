@@ -14,12 +14,17 @@ export function isValidAnnotationType(type: _ZoteroTypes.Annotations.AnnotationT
 
 export type MessageAttachment =
     | SourceAttachment
+    | ItemMetadataAttachment
     | AnnotationAttachment
     | NoteAttachment;
 
 interface BaseMessageAttachment {
     library_id: number;
     zotero_key: string;
+}
+
+export interface ItemMetadataAttachment extends BaseMessageAttachment {
+    type: "item";
 }
 
 // "source" type attachment (Zotero attachment item)

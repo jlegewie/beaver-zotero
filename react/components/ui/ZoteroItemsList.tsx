@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from '../icons/icons';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
-import { SourceAttachment } from '../../types/attachments/apiTypes';
+import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachments/apiTypes';
 import { ZoteroItemReference } from '../../types/zotero';
 import { selectItemById } from '../../../src/utils/selectItem';
 
@@ -11,7 +11,7 @@ interface ItemWithSelectionId {
 }
 
 interface ZoteroItemsListProps {
-    messageAttachments: SourceAttachment[] | ZoteroItemReference[];
+    messageAttachments: SourceAttachment[] | ItemMetadataAttachment[] | ZoteroItemReference[];
 }
 
 const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
