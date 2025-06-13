@@ -11,6 +11,7 @@ import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { isAgentModelAtom } from '../../atoms/models';
 import { getCustomPromptsFromPreferences } from '../../types/settings';
 import { logger } from '../../../src/utils/logger';
+import { isLibraryTabAtom } from '../../atoms/ui';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -30,6 +31,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
     const setIsCancelling = useSetAtom(isCancellingAtom);
+    const isLibraryTab = useAtomValue(isLibraryTabAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -173,7 +175,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder="@ to add a source"
+                        placeholder={isLibraryTab ? "@ to add a source" : "@ to add a source, drag to add annotations"}
                         className="chat-input"
                         onKeyDown={(e) => {
                             handleKeyDown(e);
