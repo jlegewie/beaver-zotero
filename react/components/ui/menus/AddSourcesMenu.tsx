@@ -152,7 +152,10 @@ const AddSourcesMenu: React.FC<{
         setSearchQuery('');
         setMenuItems([]);
         setSearchResults([]);
-        onClose();
+        // Delay the onClose call to ensure focus happens after menu is fully closed
+        setTimeout(() => {
+            onClose();
+        }, 0);
     }
 
     // This function is called when the user types in the search field
