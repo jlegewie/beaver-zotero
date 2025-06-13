@@ -7,6 +7,7 @@ import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';
 import AssistantMessageFooter from './AssistantMessageFooter';
 import GeneratingIndicator from '../ui/GeneratingIndicator';
+import ThinkingContent from './ThinkingContent';
 
 interface AssistantMessageProps {
     message: ChatMessage;
@@ -44,6 +45,15 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 {message.warnings?.map((warning) => (
                     <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
                 ))}
+
+                {/* Reasoning */}
+                {message.reasoning_content && (
+                    <ThinkingContent
+                        thinkingContent={message.reasoning_content}
+                        isThinking={message.status === 'thinking'}
+                        previousMessageHasToolCalls={previousMessageHasToolCalls}
+                    />
+                )}
                 
                 {/* Content */}
                 {message.content && (
