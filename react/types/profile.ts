@@ -9,7 +9,7 @@ interface SafePlanModel {
     price_monthly: number;
     active: boolean;
     // Grants
-    monthly_chat_messages: number;
+    monthly_chat_credits: number;
     initial_basic_page_grant: number;
     monthly_basic_page_grant: number;
     initial_advanced_page_grant: number;
@@ -65,24 +65,36 @@ export enum SubscriptionStatus {
  */
 export interface ProfileModel {
     user_id: string;             // UUID
+    
+    // Subscription
     current_plan_id: string;     // UUID
     subscription_status: SubscriptionStatus;
     current_period_start?: Date;
     current_period_end?: Date;
     stripe_customer_id: string | null;
     stripe_subscription_id: string | null;
-    // Onboarding state
+    
+    // Authorization and onboarding status
+    zotero_user_id: string | null;
+    zotero_local_id: string | null;
     has_authorized_access: boolean;
     consented_at: Date;
     has_completed_onboarding: boolean;
     libraries?: Record<string, any>[];
+    
     // Balances
     basic_page_balance: number;
     advanced_page_balance: number;
+    purchased_basic_page_balance: number;
     purchased_advanced_page_balance: number;
-    // Chat counters
-    app_key_chats_count: number;
-    user_key_chats_count: number;
+
+    // Subscription credits
+    chat_credits_used: number;
+
+    // Usage-based billing settings
+    usage_based_billing_enabled: boolean;
+    usage_based_billing_limit: number;
+    usage_based_billing_cost: number;
 }
 
 export type SafeProfileModel = Omit<ProfileModel, 'stripe_customer_id' | 'stripe_subscription_id'>;
