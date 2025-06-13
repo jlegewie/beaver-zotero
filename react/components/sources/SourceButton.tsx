@@ -136,6 +136,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             <button
                 ref={ref}
                 style={{height: '22px !important'}}
+                title={!isValid && invalidReason ? invalidReason : undefined}
                 {...hoverEventHandlers}
                 className={
                     `variant-outline source-button
@@ -158,11 +159,11 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         )
 
         return (
-            !isValid ?
-                <Tooltip content={invalidReason} singleLine={true} placement="top" width="200px">
-                    {sourceButton}
-                </Tooltip>
-            :
+            // !isValid ?
+            //     <Tooltip content={invalidReason} singleLine={true} placement="top" width="200px">
+            //         {sourceButton}
+            //     </Tooltip>
+            // :
                 sourceButton
         )
 
