@@ -576,15 +576,15 @@ attachment-box .metadata-table #beaver-status {
 }
 
 [id^="beaver-pane-"] .markdown h2 {
-    font-size: 1.3em;
+    font-size: 1.2em;
     font-weight: 700;
     padding-top: 0.3em;
-    padding-bottom: 0.3em;
+    /* padding-bottom: 0.1em; */
 }
 
 [id^="beaver-pane-"] .markdown h3 {
-    padding-top: 0.1em;
-    font-size: 1.15em;
+    font-size: 1.1em;
+    padding-top: 0.15em;
 }
 
 [id^="beaver-pane-"] .markdown h4 {
