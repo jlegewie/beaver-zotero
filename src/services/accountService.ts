@@ -3,6 +3,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
+import { FullModelConfig } from '../../react/atoms/models';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
@@ -54,6 +55,28 @@ export class AccountService extends ApiService {
             }
             // Re-throw other errors as-is
             throw error;
+        }
+    }
+
+    /**
+     * Fetches the list of models supported by the backend
+     * @returns Promise resolving to an array of supported models
+     */
+    async getModelList(plan_id: string): Promise<FullModelConfig[]> {
+        try {
+            const endpoint = `${this.baseUrl}/account/model-configs?plan_id=${plan_id}`;
+            const headers = await this.getAuthHeaders();
+            
+            const response = await Zotero.HTTP.request('GET', endpoint, {
+                headers,
+                responseType: 'json'
+            });
+            
+            return response.response as FullModelConfig[];
+        } catch (error) {
+            Zotero.debug(`ChatService: getModelList error - ${error}`, 1);
+            // Return empty array on error
+            return [];
         }
     }
 

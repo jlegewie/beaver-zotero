@@ -53,7 +53,7 @@ const ModelMenuItemContent: React.FC<{
 const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
     const [isLoading, setIsLoading] = useState(true);
     const isAgentModel = useAtomValue(isAgentModelAtom);
-    const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
     const supportedModels = useAtomValue(supportedModelsAtom);
     const availableModels = useAtomValue(availableModelsAtom);
     const initModels = useAtom(initModelsAtom)[1];
@@ -98,9 +98,9 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
-        const byok_models = availableModels.filter((model) => !model.app_key && !model.is_agent);
-        const byok_models_agent = availableModels.filter((model) => !model.app_key && model.is_agent);
-        const included_models = availableModels.filter((model) => model.app_key) || [DEFAULT_MODEL];
+        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_agent);
+        const byok_models_agent = availableModels.filter((model) => !model.use_app_key && model.is_agent);
+        const included_models = availableModels.filter((model) => model.use_app_key) || [DEFAULT_MODEL];
 
         items.push({
             label: 'Included Models',

@@ -20,6 +20,11 @@ export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
 
+export const planIdAtom = atom<string>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.plan.id || '';
+});
+
 export const planNameAtom = atom<string>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.plan.display_name || 'Unknown';

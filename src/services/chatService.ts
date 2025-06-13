@@ -2,7 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
 import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
-import { ModelConfig, ProviderType } from '../../react/atoms/models';
+import { FullModelConfig, ProviderType } from '../../react/atoms/models';
 
 export interface ToolRequest {
     function: "hybrid_search" | "related_items_search";
@@ -22,7 +22,7 @@ export interface ChatCompletionRequestBody {
     assistant_message_id: string;       // The UUID from the frontend
     content: string;                    // The user's input text
     user_api_key: string | null;        // The user's API key, if provided
-    model: ModelConfig;                       // The model to use for the request
+    model_id: string;                   // The model ID to use for the request
     custom_instructions?: string;       // Custom instructions for the assistant
     attachments: MessageAttachment[];   // The attachments to include in the request
     tool_request: ToolRequest | null;   // User tool request, if any
@@ -413,28 +413,6 @@ export class ChatService extends ApiService {
             errorType = 'bad_request';
         }
         onError(null, errorType);
-    }
-
-    /**
-     * Fetches the list of models supported by the backend
-     * @returns Promise resolving to an array of supported models
-     */
-    async getModelList(): Promise<ModelConfig[]> {
-        try {
-            const endpoint = `${this.baseUrl}/chat/model-list`;
-            const headers = await this.getAuthHeaders();
-            
-            const response = await Zotero.HTTP.request('GET', endpoint, {
-                headers,
-                responseType: 'json'
-            });
-            
-            return response.response as ModelConfig[];
-        } catch (error) {
-            Zotero.debug(`ChatService: getModelList error - ${error}`, 1);
-            // Return empty array on error
-            return [];
-        }
     }
 }
 

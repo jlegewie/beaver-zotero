@@ -26,7 +26,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { ReaderContext, getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
-import { ModelConfig, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
+import { FullModelConfig, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
@@ -339,13 +339,13 @@ function _processChatCompletionViaBackend(
     attachments: MessageAttachment[],
     readerState: ReaderState | null,
     isLibrarySearch: boolean,
-    model: ModelConfig,
+    model: FullModelConfig,
     set: any,
     get: any
 ) {
     // Set user API key
     let userApiKey = undefined;
-    if (!model.app_key) {
+    if (!model.use_app_key) {
         if (model.provider === 'google') {
             userApiKey = getPref('googleGenerativeAiApiKey') || undefined;
         } else if (model.provider === 'openai') {
@@ -357,7 +357,7 @@ function _processChatCompletionViaBackend(
         // If no API key available, find default model from supported models
         if (!userApiKey) {
             const supportedModels = get(supportedModelsAtom);
-            model = supportedModels.find((m: ModelConfig) => m.default) || DEFAULT_MODEL;
+            model = supportedModels.find((m: FullModelConfig) => m.is_default) || DEFAULT_MODEL;
         }
     }
 
@@ -372,7 +372,7 @@ function _processChatCompletionViaBackend(
         tool_request: isLibrarySearch ? search_tool_request : null,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
-        model: model,
+        model_id: model.id,
         frontend_version: Zotero.Beaver.pluginVersion || ''
     } as ChatCompletionRequestBody;
 

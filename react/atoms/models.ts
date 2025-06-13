@@ -1,59 +1,71 @@
 import { atom } from 'jotai';
-import { chatService } from '../../src/services/chatService';
+import { accountService } from '../../src/services/accountService';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
+import { planIdAtom } from './profile';
 
 /**
  * Supported AI model provider types
  */
-export type ProviderType = "anthropic" | "google" | "openai";
+export type ProviderType = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 /**
  * ModelConfig interface representing an AI model for chat completion
  * @property id - Unique identifier for the model
  * @property provider - The provider of the model (anthropic, google, openai)
- * @property model_id - The provider's model identifier used in API calls
+ * @property snapshot - The provider's model identifier used in API calls
  * @property is_agent - Whether the model supports agent capabilities
  * @property reasoning_model - Whether the model provides reasoning capabilities
  * @property kwargs - Additional provider-specific parameters
- * @property app_key - Whether the model is available with the app's API key (no user key needed)
- * @property default - Whether this is the default model for fallback situations
+ * @property price_input_tokens - The cost of input tokens
+ * @property price_output_tokens - The cost of output tokens
+ * @property cache_discount - The discount for cached responses
  */
 export interface ModelConfig {
     id: string;
     provider: ProviderType;
     name: string;
-    model_id: string;
+    snapshot: string;
     is_agent: boolean;
     reasoning_model?: boolean;
+    reasoning_effort?: ReasoningEffort;
     kwargs?: Record<string, any>;
-    app_key: boolean;
-    default?: boolean;
+    price_input_tokens?: number;
+    price_output_tokens?: number;
+    cache_discount?: number;
+}
+
+export interface FullModelConfig extends ModelConfig {
+    use_app_key: boolean;
+    credit_cost: number;
+    is_default: boolean;
 }
 
 /**
  * Default model used when no models are available or when a previously
  * selected model becomes unavailable. This serves as a fallback option.
  */
-export const DEFAULT_MODEL: ModelConfig = {
-    id: "6c750f70",
+export const DEFAULT_MODEL: FullModelConfig = {
+    id: "6c750f70-8c2a-4e5b-9f1d-2a3b4c5d6e7f",
     provider: 'google',
     name: 'Gemini 2.0 Flash',
-    model_id: 'gemini/gemini-2.0-flash-001',
+    snapshot: 'gemini/gemini-2.0-flash-001',
     is_agent: false,
     reasoning_model: false,
-    app_key: true,
-    default: true
-} as ModelConfig;
+    use_app_key: true,
+    credit_cost: 1,
+    is_default: true,
+} as FullModelConfig;
 
 /**
  * Core atoms for model state management
  */
 // Stores all models supported by the backend
-export const supportedModelsAtom = atom<ModelConfig[]>([]);
+export const supportedModelsAtom = atom<FullModelConfig[]>([]);
 
 // Stores the currently selected model
-export const selectedModelAtom = atom<ModelConfig>(DEFAULT_MODEL);
+export const selectedModelAtom = atom<FullModelConfig>(DEFAULT_MODEL);
 
 /**
  * Derived atom that indicates if the selected model has agent capabilities
@@ -76,10 +88,10 @@ export const availableModelsAtom = atom(
         };
         
         return supportedModels.filter(model => {
-            if (model.app_key) return true;
-            if (!model.app_key && model.provider === 'google' && apiKeys.google) return true;
-            if (!model.app_key && model.provider === 'openai' && apiKeys.openai) return true;
-            if (!model.app_key && model.provider === 'anthropic' && apiKeys.anthropic) return true;
+            if (model.use_app_key) return true;
+            if (!model.use_app_key && model.provider === 'google' && apiKeys.google) return true;
+            if (!model.use_app_key && model.provider === 'openai' && apiKeys.openai) return true;
+            if (!model.use_app_key && model.provider === 'anthropic' && apiKeys.anthropic) return true;
             return false;
         });
     }
@@ -97,7 +109,7 @@ export const initModelsAtom = atom(
     null,
     async (get, set) => {
         // Load supportedModels from prefs
-        let cachedModels: ModelConfig[] = [];
+        let cachedModels: FullModelConfig[] = [];
         try {
             const cachedModelsPref = getPref('supportedModels');
             if (cachedModelsPref) {
@@ -110,7 +122,7 @@ export const initModelsAtom = atom(
         }
         
         // Find default model in cache if available
-        const defaultModel = cachedModels.find(model => model.default) || DEFAULT_MODEL;
+        const defaultModel = cachedModels.find(model => model.is_default) || DEFAULT_MODEL;
         
         // Set supported models
         set(supportedModelsAtom, cachedModels);
@@ -153,7 +165,7 @@ export const validateSelectedModelAtom = atom(
     (get, set) => {
         const selectedModel = get(selectedModelAtom);
         const availableModels = get(availableModelsAtom);
-        const defaultModel = availableModels.find(model => model.default) || DEFAULT_MODEL;
+        const defaultModel = availableModels.find(model => model.is_default) || DEFAULT_MODEL;
 
         // Check if the selected model is still valid with current API keys
         const isModelAvailable = 
@@ -183,8 +195,13 @@ export const fetchModelsAtom = atom(
     async (get, set) => {
         logger("Fetching model list...");
         try {
+            const plan_id = get(planIdAtom);
+            if (!plan_id) {
+                logger("No plan ID found, skipping model fetch");
+                return;
+            }
             // Fetch models and set supported models
-            const models = await chatService.getModelList();
+            const models = await accountService.getModelList(plan_id);
             set(supportedModelsAtom, models);
             setPref('supportedModels', JSON.stringify(models));
             setPref('supportedModelsLastFetched', Date.now().toString());
@@ -192,7 +209,7 @@ export const fetchModelsAtom = atom(
             // Ensure selected model is still available
             const availableModels = get(availableModelsAtom);
             const selectedModel = get(selectedModelAtom);
-            const defaultModel = models.find(model => model.default) || DEFAULT_MODEL;
+            const defaultModel = models.find(model => model.is_default) || DEFAULT_MODEL;
             
             const isSelectedModelAvailable = 
                 selectedModel.id === defaultModel.id || 
@@ -214,7 +231,7 @@ export const fetchModelsAtom = atom(
 // Atom to update selected model
 export const updateSelectedModelAtom = atom(
     null,
-    (_, set, model: ModelConfig) => {
+    (_, set, model: FullModelConfig) => {
         set(selectedModelAtom, model);
         setPref('lastUsedModel', JSON.stringify(model));
     }
