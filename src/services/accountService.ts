@@ -16,6 +16,12 @@ interface ProfileRequest {
     zotero_user_id: string | undefined;
 }
 
+interface ProfileResponse {
+    profile: ProfileWithPlan
+    model_configs: FullModelConfig[]
+}
+
+
 /**
  * Account-specific API service that extends the base API service
  */
@@ -40,11 +46,11 @@ export class AccountService extends ApiService {
      * Fetches the user's profile including the plan name
      * @returns Promise with the profile data
      */
-    async getProfileWithPlan(): Promise<ProfileWithPlan> {
+    async getProfileWithPlan(): Promise<ProfileResponse> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         
         try {
-            return await this.post<ProfileWithPlan>('/account/profile', {
+            return await this.post<ProfileResponse>('/account/profile', {
                 zotero_local_id: localUserKey,
                 zotero_user_id: userID
             } as ProfileRequest);

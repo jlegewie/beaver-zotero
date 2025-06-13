@@ -9,6 +9,7 @@ import { supabase } from '../../src/services/supabaseClient';
 import { ProfileModel, SafeProfileModel } from '../types/profile';
 import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
+import { setModelsAtom } from '../atoms/models';
 
 // Helper function to strip sensitive fields (optional, but cleans up the callback)
 const toSafeProfileModel = (profile: ProfileModel): SafeProfileModel => {
@@ -30,6 +31,7 @@ export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
+    const setModels = useSetAtom(setModelsAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
@@ -39,11 +41,12 @@ export const useProfileSync = () => {
         const syncProfileData = async (userId: string) => {
             logger(`useProfileSync: User ${userId} authenticated. Fetching profile and plan.`);
             try {
-                // --- Fetch initial ProfileWithPlan ---
-                const fetchedProfileWithPlan = await accountService.getProfileWithPlan();
-                setProfileWithPlan(fetchedProfileWithPlan);
+                // --- Fetch initial ProfileWithPlan and model configs ---
+                const profileData = await accountService.getProfileWithPlan();
+                setProfileWithPlan(profileData.profile);
                 setIsProfileLoaded(true);
                 setIsProfileInvalid(false);
+                setModels(profileData.model_configs);
                 logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
                 // --- Realtime Setup ---
@@ -112,12 +115,13 @@ export const useProfileSync = () => {
                                 (async () => {
                                     try {
                                         logger(`useProfileSync: Refetching ProfileWithPlan for ${userId} due to plan_id change or null previous state.`);
-                                        const refreshedProfileWithPlan = await accountService.getProfileWithPlan();
+                                        const profileData = await accountService.getProfileWithPlan();
                                         // Set the state with the complete, fresh data
-                                        setProfileWithPlan(refreshedProfileWithPlan);
+                                        setProfileWithPlan(profileData.profile);
+                                        setModels(profileData.model_configs);
                                         logger(`useProfileSync: Successfully refreshed ProfileWithPlan for ${userId}.`);
                                         // If the plan allows file uploads, start the file uploader
-                                        if (refreshedProfileWithPlan.plan.upload_files) {
+                                        if (profileData.profile.plan.upload_files) {
                                             await fileUploader.start();
                                         }
                                     } catch (error: any) {

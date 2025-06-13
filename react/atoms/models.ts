@@ -98,63 +98,6 @@ export const availableModelsAtom = atom(
 );
 
 /**
- * Initialization atom that loads models and selected model from preferences
- * This is called when the application starts up and:
- * 1. Loads cached models from preferences
- * 2. Finds the default model from the cached list
- * 3. Loads the last used model if it's still available
- * 4. Falls back to the default model if needed
- */
-export const initModelsAtom = atom(
-    null,
-    async (get, set) => {
-        // Load supportedModels from prefs
-        let cachedModels: FullModelConfig[] = [];
-        try {
-            const cachedModelsPref = getPref('supportedModels');
-            if (cachedModelsPref) {
-                cachedModels = JSON.parse(cachedModelsPref as string);
-                if (!Array.isArray(cachedModels)) cachedModels = [];
-            }
-        } catch (e) {
-            console.error("Error parsing cached supportedModels:", e);
-            cachedModels = [];
-        }
-        
-        // Find default model in cache if available
-        const defaultModel = cachedModels.find(model => model.is_default) || DEFAULT_MODEL;
-        
-        // Set supported models
-        set(supportedModelsAtom, cachedModels);
-        
-        // Load selected model from prefs or use default
-        try {
-            const lastUsedModelPref = getPref('lastUsedModel');
-            if (lastUsedModelPref) {
-                const lastUsedModel = JSON.parse(lastUsedModelPref as string);
-                
-                // Only set if it's in the available models or it's the default model
-                const availableModels = get(availableModelsAtom);
-                const isModelAvailable = 
-                lastUsedModel.id === defaultModel.id || 
-                availableModels.some(m => m.id === lastUsedModel.id);
-                
-                if (isModelAvailable) {
-                    set(selectedModelAtom, lastUsedModel);
-                } else {
-                    set(selectedModelAtom, defaultModel);
-                }
-            } else {
-                set(selectedModelAtom, defaultModel);
-            }
-        } catch (e) {
-            console.error("Error parsing lastUsedModel:", e);
-            set(selectedModelAtom, defaultModel);
-        }
-    }
-);
-
-/**
  * Validation atom that ensures the selected model is still available
  * This is called when API keys change to verify the selected model is valid:
  * - If current model is invalid, switches to an available model
@@ -186,9 +129,40 @@ export const validateSelectedModelAtom = atom(
 );
 
 /**
+ * Setter atom that updates supported models and validates selected model
+ * This handles all atom updates when new models are provided:
+ * 1. Updates supportedModelsAtom with new models
+ * 2. Saves models to preferences
+ * 3. Validates and updates selected model if needed
+ */
+export const setModelsAtom = atom(
+    null,
+    (get, set, models: FullModelConfig[]) => {
+        // Set supported models
+        set(supportedModelsAtom, models);
+        
+        // Ensure selected model is still available
+        const availableModels = get(availableModelsAtom);
+        const selectedModel = get(selectedModelAtom);
+        const defaultModel = models.find(model => model.is_default) || DEFAULT_MODEL;
+        
+        const isSelectedModelAvailable = 
+            selectedModel.id === defaultModel.id || 
+            availableModels.some(m => m.id === selectedModel.id);
+        
+        if (!isSelectedModelAvailable && availableModels.length > 0) {
+            set(selectedModelAtom, availableModels[0]);
+            setPref('lastUsedModel', JSON.stringify(availableModels[0]));
+        } else if (!isSelectedModelAvailable) {
+            set(selectedModelAtom, defaultModel);
+            setPref('lastUsedModel', JSON.stringify(defaultModel));
+        }
+    }
+);
+
+/**
  * API fetch atom that retrieves models from the backend
- * This updates the list of supported models and ensures the
- * selected model is still valid after the update
+ * This fetches models from the backend and delegates updates to setModelsAtom
  */
 export const fetchModelsAtom = atom(
     null,
@@ -200,28 +174,13 @@ export const fetchModelsAtom = atom(
                 logger("No plan ID found, skipping model fetch");
                 return;
             }
-            // Fetch models and set supported models
-            const models = await accountService.getModelList(plan_id);
-            set(supportedModelsAtom, models);
-            setPref('supportedModels', JSON.stringify(models));
-            setPref('supportedModelsLastFetched', Date.now().toString());
             
-            // Ensure selected model is still available
-            const availableModels = get(availableModelsAtom);
-            const selectedModel = get(selectedModelAtom);
-            const defaultModel = models.find(model => model.is_default) || DEFAULT_MODEL;
+            // Fetch models from backend
+            const models: FullModelConfig[] = await accountService.getModelList(plan_id);
             
-            const isSelectedModelAvailable = 
-                selectedModel.id === defaultModel.id || 
-                availableModels.some(m => m.id === selectedModel.id);
+            // Update models using the setter atom
+            set(setModelsAtom, models);
             
-            if (!isSelectedModelAvailable && availableModels.length > 0) {
-                set(selectedModelAtom, availableModels[0]);
-                setPref('lastUsedModel', JSON.stringify(availableModels[0]));
-            } else if (!isSelectedModelAvailable) {
-                set(selectedModelAtom, defaultModel);
-                setPref('lastUsedModel', JSON.stringify(defaultModel));
-            }
         } catch (error) {
             console.error("Failed to fetch model list:", error);
         }

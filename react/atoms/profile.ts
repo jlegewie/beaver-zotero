@@ -30,24 +30,6 @@ export const planNameAtom = atom<string>((get) => {
     return profile?.plan.display_name || 'Unknown';
 });
 
-export const fetchProfileWithPlanAtom = atom(
-    null,
-    async (get, set) => {
-        try {
-            const profileFetched = await accountService.getProfileWithPlan();
-            if (!profileFetched) {
-                set(isProfileInvalidAtom, true);
-                return;
-            }
-            set(profileWithPlanAtom, profileFetched);
-            set(isProfileLoadedAtom, true);
-            set(isProfileInvalidAtom, false);
-        } catch (error: any) {
-            Zotero.debug('Error fetching profile:', error, 3);
-        }
-    }
-);
-
 export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     const profile = get(profileWithPlanAtom);
     return {

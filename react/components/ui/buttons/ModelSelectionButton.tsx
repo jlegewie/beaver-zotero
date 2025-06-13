@@ -1,24 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons/icons';
-import { getPref } from '../../../../src/utils/prefs';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { 
   selectedModelAtom, 
-  DEFAULT_MODEL, 
-  supportedModelsAtom, 
+  DEFAULT_MODEL,  
   availableModelsAtom,
-  initModelsAtom,
-  fetchModelsAtom, 
   updateSelectedModelAtom,
   validateSelectedModelAtom,
   isAgentModelAtom
 } from '../../../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 17;
-const REFETCH_INTERVAL_HOURS = 6;
-const REFETCH_INTERVAL_MS = REFETCH_INTERVAL_HOURS * 60 * 60 * 1000;
 
 /**
  * Component for displaying a model menu item
@@ -51,13 +45,12 @@ const ModelMenuItemContent: React.FC<{
  * Displays available models based on configured API keys.
  */
 const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
-    const [isLoading, setIsLoading] = useState(true);
     const isAgentModel = useAtomValue(isAgentModelAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
-    const supportedModels = useAtomValue(supportedModelsAtom);
     const availableModels = useAtomValue(availableModelsAtom);
-    const initModels = useAtom(initModelsAtom)[1];
-    const fetchModels = useAtom(fetchModelsAtom)[1];
+
+    console.log('availableModels', availableModels);
+
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
 
@@ -65,35 +58,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     useEffect(() => {
         validateSelectedModel();
     }, [availableModels, validateSelectedModel]);
-
-    useEffect(() => {
-        const loadAndInitializeModels = async () => {
-            setIsLoading(true);
-            
-            // First initialize from preferences
-            await initModels();
-            
-            // Check if we need to fetch fresh data
-            const lastFetchedPref = getPref('supportedModelsLastFetched');
-            const lastFetchedTime = lastFetchedPref ? parseInt(lastFetchedPref, 10) : 0;
-            const timeSinceLastFetch = Date.now() - lastFetchedTime;
-            
-            // Check if any API keys are configured
-            const hasAnyKey = 
-                !!getPref('googleGenerativeAiApiKey') || 
-                !!getPref('openAiApiKey') || 
-                !!getPref('anthropicApiKey');
-                
-            // Fetch if needed (empty or outdated)
-            if (hasAnyKey && (supportedModels.length === 0 || timeSinceLastFetch > REFETCH_INTERVAL_MS)) {
-                await fetchModels();
-            }
-            
-            setIsLoading(false);
-        };
-        
-        loadAndInitializeModels();
-    }, [initModels, fetchModels, supportedModels.length]);
 
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
@@ -175,9 +139,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         return items;
     }, [availableModels, updateSelectedModel, selectedModel]);
 
-    const hasAnyKey = availableModels.length > 0;
-    const isButtonDisabled = !hasAnyKey;
-
     const getButtonLabel = () => {
         return selectedModel.name.length > MAX_MODEL_NAME_LENGTH
             ? `${selectedModel.name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
@@ -222,9 +183,9 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             iconClassName="scale-11 -mr-015"
             rightIconClassName="scale-11 -ml-1"
             ariaLabel="Select AI Model"
-            tooltipContent={isButtonDisabled ? 'No models available' : 'Choose AI model'}
+            tooltipContent={availableModels.length === 0 ? 'No models available' : 'Choose AI model'}
             showArrow={false}
-            disabled={isLoading || isButtonDisabled}
+            disabled={availableModels.length === 0}
             onAfterClose={handleAfterClose}
         />
     );
