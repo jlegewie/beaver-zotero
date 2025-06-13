@@ -73,8 +73,8 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     return {
         basicPagesRemaining: profile?.basic_page_balance || 0,
         advancedPagesRemaining: profile?.advanced_page_balance || 0,
-        chatMessagesRemaining: profile?.plan.monthly_chat_messages && profile?.app_key_chats_count
-            ? profile.plan.monthly_chat_messages - profile.app_key_chats_count
+        chatMessagesRemaining: profile?.plan.monthly_chat_credits && profile?.chat_credits_used
+            ? profile.plan.monthly_chat_credits - profile.chat_credits_used
             : 0
     } as ProfileBalance;
 });
