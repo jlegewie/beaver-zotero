@@ -34,6 +34,7 @@ export interface MessageModel {
     thread_id: string;
     role: 'user' | 'assistant' | 'system';
     content?: string;
+    reasoning_content?: string;
     attachments?: MessageAttachment[];
     tool_calls?: ToolCall[];
     status: 'in_progress' | 'completed' | 'error' | 'canceled';

@@ -26,6 +26,7 @@ export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';
     content: string;
+    reasoning_content?: string;
     tool_calls?: ToolCall[];
     status: MessageStatus;
     errorType?: string;
