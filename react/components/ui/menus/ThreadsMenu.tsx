@@ -1,6 +1,6 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { threadMessagesAtom, currentThreadIdAtom, recentThreadsAtom, addToolCallResponsesToToolAttachmentsAtom, userAttachmentsAtom, loadThreadAtom } from '../../../atoms/threads';
+import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom } from '../../../atoms/threads';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
@@ -10,12 +10,6 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
-import { isPreferencePageVisibleAtom, userScrolledAtom } from '../../../atoms/ui';
-import { currentSourcesAtom } from '../../../atoms/input';
-import { currentMessageContentAtom } from '../../../atoms/input';
-import { updateAttachmentCitationsAtom } from '../../../atoms/citations';
-
-const MAX_THREADS = 10;
 
 interface ThreadsMenuProps {
     className?: string;
