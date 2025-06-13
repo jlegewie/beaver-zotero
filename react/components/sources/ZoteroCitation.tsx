@@ -30,6 +30,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
+
+    if (!id) return null;
     
     // Parse the id to get libraryID and itemKey
     id = id.replace('user-content-', '');
