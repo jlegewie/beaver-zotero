@@ -135,7 +135,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const sourceButton = (
             <button
                 ref={ref}
-                style={{height: '22px !important'}}
+                style={{height: '22px'}}
                 title={!isValid && invalidReason ? invalidReason : undefined}
                 {...hoverEventHandlers}
                 className={

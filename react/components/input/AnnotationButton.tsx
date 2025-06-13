@@ -134,7 +134,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
         return (
             <button
                 ref={ref}
-                style={{height: '22px !important'}}
+                style={{height: '22px'}}
                 // Spread the event handlers from the hook
                 {...hoverEventHandlers}
                 className={
