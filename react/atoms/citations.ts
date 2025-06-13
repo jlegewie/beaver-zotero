@@ -26,9 +26,10 @@ export const updateAttachmentCitationsAtom = atom(
         const citationIds: string[] = [];
         const citationRegex = /<citation\s+(?:[^>]*?)id="([^"]+)"(?:[^>]*?)\s*(?:\/>|><\/citation>)/g;
         for (const message of messages) {
-            if (message.role === 'assistant' && message.content !== null) {
+            const content = message.content + (message.reasoning_content || '');
+            if (message.role === 'assistant' && content !== null) {
                 let match;
-                while ((match = citationRegex.exec(message.content)) !== null) {
+                while ((match = citationRegex.exec(content)) !== null) {
                     if (match[1] && !citationIds.includes(match[1])) {
                         citationIds.push(match[1]);
                     }
