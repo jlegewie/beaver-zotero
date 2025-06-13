@@ -1,11 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StopIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, cancelStreamingMessageAtom, isCancellingAtom } from '../../atoms/threads';
+import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
 import { currentSourcesAtom, currentMessageContentAtom } from '../../atoms/input';
-import { readerTextSelectionAtom } from '../../atoms/input';
 import { generateResponseAtom } from '../../atoms/generateMessages';
-import { getPref } from '../../../src/utils/prefs';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -29,12 +27,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
-    const buttonRef = useRef<HTMLButtonElement | null>(null);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
-    const cancelStreamingMessage = useSetAtom(cancelStreamingMessageAtom);
     const setIsCancelling = useSetAtom(isCancellingAtom);
-    const readerTextSelection = useAtomValue(readerTextSelectionAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
