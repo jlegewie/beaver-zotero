@@ -389,6 +389,7 @@ function _processChatCompletionViaBackend(
                 // logger(`event 'onDelta': ${messageId} - ${delta} - ${type}`, 1);
                 // SSE partial chunk → append to the assistant message
                 if (type === "content") {
+                    set(setMessageStatusAtom, { id: messageId, status: 'in_progress' });
                     set(streamToMessageAtom, {
                         id: messageId,
                         chunk: delta
@@ -401,6 +402,7 @@ function _processChatCompletionViaBackend(
                 }
                 if (type === "reasoning") {
                     if (delta) {
+                        set(setMessageStatusAtom, { id: messageId, status: 'thinking' });
                         set(streamReasoningToMessageAtom, {
                             id: messageId,
                             chunk: delta

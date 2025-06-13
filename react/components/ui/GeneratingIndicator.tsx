@@ -1,18 +1,32 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Button from './Button';
 import { Icon, Spinner, BrainIcon } from '../icons/icons';
 import { MessageStatus } from '../../types/chat/uiTypes';
 
 interface GeneratingIndicatorProps {
     status: MessageStatus;
+    previousMessageHasToolCalls: boolean;
 }
 
-const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status }) => {
-    const label = status === "thinking" ? "Thinking..." : "Generating...";
+const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previousMessageHasToolCalls }) => {
+    const [loadingDots, setLoadingDots] = useState(1);
+
+    useEffect(() => {
+        setLoadingDots(1); 
+        const interval = setInterval(() => {
+            setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
+        }, 250);
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, []);
     
     return (
         // Matching style of AssistantMessageTools
-        <div className="border-transparent rounded-md flex flex-col min-w-0">
+        <div className={`
+            border-transparent rounded-md flex flex-col min-w-0 display-flex flex-col py-1 mb-2
+            ${previousMessageHasToolCalls ? '-mt-3' : ''}
+        `}>
             <Button
                 variant="ghost-secondary"
                 className={`
@@ -28,7 +42,7 @@ const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status }) => 
                     </div>
                     
                     <div className="display-flex">
-                        {label}
+                        {'Generating' + '.'.repeat(loadingDots)}
                     </div>
                     
                 </div>

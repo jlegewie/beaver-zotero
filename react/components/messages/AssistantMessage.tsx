@@ -72,7 +72,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
 
                 {/* Generating button */}
                 {message.status === 'in_progress' && message.content === '' && isLastMessage && !message.tool_calls && (
-                    <GeneratingIndicator status={message.status} />
+                    <GeneratingIndicator status={message.status} previousMessageHasToolCalls={previousMessageHasToolCalls}/>
                 )}
 
                 {/* Error */}

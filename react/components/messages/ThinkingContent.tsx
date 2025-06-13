@@ -22,7 +22,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isTh
                 setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
             }, 250);
         } else {
-            setLoadingDots(1); 
+            setLoadingDots(0); 
         }
         return () => {
             if (interval) clearInterval(interval);
@@ -62,7 +62,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isTh
                     </div>
                     
                     <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        {'Thinking'.padEnd(loadingDots, '.')}
+                        {'Thinking' + '.'.repeat(isThinking ? loadingDots : 0)}
                     </div>
                     
                 </div>
