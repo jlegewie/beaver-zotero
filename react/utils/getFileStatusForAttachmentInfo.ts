@@ -1,10 +1,8 @@
 import { syncingItemFilter } from '../../src/utils/sync';
-import { attachmentsService } from '../../src/services/attachmentsService';
-import { syncService } from '../../src/services/syncService';
 import { fileUploader } from '../../src/services/FileUploader';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../atoms/files';
-import { AttachmentStatusResponse } from '../../src/services/attachmentsService';
+import { AttachmentStatusResponse, attachmentsService } from '../../src/services/attachmentsService';
 import { store } from '../index';
 import { userAtom } from '../atoms/auth';
 import { getAttachmentStatus } from './attachmentStatus';
@@ -107,7 +105,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonIcon: 'chrome://beaver/content/icons/info.svg',
                     buttonTooltip: 'Your balance is insufficient to process this file.',
                     buttonDisabled: true,
-                    onClick: () => {syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash); }
+                    onClick: () => {attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash); }
                 };
             case 'queued':
                 return { text: 'Waiting for processing...', showButton: false };
@@ -122,7 +120,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        await syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash);
                         await fileUploader.start("manual");
                     }
                 };
@@ -138,7 +136,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        await syncService.forceAttachmentFileUpdate(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash);
                         await fileUploader.start("manual");
                     }
                 };

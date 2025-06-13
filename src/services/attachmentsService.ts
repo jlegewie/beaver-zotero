@@ -1,10 +1,13 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
 import { UploadQueueRecord } from './database';
 import { logger } from '../utils/logger';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
+import { store } from '../../react/index';
+import { userAtom } from '../../react/atoms/auth';
+import { fileUploader } from './FileUploader';
 
 // processing_status from backend
 export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "embedded" | "failed" | "skipped";
@@ -328,6 +331,53 @@ export class AttachmentsService extends ApiService {
         
         const url = `/attachments/by-status?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
+    }
+
+    /**
+     * Forces update of an attachment's file hash
+     * @param libraryId The Zotero library ID
+     * @param zoteroKey The Zotero key of the attachment
+     * @param fileHash The new file hash
+     * @returns Promise with the update response indicating if the hash was enqueued
+     */
+    async updateFile(libraryId: number, zoteroKey: string, fileHash: string): Promise<FileHashReference | null> {
+        logger(`updateFile: Updating file hash for ${zoteroKey} in library ${libraryId}`);
+        // Update file hash in backend
+        const result = await this.post<FileHashReference>('/attachments/update-file', {
+            library_id: libraryId,
+            zotero_key: zoteroKey,
+            file_hash: fileHash
+        } as FileHashReference);
+        logger(`updateFile: Result: ${JSON.stringify(result)}`);
+        if (!result) {
+            logger(`updateFile: No file update required for ${zoteroKey} in library ${libraryId}`);
+            return null;
+        }
+
+        // Get user ID
+        const userId = store.get(userAtom)?.id;
+        if (!userId) {
+            throw new Error('User ID not found');
+        }
+
+        // Update attachment in local db
+        await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
+            file_hash: result.file_hash,
+            upload_status: 'pending'
+        });
+
+        // Queue file hash for upload
+        await Zotero.Beaver.db.upsertQueueItem(userId, {
+            file_hash: result.file_hash,
+            library_id: result.library_id,
+            zotero_key: result.zotero_key
+        });
+        
+        // Start upload
+        await fileUploader.start("manual");
+
+        // Return the result
+        return result;
     }
 }
 

@@ -8,7 +8,7 @@ import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import { FailedFileReference } from '../../types/zotero';
-import { Icon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -53,12 +53,27 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
                 ITEMS_PER_PAGE
             );
 
-            const newItems = result.items.map((item) => ({
-                file_hash: item.file_hash || '',
-                library_id: item.library_id,
-                zotero_key: item.zotero_key,
-                errorCode: useAdvancedPipeline ? item.docling_error_code : item.md_error_code,
-            } as FailedFileReference));
+            const newItems = await Promise.all(result.items.map(async (item) => {
+                let enableRetry = false;
+                let fileHash: string | undefined = undefined;
+                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                if (zoteroItem && zoteroItem.isAttachment()) {
+                    fileHash = await zoteroItem.attachmentHash;
+                    if (fileHash !== item.file_hash) enableRetry = true;
+                }
+
+                return {
+                    file_hash: item.file_hash || '',
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                    errorCode: useAdvancedPipeline ? item.docling_error_code : item.md_error_code,
+                    buttonText: enableRetry && fileHash ? 'Retry' : undefined,
+                    buttonAction: enableRetry && fileHash ? () => {
+                        attachmentsService.updateFile(item.library_id, item.zotero_key, fileHash);
+                    } : undefined,
+                    buttonIcon: enableRetry && fileHash ? RepeatIcon : undefined,
+                } as FailedFileReference;
+            }));
 
             setAttachments(prevItems => (page === 0 ? newItems : [...prevItems, ...newItems]));
             setHasMore(result.has_more);

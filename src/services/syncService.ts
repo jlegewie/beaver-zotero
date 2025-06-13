@@ -178,55 +178,6 @@ export class SyncService extends ApiService {
             zotero_keys: zoteroKeys
         });
     }
-
-    
-
-    /**
-     * Forces update of an attachment's file hash
-     * @param libraryId The Zotero library ID
-     * @param zoteroKey The Zotero key of the attachment
-     * @param fileHash The new file hash
-     * @returns Promise with the update response indicating if the hash was enqueued
-     */
-    async forceAttachmentFileUpdate(libraryId: number, zoteroKey: string, fileHash: string): Promise<FileHashReference | null> {
-        logger(`forceAttachmentFileUpdate: Updating file hash for ${zoteroKey} in library ${libraryId}`);
-        // Update file hash in backend
-        const result = await this.post<FileHashReference>('/zotero/sync/items/attachment-update', {
-            library_id: libraryId,
-            zotero_key: zoteroKey,
-            file_hash: fileHash
-        });
-        logger(`forceAttachmentFileUpdate: Result: ${JSON.stringify(result)}`);
-        if (!result) {
-            logger(`forceAttachmentFileUpdate: No file update required for ${zoteroKey} in library ${libraryId}`);
-            return null;
-        }
-
-        // Get user ID
-        const userId = store.get(userAtom)?.id;
-        if (!userId) {
-            throw new Error('User ID not found');
-        }
-
-        // Update attachment in local db
-        await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
-            file_hash: result.file_hash,
-            upload_status: 'pending'
-        });
-
-        // Queue file hash for upload
-        await Zotero.Beaver.db.upsertQueueItem(userId, {
-            file_hash: result.file_hash,
-            library_id: result.library_id,
-            zotero_key: result.zotero_key
-        });
-        
-        // Start upload
-        await fileUploader.start("manual");
-
-        // Return the result
-        return result;
-    }
 }
 
 // Export syncService

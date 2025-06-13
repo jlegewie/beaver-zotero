@@ -1,4 +1,3 @@
-
 /**
  * ZoteroItemReference is a reference to a Zotero item.
  */
@@ -15,10 +14,16 @@ export interface FileHashReference {
 
 export interface FailedItemReference extends ZoteroItemReference {
     errorCode?: string;
+    buttonText?: string;
+    buttonAction?: () => void;
+    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
 export interface FailedFileReference extends FileHashReference {
     errorCode?: string;
+    buttonText?: string;
+    buttonAction?: () => void;
+    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
 export function createZoteroItemReference(id: string): ZoteroItemReference | null {
