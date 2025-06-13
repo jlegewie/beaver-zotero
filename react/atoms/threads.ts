@@ -148,6 +148,15 @@ export const streamToMessageAtom = atom(
     }
 );
 
+export const streamReasoningToMessageAtom = atom(
+    null,
+    (get, set, { id, chunk }: { id: string; chunk: string }) => {
+        set(threadMessagesAtom, get(threadMessagesAtom).map(message =>
+            message.id === id ? { ...message, reasoning_content: message.reasoning_content + chunk } : message
+        ));
+    }
+);
+
 export const setMessageStatusAtom = atom(
     null,
     (get, set, { id, status, errorType, warnings }: { id: string; status?: ChatMessage['status']; errorType?: string; warnings?: Warning[] }) => {

@@ -20,6 +20,7 @@ import {
     currentAssistantMessageIdAtom,
     userAttachmentsAtom,
     toolAttachmentsAtom,
+    streamReasoningToMessageAtom,
 } from './threads';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -398,7 +399,17 @@ function _processChatCompletionViaBackend(
                         set(updateAttachmentCitationsAtom);
                     }
                 }
-                // if (type === "reasoning")
+                if (type === "reasoning") {
+                    if (delta) {
+                        set(streamReasoningToMessageAtom, {
+                            id: messageId,
+                            chunk: delta
+                        });
+                        if (delta.includes('>')) {
+                            set(updateAttachmentCitationsAtom);
+                        }
+                    }
+                }
             },
             onMessage: (msg: MessageModel) => {
                 logger(`event 'onMessage': ${JSON.stringify(msg)}`, 1);
