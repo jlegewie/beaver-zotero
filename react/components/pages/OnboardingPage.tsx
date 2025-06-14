@@ -19,6 +19,8 @@ import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
+import { profileWithPlanAtom } from "../../atoms/profile";
+import { getZoteroUserIdentifier } from "../../../src/utils/zoteroIdentifier";
 
 
 const OnboardingPage: React.FC = () => {
@@ -26,6 +28,7 @@ const OnboardingPage: React.FC = () => {
     const logout = useSetAtom(logoutAtom);
     const userId = useAtomValue(userIdAtom);
     const planSupported = useAtomValue(planSupportedAtom);
+    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
@@ -115,11 +118,29 @@ const OnboardingPage: React.FC = () => {
             setPref('selectedLibrary', JSON.stringify(selectedLibraries));
             setLibrariesSyncStatus(selectedLibraries);
             
-            // Call the service to authorize access
+            // Determine if onboarding is required
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
+            
+            // Call the service to authorize access
             await accountService.authorizeAccess(requireOnboarding);
+
+            // Update profile atoms for immediate UI feedback
+            if (profileWithPlan) {
+                const { userID, localUserKey } = getZoteroUserIdentifier();
+                setProfileWithPlan({
+                    ...profileWithPlan,
+                    has_authorized_access: true,
+                    consented_at: new Date(),
+                    zotero_user_id: userID || profileWithPlan.zotero_user_id,
+                    zotero_local_id: localUserKey,
+                    has_completed_onboarding: !requireOnboarding || profileWithPlan.has_completed_onboarding
+                });
+            }
+            
         } catch (error) {
             logger(`OnboardingPage: Error authorizing access: ${error}`);
+            // Revert optimistic update on error by fetching fresh profile
+            // Note: We could store currentProfile outside try block, but a fresh fetch is safer
         } finally {
             setIsAuthorizing(false);
         }
@@ -129,12 +150,27 @@ const OnboardingPage: React.FC = () => {
         if (isCompletingOnboarding) return;
         
         setIsCompletingOnboarding(true);
-        try {
+        try {            
             // Call the service to complete onboarding
             await accountService.completeOnboarding();
+
+            // Update profile atom for immediate UI feedback
+            if (profileWithPlan) {
+                setProfileWithPlan({
+                    ...profileWithPlan,
+                    has_completed_onboarding: true
+                });
+            }
             
         } catch (error) {
             logger(`OnboardingPage: Error completing onboarding: ${error}`);
+            // Revert optimistic update on error
+            if (profileWithPlan) {
+                setProfileWithPlan({
+                    ...profileWithPlan,
+                    has_completed_onboarding: false
+                });
+            }
         } finally {
             setIsCompletingOnboarding(false);
         }
