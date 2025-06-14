@@ -18,7 +18,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
                 {/* Header section */}
                 <div className="display-flex flex-col items-start mb-4">
                     <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
-                    <p className="text-base font-color-secondary -mt-2">Your AI plugin for Zotero.</p>
+                    {/* <p className="text-base font-color-secondary -mt-2">Your AI plugin for Zotero.</p> */}
                 </div>
                 
                 {/* Form container with subtle background */}
