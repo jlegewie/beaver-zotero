@@ -159,7 +159,7 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
                             {hasMore && (
                                 <Button
                                     variant="ghost"
-                                    rightIcon={ArrowDownIcon}
+                                    rightIcon={isLoading ? undefined : ArrowDownIcon}
                                     loading={isLoading}
                                     iconClassName={`scale-11 ${isLoading ? 'animate-spin' : ''}`}
                                     className="fit-content"
