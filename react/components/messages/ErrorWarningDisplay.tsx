@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChatMessage, Warning } from '../../types/chat/uiTypes';
-import { Icon, AlertIcon, KeyIcon, CancelIcon } from '../icons/icons';
+import { Icon, AlertIcon, KeyIcon, CancelIcon, SettingsIcon } from '../icons/icons';
 import { useSetAtom } from 'jotai';
 import Button from '../ui/Button';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
@@ -31,6 +31,8 @@ const getErrorMessage = (errorType: string) => {
             return "AI service hiccup. Please try again later.";
         case 'internal_server_error':
             return "AI service problem. Please try again later.";
+        case 'inactive_subscription':
+            return "Your subscription is inactive. Please upgrade or change to the free version.";
         case 'app_key_limit_exceeded':
             return "Monthly chat limit reached. Add your own API key in settings.";
         case 'user_key_failed_unexpected':
@@ -49,7 +51,9 @@ const getErrorMessage = (errorType: string) => {
 export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
-    const showSettingsButton =
+    const showSettingsButton = errorType === 'inactive_subscription';
+    
+    const showApiKeyButton =
         errorType === 'app_key_limit_exceeded' ||
         errorType === 'user_key_failed_unexpected' ||
         errorType === 'user_key_rate_limit_exceeded' ||
@@ -67,6 +71,13 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                         <div>Error</div>
                         <div className="flex-1"/>
                         {showSettingsButton &&
+                            <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={SettingsIcon} onClick={() => {
+                                setIsPreferencePageVisible(true);
+                            }}>
+                                Settings
+                            </Button>
+                        }
+                        {showApiKeyButton &&
                             <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
