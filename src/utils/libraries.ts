@@ -51,6 +51,7 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
             name: library.name,
             isGroup: library.isGroup,
             itemCount: allItems.length,
+            // itemCount: allItems.filter(item => item.isRegularItem()).length,
             attachmentCount: attachments.length,
             pdfCount: pdfAttachments.length,
             imageCount: attachments.filter(item => item.isImageAttachment()).length,
