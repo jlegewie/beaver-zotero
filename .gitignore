@@ -8,7 +8,20 @@ yarn.lock
 
 # Scaffold
 .env
+.env.production
 .scaffold
 build
 logs
 .cursorrules
+archive
+
+# compiled files
+reactBundle.js
+reactBundle.js.map
+
+
+# Build files
+/build
+/dist
+*.js.LICENSE.txt
+*.reactBundle.js

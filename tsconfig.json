@@ -8,9 +8,15 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"]
+      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"],
+      "../../addon/content/reactBundle": ["typings/reactBundle.d.ts"],
+      "react": ["node_modules/react"],
+      "react/*": ["node_modules/react/*"]
     },
+    "jsx": "react",
+    "esModuleInterop": true,
+    "lib": ["DOM", "ES2016"]
   },
-  "include": ["src", "typings", "node_modules/zotero-types"],
+  "include": ["src", "react", "typings", "node_modules/zotero-types"],
   "exclude": ["build", "addon"]
 }

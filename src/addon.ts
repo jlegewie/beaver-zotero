@@ -1,12 +1,11 @@
-import { config } from "../package.json";
+import { config, version } from "../package.json";
 import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTable";
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
-import { VectorStoreDB } from "./services/vectorStore";
-import { VoyageClient } from "./services/voyage";
-import { ItemService } from "./services/ItemService";
-import { QuickChat } from "./ui/quickChat"
+import { BeaverDB } from "./services/database";
+import { AIProvider } from "./services/OpenAIProvider";
+import { CitationService } from "./services/CitationService";
 
 class Addon {
     public data: {
@@ -26,7 +25,10 @@ class Addon {
         dialog?: DialogHelper;
         _itemStatuses: Map<number, string>;
     };
-    public itemService?: ItemService;
+    public aiProvider?: AIProvider;
+    public citationService?: CitationService;
+    public db?: BeaverDB;
+    public pluginVersion?: typeof version;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

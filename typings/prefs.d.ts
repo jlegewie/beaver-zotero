@@ -7,9 +7,22 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
-      "enable": boolean;
-      "input": string;
-      "voyageApiKey": string;
+      "userId": string;
+      "userEmail": string;
+      "selectedLibrary": string;
+      "keyboardShortcut": string;
+      "updateSourcesFromZoteroSelection": boolean;
+      "maxAttachments": number;
+      "customInstructions": string;
+      "googleGenerativeAiApiKey": string;
+      "openAiApiKey": string;
+      "anthropicApiKey": string;
+      "lastUsedModel": string;
+      "recentItems": string;
+      "citationFormat": string;
+      "citationStyle": string;
+      "citationLocale": string;
+      "customPrompts": string;
     };
   }
 }
