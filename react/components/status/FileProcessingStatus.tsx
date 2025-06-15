@@ -38,7 +38,17 @@ const FileProcessingStatus: React.FC = () => {
     };
     
     if (!fileStats || !fileStats.fileStatusAvailable) {
-        return null;
+        return (
+            <div className="display-flex flex-col gap-4 p-3 border-popup rounded-md bg-quinary min-w-0">
+                <div className="display-flex flex-row gap-4">
+                    <div className="mt-1">{SpinnerIcon}</div>
+                    <div className="display-flex flex-col gap-3 items-start flex-1">
+                        <div className="font-color-secondary text-lg">File Processing</div>
+                        <div className="font-color-tertiary text-base">Initializing...</div>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     return (
