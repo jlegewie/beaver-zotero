@@ -155,7 +155,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                     onClick={handleCheckboxClick}
                                 />
 
-                                <div className="display-flex flex-col gap-2">
+                                <div className="display-flex flex-col gap-3">
                                     <div className="display-flex flex-row gap-3 items-center">
                                         <CSSIcon name="library" className="icon-16" />
                                         <div className="font-color-primary text-base">
@@ -166,10 +166,17 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                     {/* Statistics or loading spinner */}
                                     <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
                                         {isLoading ? (
-                                            <>
-                                                <Spinner className="" size={14} />
-                                                <span>Loading library statistics...</span>
-                                            </>
+                                            <div className="display-flex flex-row gap-2 items-start">
+                                                <Spinner className="mt-015" size={14} />
+                                                <div className="display-flex flex-col gap-1">
+                                                    <div className="font-color-secondary text-sm">
+                                                        Loading library statistics...
+                                                    </div> 
+                                                    <div className="font-color-tertiary text-sm">
+                                                        This may take a few minutes...
+                                                    </div>
+                                                </div>
+                                            </div>
                                         ) : statistics ? (
                                             <>
                                                 {statistics.itemCount} items,{' '}
