@@ -40,9 +40,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     useEffect(() => {
         if (inputRef.current) {
             inputRef.current.style.height = 'auto';
-            if (messageContent) {
-                inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
-            }
+            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
         }
     }, [messageContent]);
     
