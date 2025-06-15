@@ -49,8 +49,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
 
-    console.log('availableModels', availableModels);
-
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
 
