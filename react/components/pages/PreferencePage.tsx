@@ -368,7 +368,7 @@ const PreferencePage: React.FC = () => {
                         <span className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</span>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
-                        <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
+                        <Button variant="outline" disabled={true} icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
                 </div>

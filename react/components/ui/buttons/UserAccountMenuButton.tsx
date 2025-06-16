@@ -35,6 +35,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             label: "Manage account",
             onClick: () => console.log('manage account'),
             icon: UserIcon,
+            disabled: true,
         },
         {
             label: "Logout",
