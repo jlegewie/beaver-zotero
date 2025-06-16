@@ -35,7 +35,7 @@ jobs:
 
       - name: Release to GitHub
         run: |
-          npm run release
+          NODE_ENV=production npm run release
           sleep 1s
 
       - name: Notify release
