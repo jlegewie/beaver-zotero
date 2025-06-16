@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Beaver chews through your research powered by AI, seamlessly integrates with Zotero, finds exactly what you need with smart search, and answers questions about whatever you're reading.",
     "config": {
         "addonName": "Beaver",
