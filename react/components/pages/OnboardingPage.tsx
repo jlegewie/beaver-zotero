@@ -42,7 +42,7 @@ const OnboardingPage: React.FC = () => {
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
 
     // Realtime listening for file status updates
-    useFileStatus();
+    const { connectionStatus } = useFileStatus();
 
     // Library sync state
     const setLibrariesSyncStatus = useSetAtom(librariesSyncStatusAtom);
@@ -265,7 +265,7 @@ const OnboardingPage: React.FC = () => {
                         <FileUploadStatus />
                         
                         {/* File Processing */}
-                        <FileProcessingStatus />
+                        <FileProcessingStatus connectionStatus={connectionStatus} />
 
                     </div>
                 )}

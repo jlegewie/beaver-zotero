@@ -8,8 +8,9 @@ import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent
 import ExpandableAttachmentList from "./ExpandableAttachmentList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
 import { useErrorCodeStats } from "../../hooks/useErrorCodeStats";
+import { FileStatusConnection } from "../../hooks/useFileStatus";
 
-const FileProcessingStatus: React.FC = () => {
+const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['connectionStatus'] }> = ({ connectionStatus }) => {
     useErrorCodeStats();
     const fileStats = useAtomValue(fileStatusStatsAtom);
 
@@ -25,6 +26,7 @@ const FileProcessingStatus: React.FC = () => {
     };
 
     const getProcessingLeftText = (): string => {
+        if(connectionStatus === 'failed') return "";
         if (!fileStats) return "Loading status...";
         
         const textParts: string[] = [];
@@ -65,9 +67,14 @@ const FileProcessingStatus: React.FC = () => {
                             File Processing
                         </div>
                         <div className="flex-1"/>
-                        {fileStats && (
+                        {connectionStatus !== 'connected' && fileStats && (
                             <div className="font-color-tertiary text-base">
                                 {fileStats.totalProcessingCount.toLocaleString()} Files
+                            </div>
+                        )}
+                        {connectionStatus === 'failed' && (
+                            <div className="font-color-tertiary text-sm items-end">
+                                Connection failed
                             </div>
                         )}
                     </div>
@@ -76,22 +83,24 @@ const FileProcessingStatus: React.FC = () => {
                     {fileStats && fileStats.totalProcessingCount > 0 && (
                         <div className="w-full">
                             <ProgressBar progress={fileStats.processingProgress} />
-                            <div className="display-flex flex-row gap-4">
-                                <div className="font-color-tertiary text-base">
-                                    {getProcessingLeftText()}
+
+                                <div className="display-flex flex-row gap-4">
+                                    <div className="font-color-tertiary text-base">
+                                        {getProcessingLeftText()}
+                                    </div>
+                                    <div className="flex-1"/>
+                                    <div className="font-color-tertiary text-base">
+                                        {`${Math.min(fileStats.processingProgress, 100).toFixed(1)}%`}
+                                    </div>
                                 </div>
-                                <div className="flex-1"/>
-                                <div className="font-color-tertiary text-base">
-                                    {`${Math.min(fileStats.processingProgress, 100).toFixed(1)}%`}
-                                </div>
-                            </div>
+
                         </div>
                     )}
-                     {fileStats && fileStats.totalProcessingCount === 0 && (
-                         <div className="font-color-tertiary text-base w-full">
-                            {getProcessingLeftText()}
-                        </div>
-                     )}
+                    {fileStats && fileStats.totalProcessingCount === 0 && (
+                        <div className="font-color-tertiary text-base w-full">
+                        {getProcessingLeftText()}
+                    </div>
+                    )}
                 </div>
             </div>
 

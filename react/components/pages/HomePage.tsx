@@ -24,7 +24,7 @@ const HomePage: React.FC = () => {
     const planFeatures = useAtomValue(planFeaturesAtom);
 
     // Realtime listening for file status updates
-    useFileStatus();
+    const { connectionStatus } = useFileStatus();
 
     const handleCustomPrompt = async (
         prompt: CustomPrompt
@@ -104,7 +104,7 @@ const HomePage: React.FC = () => {
                 {showFileStatus && (
                     <div className="display-flex flex-col gap-4 min-w-0 w-full">
                         <FileUploadStatus pollingInterval={3000} />
-                        <FileProcessingStatus />
+                        <FileProcessingStatus connectionStatus={connectionStatus} />
                     </div>
                 )}
                 </>
