@@ -165,7 +165,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                     
                                     {/* Statistics or loading spinner */}
                                     <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
-                                        {!isLoading ? (
+                                        {isLoading ? (
                                             <div className="display-flex flex-row gap-2 items-start">
                                                 <Spinner className="mt-015" size={14} />
                                                 <div className="display-flex flex-col gap-1">
