@@ -12,6 +12,7 @@ import { isAgentModelAtom } from '../../atoms/models';
 import { getCustomPromptsFromPreferences } from '../../types/settings';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom } from '../../atoms/ui';
+import { selectedModelAtom } from '../../atoms/models';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -25,6 +26,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
@@ -200,7 +202,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                                 className="mr-1"
                                 onClick={(e) => handleSubmit(e as any, true)}
-                                disabled={isStreaming || messageContent.length === 0}
+                                disabled={isStreaming || messageContent.length === 0 || !selectedModel}
                             >
                                 Library Search
                                 <span className="opacity-50">
@@ -214,7 +216,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
                             className="mr-1"
                             onClick={isStreaming ? handleStop : handleSubmit}
-                            disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable)}
+                            disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable) || !selectedModel}
                         >
                             {isStreaming
                                 ? 'Stop'

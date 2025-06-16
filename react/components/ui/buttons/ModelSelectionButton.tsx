@@ -4,8 +4,7 @@ import { MenuItem } from '../menu/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { 
-  selectedModelAtom, 
-  DEFAULT_MODEL,  
+  selectedModelAtom,
   availableModelsAtom,
   updateSelectedModelAtom,
   validateSelectedModelAtom,
@@ -62,7 +61,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
         const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_agent);
         const byok_models_agent = availableModels.filter((model) => !model.use_app_key && model.is_agent);
-        const included_models = availableModels.filter((model) => model.use_app_key) || [DEFAULT_MODEL];
+        const included_models = availableModels.filter((model) => model.use_app_key) || [];
 
         items.push({
             label: 'Included Models',
@@ -70,7 +69,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             onClick: () => {},
         });
 
-        (included_models.length ? included_models : [DEFAULT_MODEL]).forEach((model) => {
+        included_models.forEach((model) => {
             items.push({
                 label: model.name,
                 onClick: () => {
@@ -80,7 +79,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel.id === model.id}
+                        isSelected={selectedModel !== null && selectedModel.id === model.id}
                     />
                 )
             });
@@ -103,7 +102,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel.id === model.id}
+                            isSelected={selectedModel !== null && selectedModel.id === model.id}
                         />
                     )
                 });
@@ -127,7 +126,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel.id === model.id}
+                            isSelected={selectedModel !== null && selectedModel.id === model.id}
                         />
                     )
                 });
@@ -138,9 +137,10 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     }, [availableModels, updateSelectedModel, selectedModel]);
 
     const getButtonLabel = () => {
-        return selectedModel.name.length > MAX_MODEL_NAME_LENGTH
+        if (!selectedModel) return 'None Selected';
+        return selectedModel && selectedModel.name.length > MAX_MODEL_NAME_LENGTH
             ? `${selectedModel.name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
-            : selectedModel.name;
+            : selectedModel?.name || '';
     };
 
     const handleAfterClose = () => {
@@ -151,7 +151,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
     const agentComponent = (
         <div className="display-flex items-center gap-1">
-            {selectedModel.reasoning_model && <Icon icon={BrainIcon} />}
+            {(selectedModel?.reasoning_model || false) && <Icon icon={BrainIcon} />}
             {getButtonLabel()}
             <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
                 <Icon icon={AiMagicIcon} />
@@ -174,7 +174,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             variant="ghost-secondary"
             customContent={isAgentModel ? agentComponent : undefined}
             buttonLabel={getButtonLabel()}
-            icon={selectedModel.reasoning_model ? BrainIcon : undefined}
+            icon={selectedModel && selectedModel.reasoning_model ? BrainIcon : undefined}
             rightIcon={ArrowDownIcon}
             className="truncate"
             style={dynamicStyle}

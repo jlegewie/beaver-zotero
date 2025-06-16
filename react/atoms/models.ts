@@ -43,34 +43,24 @@ export interface FullModelConfig extends ModelConfig {
 }
 
 /**
- * Default model used when no models are available or when a previously
- * selected model becomes unavailable. This serves as a fallback option.
- */
-export const DEFAULT_MODEL: FullModelConfig = {
-    id: "6c750f70-8c2a-4e5b-9f1d-2a3b4c5d6e7f",
-    provider: 'google',
-    name: 'Gemini 2.0 Flash',
-    snapshot: 'gemini/gemini-2.0-flash-001',
-    is_agent: false,
-    reasoning_model: false,
-    use_app_key: true,
-    credit_cost: 1,
-    is_default: true,
-} as FullModelConfig;
-
-/**
  * Core atoms for model state management
  */
 // Stores all models supported by the backend
 export const supportedModelsAtom = atom<FullModelConfig[]>([]);
 
 // Stores the currently selected model
-export const selectedModelAtom = atom<FullModelConfig>(DEFAULT_MODEL);
+let lastUsedModel = null;
+try {
+    lastUsedModel = JSON.parse(getPref('lastUsedModel')) as FullModelConfig;
+} catch (error) {
+    lastUsedModel = null
+}
+export const selectedModelAtom = atom<FullModelConfig | null>(lastUsedModel);
 
 /**
  * Derived atom that indicates if the selected model has agent capabilities
  */
-export const isAgentModelAtom = atom((get) => get(selectedModelAtom).is_agent);
+export const isAgentModelAtom = atom((get) => get(selectedModelAtom)?.is_agent || false);
 
 /**
  * Derived atom that filters supported models based on available API keys
@@ -101,19 +91,20 @@ export const availableModelsAtom = atom(
  * Validation atom that ensures the selected model is still available
  * This is called when API keys change to verify the selected model is valid:
  * - If current model is invalid, switches to an available model
- * - If no models are available, falls back to DEFAULT_MODEL
+ * - If no models are available, falls back to default model
  */
 export const validateSelectedModelAtom = atom(
     null,
     (get, set) => {
         const selectedModel = get(selectedModelAtom);
         const availableModels = get(availableModelsAtom);
-        const defaultModel = availableModels.find(model => model.is_default) || DEFAULT_MODEL;
+        const defaultModel = availableModels.find(model => model.is_default);
 
         // Check if the selected model is still valid with current API keys
-        const isModelAvailable = 
-            selectedModel.id === defaultModel.id || 
-            availableModels.some(m => m.id === selectedModel.id);
+        const isModelAvailable = selectedModel && (
+            selectedModel.id === defaultModel?.id || 
+            availableModels.some(m => m.id === selectedModel.id)
+        );
 
         // If not valid, revert to default or first available model
         if (!isModelAvailable) {
@@ -121,7 +112,7 @@ export const validateSelectedModelAtom = atom(
                 set(selectedModelAtom, availableModels[0]);
                 setPref('lastUsedModel', JSON.stringify(availableModels[0]));
             } else {
-                set(selectedModelAtom, defaultModel);
+                set(selectedModelAtom, defaultModel || null);
                 setPref('lastUsedModel', JSON.stringify(defaultModel));
             }
         }
@@ -144,17 +135,18 @@ export const setModelsAtom = atom(
         // Ensure selected model is still available
         const availableModels = get(availableModelsAtom);
         const selectedModel = get(selectedModelAtom);
-        const defaultModel = models.find(model => model.is_default) || DEFAULT_MODEL;
+        const defaultModel = models.find(model => model.is_default);
         
-        const isSelectedModelAvailable = 
-            selectedModel.id === defaultModel.id || 
-            availableModels.some(m => m.id === selectedModel.id);
+        const isSelectedModelAvailable = selectedModel && ( 
+            selectedModel.id === defaultModel?.id || 
+            availableModels.some(m => m.id === selectedModel.id)
+        );
         
         if (!isSelectedModelAvailable && availableModels.length > 0) {
             set(selectedModelAtom, availableModels[0]);
             setPref('lastUsedModel', JSON.stringify(availableModels[0]));
         } else if (!isSelectedModelAvailable) {
-            set(selectedModelAtom, defaultModel);
+            set(selectedModelAtom, defaultModel || null);
             setPref('lastUsedModel', JSON.stringify(defaultModel));
         }
     }

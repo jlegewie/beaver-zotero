@@ -27,7 +27,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
-import { FullModelConfig, selectedModelAtom, DEFAULT_MODEL, supportedModelsAtom } from './models';
+import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../index';
@@ -194,6 +194,11 @@ export const generateResponseAtom = atom(
 
         // Get current model
         const model = get(selectedModelAtom);
+        if (!model) {
+            logger('generateResponseAtom: No model selected');
+            set(isChatRequestPendingAtom, false);
+            return;
+        }
 
         // Create user and assistant messages
         const userMsg = createUserMessage(payload.content);
@@ -281,6 +286,11 @@ export const regenerateFromMessageAtom = atom(
 
         // Get current model
         const model = get(selectedModelAtom);
+        if (!model) {
+            logger('regenerateFromMessageAtom: No model selected');
+            set(isChatRequestPendingAtom, false);
+            return;
+        }
         
         // Get current thread ID
         const currentThreadId = get(currentThreadIdAtom);
@@ -358,7 +368,12 @@ function _processChatCompletionViaBackend(
         // If no API key available, find default model from supported models
         if (!userApiKey) {
             const supportedModels = get(supportedModelsAtom);
-            model = supportedModels.find((m: FullModelConfig) => m.is_default) || DEFAULT_MODEL;
+            model = supportedModels.find((m: FullModelConfig) => m.is_default);
+            if (!model) {
+                logger('No default model found, cannot generate response');
+                set(isChatRequestPendingAtom, false);
+                return;
+            }
         }
     }
 
