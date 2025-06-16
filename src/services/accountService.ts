@@ -4,10 +4,12 @@ import { ProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { FullModelConfig } from '../../react/atoms/models';
+import { ZoteroLibrary } from '../../react/types/zotero';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
     zotero_user_id: string | undefined;
+    libraries: ZoteroLibrary[];
     require_onboarding: boolean;
 }
 
@@ -91,12 +93,13 @@ export class AccountService extends ApiService {
      * @param requireOnboarding Whether the user needs to complete onboarding
      * @returns Promise with the response message
      */
-    async authorizeAccess(requireOnboarding: boolean = true): Promise<{ message: string }> {
+    async authorizeAccess(requireOnboarding: boolean = true, libraries: ZoteroLibrary[]): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<{ message: string }>('/account/authorize', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
-            require_onboarding: requireOnboarding
+            require_onboarding: requireOnboarding,
+            libraries: libraries
         } as AuthorizationRequest);
     }
 
