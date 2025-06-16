@@ -1,4 +1,15 @@
 /**
+ * ZoteroLibrary is a reference to a Zotero library.
+ */
+export interface ZoteroLibrary {
+    library_id: number;
+    name: string;
+    is_group: boolean;
+    type: string;
+    type_id: number;
+}
+
+/**
  * ZoteroItemReference is a reference to a Zotero item.
  */
 export interface ZoteroItemReference {
