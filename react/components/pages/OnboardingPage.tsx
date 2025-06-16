@@ -21,6 +21,7 @@ import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroIdentifier";
+import { ZoteroLibrary } from "../../types/zotero";
 
 
 const OnboardingPage: React.FC = () => {
@@ -122,7 +123,21 @@ const OnboardingPage: React.FC = () => {
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
             
             // Call the service to authorize access
-            await accountService.authorizeAccess(requireOnboarding);
+            const libraries = selectedLibraryIds
+                .map(id => {
+                    const library = Zotero.Libraries.get(id);
+                    if (!library) return null;
+                    return {
+                        library_id: library.libraryID,
+                        name: library.name,
+                        is_group: library.isGroup,
+                        type: library.libraryType,
+                        type_id: library.libraryTypeID,
+                    } as ZoteroLibrary;
+                })
+                .filter(library => library !== null);
+            
+            await accountService.authorizeAccess(requireOnboarding, libraries);
 
             // Update profile atoms for immediate UI feedback
             if (profileWithPlan) {
