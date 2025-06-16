@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,9 +32,9 @@ jobs:
       - name: Install deps
         run: npm install
 
-      - name: Build
-        run: |
-          npm run build
+      # - name: Build
+      #   run: |
+      #     npm run build
 
       - name: Release to GitHub
         run: |

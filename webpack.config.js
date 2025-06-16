@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import webpack from 'webpack';
 import dotenv from 'dotenv';
+import process from 'process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,8 +11,13 @@ const loadEnv = (mode) => {
     const envFile = mode === 'production' ? '.env.production' : '.env.development';
     const result = dotenv.config({ path: envFile });
 
+    // If env file doesn't exist (like in CI), use process.env directly
     if (result.error) {
-        return {};
+        return {
+            SUPABASE_URL: process.env.SUPABASE_URL,
+            SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+            API_BASE_URL: process.env.API_BASE_URL
+        };
     }
 
     return result.parsed;
