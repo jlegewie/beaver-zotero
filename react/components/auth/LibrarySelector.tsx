@@ -165,16 +165,13 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                     
                                     {/* Statistics or loading spinner */}
                                     <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
-                                        {isLoading ? (
+                                        {!isLoading ? (
                                             <div className="display-flex flex-row gap-2 items-start">
                                                 <Spinner className="mt-015" size={14} />
                                                 <div className="display-flex flex-col gap-1">
                                                     <div className="font-color-secondary text-sm">
                                                         Loading library statistics...
                                                     </div> 
-                                                    <div className="font-color-tertiary text-sm">
-                                                        This may take a few minutes...
-                                                    </div>
                                                 </div>
                                             </div>
                                         ) : statistics ? (
@@ -192,6 +189,10 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                         </div>
                     );
                 })}
+            </div>
+
+            <div className="font-color-tertiary text-sm">
+                Loading library statistics may take a few minutes...
             </div>
             
             {/* Summary information with page balance */}
