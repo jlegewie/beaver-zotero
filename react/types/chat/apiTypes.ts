@@ -4,6 +4,7 @@ import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments
 export interface ThreadModel {
     id: string;
     user_id: string;
+    name?: string;
     created_at: string;
     updated_at: string;
 }
