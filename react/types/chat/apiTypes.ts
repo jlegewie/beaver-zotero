@@ -1,4 +1,5 @@
-import { MessageAttachment, SourceAttachment } from "../attachments/apiTypes";
+import { ToolRequest } from "src/services/chatService";
+import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 
 export interface ThreadModel {
     id: string;
@@ -29,16 +30,26 @@ export interface ToolCall {
 }
 
 export interface MessageModel {
-    id: string;
+    id: string; // UUID
     user_id?: string; // Set in DB
-    thread_id: string;
+    thread_id: string; // UUID
+    
+    // OpenAI-message fields
     role: 'user' | 'assistant' | 'system';
     content?: string;
     reasoning_content?: string;
-    attachments?: MessageAttachment[];
     tool_calls?: ToolCall[];
+
+    // reader state and attachments
+    reader_state?: ReaderState;
+    attachments?: MessageAttachment[];
+
+    // User-initiated tool requests
+    tool_request?: ToolRequest;
+
+    // Message metadata
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
-    created_at?: string;
+    created_at?: string; // Set in DB
     metadata?: Record<string, any>;
     error?: string;
 }
