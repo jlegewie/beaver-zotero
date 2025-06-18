@@ -369,6 +369,105 @@ declare namespace Zotero {
              * @returns Number of attachments fixed
              */
             fixPendingAttachmentsWithoutQueue(user_id: string): Promise<number>;
+
+            // --- Thread Methods ---
+
+            /**
+             * Create a new chat thread for a user.
+             * @param user_id User ID
+             * @param name Optional name for the thread
+             * @returns The ID of the newly created thread
+             */
+            createThread(user_id: string, name?: string | null): Promise<string>;
+
+            /**
+             * Retrieve a thread by its ID.
+             * @param user_id User ID
+             * @param id The ID of the thread to retrieve
+             * @returns The ThreadRecord if found, otherwise null
+             */
+            getThread(user_id: string, id: string): Promise<import("../src/services/database").ThreadRecord | null>;
+
+            /**
+             * Get a paginated list of threads for a user.
+             * @param user_id User ID
+             * @param limit Number of threads per page
+             * @param offset Number of threads to skip
+             * @returns Object containing an array of ThreadRecord objects and a boolean indicating if there are more items
+             */
+            getThreadsPaginated(
+                user_id: string,
+                limit: number,
+                offset: number
+            ): Promise<{ threads: import("../src/services/database").ThreadRecord[]; has_more: boolean }>;
+
+            /**
+             * Delete a thread and all its messages.
+             * @param user_id User ID
+             * @param id The ID of the thread to delete
+             */
+            deleteThread(user_id: string, id: string): Promise<void>;
+
+            /**
+             * Rename a thread.
+             * @param user_id User ID
+             * @param id The ID of the thread to rename
+             * @param name The new name for the thread
+             */
+            renameThread(user_id: string, id: string, name: string): Promise<void>;
+
+            /**
+             * Update a thread. Currently only supports renaming.
+             * @param user_id User ID
+             * @param id The ID of the thread to update
+             * @param updates An object containing the fields to update
+             */
+            updateThread(
+                user_id: string,
+                id: string,
+                updates: Partial<Omit<import("../src/services/database").ThreadRecord, 'id' | 'user_id' | 'created_at'>>
+            ): Promise<void>;
+
+            // --- Message Methods ---
+
+            /**
+             * Retrieve all messages from a specific thread, ordered by creation date.
+             * @param user_id User ID
+             * @param threadId The ID of the thread
+             * @returns An array of MessageRecord objects
+             */
+            getMessagesFromThread(user_id: string, threadId: string): Promise<import("../src/services/database").MessageRecord[]>;
+
+            /**
+             * Upsert a message in the database.
+             * Inserts a new message or updates an existing one based on the message ID.
+             * @param user_id User ID
+             * @param message The complete message object to upsert
+             */
+            upsertMessage(user_id: string, message: import("../react/types/chat/apiTypes").MessageModel): Promise<void>;
+
+            /**
+             * Update an existing message.
+             * @param user_id User ID
+             * @param id The ID of the message to update
+             * @param updates A partial message object with fields to update
+             */
+            updateMessage(user_id: string, id: string, updates: Partial<import("../react/types/chat/apiTypes").MessageModel>): Promise<void>;
+
+            /**
+             * Delete a message by its ID.
+             * @param user_id User ID
+             * @param id The ID of the message to delete
+             */
+            deleteMessage(user_id: string, id: string): Promise<void>;
+
+            /**
+             * Retrieve a message by its ID.
+             * @param user_id User ID
+             * @param id The ID of the message to retrieve
+             * @returns The MessageRecord if found, otherwise null
+             */
+            getMessage(user_id: string, id: string): Promise<import("../src/services/database").MessageRecord | null>;
         }
 
         /**
