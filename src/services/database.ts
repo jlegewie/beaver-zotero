@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingStatus, UploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
+import type { MessageModel } from '../../react/types/chat/apiTypes';
 
 /* 
  * Interface for the 'items' table row
@@ -81,6 +82,54 @@ export interface AttachmentUploadStatistics {
     skipped: number;
 }
 
+/* 
+ * Interface for the 'threads' table row
+ * 
+ * Table stores chat threads for users, mirroring the backend postgres structure.
+ * Corresponds to the ThreadModel and threads table in the backend.
+ * 
+ */
+export interface ThreadRecord {
+    id: string;
+    user_id: string;
+    name: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+/* 
+ * Interface for the 'messages' table row
+ * 
+ * Table stores chat messages for threads, mirroring the backend postgres structure
+ * JSON fields are stored as stringified JSON in SQLite.
+ * Corresponds to the MessageModel and messages table in the backend.
+ * 
+ */
+export interface MessageRecord {
+    id: string;
+    user_id: string;
+    thread_id: string;
+    
+    // OpenAI-message fields
+    role: 'user' | 'assistant' | 'system';
+    content: string | null;
+    reasoning_content: string | null;
+    tool_calls: string | null; // JSON string of ToolCall[]
+    
+    // reader state and attachments  
+    reader_state: string | null; // JSON string of ReaderState
+    attachments: string | null; // JSON string of MessageAttachment[]
+    
+    // User-initiated tool requests
+    tool_request: string | null; // JSON string of ToolRequest
+    
+    // Message metadata
+    status: 'in_progress' | 'completed' | 'canceled' | 'error';
+    created_at: string;
+    metadata: string | null; // JSON string of Record<string, any>
+    error: string | null;
+}
+
 /**
  * Manages the beaver SQLite database using Zotero's DBConnection.
  */
@@ -144,6 +193,51 @@ export class BeaverDB {
                 PRIMARY KEY (user_id, file_hash),
                 UNIQUE(user_id, file_hash)
             );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS threads (
+                id                       TEXT(36) PRIMARY KEY,
+                user_id                  TEXT(36) NOT NULL,
+                name                     TEXT,
+                created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS messages (
+                id                       TEXT(36) PRIMARY KEY,
+                user_id                  TEXT(36) NOT NULL,
+                thread_id                TEXT(36) NOT NULL,
+                role                     TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+                content                  TEXT,
+                reasoning_content        TEXT,
+                tool_calls               TEXT,
+                reader_state             TEXT,
+                attachments              TEXT,
+                tool_request             TEXT,
+                status                   TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('in_progress', 'completed', 'canceled', 'error')),
+                created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+                metadata                 TEXT,
+                error                    TEXT,
+                FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_messages_user_thread 
+            ON messages(user_id, thread_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_messages_thread_id 
+            ON messages(thread_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_threads_user_updated 
+            ON threads(user_id, updated_at DESC);
         `);
     }
 
@@ -1045,7 +1139,7 @@ export class BeaverDB {
                 
                 await this.conn.queryAsync(
                     `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
@@ -1404,6 +1498,271 @@ export class BeaverDB {
             logger(`Beaver DB: Error fixing pending attachments without queue entries: ${error.message}`, 1);
             return 0;
         }
+    }
+
+    /**
+     * Helper method to construct ThreadRecord from a database row
+     */
+    private static rowToThreadRecord(row: any): ThreadRecord {
+        return {
+            id: row.id,
+            user_id: row.user_id,
+            name: row.name,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        };
+    }
+
+    /**
+     * Helper method to construct MessageRecord from a database row
+     */
+    private static rowToMessageRecord(row: any): MessageRecord {
+        return {
+            id: row.id,
+            user_id: row.user_id,
+            thread_id: row.thread_id,
+            role: row.role as 'user' | 'assistant' | 'system',
+            content: row.content,
+            reasoning_content: row.reasoning_content,
+            tool_calls: row.tool_calls,
+            reader_state: row.reader_state,
+            attachments: row.attachments,
+            tool_request: row.tool_request,
+            status: row.status as 'in_progress' | 'completed' | 'canceled' | 'error',
+            created_at: row.created_at,
+            metadata: row.metadata,
+            error: row.error,
+        };
+    }
+
+    // --- Thread Methods ---
+
+    /**
+     * Create a new chat thread for a user.
+     * @param user_id User ID
+     * @param name Optional name for the thread
+     * @returns The ID of the newly created thread
+     */
+    public async createThread(user_id: string, name: string | null = null): Promise<string> {
+        const id = uuidv4();
+        await this.conn.queryAsync(
+            `INSERT INTO threads (id, user_id, name) VALUES (?, ?, ?)`,
+            [id, user_id, name]
+        );
+        return id;
+    }
+
+    /**
+     * Retrieve a thread by its ID.
+     * @param user_id User ID
+     * @param id The ID of the thread to retrieve
+     * @returns The ThreadRecord if found, otherwise null
+     */
+    public async getThread(user_id: string, id: string): Promise<ThreadRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM threads WHERE user_id = ? AND id = ?`,
+            [user_id, id]
+        );
+        return rows.length > 0 ? BeaverDB.rowToThreadRecord(rows[0]) : null;
+    }
+
+    /**
+     * Get a paginated list of threads for a user.
+     * @param user_id User ID
+     * @param limit Number of threads per page
+     * @param offset Number of threads to skip
+     * @returns Object containing an array of ThreadRecord objects and a boolean indicating if there are more items
+     */
+    public async getThreadsPaginated(
+        user_id: string,
+        limit: number,
+        offset: number
+    ): Promise<{ threads: ThreadRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+            [user_id, limit + 1, offset]
+        );
+
+        const threads = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToThreadRecord(row));
+
+        return {
+            threads,
+            has_more: rows.length > limit,
+        };
+    }
+
+    /**
+     * Delete a thread and all its messages.
+     * @param user_id User ID
+     * @param id The ID of the thread to delete
+     */
+    public async deleteThread(user_id: string, id: string): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM threads WHERE user_id = ? AND id = ?`,
+            [user_id, id]
+        );
+    }
+
+    /**
+     * Rename a thread.
+     * @param user_id User ID
+     * @param id The ID of the thread to rename
+     * @param name The new name for the thread
+     */
+    public async renameThread(user_id: string, id: string, name: string): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE threads SET name = ?, updated_at = datetime('now') WHERE user_id = ? AND id = ?`,
+            [name, user_id, id]
+        );
+    }
+
+    /**
+     * Update a thread. Currently only supports renaming.
+     * @param user_id User ID
+     * @param id The ID of the thread to update
+     * @param updates An object containing the fields to update
+     */
+    public async updateThread(
+        user_id: string,
+        id: string,
+        updates: Partial<Omit<ThreadRecord, 'id' | 'user_id' | 'created_at'>>
+    ): Promise<void> {
+        const fieldsToUpdate: string[] = [];
+        const values: any[] = [];
+
+        if (updates.name !== undefined) {
+            fieldsToUpdate.push('name = ?');
+            values.push(updates.name);
+        }
+
+        if (updates.updated_at !== undefined) {
+            fieldsToUpdate.push('updated_at = ?');
+            values.push(updates.updated_at);
+        } else if (fieldsToUpdate.length > 0) {
+            // Auto-update updated_at if we're making other changes
+            fieldsToUpdate.push('updated_at = datetime(\'now\')');
+        }
+
+        if (fieldsToUpdate.length === 0) {
+            return; // Nothing to update
+        }
+
+        values.push(user_id, id);
+        
+        await this.conn.queryAsync(
+            `UPDATE threads SET ${fieldsToUpdate.join(', ')} WHERE user_id = ? AND id = ?`,
+            values
+        );
+    }
+
+    // --- Message Methods ---
+
+    /**
+     * Retrieve all messages from a specific thread, ordered by creation date.
+     * @param user_id User ID
+     * @param threadId The ID of the thread
+     * @returns An array of MessageRecord objects
+     */
+    public async getMessagesFromThread(user_id: string, threadId: string): Promise<MessageRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM messages WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+            [user_id, threadId]
+        );
+        return rows.map((row: any) => BeaverDB.rowToMessageRecord(row));
+    }
+
+    /**
+     * Upsert a message in the database.
+     * Inserts a new message or updates an existing one based on the message ID.
+     * @param user_id User ID
+     * @param message The complete message object to upsert
+     */
+    public async upsertMessage(user_id: string, message: MessageModel): Promise<void> {
+        const record = {
+            ...message,
+            tool_calls: message.tool_calls ? JSON.stringify(message.tool_calls) : null,
+            reader_state: message.reader_state ? JSON.stringify(message.reader_state) : null,
+            attachments: message.attachments ? JSON.stringify(message.attachments) : null,
+            tool_request: message.tool_request ? JSON.stringify(message.tool_request) : null,
+            metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+        };
+
+        const { id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error } = record;
+
+        await this.conn.queryAsync(
+            `INSERT INTO messages (id, user_id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                thread_id = excluded.thread_id,
+                role = excluded.role,
+                content = excluded.content,
+                reasoning_content = excluded.reasoning_content,
+                tool_calls = excluded.tool_calls,
+                reader_state = excluded.reader_state,
+                attachments = excluded.attachments,
+                tool_request = excluded.tool_request,
+                status = excluded.status,
+                metadata = excluded.metadata,
+                error = excluded.error`,
+            [id, user_id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error]
+        );
+    }
+
+    /**
+     * Update an existing message.
+     * @param user_id User ID
+     * @param id The ID of the message to update
+     * @param updates A partial message object with fields to update
+     */
+    public async updateMessage(user_id: string, id: string, updates: Partial<MessageModel>): Promise<void> {
+        const recordUpdates: any = { ...updates };
+
+        if (updates.tool_calls !== undefined) recordUpdates.tool_calls = JSON.stringify(updates.tool_calls);
+        if (updates.reader_state !== undefined) recordUpdates.reader_state = JSON.stringify(updates.reader_state);
+        if (updates.attachments !== undefined) recordUpdates.attachments = JSON.stringify(updates.attachments);
+        if (updates.tool_request !== undefined) recordUpdates.tool_request = JSON.stringify(updates.tool_request);
+        if (updates.metadata !== undefined) recordUpdates.metadata = JSON.stringify(updates.metadata);
+
+        const fieldsToUpdate = Object.keys(recordUpdates).filter(key => key !== 'id' && key !== 'user_id' && key !== 'thread_id' && key !== 'created_at');
+
+        if (fieldsToUpdate.length === 0) {
+            return; // Nothing to update
+        }
+
+        const setClauses = fieldsToUpdate.map(field => `${field} = ?`).join(', ');
+        const values = fieldsToUpdate.map(field => (recordUpdates as any)[field]);
+        values.push(user_id, id);
+
+        const query = `UPDATE messages SET ${setClauses} WHERE user_id = ? AND id = ?`;
+        await this.conn.queryAsync(query, values);
+    }
+
+    /**
+     * Delete a message by its ID.
+     * @param user_id User ID
+     * @param id The ID of the message to delete
+     */
+    public async deleteMessage(user_id: string, id: string): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM messages WHERE user_id = ? AND id = ?`,
+            [user_id, id]
+        );
+    }
+
+    /**
+     * Retrieve a message by its ID.
+     * @param user_id User ID
+     * @param id The ID of the message to retrieve
+     * @returns The MessageRecord if found, otherwise null
+     */
+    public async getMessage(user_id: string, id: string): Promise<MessageRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM messages WHERE user_id = ? AND id = ?`,
+            [user_id, id]
+        );
+        return rows.length > 0 ? BeaverDB.rowToMessageRecord(rows[0]) : null;
     }
 }
 
