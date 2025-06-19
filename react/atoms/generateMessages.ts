@@ -342,6 +342,29 @@ export const regenerateFromMessageAtom = atom(
     }
 );
 
+function getUserApiKey(model: FullModelConfig, get:any, set: any): string | undefined {
+    let userApiKey = undefined;
+    if (model.provider === 'google') {
+        userApiKey = getPref('googleGenerativeAiApiKey') || undefined;
+    } else if (model.provider === 'openai') {
+        userApiKey = getPref('openAiApiKey') || undefined;
+    } else if (model.provider === 'anthropic') {
+        userApiKey = getPref('anthropicApiKey') || undefined;
+    }
+    
+    // If no API key available, find default model from supported models
+    if (!userApiKey) {
+        const supportedModels = get(supportedModelsAtom);
+        model = supportedModels.find((m: FullModelConfig) => m.is_default);
+        if (!model) {
+            logger('No default model found, cannot generate response');
+            set(isChatRequestPendingAtom, false);
+            throw new Error('Invalid model: No default model found, cannot generate response');
+        }
+    }
+    return userApiKey;
+}
+
 function _processChatCompletionViaBackend(
     currentThreadId: string | null,
     userMessageId: string,
@@ -355,27 +378,7 @@ function _processChatCompletionViaBackend(
     get: any
 ) {
     // Set user API key
-    let userApiKey = undefined;
-    if (!model.use_app_key) {
-        if (model.provider === 'google') {
-            userApiKey = getPref('googleGenerativeAiApiKey') || undefined;
-        } else if (model.provider === 'openai') {
-            userApiKey = getPref('openAiApiKey') || undefined;
-        } else if (model.provider === 'anthropic') {
-            userApiKey = getPref('anthropicApiKey') || undefined;
-        }
-        
-        // If no API key available, find default model from supported models
-        if (!userApiKey) {
-            const supportedModels = get(supportedModelsAtom);
-            model = supportedModels.find((m: FullModelConfig) => m.is_default);
-            if (!model) {
-                logger('No default model found, cannot generate response');
-                set(isChatRequestPendingAtom, false);
-                return;
-            }
-        }
-    }
+    const userApiKey = getUserApiKey(model, get, set);
 
     // Set payload
     const payload = {
