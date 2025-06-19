@@ -27,6 +27,7 @@ import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
+import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
@@ -380,15 +381,23 @@ function _processChatCompletionViaBackend(
     // Set user API key
     const userApiKey = getUserApiKey(model, get, set);
 
-    // Set payload
-    const payload = {
-        thread_id: currentThreadId,
-        user_message_id: userMessageId,
-        assistant_message_id: assistantMessageId,
+    // User message
+    const userMessage = {
+        id: userMessageId,
+        role: "user",
         content: content,
         attachments: attachments,
         reader_state: readerState,
         tool_request: isLibrarySearch ? search_tool_request : null,
+        status: "completed"
+    } as MessageData;
+
+    // Set payload
+    const payload = {
+        mode: "stateful",
+        messages: [userMessage],
+        thread_id: currentThreadId,
+        assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
         model_id: model.id,

@@ -1,8 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
-import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
-import { FullModelConfig, ProviderType } from '../../react/atoms/models';
+import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
+import { ProviderType } from '../../react/atoms/models';
 
 export interface ToolRequest {
     function: "hybrid_search" | "related_items_search";
@@ -17,17 +16,14 @@ export const search_tool_request: ToolRequest = {
 
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
 export interface ChatCompletionRequestBody {
-    thread_id: string | null;           // If continuing an existing thread, else null
-    user_message_id: string;            // The UUID from the frontend
-    assistant_message_id: string;       // The UUID from the frontend
-    content: string;                    // The user's input text
-    user_api_key: string | null;        // The user's API key, if provided
-    model_id: string;                   // The model ID to use for the request
-    custom_instructions?: string;       // Custom instructions for the assistant
-    attachments: MessageAttachment[];   // The attachments to include in the request
-    tool_request: ToolRequest | null;   // User tool request, if any
-    reader_state: ReaderState | null;   // Reader state, if any
-    frontend_version: string;           // The version of the frontend
+    mode?: 'stateful' | 'stateless';
+    messages: MessageData[];
+    thread_id?: string;
+    assistant_message_id?: string;
+    user_api_key?: string;
+    model_id?: string;
+    custom_instructions?: string;
+    frontend_version?: string;
 }
 
 export type DeltaType = "reasoning" | "content";

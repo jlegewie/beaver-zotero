@@ -30,6 +30,18 @@ export interface ToolCall {
     status?: 'in_progress' | 'completed' | 'error';
 }
 
+// Input messagemodel for chat completions requests
+export interface MessageData {
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;    
+    reader_state: ReaderState | null;
+    attachments: MessageAttachment[] | null;
+    tool_request: ToolRequest | null;
+    tool_calls: ToolCall[] | null;
+    status: 'in_progress' | 'completed' | 'error' | 'canceled';
+}
+
 export interface MessageModel {
     id: string; // UUID
     user_id?: string; // Set in DB
