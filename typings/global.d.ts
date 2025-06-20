@@ -436,7 +436,23 @@ declare namespace Zotero {
              * @param threadId The ID of the thread
              * @returns An array of MessageRecord objects
              */
-            getMessagesFromThread(user_id: string, threadId: string): Promise<import("../src/services/database").MessageRecord[]>;
+            getMessagesFromThread(user_id: string, threadId: string): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
+
+            /**
+             * Reset a thread from a specific message.
+             * @param user_id User ID
+             * @param thread_id The ID of the thread
+             * @param message_id The ID of the message to reset from
+             * @param keep_message If true, keeps the message with message_id and deletes only subsequent messages
+             * @param messages Optional list of messages to operate on; if not provided, they are fetched from the DB
+             */
+            resetFromMessage(
+                user_id: string,
+                thread_id: string,
+                message_id: string,
+                keep_message: boolean,
+                messages?: import("../react/types/chat/apiTypes").MessageModel[]
+            ): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
 
             /**
              * Upsert a message in the database.

@@ -1665,12 +1665,60 @@ export class BeaverDB {
      * @param threadId The ID of the thread
      * @returns An array of MessageRecord objects
      */
-    public async getMessagesFromThread(user_id: string, threadId: string): Promise<MessageRecord[]> {
+    public async getMessagesFromThread(user_id: string, threadId: string): Promise<MessageModel[]> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM messages WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC`,
             [user_id, threadId]
         );
-        return rows.map((row: any) => BeaverDB.rowToMessageRecord(row));
+        return rows.map((row: any) => BeaverDB.rowToMessageRecord(row) as unknown as MessageModel);
+    }
+
+    /**
+     * Deletes the specified message and all subsequent messages in a thread.
+     * @param user_id User ID of the user owning the thread
+     * @param thread_id ID of the thread to modify
+     * @param message_id ID of the message to reset from
+     * @param keep_message If true, keeps the message with message_id and deletes only subsequent messages
+     * @param messages Optional list of messages to operate on; if not provided, they are fetched from the DB
+     * @returns A list of the remaining messages in the thread
+     */
+    public async resetFromMessage(
+        user_id: string,
+        thread_id: string,
+        message_id: string,
+        keep_message: boolean = false,
+        messages?: MessageModel[]
+    ): Promise<MessageModel[]> {
+        // Get all messages for this thread if not provided
+        const threadMessages = messages || (await this.getMessagesFromThread(user_id, thread_id));
+
+        if (!threadMessages || threadMessages.length === 0) {
+            return [];
+        }
+
+        // Find the index of the message to reset from
+        const messageIndex = threadMessages.findIndex(msg => msg.id === message_id);
+
+        if (messageIndex === -1) {
+            throw new Error("Message not found in thread");
+        }
+
+        // Determine the slice of messages to delete
+        const deleteStartIndex = keep_message ? messageIndex + 1 : messageIndex;
+        const messagesToDelete = threadMessages.slice(deleteStartIndex);
+        
+        if (messagesToDelete.length > 0) {
+            const messageIdsToDelete = messagesToDelete.map(msg => msg.id);
+            await this.deleteMessagesBatch(user_id, messageIdsToDelete);
+
+            // Also update thread's updated_at timestamp
+            await this.updateThread(user_id, thread_id, { 
+                updated_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+            });
+        }
+
+        // Return the remaining messages
+        return threadMessages.slice(0, deleteStartIndex);
     }
 
     /**
@@ -1680,6 +1728,17 @@ export class BeaverDB {
      * @param message The complete message object to upsert
      */
     public async upsertMessage(user_id: string, message: MessageModel): Promise<void> {
+        // Validate required fields
+        if (!message.id) {
+            throw new Error('Message ID is required');
+        }
+        if (!message.thread_id) {
+            throw new Error('Thread ID is required');
+        }
+        if (!message.role) {
+            throw new Error('Message role is required');
+        }
+
         const record = {
             ...message,
             tool_calls: message.tool_calls ? JSON.stringify(message.tool_calls) : null,
@@ -1689,7 +1748,22 @@ export class BeaverDB {
             metadata: message.metadata ? JSON.stringify(message.metadata) : null,
         };
 
-        const { id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error } = record;
+        // Ensure required fields have values with defaults if needed
+        const {
+            id,
+            thread_id,
+            role,
+            content = null,
+            reasoning_content = null,
+            tool_calls,
+            reader_state,
+            attachments,
+            tool_request,
+            status = 'completed',
+            created_at = null,
+            metadata,
+            error = null
+        } = record;
 
         await this.conn.queryAsync(
             `INSERT INTO messages (id, user_id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error)
@@ -1748,6 +1822,24 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `DELETE FROM messages WHERE user_id = ? AND id = ?`,
             [user_id, id]
+        );
+    }
+
+    /**
+     * Delete multiple messages by their IDs in a single transaction.
+     * @param user_id User ID
+     * @param ids The IDs of the messages to delete
+     */
+    public async deleteMessagesBatch(user_id: string, ids: string[]): Promise<void> {
+        if (ids.length === 0) {
+            return;
+        }
+
+        const placeholders = ids.map(() => '?').join(',');
+        
+        await this.conn.queryAsync(
+            `DELETE FROM messages WHERE user_id = ? AND id IN (${placeholders})`,
+            [user_id, ...ids]
         );
     }
 
