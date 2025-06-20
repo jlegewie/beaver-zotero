@@ -1139,7 +1139,7 @@ export class BeaverDB {
                 
                 await this.conn.queryAsync(
                     `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
@@ -1214,7 +1214,7 @@ export class BeaverDB {
                 
                 await this.conn.queryAsync(
                     `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
