@@ -8,6 +8,7 @@ pref("userEmail", "");
 pref("selectedLibrary", "{}");
 pref("keyboardShortcut", "l");
 pref("updateSourcesFromZoteroSelection", false);
+pref("statefulChat", true);
 
 // AI settings
 pref("maxAttachments", 8);

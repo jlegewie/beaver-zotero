@@ -66,3 +66,23 @@ export interface MessageModel {
     metadata?: Record<string, any>;
     error?: string;
 }
+
+export function toMessageData(message: MessageModel): MessageData {
+    return {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        reader_state: message.reader_state,
+        attachments: message.attachments,
+        tool_request: message.tool_request,
+        tool_calls: message.tool_calls,
+        status: message.status
+    } as MessageData;
+}
+
+export function toMessageModel(message: MessageData, threadId: string): MessageModel {
+    return {
+        ...message,
+        thread_id: threadId,
+    } as MessageModel;
+}

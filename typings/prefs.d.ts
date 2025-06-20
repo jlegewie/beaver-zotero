@@ -12,6 +12,7 @@ declare namespace _ZoteroTypes {
       "selectedLibrary": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
+      "statefulChat": boolean;
       "maxAttachments": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;

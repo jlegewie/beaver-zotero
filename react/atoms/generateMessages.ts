@@ -367,27 +367,36 @@ function getUserApiKey(model: FullModelConfig, get:any, set: any): string | unde
     return userApiKey;
 }
 
-async function _initializeThread(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
+async function _handleThreadMessages(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
     const user_id = getZoteroUserIdentifier().localUserKey;
-    let messages: MessageData[] = [userMessage];
+    let messages: MessageData[] = [];
 
     // Initialize thread
     if (!threadId) {
         threadId = await Zotero.Beaver.db.createThread(user_id);
         set(currentThreadIdAtom, threadId);
     }
-
     // Existing thread
     else {
         const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
-        const messagesData: MessageData[] = messagesDB.map(m => toMessageData(m));
-        messages = [...messagesData, userMessage];
+        messages = messagesDB.map(m => toMessageData(m));
     }
-    // Add user message to local DB
-    const message = toMessageModel(userMessage, threadId);
-    await Zotero.Beaver.db.upsertMessage(user_id, message);
+    
+    // Handle user message
+    const existingMessage = messages.find(m => m.id === userMessage.id);
 
-    // TODO: retry flow
+    // Case 1: Normal flow (new user message)
+    if (!existingMessage) {
+        messages = [...messages, userMessage];
+        // Add user message to local DB
+        await Zotero.Beaver.db.upsertMessage(user_id, toMessageModel(userMessage, threadId));
+    }
+
+    // Case 2: Retry flow (existing user message)
+    else if (existingMessage) {
+        const resetMessages = await Zotero.Beaver.db.resetFromMessage(user_id, threadId, existingMessage.id, messages.map(m => toMessageModel(m, threadId)), true);
+        messages = resetMessages.map(m => toMessageData(m));
+    }
 
     // Return current thread ID and messages
     return {threadId, messages};
@@ -420,12 +429,13 @@ async function _processChatCompletionViaBackend(
     } as MessageData;
 
     // Stateful vs stateless chat
-    const threadId: string | null = currentThreadId;
+    let threadId: string | null = currentThreadId;
     let messages: MessageData[] = [];
     const statefulChat = getPref('statefulChat') || true;
     if (!statefulChat) {
-        const {threadId, messages} = await _initializeThread(userMessage, currentThreadId, set, get);
-        userMessage.id = messages[0].id;
+        const { threadId: newThreadId, messages: threadMessages } = await _handleThreadMessages(userMessage, currentThreadId, set, get);
+        threadId = newThreadId;
+        messages = threadMessages;
     } else {
         messages = [userMessage];
     }
