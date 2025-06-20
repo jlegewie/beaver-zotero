@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { recentThreadsAtom } from '../atoms/threads';
-import { Thread } from '../types/chat/uiTypes';
+import { ThreadData } from '../types/chat/uiTypes';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 
@@ -20,8 +20,8 @@ export const useRecentThreads = (): void => {
         // Skip if user is not authenticated
         if (!isAuthenticated || !user) return;
 
-        // Format thread data from the database to match our Thread interface
-        const formatThread = (thread: any): Thread => ({
+        // Format thread data from the database to match our ThreadData interface
+        const formatThread = (thread: any): ThreadData => ({
             id: thread.id,
             name: thread.name,
             createdAt: thread.created_at,

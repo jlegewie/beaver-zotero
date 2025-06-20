@@ -4,12 +4,13 @@ import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom } from '../../..
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
-import { Thread } from '../../../types/chat/uiTypes';
+import { ThreadData } from '../../../types/chat/uiTypes';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
+import { getPref } from '../../../../src/utils/prefs';
 
 interface ThreadsMenuProps {
     className?: string;
@@ -19,8 +20,8 @@ interface ThreadsMenuProps {
 /**
  * Groups threads by date: Today, Yesterday, This Week, This Month, Older
  */
-const groupThreadsByDate = (threads: Thread[]) => {
-    const groups: Record<string, Thread[]> = {
+const groupThreadsByDate = (threads: ThreadData[]) => {
+    const groups: Record<string, ThreadData[]> = {
         'Today': [],
         'Yesterday': [],
         'This Week': [],
@@ -58,6 +59,8 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState<boolean>(false);
 
+    const statefulChat = getPref('statefulChat') || true;
+
     // Fetch initial threads
     useEffect(() => {
         if (!user || !isMenuOpen) return;
@@ -72,7 +75,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                     name: thread.name,
                     createdAt: thread.created_at,
                     updatedAt: thread.updated_at,
-                } as Thread)));
+                } as ThreadData)));
                 
                 setNextCursor(response.next_cursor);
                 setHasMore(response.has_more);
@@ -102,7 +105,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                     name: thread.name,
                     createdAt: thread.created_at,
                     updatedAt: thread.updated_at,
-                } as Thread))
+                } as ThreadData))
             ]);
             
             setNextCursor(response.next_cursor);

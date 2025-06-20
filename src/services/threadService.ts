@@ -4,18 +4,12 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageModel } from '../../react/types/chat/apiTypes';
 import { toMessageUI } from '../../react/types/chat/converters';
 import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
+import { ThreadModel } from '../../react/types/chat/apiTypes';
 
-// Types that match the backend models
-export interface Thread {
-    id: string;
-    name: string | null;
-    created_at: string;
-    updated_at: string;
-}
 
 // Based on backend MessageModel
 export interface PaginatedThreadsResponse {
-    data: Thread[];
+    data: ThreadModel[];
     next_cursor: string | null;
     has_more: boolean;
 }
@@ -45,8 +39,8 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread to fetch
      * @returns Promise with the thread data
      */
-    async getThread(threadId: string): Promise<Thread> {
-        return this.get<Thread>(`/threads/${threadId}`);
+    async getThread(threadId: string): Promise<ThreadModel> {
+        return this.get<ThreadModel>(`/threads/${threadId}`);
     }
 
     /**
@@ -84,8 +78,8 @@ export class ThreadService extends ApiService {
      * @param newName The new name for the thread
      * @returns Promise with the updated thread data
      */
-    async renameThread(threadId: string, newName: string): Promise<Thread> {
-        return this.patch<Thread>(`/threads/${threadId}/rename`, { new_name: newName });
+    async renameThread(threadId: string, newName: string): Promise<ThreadModel> {
+        return this.patch<ThreadModel>(`/threads/${threadId}/rename`, { new_name: newName });
     }
 
     /**
@@ -117,9 +111,9 @@ export class ThreadService extends ApiService {
      * @param name Optional name for the thread
      * @returns Promise with the created thread data
      */
-    async createThread(name?: string): Promise<Thread> {
+    async createThread(name?: string): Promise<ThreadModel> {
         const payload = { name: name || null };
-        return this.post<Thread>('/threads', payload);
+        return this.post<ThreadModel>('/threads', payload);
     }
 }
 

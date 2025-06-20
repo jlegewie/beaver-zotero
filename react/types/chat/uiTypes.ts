@@ -13,7 +13,7 @@ export interface Warning {
 
 
 // Thread types
-export interface Thread {
+export interface ThreadData {
     id: string;
     name: string;
     createdAt: string;

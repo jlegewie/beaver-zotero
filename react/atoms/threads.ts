@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ChatMessage, Thread, Warning } from "../types/chat/uiTypes";
+import { ChatMessage, ThreadData, Warning } from "../types/chat/uiTypes";
 import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
@@ -56,7 +56,7 @@ export const isCancellableAtom = atom<boolean>(false);
 export const isCancellingAtom = atom<boolean>(false);
 
 // Atom to store recent threads
-export const recentThreadsAtom = atom<Thread[]>([]);
+export const recentThreadsAtom = atom<ThreadData[]>([]);
 
 export const cancelStreamingMessageAtom = atom(
     null,
