@@ -434,7 +434,7 @@ declare namespace Zotero {
              * Retrieve all messages from a specific thread, ordered by creation date.
              * @param user_id User ID
              * @param threadId The ID of the thread
-             * @returns An array of MessageRecord objects
+             * @returns An array of MessageModel objects
              */
             getMessagesFromThread(user_id: string, threadId: string): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
 
@@ -481,9 +481,9 @@ declare namespace Zotero {
              * Retrieve a message by its ID.
              * @param user_id User ID
              * @param id The ID of the message to retrieve
-             * @returns The MessageRecord if found, otherwise null
+             * @returns The MessageModel if found, otherwise null
              */
-            getMessage(user_id: string, id: string): Promise<import("../src/services/database").MessageRecord | null>;
+            getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
         }
 
         /**

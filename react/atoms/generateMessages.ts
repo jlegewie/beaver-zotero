@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
-import { MessageModel, ToolCall } from '../types/chat/apiTypes';
+import { MessageModel, toMessageData, ToolCall, toMessageModel } from '../types/chat/apiTypes';
 import { ZoteroItemReference } from '../types/zotero';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
@@ -37,6 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { updateAttachmentCitationsAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
+import { getZoteroUserIdentifier } from '../../src/utils/zoteroIdentifier';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -251,7 +252,7 @@ export const generateResponseAtom = atom(
         set(currentMessageContentAtom, '');
         
         // Execute chat completion
-        _processChatCompletionViaBackend(
+        await _processChatCompletionViaBackend(
             get(currentThreadIdAtom),
             userMsg.id,         // the ID from createUserMessage
             assistantMsg.id,
@@ -326,7 +327,7 @@ export const regenerateFromMessageAtom = atom(
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);
-        _processChatCompletionViaBackend(
+        await _processChatCompletionViaBackend(
             currentThreadId,
             userMessageId,         // existing user message ID
             assistantMsg.id,       // new assistant message ID
@@ -366,7 +367,33 @@ function getUserApiKey(model: FullModelConfig, get:any, set: any): string | unde
     return userApiKey;
 }
 
-function _processChatCompletionViaBackend(
+async function _initializeThread(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
+    const user_id = getZoteroUserIdentifier().localUserKey;
+    let messages: MessageData[] = [userMessage];
+
+    // Initialize thread
+    if (!threadId) {
+        threadId = await Zotero.Beaver.db.createThread(user_id);
+        set(currentThreadIdAtom, threadId);
+    }
+
+    // Existing thread
+    else {
+        const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
+        const messagesData: MessageData[] = messagesDB.map(m => toMessageData(m));
+        messages = [...messagesData, userMessage];
+    }
+    // Add user message to local DB
+    const message = toMessageModel(userMessage, threadId);
+    await Zotero.Beaver.db.upsertMessage(user_id, message);
+
+    // TODO: retry flow
+
+    // Return current thread ID and messages
+    return {threadId, messages};
+}
+
+async function _processChatCompletionViaBackend(
     currentThreadId: string | null,
     userMessageId: string,
     assistantMessageId: string,
@@ -392,11 +419,22 @@ function _processChatCompletionViaBackend(
         status: "completed"
     } as MessageData;
 
+    // Stateful vs stateless chat
+    const threadId: string | null = currentThreadId;
+    let messages: MessageData[] = [];
+    const statefulChat = getPref('statefulChat') || true;
+    if (!statefulChat) {
+        const {threadId, messages} = await _initializeThread(userMessage, currentThreadId, set, get);
+        userMessage.id = messages[0].id;
+    } else {
+        messages = [userMessage];
+    }
+
     // Set payload
     const payload = {
-        mode: "stateful",
-        messages: [userMessage],
-        thread_id: currentThreadId,
+        mode: statefulChat ? "stateful" : "stateless",
+        messages: messages,
+        thread_id: threadId,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
@@ -456,6 +494,12 @@ function _processChatCompletionViaBackend(
                 // a citation (or other) tag
                 if (message.role === 'assistant' && message.content && message.content.includes('>')) {
                     set(updateAttachmentCitationsAtom);
+                }
+
+                // Store message locally
+                if (!getPref('statefulChat')) {
+                    const user_id = getZoteroUserIdentifier().localUserKey;
+                    Zotero.Beaver.db.upsertMessage(user_id, msg);
                 }
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
