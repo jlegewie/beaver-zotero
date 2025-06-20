@@ -1535,6 +1535,25 @@ export class BeaverDB {
         };
     }
 
+    private static messageRecordToModel(record: MessageRecord): MessageModel {
+        return {
+            id: record.id,
+            user_id: record.user_id,
+            thread_id: record.thread_id,
+            role: record.role,
+            content: record.content || undefined,
+            reasoning_content: record.reasoning_content || undefined,
+            tool_calls: record.tool_calls ? JSON.parse(record.tool_calls) : undefined,
+            reader_state: record.reader_state ? JSON.parse(record.reader_state) : undefined,
+            attachments: record.attachments ? JSON.parse(record.attachments) : undefined,
+            tool_request: record.tool_request ? JSON.parse(record.tool_request) : undefined,
+            status: record.status,
+            created_at: record.created_at,
+            metadata: record.metadata ? JSON.parse(record.metadata) : undefined,
+            error: record.error || undefined,
+        };
+    }
+
     // --- Thread Methods ---
 
     /**
@@ -1670,7 +1689,10 @@ export class BeaverDB {
             `SELECT * FROM messages WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC`,
             [user_id, threadId]
         );
-        return rows.map((row: any) => BeaverDB.rowToMessageRecord(row) as unknown as MessageModel);
+        return rows.map((row: any) => {
+            const record = BeaverDB.rowToMessageRecord(row);
+            return BeaverDB.messageRecordToModel(record);
+        });
     }
 
     /**
@@ -1847,14 +1869,18 @@ export class BeaverDB {
      * Retrieve a message by its ID.
      * @param user_id User ID
      * @param id The ID of the message to retrieve
-     * @returns The MessageRecord if found, otherwise null
+     * @returns The MessageModel if found, otherwise null
      */
-    public async getMessage(user_id: string, id: string): Promise<MessageRecord | null> {
+    public async getMessage(user_id: string, id: string): Promise<MessageModel | null> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM messages WHERE user_id = ? AND id = ?`,
             [user_id, id]
         );
-        return rows.length > 0 ? BeaverDB.rowToMessageRecord(rows[0]) : null;
+        if (rows.length === 0) {
+            return null;
+        }
+        const record = BeaverDB.rowToMessageRecord(rows[0]);
+        return BeaverDB.messageRecordToModel(record);
     }
 }
 
