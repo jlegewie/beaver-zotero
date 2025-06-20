@@ -1700,34 +1700,31 @@ export class BeaverDB {
      * @param user_id User ID of the user owning the thread
      * @param thread_id ID of the thread to modify
      * @param message_id ID of the message to reset from
+     * @param messages List of messages to operate on
      * @param keep_message If true, keeps the message with message_id and deletes only subsequent messages
-     * @param messages Optional list of messages to operate on; if not provided, they are fetched from the DB
      * @returns A list of the remaining messages in the thread
      */
     public async resetFromMessage(
         user_id: string,
         thread_id: string,
         message_id: string,
-        keep_message: boolean = false,
-        messages?: MessageModel[]
+        messages: MessageModel[],
+        keep_message: boolean = false
     ): Promise<MessageModel[]> {
-        // Get all messages for this thread if not provided
-        const threadMessages = messages || (await this.getMessagesFromThread(user_id, thread_id));
-
-        if (!threadMessages || threadMessages.length === 0) {
+        if (!messages || messages.length === 0) {
             return [];
         }
 
         // Find the index of the message to reset from
-        const messageIndex = threadMessages.findIndex(msg => msg.id === message_id);
+        const messageIndex = messages.findIndex(msg => msg.id === message_id);
 
         if (messageIndex === -1) {
-            throw new Error("Message not found in thread");
+            return messages;
         }
 
         // Determine the slice of messages to delete
         const deleteStartIndex = keep_message ? messageIndex + 1 : messageIndex;
-        const messagesToDelete = threadMessages.slice(deleteStartIndex);
+        const messagesToDelete = messages.slice(deleteStartIndex);
         
         if (messagesToDelete.length > 0) {
             const messageIdsToDelete = messagesToDelete.map(msg => msg.id);
@@ -1740,7 +1737,7 @@ export class BeaverDB {
         }
 
         // Return the remaining messages
-        return threadMessages.slice(0, deleteStartIndex);
+        return messages.slice(0, deleteStartIndex);
     }
 
     /**

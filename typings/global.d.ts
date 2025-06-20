@@ -450,8 +450,8 @@ declare namespace Zotero {
                 user_id: string,
                 thread_id: string,
                 message_id: string,
-                keep_message: boolean,
-                messages?: import("../react/types/chat/apiTypes").MessageModel[]
+                messages: import("../react/types/chat/apiTypes").MessageModel[],
+                keep_message: boolean
             ): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
 
             /**
