@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ProcessingStatus, UploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
+import { ThreadData } from '../../react/types/chat/uiTypes';
 
 /* 
  * Interface for the 'items' table row
@@ -1514,6 +1515,34 @@ export class BeaverDB {
     }
 
     /**
+     * Convert ThreadRecord to ThreadData (application-facing format)
+     */
+    private static threadRecordToData(record: ThreadRecord): ThreadData {
+        return {
+            id: record.id,
+            name: record.name || '', // Convert null to empty string
+            createdAt: record.created_at,
+            updatedAt: record.updated_at,
+        };
+    }
+
+    /**
+     * Convert ThreadData to ThreadRecord format (for database operations)
+     */
+    private static threadDataToRecord(user_id: string, data: Partial<ThreadData>): Partial<ThreadRecord> {
+        const record: Partial<ThreadRecord> = {
+            user_id,
+        };
+        
+        if (data.id !== undefined) record.id = data.id;
+        if (data.name !== undefined) record.name = data.name || null; // Convert empty string to null
+        if (data.createdAt !== undefined) record.created_at = data.createdAt;
+        if (data.updatedAt !== undefined) record.updated_at = data.updatedAt;
+        
+        return record;
+    }
+
+    /**
      * Helper method to construct MessageRecord from a database row
      */
     private static rowToMessageRecord(row: any): MessageRecord {
@@ -1560,29 +1589,42 @@ export class BeaverDB {
      * Create a new chat thread for a user.
      * @param user_id User ID
      * @param name Optional name for the thread
-     * @returns The ID of the newly created thread
+     * @returns The complete ThreadData for the newly created thread
      */
-    public async createThread(user_id: string, name: string | null = null): Promise<string> {
+    public async createThread(user_id: string, name: string = ''): Promise<ThreadData> {
         const id = uuidv4();
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const dbName = name || null; // Convert empty string to null for database
+        
         await this.conn.queryAsync(
-            `INSERT INTO threads (id, user_id, name) VALUES (?, ?, ?)`,
-            [id, user_id, name]
+            `INSERT INTO threads (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+            [id, user_id, dbName, now, now]
         );
-        return id;
+        
+        return {
+            id,
+            name,
+            createdAt: now,
+            updatedAt: now,
+        };
     }
 
     /**
      * Retrieve a thread by its ID.
      * @param user_id User ID
      * @param id The ID of the thread to retrieve
-     * @returns The ThreadRecord if found, otherwise null
+     * @returns The ThreadData if found, otherwise null
      */
-    public async getThread(user_id: string, id: string): Promise<ThreadRecord | null> {
+    public async getThread(user_id: string, id: string): Promise<ThreadData | null> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM threads WHERE user_id = ? AND id = ?`,
             [user_id, id]
         );
-        return rows.length > 0 ? BeaverDB.rowToThreadRecord(rows[0]) : null;
+        if (rows.length === 0) {
+            return null;
+        }
+        const record = BeaverDB.rowToThreadRecord(rows[0]);
+        return BeaverDB.threadRecordToData(record);
     }
 
     /**
@@ -1590,13 +1632,13 @@ export class BeaverDB {
      * @param user_id User ID
      * @param limit Number of threads per page
      * @param offset Number of threads to skip
-     * @returns Object containing an array of ThreadRecord objects and a boolean indicating if there are more items
+     * @returns Object containing an array of ThreadData objects and a boolean indicating if there are more items
      */
     public async getThreadsPaginated(
         user_id: string,
         limit: number,
         offset: number
-    ): Promise<{ threads: ThreadRecord[]; has_more: boolean }> {
+    ): Promise<{ threads: ThreadData[]; has_more: boolean }> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
             [user_id, limit + 1, offset]
@@ -1604,7 +1646,10 @@ export class BeaverDB {
 
         const threads = rows
             .slice(0, limit)
-            .map((row: any) => BeaverDB.rowToThreadRecord(row));
+            .map((row: any) => {
+                const record = BeaverDB.rowToThreadRecord(row);
+                return BeaverDB.threadRecordToData(record);
+            });
 
         return {
             threads,
@@ -1641,24 +1686,24 @@ export class BeaverDB {
      * Update a thread. Currently only supports renaming.
      * @param user_id User ID
      * @param id The ID of the thread to update
-     * @param updates An object containing the fields to update
+     * @param updates An object containing the fields to update (using ThreadData format)
      */
     public async updateThread(
         user_id: string,
         id: string,
-        updates: Partial<Omit<ThreadRecord, 'id' | 'user_id' | 'created_at'>>
+        updates: Partial<Omit<ThreadData, 'id' | 'createdAt'>>
     ): Promise<void> {
         const fieldsToUpdate: string[] = [];
         const values: any[] = [];
 
         if (updates.name !== undefined) {
             fieldsToUpdate.push('name = ?');
-            values.push(updates.name);
+            values.push(updates.name || null); // Convert empty string to null for database
         }
 
-        if (updates.updated_at !== undefined) {
+        if (updates.updatedAt !== undefined) {
             fieldsToUpdate.push('updated_at = ?');
-            values.push(updates.updated_at);
+            values.push(updates.updatedAt);
         } else if (fieldsToUpdate.length > 0) {
             // Auto-update updated_at if we're making other changes
             fieldsToUpdate.push('updated_at = datetime(\'now\')');
@@ -1732,7 +1777,7 @@ export class BeaverDB {
 
             // Also update thread's updated_at timestamp
             await this.updateThread(user_id, thread_id, { 
-                updated_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+                updatedAt: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
             });
         }
 
