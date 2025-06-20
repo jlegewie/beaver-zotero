@@ -368,17 +368,17 @@ function getUserApiKey(model: FullModelConfig, get:any, set: any): string | unde
 }
 
 async function _handleThreadMessages(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
-    const user_id = getZoteroUserIdentifier().localUserKey;
     let messages: MessageData[] = [];
 
     // Initialize thread
     if (!threadId) {
-        threadId = await Zotero.Beaver.db.createThread(user_id);
-        set(currentThreadIdAtom, threadId);
+        const thread = await Zotero.Beaver.db.createThread();
+        threadId = thread.id;
+        set(currentThreadIdAtom, thread.id);
     }
     // Existing thread
     else {
-        const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
+        const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(threadId);
         messages = messagesDB.map(m => toMessageData(m));
     }
     
@@ -389,12 +389,12 @@ async function _handleThreadMessages(userMessage: MessageData, threadId: string 
     if (!existingMessage) {
         messages = [...messages, userMessage];
         // Add user message to local DB
-        await Zotero.Beaver.db.upsertMessage(user_id, toMessageModel(userMessage, threadId));
+        await Zotero.Beaver.db.upsertMessage(toMessageModel(userMessage, threadId));
     }
 
     // Case 2: Retry flow (existing user message)
     else if (existingMessage) {
-        const resetMessages = await Zotero.Beaver.db.resetFromMessage(user_id, threadId, existingMessage.id, messages.map(m => toMessageModel(m, threadId)), true);
+        const resetMessages = await Zotero.Beaver.db.resetFromMessage(threadId, existingMessage.id, messages.map(m => toMessageModel(m, threadId)), true);
         messages = resetMessages.map(m => toMessageData(m));
     }
 
@@ -508,8 +508,7 @@ async function _processChatCompletionViaBackend(
 
                 // Store message locally
                 if (!getPref('statefulChat')) {
-                    const user_id = getZoteroUserIdentifier().localUserKey;
-                    Zotero.Beaver.db.upsertMessage(user_id, msg);
+                    Zotero.Beaver.db.upsertMessage(msg);
                 }
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {

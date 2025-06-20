@@ -373,57 +373,49 @@ declare namespace Zotero {
             // --- Thread Methods ---
 
             /**
-             * Create a new chat thread for a user.
-             * @param user_id User ID
+             * Create a new chat thread.
              * @param name Optional name for the thread
              * @returns The complete ThreadData for the newly created thread
              */
-            createThread(user_id: string, name?: string): Promise<import("../react/types/chat/uiTypes").ThreadData>;
+            createThread(name?: string): Promise<import("../react/types/chat/uiTypes").ThreadData>;
 
             /**
              * Retrieve a thread by its ID.
-             * @param user_id User ID
              * @param id The ID of the thread to retrieve
              * @returns The ThreadData if found, otherwise null
              */
-            getThread(user_id: string, id: string): Promise<import("../react/types/chat/uiTypes").ThreadData | null>;
+            getThread(id: string): Promise<import("../react/types/chat/uiTypes").ThreadData | null>;
 
             /**
-             * Get a paginated list of threads for a user.
-             * @param user_id User ID
+             * Get a paginated list of threads.
              * @param limit Number of threads per page
              * @param offset Number of threads to skip
              * @returns Object containing an array of ThreadData objects and a boolean indicating if there are more items
              */
             getThreadsPaginated(
-                user_id: string,
                 limit: number,
                 offset: number
             ): Promise<{ threads: import("../react/types/chat/uiTypes").ThreadData[]; has_more: boolean }>;
 
             /**
              * Delete a thread and all its messages.
-             * @param user_id User ID
              * @param id The ID of the thread to delete
              */
-            deleteThread(user_id: string, id: string): Promise<void>;
+            deleteThread(id: string): Promise<void>;
 
             /**
              * Rename a thread.
-             * @param user_id User ID
              * @param id The ID of the thread to rename
              * @param name The new name for the thread
              */
-            renameThread(user_id: string, id: string, name: string): Promise<void>;
+            renameThread(id: string, name: string): Promise<void>;
 
             /**
              * Update a thread. Currently only supports renaming.
-             * @param user_id User ID
              * @param id The ID of the thread to update
              * @param updates An object containing the fields to update (using ThreadData format)
              */
             updateThread(
-                user_id: string,
                 id: string,
                 updates: Partial<Omit<import("../react/types/chat/uiTypes").ThreadData, 'id' | 'createdAt'>>
             ): Promise<void>;
@@ -432,22 +424,19 @@ declare namespace Zotero {
 
             /**
              * Retrieve all messages from a specific thread, ordered by creation date.
-             * @param user_id User ID
              * @param threadId The ID of the thread
              * @returns An array of MessageModel objects
              */
-            getMessagesFromThread(user_id: string, threadId: string): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
+            getMessagesFromThread(threadId: string): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
 
             /**
              * Reset a thread from a specific message.
-             * @param user_id User ID
              * @param thread_id The ID of the thread
              * @param message_id The ID of the message to reset from
+             * @param messages List of messages to operate on
              * @param keep_message If true, keeps the message with message_id and deletes only subsequent messages
-             * @param messages Optional list of messages to operate on; if not provided, they are fetched from the DB
              */
             resetFromMessage(
-                user_id: string,
                 thread_id: string,
                 message_id: string,
                 messages: import("../react/types/chat/apiTypes").MessageModel[],
@@ -457,33 +446,29 @@ declare namespace Zotero {
             /**
              * Upsert a message in the database.
              * Inserts a new message or updates an existing one based on the message ID.
-             * @param user_id User ID
              * @param message The complete message object to upsert
              */
-            upsertMessage(user_id: string, message: import("../react/types/chat/apiTypes").MessageModel): Promise<void>;
+            upsertMessage(message: import("../react/types/chat/apiTypes").MessageModel): Promise<void>;
 
             /**
              * Update an existing message.
-             * @param user_id User ID
              * @param id The ID of the message to update
              * @param updates A partial message object with fields to update
              */
-            updateMessage(user_id: string, id: string, updates: Partial<import("../react/types/chat/apiTypes").MessageModel>): Promise<void>;
+            updateMessage(id: string, updates: Partial<import("../react/types/chat/apiTypes").MessageModel>): Promise<void>;
 
             /**
              * Delete a message by its ID.
-             * @param user_id User ID
              * @param id The ID of the message to delete
              */
-            deleteMessage(user_id: string, id: string): Promise<void>;
+            deleteMessage(id: string): Promise<void>;
 
             /**
              * Retrieve a message by its ID.
-             * @param user_id User ID
              * @param id The ID of the message to retrieve
              * @returns The MessageModel if found, otherwise null
              */
-            getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
+            getMessage(id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
         }
 
         /**
