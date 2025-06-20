@@ -2,12 +2,14 @@ import { atom } from "jotai";
 import { ChatMessage, ThreadData, Warning } from "../types/chat/uiTypes";
 import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
-import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
+import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { attachmentCitationsAtom, updateAttachmentCitationsAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
+import { getPref } from "../../src/utils/prefs";
+import { logger } from "../../src/utils/logger";
 
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -107,21 +109,49 @@ export const newThreadAtom = atom(
 
 export const loadThreadAtom = atom(
     null,
-    async (_, set, { threadId }: { threadId: string }) => {
+    async (get, set, { threadId }: { threadId: string }) => {
         set(userScrolledAtom, false);
         // Set the current thread ID
         set(currentThreadIdAtom, threadId);
         set(isPreferencePageVisibleAtom, false);
 
-        // Use the thread service to fetch messages
-        const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
+        const statefulChat = getPref('statefulChat');
         
-        // Update the thread messages and attachments state
-        set(threadMessagesAtom, messages);
-        set(updateAttachmentCitationsAtom);
-        set(userAttachmentsAtom, userAttachments);
-        // set(toolAttachmentsAtom, toolAttachments);
-        set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+        if (!statefulChat) {
+            const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(threadId);
+            logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
+            const messages = messagesDB.map(toMessageUI);
+            
+            // Extract user attachments from messages
+            const userAttachments: MessageAttachmentWithId[] = [];
+            for (const messageDB of messagesDB) {
+                if (messageDB.role === 'user') {
+                    for (const attachment of messageDB.attachments || []) {
+                        userAttachments.push({ ...attachment, messageId: messageDB.id } as MessageAttachmentWithId);
+                    }
+                }
+            }
+            
+            // Update the thread messages and attachments state
+            if (messages.length > 0) {
+                set(threadMessagesAtom, messages);
+                set(updateAttachmentCitationsAtom);
+                set(userAttachmentsAtom, userAttachments);
+                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+            }
+        } else {
+            // Use remote API
+            const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
+            
+            if (messages.length > 0) {
+                // Update the thread messages and attachments state
+                set(threadMessagesAtom, messages);
+                set(updateAttachmentCitationsAtom);
+                set(userAttachmentsAtom, userAttachments);
+                // set(toolAttachmentsAtom, toolAttachments);
+                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+            }
+        }
         
         // Clear sources for now
         set(currentSourcesAtom, []);

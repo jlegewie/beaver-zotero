@@ -54,12 +54,13 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [editingName, setEditingName] = useState<string>('');
     const [allowBlur, setAllowBlur] = useState<boolean>(true);
     
-    // New state for pagination
+    // State for pagination
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState<boolean>(false);
+    const [offset, setOffset] = useState<number>(0); // For local pagination
 
-    const statefulChat = getPref('statefulChat') || true;
+    const statefulChat = getPref('statefulChat');
 
     // Fetch initial threads
     useEffect(() => {
@@ -68,17 +69,26 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         const fetchThreads = async () => {
             setIsLoading(true);
             try {
-                const response = await threadService.getPaginatedThreads();
-                
-                setThreads(response.data.map(thread => ({
-                    id: thread.id,
-                    name: thread.name,
-                    createdAt: thread.created_at,
-                    updatedAt: thread.updated_at,
-                } as ThreadData)));
-                
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
+                if (!statefulChat) {
+                    // Use local database
+                    const response = await Zotero.Beaver.db.getThreadsPaginated(10, 0);
+                    setThreads(response.threads);
+                    setOffset(10);
+                    setHasMore(response.has_more);
+                    setNextCursor(null); // Not used for local pagination
+                } else {
+                    // Use remote API
+                    const response = await threadService.getPaginatedThreads();
+                    setThreads(response.data.map(thread => ({
+                        id: thread.id,
+                        name: thread.name,
+                        createdAt: thread.created_at,
+                        updatedAt: thread.updated_at,
+                    } as ThreadData)));
+                    setNextCursor(response.next_cursor);
+                    setHasMore(response.has_more);
+                    setOffset(0); // Not used for remote pagination
+                }
             } catch (error) {
                 console.error('Error fetching recent threads:', error);
             } finally {
@@ -87,29 +97,35 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         };
         
         fetchThreads();
-    }, [setThreads, user, isMenuOpen]);
+    }, [setThreads, user, isMenuOpen, statefulChat]);
 
     // Load more threads
     const loadMoreThreads = async () => {
-        if (isLoading || !nextCursor) return;
+        if (isLoading || (!nextCursor && !hasMore)) return;
         
         setIsLoading(true);
         try {
-            const response = await threadService.getPaginatedThreads(10, nextCursor);
-            
-            // Append new threads to existing ones
-            setThreads(prevThreads => [
-                ...prevThreads,
-                ...response.data.map(thread => ({
-                    id: thread.id,
-                    name: thread.name,
-                    createdAt: thread.created_at,
-                    updatedAt: thread.updated_at,
-                } as ThreadData))
-            ]);
-            
-            setNextCursor(response.next_cursor);
-            setHasMore(response.has_more);
+            if (!statefulChat) {
+                // Use local database with offset pagination
+                const response = await Zotero.Beaver.db.getThreadsPaginated(10, offset);
+                setThreads(prevThreads => [...prevThreads, ...response.threads]);
+                setOffset(prev => prev + 10);
+                setHasMore(response.has_more);
+            } else {
+                // Use remote API with cursor pagination
+                const response = await threadService.getPaginatedThreads(10, nextCursor!);
+                setThreads(prevThreads => [
+                    ...prevThreads,
+                    ...response.data.map(thread => ({
+                        id: thread.id,
+                        name: thread.name,
+                        createdAt: thread.created_at,
+                        updatedAt: thread.updated_at,
+                    } as ThreadData))
+                ]);
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+            }
         } catch (error) {
             console.error('Error loading more threads:', error);
         } finally {
@@ -126,9 +142,19 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     };
 
     const handleDeleteThread = async (threadId: string) => {
-        await threadService.deleteThread(threadId);
-        // Refresh the threads list
-        setThreads((prev) => prev.filter(thread => thread.id !== threadId));
+        try {
+            if (!statefulChat) {
+                // Use local database
+                await Zotero.Beaver.db.deleteThread(threadId);
+            } else {
+                // Use remote API
+                await threadService.deleteThread(threadId);
+            }
+            // Refresh the threads list
+            setThreads((prev) => prev.filter(thread => thread.id !== threadId));
+        } catch (error) {
+            console.error('Error deleting thread:', error);
+        }
     };
 
     const handleStartRename = (threadId: string, currentName: string) => {
@@ -144,7 +170,17 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         }
 
         try {
-            await threadService.renameThread(threadId, newName);
+            if (!statefulChat) {
+                // Use local database
+                await Zotero.Beaver.db.renameThread(threadId, newName);
+            } else {
+                // Use remote API
+                await threadService.renameThread(threadId, newName);
+            }
+            // Update local state
+            setThreads(prev => prev.map(thread => 
+                thread.id === threadId ? { ...thread, name: newName } : thread
+            ));
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {
@@ -152,7 +188,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         }
     };
 
-    // Filter out current thread and limit to MAX_THREADS
+    // Filter out current thread
     const filteredThreads = threads
         .filter(thread => thread.id !== currentThreadId);
     

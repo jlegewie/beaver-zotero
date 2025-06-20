@@ -431,7 +431,7 @@ async function _processChatCompletionViaBackend(
     // Stateful vs stateless chat
     let threadId: string | null = currentThreadId;
     let messages: MessageData[] = [];
-    const statefulChat = getPref('statefulChat') || true;
+    const statefulChat = getPref('statefulChat');
     if (!statefulChat) {
         const { threadId: newThreadId, messages: threadMessages } = await _handleThreadMessages(userMessage, currentThreadId, set, get);
         threadId = newThreadId;
