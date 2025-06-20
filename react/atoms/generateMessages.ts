@@ -574,7 +574,7 @@ async function _processChatCompletionViaBackend(
         // Store the canceller function directly in the holder
         // and update the boolean state atom (potentially async)
         (canceller) => {
-            console.log('Received canceller, storing in holder:', canceller);
+            // console.log('Received canceller, storing in holder:', canceller);
             cancellerHolder.current = canceller;
             // Update the boolean atom asynchronously to avoid sync interference
             setTimeout(() => {
