@@ -8,6 +8,7 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { store } from '../../react/index';
 import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
+import pako from 'pako';
 
 // processing_status from backend
 export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "embedded" | "failed" | "skipped";
@@ -395,19 +396,14 @@ export class AttachmentsService extends ApiService {
      * @param lastModifiedAt The last modified date of the file
      * @returns Promise with the upload response
      */
-    async uploadFileContent(textContent: string, fileHash: string, lastModifiedAt: Date): Promise<UploadResponse> {
+    async uploadFileContent(textContent: string, fileHash: string, lastModifiedAt: Date | null): Promise<UploadResponse> {
         try {
-            // Step 1: Compress the content
-            // @ts-ignore - Zotero.Utilities.Internal.gzip is not typed
-            const compressedContent = await Zotero.Utilities.Internal.gzip(textContent);
+            // Step 1: Compress the content using pako
+            const textEncoder = new TextEncoder();
+            const textBytes = textEncoder.encode(textContent);
+            const compressedBytes = pako.gzip(textBytes); // This is a Uint8Array
 
-            // Step 2: Convert binary string to Uint8Array
-            const compressedBytes = new Uint8Array(compressedContent.length);
-            for (let i = 0; i < compressedContent.length; i++) {
-                compressedBytes[i] = compressedContent.charCodeAt(i) & 0xFF;
-            }
-
-            // Step 3: Create form data
+            // Step 2: Create form data
             const formData = new FormData();
 
             // Create a blob from compressed bytes
@@ -418,14 +414,14 @@ export class AttachmentsService extends ApiService {
             // Add compressed file to form data
             formData.append('file', compressedBlob, `${fileHash}.gz`);
             formData.append('file_hash', fileHash);
-            formData.append('last_modified_at', lastModifiedAt.toISOString());
+            formData.append('last_modified_at', lastModifiedAt?.toISOString() || '');
             formData.append('is_compressed', 'true');
 
-            // Step 4: Get auth headers (but exclude Content-Type for FormData)
+            // Step 3: Get auth headers (but exclude Content-Type for FormData)
             const authHeaders = await this.getAuthHeaders();
             const { 'Content-Type': _, ...headersWithoutContentType } = authHeaders;
 
-            // Step 5: Upload to backend
+            // Step 4: Upload to backend
             const response = await fetch(`${this.baseUrl}/attachments/upload-file-content`, {
                 method: 'POST',
                 headers: headersWithoutContentType,
@@ -433,11 +429,7 @@ export class AttachmentsService extends ApiService {
             });
 
             if (!response.ok) {
-                if (response.status >= 500) {
-                    throw new Error(`Server error: ${response.status} - ${response.statusText}`);
-                } else {
-                    throw new Error(`Upload failed with status ${response.status}: ${response.statusText}`);
-                }
+                throw new Error(`Upload failed with status ${response.status}`);
             }
 
             return response.json() as unknown as Promise<UploadResponse>;
