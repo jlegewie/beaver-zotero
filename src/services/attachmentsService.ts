@@ -110,6 +110,14 @@ export interface AttachmentStatusPagedResponse {
 }
 
 /**
+ * Response from uploading file content
+ */
+export interface UploadResponse {
+    success: boolean;
+    message: string;
+}
+
+/**
  * Attachments-specific API service that extends the base API service
  */
 export class AttachmentsService extends ApiService {
@@ -378,6 +386,66 @@ export class AttachmentsService extends ApiService {
 
         // Return the result
         return result;
+    }
+
+    /**
+     * Uploads text content as a compressed file to the backend
+     * @param textContent The text content to upload
+     * @param fileHash The hash of the file
+     * @param lastModifiedAt The last modified date of the file
+     * @returns Promise with the upload response
+     */
+    async uploadFileContent(textContent: string, fileHash: string, lastModifiedAt: Date): Promise<UploadResponse> {
+        try {
+            // Step 1: Compress the content
+            // @ts-ignore - Zotero.Utilities.Internal.gzip is not typed
+            const compressedContent = await Zotero.Utilities.Internal.gzip(textContent);
+
+            // Step 2: Convert binary string to Uint8Array
+            const compressedBytes = new Uint8Array(compressedContent.length);
+            for (let i = 0; i < compressedContent.length; i++) {
+                compressedBytes[i] = compressedContent.charCodeAt(i) & 0xFF;
+            }
+
+            // Step 3: Create form data
+            const formData = new FormData();
+
+            // Create a blob from compressed bytes
+            const compressedBlob = new Blob([compressedBytes], { 
+                type: 'application/gzip' 
+            });
+
+            // Add compressed file to form data
+            formData.append('file', compressedBlob, `${fileHash}.gz`);
+            formData.append('file_hash', fileHash);
+            formData.append('last_modified_at', lastModifiedAt.toISOString());
+            formData.append('is_compressed', 'true');
+
+            // Step 4: Get auth headers (but exclude Content-Type for FormData)
+            const authHeaders = await this.getAuthHeaders();
+            const { 'Content-Type': _, ...headersWithoutContentType } = authHeaders;
+
+            // Step 5: Upload to backend
+            const response = await fetch(`${this.baseUrl}/attachments/upload-file-content`, {
+                method: 'POST',
+                headers: headersWithoutContentType,
+                body: formData,
+            });
+
+            if (!response.ok) {
+                if (response.status >= 500) {
+                    throw new Error(`Server error: ${response.status} - ${response.statusText}`);
+                } else {
+                    throw new Error(`Upload failed with status ${response.status}: ${response.statusText}`);
+                }
+            }
+
+            return response.json() as unknown as Promise<UploadResponse>;
+
+        } catch (error: any) {
+            logger(`Beaver Attachments Service: Error uploading file content for hash ${fileHash}: ${error.message}`, 1);
+            throw error;
+        }
     }
 }
 

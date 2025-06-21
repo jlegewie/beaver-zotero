@@ -535,6 +535,16 @@ declare namespace Zotero {
         isInTrash(): boolean;
     }
 
+    interface Utilities {
+        Internal: {
+            /**
+             * Compress text content using gzip
+             * @param textContent The text content to compress
+             * @returns Promise that resolves to the compressed content
+             */
+            gzip(textContent: string): Promise<string>;
+        }
+    }
 }
 
 declare namespace Zotero {
