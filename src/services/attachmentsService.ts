@@ -119,6 +119,22 @@ export interface UploadResponse {
 }
 
 /**
+ * Request body for updating file content status
+ */
+export interface UpdateFileContentStatusRequest {
+    file_hash: string;
+    status: UploadStatus;
+}
+
+/**
+ * Response from updating file content status
+ */
+export interface UpdateFileContentStatusResponse {
+    success: boolean;
+    file_content_status: string;
+}
+
+/**
  * Attachments-specific API service that extends the base API service
  */
 export class AttachmentsService extends ApiService {
@@ -438,6 +454,20 @@ export class AttachmentsService extends ApiService {
             logger(`Beaver Attachments Service: Error uploading file content for hash ${fileHash}: ${error.message}`, 1);
             throw error;
         }
+    }
+
+    /**
+     * Updates the file content status for a given file hash
+     * @param fileHash The hash of the file to update
+     * @param status The new upload status
+     * @returns Promise with the update response
+     */
+    async updateFileContentStatus(fileHash: string, status: UploadStatus): Promise<UpdateFileContentStatusResponse> {
+        const request: UpdateFileContentStatusRequest = {
+            file_hash: fileHash,
+            status: status
+        };
+        return this.patch<UpdateFileContentStatusResponse>('/attachments/file-content-status', request);
     }
 }
 
