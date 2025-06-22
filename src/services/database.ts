@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ProcessingStatus, UploadStatus, ContentUploadStatus } from './attachmentsService';
+import { ProcessingStatus, UploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
@@ -37,7 +37,7 @@ export interface AttachmentRecord {
     // Processing status
     can_upload: boolean | null;
     upload_status: UploadStatus | null;
-    content_upload_status: ContentUploadStatus | null;
+    content_upload_status: UploadStatus | null;
     md_status: ProcessingStatus | null;
     docling_status: ProcessingStatus | null;
     md_error_code: string | null;
@@ -90,7 +90,6 @@ export interface ContentUploadStatistics {
     pending: number;
     completed: number;
     failed: number;
-    not_available: number;
     skipped: number;
 }
 
@@ -590,7 +589,7 @@ export class BeaverDB {
             file_hash: row.file_hash,
             can_upload: typeof row.can_upload === 'number' ? Boolean(row.can_upload) : row.can_upload,
             upload_status: row.upload_status as UploadStatus,
-            content_upload_status: row.content_upload_status as ContentUploadStatus,
+            content_upload_status: row.content_upload_status as UploadStatus,
             md_status: row.md_status as ProcessingStatus,
             docling_status: row.docling_status as ProcessingStatus,
             md_error_code: row.md_error_code,
@@ -977,7 +976,6 @@ export class BeaverDB {
             pendingResult,
             completedResult,
             failedResult,
-            notAvailableResult,
             skippedResult,
         ] = await Promise.all([
             this.conn.queryAsync(
@@ -997,10 +995,6 @@ export class BeaverDB {
                 [user_id]
             ),
             this.conn.queryAsync(
-                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "not_available"',
-                [user_id]
-            ),
-            this.conn.queryAsync(
                 'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "skipped"',
                 [user_id]
             )
@@ -1011,7 +1005,6 @@ export class BeaverDB {
             pending: pendingResult[0]?.count || 0,
             completed: completedResult[0]?.count || 0,
             failed: failedResult[0]?.count || 0,
-            not_available: notAvailableResult[0]?.count || 0,
             skipped: skippedResult[0]?.count || 0,
         };
     }
@@ -1535,7 +1528,7 @@ export class BeaverDB {
      * @param status Content upload status to filter by
      * @returns Array of AttachmentRecord objects
      */
-    public async getAttachmentsByContentUploadStatus(user_id: string, status: ContentUploadStatus): Promise<AttachmentRecord[]> {
+    public async getAttachmentsByContentUploadStatus(user_id: string, status: UploadStatus): Promise<AttachmentRecord[]> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments WHERE user_id = ? AND content_upload_status = ?
              ORDER BY library_id, zotero_key`,
@@ -1554,7 +1547,7 @@ export class BeaverDB {
      */
     public async getAttachmentsByContentUploadStatusPaginated(
         user_id: string,
-        status: ContentUploadStatus,
+        status: UploadStatus,
         limit: number,
         offset: number
     ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
@@ -1645,19 +1638,6 @@ export class BeaverDB {
         };
     }
 
-    /**
-     * Convert ThreadData to ThreadRecord format (for database operations)
-     */
-    private static threadDataToRecord(data: Partial<ThreadData>): Partial<ThreadRecord> {
-        const record: Partial<ThreadRecord> = {};
-        
-        if (data.id !== undefined) record.id = data.id;
-        if (data.name !== undefined) record.name = data.name || null; // Convert empty string to null
-        if (data.createdAt !== undefined) record.created_at = data.createdAt;
-        if (data.updatedAt !== undefined) record.updated_at = data.updatedAt;
-        
-        return record;
-    }
 
     /**
      * Helper method to construct MessageRecord from a database row
