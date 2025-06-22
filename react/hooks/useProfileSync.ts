@@ -8,6 +8,7 @@ import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
+import { contentUploader } from '../../src/services/ContentUploader';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -45,6 +46,12 @@ export const useProfileSync = () => {
                 await fileUploader.start();
             } else {
                 await fileUploader.stop();
+            }
+            // If the plan allows content uploads, start the content uploader
+            if (profileData.profile.plan.upload_content) {
+                await contentUploader.start();
+            } else {
+                await contentUploader.stop();
             }
         } catch (error: any) {
             if (error instanceof ZoteroInstanceMismatchError) {
