@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ProcessingStatus, UploadStatus } from './attachmentsService';
+import { ProcessingStatus, UploadStatus, ContentUploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
@@ -37,6 +37,7 @@ export interface AttachmentRecord {
     // Processing status
     can_upload: boolean | null;
     upload_status: UploadStatus | null;
+    content_upload_status: ContentUploadStatus | null;
     md_status: ProcessingStatus | null;
     docling_status: ProcessingStatus | null;
     md_error_code: string | null;
@@ -80,6 +81,16 @@ export interface AttachmentUploadStatistics {
     pending: number;
     completed: number;
     failed: number;
+    skipped: number;
+}
+
+// Content upload statistics for a user
+export interface ContentUploadStatistics {
+    total: number;
+    pending: number;
+    completed: number;
+    failed: number;
+    not_available: number;
     skipped: number;
 }
 
@@ -178,6 +189,20 @@ export class BeaverDB {
                 UNIQUE(user_id, library_id, zotero_key)
             );
         `);
+
+        // Try to add the column, but ignore the error if it already exists
+        try {
+            await this.conn.queryAsync(`
+                ALTER TABLE attachments
+                ADD COLUMN content_upload_status TEXT;
+            `);
+        } catch (error: any) {
+            // SQLite error code 1 means "duplicate column name" - this is expected if column exists
+            if (!error.message?.includes('duplicate column name')) {
+                throw error; // Re-throw if it's a different error
+            }
+            // Otherwise, silently ignore - column already exists
+        }
 
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS upload_queue (
@@ -313,6 +338,7 @@ export class BeaverDB {
             file_hash: null,
             can_upload: null,
             upload_status: null,
+            content_upload_status: null,
             md_status: null,
             docling_status: null,
             md_error_code: null,
@@ -321,8 +347,8 @@ export class BeaverDB {
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, md_error_code, docling_error_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, md_status, docling_status, md_error_code, docling_error_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -332,6 +358,7 @@ export class BeaverDB {
                 finalAttachment.file_hash,
                 finalAttachment.can_upload,
                 finalAttachment.upload_status,
+                finalAttachment.content_upload_status,
                 finalAttachment.md_status,
                 finalAttachment.docling_status,
                 finalAttachment.md_error_code,
@@ -411,6 +438,7 @@ export class BeaverDB {
             'file_hash',
             'can_upload',
             'upload_status',
+            'content_upload_status',
             'md_status',
             'docling_status',
             'md_error_code',
@@ -562,6 +590,7 @@ export class BeaverDB {
             file_hash: row.file_hash,
             can_upload: typeof row.can_upload === 'number' ? Boolean(row.can_upload) : row.can_upload,
             upload_status: row.upload_status as UploadStatus,
+            content_upload_status: row.content_upload_status as ContentUploadStatus,
             md_status: row.md_status as ProcessingStatus,
             docling_status: row.docling_status as ProcessingStatus,
             md_error_code: row.md_error_code,
@@ -633,6 +662,7 @@ export class BeaverDB {
             can_upload: null,
             // TODO: Should they be set to null as a default?
             upload_status: 'pending',
+            content_upload_status: 'pending',
             md_status: 'unavailable',
             docling_status: 'unavailable',
             md_error_code: null,
@@ -681,7 +711,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'can_upload', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
+                    'file_hash', 'can_upload', 'upload_status', 'content_upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -712,7 +742,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -724,13 +754,14 @@ export class BeaverDB {
                         attachment.file_hash,
                         attachment.can_upload,
                         attachment.upload_status,
+                        attachment.content_upload_status,
                         attachment.md_status,
                         attachment.docling_status,
                         attachment.md_error_code,
                         attachment.docling_error_code
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
@@ -931,6 +962,57 @@ export class BeaverDB {
             skipped: skippedResult[0]?.count || 0,
             // totalPages: aggregatesResult[0]?.totalPages || 0,
             // totalSize: aggregatesResult[0]?.totalSize || 0
+        };
+    }
+
+    /**
+     * Get comprehensive content upload statistics
+     * @param user_id User ID
+     * @returns Content upload statistics
+     */
+    public async getContentUploadStatistics(user_id: string): Promise<ContentUploadStatistics> {
+        // Execute all queries in parallel for performance
+        const [
+            totalResult,
+            pendingResult,
+            completedResult,
+            failedResult,
+            notAvailableResult,
+            skippedResult,
+        ] = await Promise.all([
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL',
+                [user_id]
+            ),
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "pending"',
+                [user_id]
+            ),
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "completed"',
+                [user_id]
+            ),
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "failed"',
+                [user_id]
+            ),
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "not_available"',
+                [user_id]
+            ),
+            this.conn.queryAsync(
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND content_upload_status = "skipped"',
+                [user_id]
+            )
+        ]);
+        
+        return {
+            total: totalResult[0]?.count || 0,
+            pending: pendingResult[0]?.count || 0,
+            completed: completedResult[0]?.count || 0,
+            failed: failedResult[0]?.count || 0,
+            not_available: notAvailableResult[0]?.count || 0,
+            skipped: skippedResult[0]?.count || 0,
         };
     }
 
@@ -1432,6 +1514,53 @@ export class BeaverDB {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments 
              WHERE user_id = ? AND docling_status = ?
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, status, limit + 1, offset]
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
+
+    /**
+     * Get all attachments by content upload status for a user
+     * @param user_id User ID
+     * @param status Content upload status to filter by
+     * @returns Array of AttachmentRecord objects
+     */
+    public async getAttachmentsByContentUploadStatus(user_id: string, status: ContentUploadStatus): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND content_upload_status = ?
+             ORDER BY library_id, zotero_key`,
+            [user_id, status]
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get a paginated list of attachments by content upload status for a user.
+     * @param user_id User ID
+     * @param status Content upload status to filter by
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getAttachmentsByContentUploadStatusPaginated(
+        user_id: string,
+        status: ContentUploadStatus,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND content_upload_status = ?
              ORDER BY library_id, zotero_key
              LIMIT ? OFFSET ?`,
             [user_id, status, limit + 1, offset]
