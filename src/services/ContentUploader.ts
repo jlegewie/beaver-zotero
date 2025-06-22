@@ -341,13 +341,16 @@ export class ContentUploader {
      */
     private async markContentSkipped(attachment: AttachmentRecord, userId: string): Promise<void> {
         try {
+            // Update remote status
+            await attachmentsService.updateFileContentStatus(attachment.file_hash!, 'skipped');
+
+            // Update local status
             await Zotero.Beaver.db.updateAttachment(
                 userId,
                 attachment.library_id,
                 attachment.zotero_key,
                 { content_upload_status: 'skipped' }
             );
-            await attachmentsService.updateFileContentStatus(attachment.file_hash!, 'skipped');
         } catch (error: any) {
             logger(`Content Uploader: Error marking content as skipped: ${error.message}`, 1);
             throw error;
@@ -359,13 +362,16 @@ export class ContentUploader {
      */
     private async handleContentFailure(attachment: AttachmentRecord, userId: string, reason: string): Promise<void> {
         try {
+            // Update remote status
+            await attachmentsService.updateFileContentStatus(attachment.file_hash!, 'failed');
+
+            // Update local status
             await Zotero.Beaver.db.updateAttachment(
                 userId,
                 attachment.library_id,
                 attachment.zotero_key,
                 { content_upload_status: 'failed' }
             );
-            await attachmentsService.updateFileContentStatus(attachment.file_hash!, 'failed');
             logger(`Content Uploader: Marked content upload as failed for ${attachment.zotero_key}: ${reason}`, 2);
         } catch (error: any) {
             logger(`Content Uploader: Error marking content upload as failed: ${error.message}`, 1);
