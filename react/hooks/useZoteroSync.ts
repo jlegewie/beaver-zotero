@@ -5,6 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader } from "../../src/services/FileUploader";
+import { contentUploader } from "../../src/services/ContentUploader";
 import { planFeaturesAtom, hasAuthorizedAccessAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
@@ -238,6 +239,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 setupObserver();
                 // Start file uploader after sync completes
                 await fileUploader.start();
+                // Start content uploader if enabled
+                if (planFeatures.uploadContent) {
+                    await contentUploader.start();
+                }
             } catch (error: any) {
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);
