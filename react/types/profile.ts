@@ -17,12 +17,13 @@ interface SafePlanModel {
     // Features
     sync_database: boolean;
     upload_files: boolean;
+    upload_content: boolean;
     basic_document_processing: boolean;
     advanced_document_processing: boolean;
     allows_byok: boolean;
     rag_search: boolean;
     agent_models: boolean;
-    deep_research: boolean;
+    mcp_server: boolean;
     // Limits
     max_file_size_mb: number;
     max_page_count: number;
