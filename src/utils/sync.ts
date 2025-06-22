@@ -1,12 +1,14 @@
 import { syncService } from '../services/syncService';
 import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
+import { contentUploader } from '../services/ContentUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { getPref, setPref } from './prefs';
 import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
+import { planFeaturesAtom } from '../../react/atoms/profile';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData } from '../../react/types/zotero';
 
 /**
@@ -491,8 +493,17 @@ export async function syncItemsToBackend(
                         await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
 
                         // Start file uploader if there are attachments to upload (or newly added to queue)
-                        logger(`Beaver Sync: Starting file uploader`, 2);
-                        await fileUploader.start(syncType === 'initial' ? "initial" : "background");
+                        const planFeatures = store.get(planFeaturesAtom);
+                        if (planFeatures.uploadFiles) {
+                            logger(`Beaver Sync: Starting file uploader`, 2);
+                            await fileUploader.start(syncType === 'initial' ? "initial" : "background");
+                        }
+
+                        // Start content uploader if content upload is enabled
+                        if (planFeatures.uploadContent) {
+                            logger(`Beaver Sync: Starting content uploader`, 2);
+                            await contentUploader.start(syncType === 'initial' ? "initial" : "background");
+                        }
                     }
                 }
 
