@@ -35,6 +35,7 @@ interface SafePlanModel {
 export interface PlanFeatures {
     databaseSync: boolean;
     uploadFiles: boolean;
+    uploadContent: boolean;
     basicProcessing: boolean;
     advancedProcessing: boolean;
     fileProcessing: boolean;
