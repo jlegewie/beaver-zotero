@@ -2,9 +2,13 @@ import { atom } from 'jotai';
 import { getPref } from '../../src/utils/prefs';
 import { SyncStatus } from './ui';
 
-// File uploader status - simplified to just track running and failed states
+// File uploader status
 export const isFileUploaderRunningAtom = atom<boolean>(false);
 export const isFileUploaderFailedAtom = atom<boolean>(false);
+
+// Content uploader status
+export const isContentUploaderRunningAtom = atom<boolean>(false);
+export const isContentUploaderFailedAtom = atom<boolean>(false);
 
 // Library sync tracking
 export interface LibrarySyncStatus {

@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { InputSource } from '../types/sources';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage } from '../types/popupMessage';
-import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from './sync';
+import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, isContentUploaderRunningAtom, isContentUploaderFailedAtom } from './sync';
 
 
 export const isSidebarVisibleAtom = atom(false);
@@ -28,14 +28,14 @@ export const syncStatusAtom = atom<SyncStatus>('idle');
 export const syncingAtom = atom(
     (get) => {
         const dbStatus = get(syncStatusAtom);
-        return dbStatus === 'in_progress' || get(isFileUploaderRunningAtom);
+        return dbStatus === 'in_progress' || get(isFileUploaderRunningAtom) || get(isContentUploaderRunningAtom);
     }
 );
 
 export const syncErrorAtom = atom(
     (get) => {
         const dbStatus = get(syncStatusAtom);
-        return dbStatus === 'failed' || get(isFileUploaderFailedAtom);
+        return dbStatus === 'failed' || get(isFileUploaderFailedAtom) || get(isContentUploaderFailedAtom);
     }
 );
 

@@ -13,6 +13,7 @@ import { isAuthenticatedAtom, userAtom } from '../../react/atoms/auth';
 import { attachmentsService } from './attachmentsService';
 import { AttachmentRecord } from './database';
 import { planFeaturesAtom } from '../../react/atoms/profile';
+import { isContentUploaderRunningAtom, isContentUploaderFailedAtom } from '../../react/atoms/sync';
 
 export type ContentUploadSessionType = 'initial' | 'background' | 'manual';
 
@@ -53,6 +54,10 @@ export class ContentUploader {
             return;
         }
         this.isRunning = true;
+        
+        // Set running state
+        store.set(isContentUploaderRunningAtom, true);
+        store.set(isContentUploaderFailedAtom, false);
 
         logger(`Content Uploader: Starting content uploader (session type: ${sessionType})`, 3);
 
@@ -65,6 +70,8 @@ export class ContentUploader {
                 logger('Content Uploader: Error in runQueue: ' + error.message, 1);
                 Zotero.logError(error);
                 this.isRunning = false;
+                store.set(isContentUploaderRunningAtom, false);
+                store.set(isContentUploaderFailedAtom, true);
             });
     }
 
@@ -83,9 +90,13 @@ export class ContentUploader {
         // Wait for all queued tasks to finish, if any
         try {
             await this.contentQueue.onIdle();            
+            // Clear session
+            store.set(isContentUploaderRunningAtom, false);
         } catch (error: any) {
             logger('Content Uploader: Error while waiting for queue to idle: ' + error.message, 1);
             Zotero.logError(error);
+            store.set(isContentUploaderRunningAtom, false);
+            store.set(isContentUploaderFailedAtom, true);
         }
     }
 
