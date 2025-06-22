@@ -13,7 +13,7 @@ import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
-import { uploadQueueStatusAtom, UploadQueueSession, UploadSessionType } from '../../react/atoms/sync';
+import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
@@ -37,76 +37,12 @@ export class FileUploader {
     private readonly VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE: number = 5;  // 5 minutes timeout for retries
 
     /**
-     * Minimum interval between currentFile updates (in milliseconds)
-     */
-    private readonly MIN_FILE_UPDATE_INTERVAL: number = 200;
-    private lastFileUpdateTime: number = 0;
-
-    /**
-     * Updates the upload queue status atom
-     */
-    private updateQueueStatus(updates: Partial<UploadQueueSession>): void {
-        store.set(uploadQueueStatusAtom, (current) => {
-            return { ...current, ...updates } as UploadQueueSession;
-        });
-    }
-
-    /**
-     * Increments the queue status by the given values
-     * @param updates The values to increment by
-     * @param persist Whether to persist the session to prefs
-     */
-    private incrementQueueStatus(
-        updates: Partial<Pick<UploadQueueSession, 'pending' | 'completed' | 'failed' | 'skipped'>>,
-        persist: boolean = true
-    ): void {
-
-        store.set(uploadQueueStatusAtom, (current: UploadQueueSession | null) => {
-            const newStatus = {
-                ...current,
-                pending: (current?.pending || 0) + (updates.pending || 0),
-                completed: (current?.completed || 0) + (updates.completed || 0),
-                failed: (current?.failed || 0) + (updates.failed || 0),
-                skipped: (current?.skipped || 0) + (updates.skipped || 0),
-            } as UploadQueueSession;
-            
-            return newStatus;
-        });
-    }
-
-    /**
-     * Updates the current file being uploaded with rate limiting
-     */
-    private updateCurrentAttachment(libraryId: number, zoteroKey: string): void {
-        const now = Date.now();
-        if (libraryId && zoteroKey && now - this.lastFileUpdateTime < this.MIN_FILE_UPDATE_INTERVAL) {
-            return; // Skip update if too soon
-        }
-        
-        this.lastFileUpdateTime = now;
-        this.updateQueueStatus({ currentFile: libraryId + "-" + zoteroKey });
-    }
-
-
-    /**
-     * Calculate the total number of unique files that need uploading for this session
-     */
-    private async calculatePendingItems(user_id: string): Promise<number> {
-        try {
-            return await Zotero.Beaver.db.getTotalQueueItems(user_id);
-        } catch (error: any) {
-            logger(`File Uploader: Error calculating session total: ${error.message}`, 1);
-            return 0;
-        }
-    }
-
-    /**
      * Starts the file uploader if it's not already running.
      * Initializes a concurrency queue and continuously processes queue items 
      * until no more items or until stopped.
      * @param sessionType Type of upload session (default: 'background')
      */
-    public async start(sessionType: UploadSessionType = 'background'): Promise<void> {
+    public async start(sessionType: 'initial' | 'background' | 'manual' = 'background'): Promise<void> {
         // check authentication status and plan features
         const user = store.get(userAtom);
         if (!user?.id) {
@@ -125,16 +61,9 @@ export class FileUploader {
         }
         this.isRunning = true;
         
-        const pending = await this.calculatePendingItems(user.id);
-        this.updateQueueStatus({
-            sessionType: sessionType,
-            status: 'in_progress',
-            pending: pending,
-            completed: 0,
-            failed: 0,
-            skipped: 0,
-            currentFile: null
-        });
+        // Set running state
+        store.set(isFileUploaderRunningAtom, true);
+        store.set(isFileUploaderFailedAtom, false);
         
         logger(`File Uploader: Starting file uploader (session type: ${sessionType})`, 3);
 
@@ -147,7 +76,8 @@ export class FileUploader {
                 logger('File Uploader: Error in runQueue: ' + error.message, 1);
                 Zotero.logError(error);
                 this.isRunning = false;
-                this.updateQueueStatus({ status: 'failed' });
+                store.set(isFileUploaderRunningAtom, false);
+                store.set(isFileUploaderFailedAtom, true);
             });
     }
 
@@ -167,11 +97,12 @@ export class FileUploader {
         try {
             await this.uploadQueue.onIdle();            
             // Clear session
-            this.updateQueueStatus({ status: 'completed', currentFile: null });
+            store.set(isFileUploaderRunningAtom, false);
         } catch (error: any) {
             logger('File Uploader: Error while waiting for queue to idle: ' + error.message, 1);
             Zotero.logError(error);
-            this.updateQueueStatus({ status: 'failed', currentFile: null });
+            store.set(isFileUploaderRunningAtom, false);
+            store.set(isFileUploaderFailedAtom, true);
         }
     }
 
@@ -185,9 +116,6 @@ export class FileUploader {
         const ERROR_BACKOFF_TIME = 1000;
         let consecutiveErrors = 0;
         let errorBackoffTime = ERROR_BACKOFF_TIME;
-
-        // Only recalculate pending periodically or when needed
-        let lastPendingUpdate = 0;
 
         while (this.isRunning) {
             try {
@@ -223,13 +151,6 @@ export class FileUploader {
                     break;
                 }
 
-                // Only recalculate pending periodically or when needed
-                if (Date.now() - lastPendingUpdate > 30000) { // Every 30 seconds
-                    const pending = await this.calculatePendingItems(user.id);
-                    this.updateQueueStatus({ pending });
-                    lastPendingUpdate = Date.now();
-                }
-
                 // Reset idle and error counters on successful queue read
                 consecutiveErrors = 0;
                 errorBackoffTime = ERROR_BACKOFF_TIME;
@@ -261,7 +182,7 @@ export class FileUploader {
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
         logger('File Uploader: Finished processing queue.', 3);
-        this.updateQueueStatus({ status: 'completed', currentFile: null });
+        store.set(isFileUploaderRunningAtom, false);
     }
 
     /**
@@ -270,9 +191,6 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
         try {
-            // Update current file being processed
-            this.updateCurrentAttachment(item.library_id, item.zotero_key);
-            
             logger(`File Uploader: Uploading file for ${item.zotero_key}`, 3);
 
             // Get the user ID from the store
@@ -356,16 +274,6 @@ export class FileUploader {
                         logger(`File Uploader: Server error ${JSON.stringify(error)} on attempt ${attempt}, will retry`, 2);
                         await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
                         continue;
-
-                        // if (error.statusCode >= 500) {
-                        //     // Server error - may be temporary
-                        //     logger(`File Uploader: Server error ${response.error.status} on attempt ${attempt}, will retry`, 2);
-                        //     await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
-                        //     continue;
-                        // } else {
-                        //     // Client error - likely permanent
-                        //     throw new Error(`Upload failed with status ${response.status}`);
-                        // }
                     }
                     
                     // Mark upload as completed
@@ -396,9 +304,6 @@ export class FileUploader {
             // Treat as permanently failed with message for manual retry
             await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
             
-        } finally {
-            // Clear current file when done (success or failure)
-            this.updateQueueStatus({ currentFile: null });
         }
     }
     
@@ -415,8 +320,6 @@ export class FileUploader {
             
             // Only if backend call succeeds, update local state
             await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
-            
-            this.incrementQueueStatus({ failed: 1, pending: -1 }, true);
 
             // Error message for manual retry (only show if user has completed onboarding)
             if (store.get(hasCompletedOnboardingAtom)) {
@@ -456,9 +359,6 @@ export class FileUploader {
 
             logger(`File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
             
-            // Increment our local completed count only after successful backend update
-            this.incrementQueueStatus({ completed: 1, pending: -1 }, true);
-            
         } catch (error: any) {
             logger(`File Uploader: Error marking upload as completed: ${error.message}`, 1);
             Zotero.logError(error);
@@ -466,7 +366,6 @@ export class FileUploader {
             throw error;
         }
     }
-
 }
 
 
@@ -488,11 +387,6 @@ export const resetFailedUploads = async (): Promise<void> => {
         // -------- (1) Reset failed uploads in backend --------
         const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
         logger(`File Uploader: Backend reset ${results.length} failed uploads.`, 3);
-
-        // if (results.length > 0) {
-        //     logger(`File Uploader: No failed uploads reported by backend to reset locally.`, 3);
-        //     return;
-        // }
 
         // Use results to reset failed uploads in local database
         if (results.length > 0) {

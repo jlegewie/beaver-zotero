@@ -2,26 +2,9 @@ import { atom } from 'jotai';
 import { getPref } from '../../src/utils/prefs';
 import { SyncStatus } from './ui';
 
-// UploadQueueStatus
-export type UploadSessionType = 'initial' | 'background' | 'manual';
-export type UploadQueueStatusType = 'in_progress' | 'completed' | 'failed';
-export interface UploadQueueSession {
-    sessionType: UploadSessionType;
-    status: UploadQueueStatusType;
-    pending: number;
-    completed: number;
-    failed: number;
-    skipped: number;
-    currentFile: string | null;
-}
-
-export const uploadQueueStatusAtom = atom<UploadQueueSession | null>(null);
-
-export const uploadQueueTotalAtom = atom<number>((get) => {
-    const status = get(uploadQueueStatusAtom);
-    return (status?.pending || 0) + (status?.completed || 0) + (status?.failed || 0) + (status?.skipped || 0);
-});
-
+// File uploader status - simplified to just track running and failed states
+export const isFileUploaderRunningAtom = atom<boolean>(false);
+export const isFileUploaderFailedAtom = atom<boolean>(false);
 
 // Library sync tracking
 export interface LibrarySyncStatus {
