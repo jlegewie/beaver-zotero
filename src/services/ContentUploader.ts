@@ -250,16 +250,46 @@ export class ContentUploader {
             // Get file modification date
             const lastModified = await this.getFileModificationDate(item);
             
-            // Upload content using the existing service
-            await attachmentsService.uploadFileContent(
-                textContent, 
-                attachment.file_hash!,
-                lastModified
-            );
-            
-            // Mark as completed
-            await this.markContentCompleted(attachment, userId);
-            logger(`Content Uploader: Successfully uploaded content for ${attachment.zotero_key}`, 3);
+            // Upload content with retry logic
+            let uploadSuccess = false;
+            let attempt = 0;
+            const maxUploadAttempts = 3;
+
+            while (!uploadSuccess && attempt < maxUploadAttempts) {
+                attempt++;
+                try {
+                    logger(`Content Uploader: Uploading content for ${attachment.zotero_key} (attempt ${attempt}/${maxUploadAttempts})`, 3);
+                    
+                    // Upload content using the existing service
+                    await attachmentsService.uploadFileContent(
+                        textContent, 
+                        attachment.file_hash!,
+                        lastModified
+                    );
+                    
+                    // Mark as completed
+                    await this.markContentCompleted(attachment, userId);
+                    uploadSuccess = true;
+                    logger(`Content Uploader: Successfully uploaded content for ${attachment.zotero_key}`, 3);
+                    
+                } catch (uploadError: any) {
+                    logger(`Content Uploader: Upload attempt ${attempt} failed for ${attachment.zotero_key}: ${uploadError.message}`, 2);
+                    
+                    // Network errors or temporary failures - retry with backoff
+                    if (uploadError instanceof TypeError || attempt < maxUploadAttempts) {
+                        logger(`Content Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                    } else {
+                        // Other errors or max attempts reached, rethrow to be handled by outer catch
+                        throw uploadError;
+                    }
+                }
+            }
+
+            // If we exhausted retries without success
+            if (!uploadSuccess) {
+                throw new Error(`Failed to upload content after ${maxUploadAttempts} attempts`);
+            }
             
         } catch (error: any) {
             logger(`Content Uploader: Error uploading content for attachment ${attachment.zotero_key}: ${error.message}`, 1);
