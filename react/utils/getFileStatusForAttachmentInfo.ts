@@ -70,8 +70,8 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
 
         // Processing status of file
         const planFeatures = store.get(planFeaturesAtom);
-        const fileStatus = planFeatures.advancedProcessing ? attachmentStatus.docling_status : attachmentStatus.md_status;
-        const errorCode = planFeatures.advancedProcessing ? attachmentStatus.docling_error_code : attachmentStatus.md_error_code;
+        const fileStatus = planFeatures.advancedProcessing ? attachmentStatus.advanced_status : attachmentStatus.standard_status;
+        const errorCode = planFeatures.advancedProcessing ? attachmentStatus.advanced_error_code : attachmentStatus.standard_error_code;
         if (!fileStatus) {
             return { text: 'Unknown status', showButton: false };
         }

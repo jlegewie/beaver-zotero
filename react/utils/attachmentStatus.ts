@@ -24,7 +24,7 @@ export async function getAttachmentStatus(
     if (attachmentsDB && attachmentsDB.length > 0) {
         logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
         const attachmentDB = attachmentsDB[0];
-        if (attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'embedded') {
+        if (attachmentDB.file_hash && attachmentDB.standard_status && attachmentDB.standard_status === 'embedded') {
             logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
             attachmentStatus = {
                 attachment_id: attachmentDB.id,
@@ -47,10 +47,10 @@ export async function getAttachmentStatus(
                 {
                     file_hash: attachmentStatus.file_hash,
                     upload_status: attachmentStatus.upload_status,
-                    md_status: attachmentStatus.md_status,
-                    docling_status: attachmentStatus.docling_status,
-                    md_error_code: attachmentStatus.md_error_code,
-                    docling_error_code: attachmentStatus.docling_error_code
+                    standard_status: attachmentStatus.standard_status,
+                    advanced_status: attachmentStatus.advanced_status,
+                    standard_error_code: attachmentStatus.standard_error_code,
+                    advanced_error_code: attachmentStatus.advanced_error_code
                 }
             );
         } catch (error) {

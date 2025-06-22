@@ -38,10 +38,10 @@ export interface AttachmentRecord {
     can_upload: boolean | null;
     upload_status: UploadStatus | null;
     content_upload_status: UploadStatus | null;
-    md_status: ProcessingStatus | null;
-    docling_status: ProcessingStatus | null;
-    md_error_code: string | null;
-    docling_error_code: string | null;
+    standard_status: ProcessingStatus | null;
+    advanced_status: ProcessingStatus | null;
+    standard_error_code: string | null;
+    advanced_error_code: string | null;
 }
 
 /* 
@@ -181,10 +181,10 @@ export class BeaverDB {
                 file_hash                TEXT,
                 can_upload               BOOLEAN,
                 upload_status            TEXT,
-                md_status                TEXT,
-                docling_status           TEXT,
-                md_error_code            TEXT,
-                docling_error_code       TEXT,
+                standard_status                TEXT,
+                advanced_status           TEXT,
+                standard_error_code            TEXT,
+                advanced_error_code       TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
             );
         `);
@@ -338,15 +338,15 @@ export class BeaverDB {
             can_upload: null,
             upload_status: null,
             content_upload_status: null,
-            md_status: null,
-            docling_status: null,
-            md_error_code: null,
-            docling_error_code: null,
+            standard_status: null,
+            advanced_status: null,
+            standard_error_code: null,
+            advanced_error_code: null,
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, md_status, docling_status, md_error_code, docling_error_code)
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, standard_status, advanced_status, standard_error_code, advanced_error_code)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
@@ -358,10 +358,10 @@ export class BeaverDB {
                 finalAttachment.can_upload,
                 finalAttachment.upload_status,
                 finalAttachment.content_upload_status,
-                finalAttachment.md_status,
-                finalAttachment.docling_status,
-                finalAttachment.md_error_code,
-                finalAttachment.docling_error_code
+                finalAttachment.standard_status,
+                finalAttachment.advanced_status,
+                finalAttachment.standard_error_code,
+                finalAttachment.advanced_error_code
             ]
         );
         return id;
@@ -438,10 +438,10 @@ export class BeaverDB {
             'can_upload',
             'upload_status',
             'content_upload_status',
-            'md_status',
-            'docling_status',
-            'md_error_code',
-            'docling_error_code'
+            'standard_status',
+            'advanced_status',
+            'standard_error_code',
+            'advanced_error_code'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
@@ -590,10 +590,10 @@ export class BeaverDB {
             can_upload: typeof row.can_upload === 'number' ? Boolean(row.can_upload) : row.can_upload,
             upload_status: row.upload_status as UploadStatus,
             content_upload_status: row.content_upload_status as UploadStatus,
-            md_status: row.md_status as ProcessingStatus,
-            docling_status: row.docling_status as ProcessingStatus,
-            md_error_code: row.md_error_code,
-            docling_error_code: row.docling_error_code,
+            standard_status: row.standard_status as ProcessingStatus,
+            advanced_status: row.advanced_status as ProcessingStatus,
+            standard_error_code: row.standard_error_code,
+            advanced_error_code: row.advanced_error_code,
         };
     }
 
@@ -662,10 +662,10 @@ export class BeaverDB {
             // TODO: Should they be set to null as a default?
             upload_status: 'pending',
             content_upload_status: 'pending',
-            md_status: 'unavailable',
-            docling_status: 'unavailable',
-            md_error_code: null,
-            docling_error_code: null,
+            standard_status: 'unavailable',
+            advanced_status: 'unavailable',
+            standard_error_code: null,
+            advanced_error_code: null,
         };
 
         const finalIds: string[] = [];
@@ -710,7 +710,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'can_upload', 'upload_status', 'content_upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
+                    'file_hash', 'can_upload', 'upload_status', 'content_upload_status', 'standard_status', 'advanced_status', 'standard_error_code', 'advanced_error_code'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -754,13 +754,13 @@ export class BeaverDB {
                         attachment.can_upload,
                         attachment.upload_status,
                         attachment.content_upload_status,
-                        attachment.md_status,
-                        attachment.docling_status,
-                        attachment.md_error_code,
-                        attachment.docling_error_code
+                        attachment.standard_status,
+                        attachment.advanced_status,
+                        attachment.standard_error_code,
+                        attachment.advanced_error_code
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, content_upload_status, standard_status, advanced_status, standard_error_code, advanced_error_code) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
@@ -1436,7 +1436,7 @@ export class BeaverDB {
      */
     public async getAttachmentsByMdStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachments WHERE user_id = ? AND md_status = ?
+            `SELECT * FROM attachments WHERE user_id = ? AND standard_status = ?
              ORDER BY library_id, zotero_key`,
             [user_id, status]
         );
@@ -1459,7 +1459,7 @@ export class BeaverDB {
     ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments 
-             WHERE user_id = ? AND md_status = ?
+             WHERE user_id = ? AND standard_status = ?
              ORDER BY library_id, zotero_key
              LIMIT ? OFFSET ?`,
             [user_id, status, limit + 1, offset]
@@ -1483,7 +1483,7 @@ export class BeaverDB {
      */
     public async getAttachmentsByDoclingStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachments WHERE user_id = ? AND docling_status = ?
+            `SELECT * FROM attachments WHERE user_id = ? AND advanced_status = ?
              ORDER BY library_id, zotero_key`,
             [user_id, status]
         );
@@ -1506,7 +1506,7 @@ export class BeaverDB {
     ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments 
-             WHERE user_id = ? AND docling_status = ?
+             WHERE user_id = ? AND advanced_status = ?
              ORDER BY library_id, zotero_key
              LIMIT ? OFFSET ?`,
             [user_id, status, limit + 1, offset]
@@ -2043,7 +2043,7 @@ export class BeaverDB {
     const fetchedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Fetched attachment:", fetchedAttachment);
 
-    await db.updateAttachment(1, "ATTACHKEY456", { md_status: "embedded", file_hash: "fileHashUpdated" });
+    await db.updateAttachment(1, "ATTACHKEY456", { standard_status: "embedded", file_hash: "fileHashUpdated" });
     const updatedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Updated attachment:", updatedAttachment);
 
