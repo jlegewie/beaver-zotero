@@ -80,11 +80,11 @@ export interface AttachmentStatusResponse {
 
     // Processing status
     upload_status?: UploadStatus;
-    standard_status?: ProcessingStatus;
+    md_status?: ProcessingStatus;
     advanced_status?: ProcessingStatus;
 
     // error codes
-    standard_error_code?: string
+    md_error_code?: string
     advanced_error_code?: string
 
     // upload url

@@ -66,7 +66,7 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
                     file_hash: item.file_hash || '',
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
-                    errorCode: useAdvancedPipeline ? item.advanced_error_code : item.standard_error_code,
+                    errorCode: useAdvancedPipeline ? item.advanced_error_code : item.md_error_code,
                     buttonText: enableRetry && fileHash ? 'Retry' : undefined,
                     buttonAction: enableRetry && fileHash ? () => {
                         attachmentsService.updateFile(item.library_id, item.zotero_key, fileHash);
