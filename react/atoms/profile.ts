@@ -35,6 +35,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
+        uploadContent: profile?.plan.upload_content || false,
         basicProcessing: profile?.plan.basic_document_processing || false,
         advancedProcessing: profile?.plan.advanced_document_processing || false,
         fileProcessing: profile?.plan.basic_document_processing || profile?.plan.advanced_document_processing || false,
