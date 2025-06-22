@@ -216,6 +216,13 @@ declare namespace Zotero {
             getAttachmentUploadStatistics(user_id: string): Promise<import("../src/services/database").AttachmentUploadStatistics>;
 
             /**
+             * Get comprehensive content upload statistics
+             * @param user_id User ID
+             * @returns Content upload statistics
+             */
+            getContentUploadStatistics(user_id: string): Promise<import("../src/services/database").ContentUploadStatistics>;
+
+            /**
              * Get the next batch of items from the upload queue and claim them for processing.
              * @param user_id User ID
              * @param limit Maximum number of items to return
@@ -362,6 +369,24 @@ declare namespace Zotero {
              * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
              */
             getAttachmentsByDoclingStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").ProcessingStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+
+            /**
+             * Get all attachments by content upload status for a user
+             * @param user_id User ID
+             * @param status Content upload status to filter by
+             * @returns Array of AttachmentRecord objects
+             */
+            getAttachmentsByContentUploadStatus(user_id: string, status: import("../src/services/attachmentsService").UploadStatus): Promise<import("../src/services/database").AttachmentRecord[]>;
+
+            /**
+             * Get a paginated list of attachments by content upload status for a user.
+             * @param user_id User ID
+             * @param status Content upload status to filter by
+             * @param limit Number of items per page
+             * @param offset Number of items to skip
+             * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+             */
+            getAttachmentsByContentUploadStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").UploadStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
 
             /**
              * Fix pending attachments without queue entries
@@ -544,6 +569,29 @@ declare namespace Zotero {
              */
             gzip(textContent: string): Promise<string>;
         }
+    }
+
+    interface FullText {
+        /**
+         * Get the cache file for an item's fulltext
+         * @param item Zotero item
+         * @returns File object or null
+         */
+        getItemCacheFile(item: any): { path: string } | null;
+
+        /**
+         * Check if an item can be indexed for full text
+         * @param item Zotero item
+         * @returns boolean indicating if the item can be indexed
+         */
+        canIndex(item: any): boolean;
+
+        /**
+         * Check if an item is fully indexed
+         * @param item Zotero item
+         * @returns Promise<boolean> indicating if the item is fully indexed
+         */
+        isFullyIndexed(item: any): Promise<boolean>;
     }
 }
 
