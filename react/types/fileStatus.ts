@@ -12,7 +12,16 @@ export interface FileStatus {
     upload_failed: number;
     upload_skipped: number;
 
-    // Markdown processing status
+    // Basic processing status (text)
+    text_unavailable: number;
+    text_balance_insufficient: number;
+    text_queued: number;
+    text_processing: number;
+    text_embedded: number;
+    text_failed: number;
+    text_skipped: number;
+
+    // Standard processing status (markdown)
     md_unavailable: number;
     md_balance_insufficient: number;
     md_queued: number;
@@ -21,7 +30,7 @@ export interface FileStatus {
     md_failed: number;
     md_skipped: number;
 
-    // Docling processing status
+    // Advanced processing status (docling)
     docling_unavailable: number;
     docling_balance_insufficient: number;
     docling_queued: number;
