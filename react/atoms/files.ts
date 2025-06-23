@@ -71,25 +71,44 @@ export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, nu
 export const fileStatusStatsAtom = atom<FileStatusStats>(
     (get) => {
         const planFeatures = get(planFeaturesAtom);
-        const useAdvancedPipeline = planFeatures.advancedProcessing;
-
         const fileStatus = get(fileStatusAtom);
         
         // Total files
         const totalFiles = fileStatus?.total_files || 0;
-        const completedFiles = useAdvancedPipeline ? (fileStatus?.docling_embedded || 0) : (fileStatus?.md_embedded || 0);
-        
-        // Upload stats
+
+        // Upload status
         const uploadPendingCount = fileStatus?.upload_pending || 0;
         const uploadCompletedCount = fileStatus?.upload_completed || 0;
         const uploadFailedCount = fileStatus?.upload_failed || 0;
         const uploadSkippedCount = fileStatus?.upload_skipped || 0;
 
-        // Processing stats
-        const skippedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_skipped || 0 : fileStatus?.md_skipped || 0;
-        const failedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_failed || 0 : fileStatus?.md_failed || 0;
-        const activeProcessingCount = (useAdvancedPipeline ? fileStatus?.docling_processing || 0 : fileStatus?.md_processing || 0);
-        const queuedProcessingCount = useAdvancedPipeline ? fileStatus?.docling_queued || 0 : fileStatus?.md_queued || 0;
+        // Processing status based on plan features
+        let completedFiles = 0;
+        let skippedProcessingCount = 0;
+        let failedProcessingCount = 0;
+        let activeProcessingCount = 0;
+        let queuedProcessingCount = 0;
+
+        if(fileStatus && planFeatures.processingTier === 'basic') {
+            completedFiles = fileStatus.text_embedded;
+            skippedProcessingCount = fileStatus.text_skipped;
+            failedProcessingCount = fileStatus.text_failed;
+            activeProcessingCount = (fileStatus.text_processing);
+            queuedProcessingCount = fileStatus.text_queued;
+        } else if(fileStatus && planFeatures.processingTier === 'standard') {
+            completedFiles = fileStatus.md_embedded;
+            skippedProcessingCount = fileStatus.md_skipped;
+            failedProcessingCount = fileStatus.md_failed;
+            activeProcessingCount = (fileStatus.md_processing);
+            queuedProcessingCount = fileStatus.md_queued;
+        } else if(fileStatus && planFeatures.processingTier === 'advanced') {
+            completedFiles = fileStatus.docling_embedded;
+            skippedProcessingCount = fileStatus.docling_skipped;
+            failedProcessingCount = fileStatus.docling_failed;
+            activeProcessingCount = fileStatus.docling_processing;
+            queuedProcessingCount = fileStatus.docling_queued;
+        }
+
         const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles + skippedProcessingCount
         const processingProgress = totalProcessingCount > 0
             ? Math.min((completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100, 100)
@@ -99,7 +118,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const failedCount = uploadFailedCount + failedProcessingCount;
         const activeCount = uploadPendingCount + activeProcessingCount;
         
-        // Progress
+        // Overall Progress
         const progress = totalProcessingCount > 0
                 ? (completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100
                 : 0;
