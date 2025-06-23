@@ -80,15 +80,14 @@ export interface AttachmentStatusResponse {
 
     // Processing status
     upload_status?: UploadStatus;
+    text_status?: ProcessingStatus;
     md_status?: ProcessingStatus;
     docling_status?: ProcessingStatus;
 
     // error codes
+    text_error_code?: string
     md_error_code?: string
     docling_error_code?: string
-
-    // upload url
-    upload_url?: string;
 }
 
 /**
@@ -311,14 +310,14 @@ export class AttachmentsService extends ApiService {
     /**
      * Fetches attachments by processing status.
      * @param status The processing status to filter by
-     * @param pipeline The pipeline type ("basic" or "advanced", default: "basic")
+     * @param pipeline The pipeline type ("basic", "standard" or "advanced", default: "basic")
      * @param page Page number (1-based, default: 1)
      * @param pageSize Number of items per page (default: 50, max: 100)
      * @returns Promise with paginated list of attachments with the specified status
      */
     async getAttachmentsByStatus(
         status: ProcessingStatus,
-        pipeline: "basic" | "advanced" = "basic",
+        pipeline: "basic" | "standard" | "advanced" = "basic",
         page: number = 1,
         pageSize: number = 50
     ): Promise<AttachmentStatusPagedResponse> {
