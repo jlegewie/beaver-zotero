@@ -11,7 +11,6 @@ import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
-import { planSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
 import FileUploadStatus from "../status/FileUploadStatus";
@@ -28,7 +27,6 @@ const OnboardingPage: React.FC = () => {
     // Auth state
     const logout = useSetAtom(logoutAtom);
     const userId = useAtomValue(userIdAtom);
-    const planSupported = useAtomValue(planSupportedAtom);
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     
     // Onboarding state
@@ -223,21 +221,8 @@ const OnboardingPage: React.FC = () => {
                     </p>
                 </div>
 
-                {/* ------------- Plan not supported ------------- */}
-                {!planSupported && (
-                    <div className="display-flex flex-col gap-3">
-                        <div className="text-lg font-semibold mb-3">Plan not supported</div>
-                        <div className="text-base font-color-secondary">
-                            Your plan does not support the features required for Beaver. Please upgrade your plan to continue.
-                        </div>
-                        <div className="display-flex flex-row gap-3">
-                            <Button variant="outline" icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button>
-                        </div>
-                    </div>
-                )}
-
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
-                {planSupported && !hasAuthorizedAccess && (
+                {!hasAuthorizedAccess && (
                     <div className="display-flex flex-col gap-3">
                         <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
                         <div className="text-base font-color-secondary">
@@ -256,7 +241,7 @@ const OnboardingPage: React.FC = () => {
                 )}
 
                 {/* ------------- Step 2: Syncing Process ------------- */}
-                {planSupported && hasAuthorizedAccess && (
+                {hasAuthorizedAccess && (
                     <div className="display-flex flex-col gap-4">
                         {/* Syncing your library */}
                         <DatabaseSyncStatus />
@@ -273,16 +258,8 @@ const OnboardingPage: React.FC = () => {
 
             {/* Fixed button area */}
             <div className="p-4 border-top-quinary">
-                {/* Plan not supported buttons */}
-                {!planSupported && (
-                    <div className="display-flex flex-row items-center gap-3">
-                        <div className="flex-1" />
-                        <Button variant="solid" icon={LogoutIcon} onClick={logout}>Logout</Button>
-                    </div>
-                )}
-
                 {/* Library selection button */}
-                {planSupported && !hasAuthorizedAccess && (
+                {!hasAuthorizedAccess && (
                     <div className="display-flex flex-row">
                         <div className="flex-1" />
                         <Button
@@ -297,7 +274,7 @@ const OnboardingPage: React.FC = () => {
                 )}
 
                 {/* Syncing process button */}
-                {planSupported && hasAuthorizedAccess && (
+                {hasAuthorizedAccess && (
                     <div className="display-flex flex-row items-center gap-4">
 
                         {/* Footer message */}
