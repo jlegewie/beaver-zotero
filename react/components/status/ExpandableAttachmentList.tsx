@@ -45,10 +45,9 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
 
         setIsLoading(true);
         try {
-            const useAdvancedPipeline = planFeatures.advancedProcessing;
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
                 status,
-                useAdvancedPipeline ? "advanced" : "basic",
+                planFeatures.processingTier,
                 page + 1, // API is 1-based
                 ITEMS_PER_PAGE
             );
@@ -61,12 +60,18 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
                     fileHash = await zoteroItem.attachmentHash;
                     if (fileHash !== item.file_hash) enableRetry = true;
                 }
+                let errorCode = item.text_error_code;
+                if(planFeatures.processingTier === 'standard') {
+                    errorCode = item.md_error_code;
+                } else if(planFeatures.processingTier === 'advanced') {
+                    errorCode = item.docling_error_code;
+                }
 
                 return {
                     file_hash: item.file_hash || '',
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
-                    errorCode: useAdvancedPipeline ? item.docling_error_code : item.md_error_code,
+                    errorCode: errorCode,
                     buttonText: enableRetry && fileHash ? 'Retry' : undefined,
                     buttonAction: enableRetry && fileHash ? () => {
                         attachmentsService.updateFile(item.library_id, item.zotero_key, fileHash);
@@ -85,7 +90,7 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
         } finally {
             setIsLoading(false);
         }
-    }, [userId, planFeatures.advancedProcessing, status]);
+    }, [userId, planFeatures.processingTier, status]);
 
     useEffect(() => {
         if (!userId || count === 0) {
