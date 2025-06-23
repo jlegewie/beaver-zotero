@@ -5,7 +5,6 @@ import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusStatsAtom } from "../../atoms/files";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
-import { userIdAtom, logoutAtom } from "../../atoms/auth";
 import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom } from '../../atoms/profile';
 import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
@@ -25,8 +24,6 @@ import { ZoteroLibrary } from "../../types/zotero";
 
 const OnboardingPage: React.FC = () => {
     // Auth state
-    const logout = useSetAtom(logoutAtom);
-    const userId = useAtomValue(userIdAtom);
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     
     // Onboarding state
