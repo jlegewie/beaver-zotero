@@ -14,8 +14,7 @@ import { logger } from "../../src/utils/logger";
  */
 export async function getAttachmentStatus(
     attachmentItem: Zotero.Item,
-    user_id: string,
-    includeUploadUrl: boolean = false
+    user_id: string
 ): Promise<AttachmentStatusResponse> {
 
     // 1. Get attachment status from Beaver DB
@@ -36,7 +35,7 @@ export async function getAttachmentStatus(
     // 2. If no status in Beaver DB, get status from backend
     if (!attachmentStatus) {
         logger(`getFileStatusForAttachmentInfo: Getting status from backend.`);
-        attachmentStatus = await attachmentsService.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key, includeUploadUrl);
+        attachmentStatus = await attachmentsService.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key);
 
         // 3. Save status to Beaver DB
         try {

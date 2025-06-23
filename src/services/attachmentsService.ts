@@ -151,8 +151,8 @@ export class AttachmentsService extends ApiService {
      * @param attachments An array of ZoteroItemReference objects.
      * @returns Promise with an array of attachment status responses.
      */
-    async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[], includeUploadUrl: boolean = false): Promise<AttachmentStatusResponse[]> {
-        const url = `/attachments/status/batch${includeUploadUrl ? '?include_upload_url=true' : ''}`;
+    async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[]): Promise<AttachmentStatusResponse[]> {
+        const url = `/attachments/status/batch`;
         return this.post<AttachmentStatusResponse[]>(url, attachments);
     }
 
@@ -162,8 +162,8 @@ export class AttachmentsService extends ApiService {
      * @param zoteroKey Zotero key of the attachment.
      * @returns Promise with the attachment status response.
      */
-    async getAttachmentStatus(libraryId: number, zoteroKey: string, includeUploadUrl: boolean = false): Promise<AttachmentStatusResponse> {
-        const url = `/attachments/status/${libraryId}/${zoteroKey}${includeUploadUrl ? '?include_upload_url=true' : ''}`;
+    async getAttachmentStatus(libraryId: number, zoteroKey: string): Promise<AttachmentStatusResponse> {
+        const url = `/attachments/status/${libraryId}/${zoteroKey}`;
         return this.get<AttachmentStatusResponse>(url);
     }
 
@@ -201,15 +201,6 @@ export class AttachmentsService extends ApiService {
             page_count: pageCount
         };
         return this.post<CompleteUploadResult>('/attachments/complete-upload', request);
-    }
-
-    /**
-     * Gets signed upload URLs for a list of file hashes.
-     * @param fileHashes Array of file hash strings
-     * @returns Promise with a dictionary mapping file hashes to their signed upload URLs
-     */
-    async getUploadUrls(fileHashes: string[]): Promise<Record<string, string>> {
-        return this.post<Record<string, string>>('/attachments/upload-urls', fileHashes);
     }
 
     /**
