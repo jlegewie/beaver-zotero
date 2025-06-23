@@ -33,8 +33,7 @@ export interface PlanFeatures {
 }
 
 export interface ProfileBalance {
-    basicPagesRemaining: number;
-    advancedPagesRemaining: number;
+    pagesRemaining: number;
     chatMessagesRemaining: number;
 }
 
