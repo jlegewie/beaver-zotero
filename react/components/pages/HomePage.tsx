@@ -8,7 +8,6 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom } from '../../atoms/threads';
 import { generateResponseAtom } from '../../atoms/generateMessages';
 import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/input";
-import { planFeaturesAtom } from "../../atoms/profile";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import FileUploadStatus from "../status/FileUploadStatus";
@@ -21,7 +20,6 @@ const HomePage: React.FC = () => {
     const currentSources = useAtomValue(currentSourcesAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
@@ -83,31 +81,29 @@ const HomePage: React.FC = () => {
                 ))}
                 </>
             )}
-            {planFeatures.fileProcessing && (
-                <>
-                <div className="display-flex flex-row justify-between items-center mt-4">
-                    <Button
-                        variant="ghost-secondary"
-                        onClick={() => setShowFileStatus(!showFileStatus)}
-                        rightIcon={showFileStatus ? ArrowDownIcon : ArrowRightIcon}
-                        iconClassName="mr-0 scale-14"
-                    >
-                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
-                            File Status
-                        </span>
-                    </Button>
-                    {!showFileStatus && (
-                        <FileStatusButton showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
-                    )}
-                </div>
-                
-                {showFileStatus && (
-                    <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                        <FileUploadStatus pollingInterval={3000} />
-                        <FileProcessingStatus connectionStatus={connectionStatus} />
-                    </div>
+            
+            {/* File Processing Status */}
+            <div className="display-flex flex-row justify-between items-center mt-4">
+                <Button
+                    variant="ghost-secondary"
+                    onClick={() => setShowFileStatus(!showFileStatus)}
+                    rightIcon={showFileStatus ? ArrowDownIcon : ArrowRightIcon}
+                    iconClassName="mr-0 scale-14"
+                >
+                    <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
+                        File Status
+                    </span>
+                </Button>
+                {!showFileStatus && (
+                    <FileStatusButton showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
                 )}
-                </>
+            </div>
+            
+            {showFileStatus && (
+                <div className="display-flex flex-col gap-4 min-w-0 w-full">
+                    <FileUploadStatus pollingInterval={3000} />
+                    <FileProcessingStatus connectionStatus={connectionStatus} />
+                </div>
             )}
         </div>
     );
