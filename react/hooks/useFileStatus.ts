@@ -82,8 +82,8 @@ export const useFileStatus = (): FileStatusConnection => {
     useEffect(() => {
         // --- Guard Clause ---
         // Only proceed if user is authenticated, user data exists, AND plan supports file processing
-        if (!isAuthenticated || !user || !planFeatures.fileProcessing || !hasAuthorizedAccess) {
-            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, Profile: ${planFeatures.fileProcessing}, HasAuthorizedAccess: ${hasAuthorizedAccess}`);
+        if (!isAuthenticated || !user || !hasAuthorizedAccess) {
+            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, HasAuthorizedAccess: ${hasAuthorizedAccess}`);
             setFileStatus(null); // Clear status if conditions not met
             resetConnectionState();
             
@@ -255,7 +255,7 @@ export const useFileStatus = (): FileStatusConnection => {
                 logger(`useFileStatus: Cleanup called, no active channel to remove for user ${userId}.`);
             }
         };
-    }, [isAuthenticated, user, planFeatures.fileProcessing, setFileStatus, hasAuthorizedAccess, resetConnectionState, clearRetryTimeout, getRetryDelay]);
+    }, [isAuthenticated, user, setFileStatus, hasAuthorizedAccess, resetConnectionState, clearRetryTimeout, getRetryDelay]);
 
     return {
         connectionStatus,
