@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ProfileWithPlan } from '../../react/types/profile';
+import { SafeProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { FullModelConfig } from '../../react/atoms/models';
@@ -19,7 +19,7 @@ interface ProfileRequest {
 }
 
 interface ProfileResponse {
-    profile: ProfileWithPlan
+    profile: SafeProfileWithPlan
     model_configs: FullModelConfig[]
 }
 

@@ -57,7 +57,7 @@ export enum ProcessingTier {
 /**
  * Profile interface representing user profile data (based on SafeProfileModel)
  */
-export interface ProfileModel {
+export interface SafeProfileModel {
     user_id: string;             // UUID
 
     // Library status
@@ -68,8 +68,6 @@ export interface ProfileModel {
     subscription_status: SubscriptionStatus;
     current_period_start?: Date;
     current_period_end?: Date;
-    stripe_customer_id: string | null;
-    stripe_subscription_id: string | null;
     
     // Authorization and onboarding status
     zotero_user_id: string | null;
@@ -96,8 +94,6 @@ export interface ProfileModel {
     usage_based_billing_cost: number;
 }
 
-export type SafeProfileModel = Omit<ProfileModel, 'stripe_customer_id' | 'stripe_subscription_id'>;
-
-export interface ProfileWithPlan extends SafeProfileModel {
+export interface SafeProfileWithPlan extends SafeProfileModel {
     plan: SafePlanModel;
 }

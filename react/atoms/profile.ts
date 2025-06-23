@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { ProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
+import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 
 // Onboarding state
 export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
@@ -17,7 +17,7 @@ export const hasCompletedInitialSyncAtom = atom<boolean>(false);
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
-export const profileWithPlanAtom = atom<ProfileWithPlan | null>(null);
+export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
 export const planIdAtom = atom<string>((get) => {
     const profile = get(profileWithPlanAtom);
