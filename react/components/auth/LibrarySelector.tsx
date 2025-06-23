@@ -112,18 +112,10 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     const handleCheckboxClick = (e: React.MouseEvent) => {
         e.stopPropagation();
     };
-
-    // Calculate processing page balance
-    const pageBalance = planFeatures.advancedProcessing
-        ? profileBalance.advancedPagesRemaining
-        : profileBalance.basicPagesRemaining;
     
     // Check if selected libraries exceed the page balance
-    const exceedsBalance = selectedLibraryTotals.pageCount > pageBalance;
+    const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
     
-    // Get processing type label
-    const processingType = planFeatures.advancedProcessing ? "Advanced" : "Basic";
-
     return (
         <div className="display-flex flex-col gap-3 mb-6">
             {/* <div className="text-lg font-semibold">Step 1: Select Libraries</div> */}
@@ -195,11 +187,12 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 Loading library statistics may take a few minutes...
             </div>
             
-            {/* Summary information with page balance */}
+            {/* Processing tiers */}
             <div className="mt-4 display-flex flex-col gap-3">
-                {/* Basic Processing - Show when user has basic plan */}
-                {!planFeatures.advancedProcessing && (
-                    <div className={`p-3 rounded-md bg-senary ${!planFeatures.advancedProcessing ? "border-popup" : ''}`}>
+
+                {/* Basic Processing */}
+                {planFeatures.processingTier === 'basic' && (
+                    <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'basic' ? "border-popup" : ''}`}>
                         <div className="display-flex flex-row justify-between items-center mb-1">
                             <span className="font-medium">Basic Processing</span>
                             {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
@@ -208,14 +201,40 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                         </div>
                         <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
                             {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
-                            <span>Balance: {pageBalance.toLocaleString()} pages</span>
+                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Standard Processing */}
+                {planFeatures.processingTier === 'standard' && (
+                    <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'standard' ? "border-popup" : ''}`}>
+                        <div className="display-flex flex-row justify-between items-center mb-1">
+                            <span className="font-medium">Standard Processing</span>
+                            {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
+                                {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
+                            </span>}
+                        </div>
+                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                            {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
+                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                        </div>
+                    </div>
+                )}
+                {planFeatures.processingTier === 'basic' && (
+                    <div className="p-3 rounded-md bg-senary">
+                        <div className="display-flex flex-row justify-between items-center mb-1">
+                            <span className="font-medium">Standard Processing</span>
+                            <Button variant="surface">Upgrade</Button>
+                        </div>
+                        <div className="text-sm font-color-secondary">
+                            Upgrade to enable standard document processing
                         </div>
                     </div>
                 )}
 
                 {/* Advanced Processing */}
-                {planFeatures.advancedProcessing ? (
-                    /* When user has advanced plan, show advanced processing with balance */
+                {planFeatures.processingTier === 'advanced' && (
                     <div className="p-3 rounded-md bg-senary border-popup">
                         <div className="display-flex flex-row justify-between items-center mb-1">
                             <span className="font-medium">Advanced Processing</span>
@@ -225,10 +244,11 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                         </div>
                         <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
                             {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>} 
-                            <span>Balance: {profileBalance.advancedPagesRemaining.toLocaleString()} pages</span>
+                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
                         </div>
                     </div>
-                ) : (
+                )}
+                {planFeatures.processingTier !== 'advanced' && (
                     /* When user has basic plan, show advanced processing with upgrade button */
                     <div className="p-3 rounded-md bg-senary">
                         <div className="display-flex flex-row justify-between items-center mb-1">
