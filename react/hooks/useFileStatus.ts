@@ -6,7 +6,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { planFeaturesAtom, hasAuthorizedAccessAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom } from '../atoms/profile';
 
 export interface FileStatusConnection {
     connectionStatus: 'idle' | 'connecting' | 'connected' | 'disconnected' | 'retrying' | 'failed';
@@ -23,7 +23,6 @@ export const useFileStatus = (): FileStatusConnection => {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const user = useAtomValue(userAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     
     // Connection status state
     const [connectionStatus, setConnectionStatus] = useState<FileStatusConnection['connectionStatus']>('idle');
