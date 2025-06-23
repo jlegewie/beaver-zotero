@@ -34,7 +34,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
-        processing: profile?.plan.processing_tier || 'basic',
+        processingTier: profile?.plan.processing_tier || 'basic',
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
     } as PlanFeatures;
 });

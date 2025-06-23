@@ -28,7 +28,7 @@ interface SafePlanModel {
 export interface PlanFeatures {
     databaseSync: boolean;
     uploadFiles: boolean;
-    processing: ProcessingTier;
+    processingTier: ProcessingTier;
     maxUserAttachments: number;
 }
 
