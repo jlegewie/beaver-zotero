@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Spinner, ArrowRightIcon, RepeatIcon, LogoutIcon, UserIcon } from "../icons/icons";
+import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusStatsAtom } from "../../atoms/files";
