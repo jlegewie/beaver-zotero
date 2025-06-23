@@ -10,37 +10,25 @@ interface SafePlanModel {
     active: boolean;
     // Grants
     monthly_chat_credits: number;
-    initial_basic_page_grant: number;
-    monthly_basic_page_grant: number;
-    initial_advanced_page_grant: number;
-    monthly_advanced_page_grant: number;
+    initial_page_grant: number;
+    monthly_page_grant: number;
     // Features
     sync_database: boolean;
     upload_files: boolean;
-    upload_content: boolean;
-    basic_document_processing: boolean;
-    advanced_document_processing: boolean;
-    allows_byok: boolean;
-    rag_search: boolean;
-    agent_models: boolean;
+    processing_tier: ProcessingTier;
     mcp_server: boolean;
+
     // Limits
     max_file_size_mb: number;
     max_page_count: number;
     max_storage_gb: number;
-    max_items_sync: number;
     max_user_attachments: number;
 }
 
 export interface PlanFeatures {
     databaseSync: boolean;
     uploadFiles: boolean;
-    basicProcessing: boolean;
-    advancedProcessing: boolean;
-    fileProcessing: boolean;
-    ragSearch: boolean;
-    agentModels: boolean;
-    byok: boolean;
+    processing: ProcessingTier;
     maxUserAttachments: number;
 }
 
@@ -61,11 +49,20 @@ export enum SubscriptionStatus {
     NONE = "none"                // No subscription
 }
 
+export enum ProcessingTier {
+    BASIC = "basic",
+    STANDARD = "standard",
+    ADVANCED = "advanced"
+}
+
 /**
  * Profile interface representing user profile data (based on SafeProfileModel)
  */
 export interface ProfileModel {
     user_id: string;             // UUID
+
+    // Library status
+    library_status: ProcessingTier;
     
     // Subscription
     current_plan_id: string;     // UUID
@@ -85,11 +82,13 @@ export interface ProfileModel {
     
     // Balances
     basic_page_balance: number;
+    standard_page_balance: number;
     advanced_page_balance: number;
     purchased_basic_page_balance: number;
+    purchased_standard_page_balance: number;
     purchased_advanced_page_balance: number;
 
-    // Subscription credits
+    // Chat credits
     chat_credits_used: number;
 
     // Usage-based billing settings

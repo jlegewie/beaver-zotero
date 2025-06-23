@@ -1,6 +1,5 @@
 import { atom } from "jotai";
 import { ProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
-import { accountService } from "../../src/services/accountService";
 
 // Onboarding state
 export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
@@ -35,25 +34,16 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
-        basicProcessing: profile?.plan.basic_document_processing || false,
-        advancedProcessing: profile?.plan.advanced_document_processing || false,
-        fileProcessing: profile?.plan.basic_document_processing || profile?.plan.advanced_document_processing || false,
-        ragSearch: profile?.plan.rag_search || false,
-        agentModels: profile?.plan.agent_models || false,
-        byok: profile?.plan.allows_byok || false,
+        processing: profile?.plan.processing_tier || 'basic',
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
     } as PlanFeatures;
-});
-
-export const planSupportedAtom = atom<boolean>((get) => {
-    const planFeatures = get(planFeaturesAtom);
-    return planFeatures.databaseSync && planFeatures.uploadFiles && planFeatures.fileProcessing;
 });
 
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     const profile = get(profileWithPlanAtom);
     return {
         basicPagesRemaining: profile?.basic_page_balance || 0,
+        standardPagesRemaining: profile?.standard_page_balance || 0,
         advancedPagesRemaining: profile?.advanced_page_balance || 0,
         chatMessagesRemaining: profile?.plan.monthly_chat_credits && profile?.chat_credits_used
             ? profile.plan.monthly_chat_credits - profile.chat_credits_used
