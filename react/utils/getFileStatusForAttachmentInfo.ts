@@ -26,17 +26,6 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         if (!user) {
             return { text: 'Not logged in', showButton: false };
         }
-
-        // 0. Check if user has a subscription
-        if (!store.get(planFeaturesAtom).fileProcessing) {
-            return {
-                text: 'Processing not available',
-                showButton: true,
-                buttonIcon: 'chrome://beaver/content/icons/info.svg',
-                buttonTooltip: `File processing is only available for users without a subscription.`,
-                buttonDisabled: true
-            };
-        }
         
         // 1. Is file valid
         if (attachmentItem.libraryID !== 1) {
@@ -70,8 +59,15 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
 
         // Processing status of file
         const planFeatures = store.get(planFeaturesAtom);
-        const fileStatus = planFeatures.advancedProcessing ? attachmentStatus.docling_status : attachmentStatus.md_status;
-        const errorCode = planFeatures.advancedProcessing ? attachmentStatus.docling_error_code : attachmentStatus.md_error_code;
+        let fileStatus = attachmentStatus.text_status;
+        let errorCode = attachmentStatus.text_error_code;
+        if(planFeatures.processingTier === 'standard') {
+            fileStatus = attachmentStatus.md_status;
+            errorCode = attachmentStatus.md_error_code;
+        } else if(planFeatures.processingTier === 'advanced') {
+            fileStatus = attachmentStatus.docling_status;
+            errorCode = attachmentStatus.docling_error_code;
+        }
         if (!fileStatus) {
             return { text: 'Unknown status', showButton: false };
         }
