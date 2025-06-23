@@ -41,12 +41,22 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
 
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     const profile = get(profileWithPlanAtom);
+
+    // Page balance based on processing tier
+    let pagesRemaining = 0;
+    if (profile && profile.plan.processing_tier === 'basic') {
+        pagesRemaining = profile.basic_page_balance + profile.purchased_basic_page_balance;
+    } else if (profile && profile.plan.processing_tier === 'standard') {
+        pagesRemaining = profile.standard_page_balance + profile.purchased_standard_page_balance;
+    } else if (profile && profile.plan.processing_tier === 'advanced') {
+        pagesRemaining = profile.advanced_page_balance + profile.purchased_advanced_page_balance;
+    }
+
+    // Chat credits remaining
+    const chatMessagesRemaining = profile ? (profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
+
     return {
-        basicPagesRemaining: profile?.basic_page_balance || 0,
-        standardPagesRemaining: profile?.standard_page_balance || 0,
-        advancedPagesRemaining: profile?.advanced_page_balance || 0,
-        chatMessagesRemaining: profile?.plan.monthly_chat_credits && profile?.chat_credits_used
-            ? profile.plan.monthly_chat_credits - profile.chat_credits_used
-            : 0
+        pagesRemaining: pagesRemaining,
+        chatMessagesRemaining: chatMessagesRemaining
     } as ProfileBalance;
 });
