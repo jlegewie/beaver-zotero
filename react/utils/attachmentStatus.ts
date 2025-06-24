@@ -1,5 +1,7 @@
+import { planFeaturesAtom } from "../atoms/profile";
 import { attachmentsService, AttachmentStatusResponse } from "../../src/services/attachmentsService";
 import { logger } from "../../src/utils/logger";
+import { store } from "../index";
 
 /**
  * Fetches the attachment status for a given attachment item and user ID.
@@ -22,8 +24,23 @@ export async function getAttachmentStatus(
     let attachmentStatus: AttachmentStatusResponse | null = null;
     if (attachmentsDB && attachmentsDB.length > 0) {
         logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
+        const processingTier = store.get(planFeaturesAtom).processingTier;
         const attachmentDB = attachmentsDB[0];
-        if (attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'embedded') {
+        if (processingTier == "basic" && attachmentDB.file_hash && attachmentDB.text_status && attachmentDB.text_status === 'embedded') {
+            logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
+            attachmentStatus = {
+                attachment_id: attachmentDB.id,
+                ...attachmentDB
+            } as AttachmentStatusResponse;
+        }
+        if (processingTier == "standard" && attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'embedded') {
+            logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
+            attachmentStatus = {
+                attachment_id: attachmentDB.id,
+                ...attachmentDB
+            } as AttachmentStatusResponse;
+        }
+        if (processingTier == "advanced" && attachmentDB.file_hash && attachmentDB.docling_status && attachmentDB.docling_status === 'embedded') {
             logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
             attachmentStatus = {
                 attachment_id: attachmentDB.id,
@@ -46,8 +63,10 @@ export async function getAttachmentStatus(
                 {
                     file_hash: attachmentStatus.file_hash,
                     upload_status: attachmentStatus.upload_status,
+                    text_status: attachmentStatus.text_status,
                     md_status: attachmentStatus.md_status,
                     docling_status: attachmentStatus.docling_status,
+                    text_error_code: attachmentStatus.text_error_code,
                     md_error_code: attachmentStatus.md_error_code,
                     docling_error_code: attachmentStatus.docling_error_code
                 }
