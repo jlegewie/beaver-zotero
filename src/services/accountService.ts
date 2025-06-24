@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { SafeProfileWithPlan } from '../../react/types/profile';
+import { SafeProfileWithPlan, ProcessingTier } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { FullModelConfig } from '../../react/atoms/models';
@@ -23,6 +23,9 @@ interface ProfileResponse {
     model_configs: FullModelConfig[]
 }
 
+interface OnboardingRequest {
+    processing_tier: ProcessingTier;
+}
 
 /**
  * Account-specific API service that extends the base API service
@@ -105,10 +108,13 @@ export class AccountService extends ApiService {
 
     /**
      * Sets the user's onboarding status to completed
+     * @param processingTier The processing tier to set for the user
      * @returns Promise with the response message
      */
-    async completeOnboarding(): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/account/complete-onboarding', {});
+    async completeOnboarding(processingTier: ProcessingTier): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/account/complete-onboarding', {
+            processing_tier: processingTier
+        } as OnboardingRequest);
     }
 }
 
