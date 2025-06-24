@@ -69,7 +69,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                             File Processing
                         </div>
                         <div className="flex-1"/>
-                        {connectionStatus !== 'connected' && fileStats && (
+                        {connectionStatus === 'connected' && fileStats && (
                             <div className="font-color-tertiary text-base">
                                 {fileStats.totalProcessingCount.toLocaleString()} Files
                             </div>
