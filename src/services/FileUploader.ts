@@ -417,8 +417,10 @@ export const resetFailedUploads = async (): Promise<void> => {
             for (const result of results) {
                 await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
                     upload_status: result.upload_status ?? null,
+                    text_status: result.text_status ?? null,
                     md_status: result.md_status ?? null,
                     docling_status: result.docling_status ?? null,
+                    text_error_code: result.text_error_code ?? null,
                     md_error_code: result.md_error_code ?? null,
                     docling_error_code: result.docling_error_code ?? null,
                 });
