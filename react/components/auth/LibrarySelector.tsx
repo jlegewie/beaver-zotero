@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, Spinner, CSSIcon } from "../icons/icons";
+import { Icon, AlertIcon, Spinner, CSSIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
 import { planFeaturesAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue } from "jotai";
@@ -263,6 +263,15 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {exceedsBalance && (
+                <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
+                    <Icon icon={AlertIcon} className="scale-12 mt-1"/>
+                    <div className="display-flex flex-col gap-2">
+                        Page limit exceeded. Some documents won't be searchable.
+                    </div>
                 </div>
             )}
             
