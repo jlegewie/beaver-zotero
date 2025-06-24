@@ -226,14 +226,40 @@ export class BeaverDB {
             );
         `);
 
+        // DB indexes
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_messages_thread_id 
+            CREATE INDEX IF NOT EXISTS idx_messages_thread_id
             ON messages(thread_id);
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_threads_updated 
+            CREATE INDEX IF NOT EXISTS idx_threads_updated
             ON threads(updated_at DESC);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachments_user_status
+            ON attachments(user_id, upload_status);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachments_user_hash
+            ON attachments(user_id, file_hash);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachments_user_processing_status
+            ON attachments(user_id, text_status, md_status, docling_status);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_upload_queue_read
+            ON upload_queue(user_id, attempt_count, queue_visibility);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_messages_thread_created
+            ON messages(thread_id, created_at);
         `);
     }
 
