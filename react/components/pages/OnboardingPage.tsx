@@ -20,11 +20,13 @@ import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroIdentifier";
 import { ZoteroLibrary } from "../../types/zotero";
+import { userAtom } from "../../atoms/auth";
 
 
 const OnboardingPage: React.FC = () => {
     // Auth state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const user = useAtomValue(userAtom);
     
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
@@ -134,7 +136,7 @@ const OnboardingPage: React.FC = () => {
             
             await accountService.authorizeAccess(requireOnboarding, libraries);
 
-            // Update profile atoms for immediate UI feedback
+            // Update profile atoms
             if (profileWithPlan) {
                 const { userID, localUserKey } = getZoteroUserIdentifier();
                 setProfileWithPlan({
@@ -146,6 +148,10 @@ const OnboardingPage: React.FC = () => {
                     has_completed_onboarding: !requireOnboarding || profileWithPlan.has_completed_onboarding
                 });
             }
+
+            // Update user ID and email in prefs
+            setPref("userId", user?.id ?? "");
+            setPref("userEmail", user?.email ?? "");
             
         } catch (error) {
             logger(`OnboardingPage: Error authorizing access: ${error}`);

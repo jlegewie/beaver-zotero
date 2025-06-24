@@ -79,8 +79,6 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                 setErrorMsg(error.message)
                 setIsLoading(false)
             } else {
-                setPref("userId", data.user.id);
-                setPref("userEmail", data.user.email ?? "");
                 
                 // Wait for useProfileSync to fetch the profile
                 setIsWaitingForProfile(true);
