@@ -205,7 +205,7 @@ const OnboardingPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1">
                 {/* Top spacing */}
-                <div style={{ height: '5vh' }}></div>
+                {/* <div style={{ height: '5vh' }}></div> */}
 
                 {/* Header section - always shown */}
                 <div className="display-flex flex-col items-start mb-3">
