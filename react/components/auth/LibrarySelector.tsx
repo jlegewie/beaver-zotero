@@ -183,84 +183,88 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 })}
             </div>
 
-            <div className="font-color-tertiary text-sm">
-                Loading library statistics may take a few minutes...
-            </div>
+            {isLoading && (
+                <div className="font-color-tertiary text-sm">
+                    Loading library statistics may take a few minutes...
+                </div>
+            )}
             
             {/* Processing tiers */}
-            <div className="mt-4 display-flex flex-col gap-3">
+            {!isLoading && (
+                <div className="mt-4 display-flex flex-col gap-3">
 
-                {/* Basic Processing */}
-                {planFeatures.processingTier === 'basic' && (
-                    <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'basic' ? "border-popup" : ''}`}>
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <span className="font-medium">Basic Processing</span>
-                            {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                            </span>}
+                    {/* Basic Processing */}
+                    {planFeatures.processingTier === 'basic' && (
+                        <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'basic' ? "border-popup" : ''}`}>
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <span className="font-medium">Basic Processing</span>
+                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
+                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
+                                </span>}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
+                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                            </div>
                         </div>
-                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                            {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
-                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
-                        </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Standard Processing */}
-                {planFeatures.processingTier === 'standard' && (
-                    <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'standard' ? "border-popup" : ''}`}>
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <span className="font-medium">Standard Processing</span>
-                            {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                            </span>}
+                    {/* Standard Processing */}
+                    {planFeatures.processingTier === 'standard' && (
+                        <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'standard' ? "border-popup" : ''}`}>
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <span className="font-medium">Standard Processing</span>
+                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
+                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
+                                </span>}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
+                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                            </div>
                         </div>
-                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                            {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
-                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                    )}
+                    {planFeatures.processingTier === 'basic' && (
+                        <div className="p-3 rounded-md bg-senary">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <span className="font-medium">Standard Processing</span>
+                                <Button variant="surface">Upgrade</Button>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Upgrade to enable standard document processing
+                            </div>
                         </div>
-                    </div>
-                )}
-                {planFeatures.processingTier === 'basic' && (
-                    <div className="p-3 rounded-md bg-senary">
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <span className="font-medium">Standard Processing</span>
-                            <Button variant="surface">Upgrade</Button>
-                        </div>
-                        <div className="text-sm font-color-secondary">
-                            Upgrade to enable standard document processing
-                        </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Advanced Processing */}
-                {planFeatures.processingTier === 'advanced' && (
-                    <div className="p-3 rounded-md bg-senary border-popup">
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <span className="font-medium">Advanced Processing</span>
-                            {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                            </span>}
+                    {/* Advanced Processing */}
+                    {planFeatures.processingTier === 'advanced' && (
+                        <div className="p-3 rounded-md bg-senary border-popup">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <span className="font-medium">Advanced Processing</span>
+                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
+                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
+                                </span>}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>} 
+                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                            </div>
                         </div>
-                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                            {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>} 
-                            <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
+                    )}
+                    {planFeatures.processingTier !== 'advanced' && (
+                        /* When user has basic plan, show advanced processing with upgrade button */
+                        <div className="p-3 rounded-md bg-senary">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <span className="font-medium">Advanced Processing</span>
+                                <Button variant="surface">Upgrade</Button>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Upgrade to enable advanced document processing
+                            </div>
                         </div>
-                    </div>
-                )}
-                {planFeatures.processingTier !== 'advanced' && (
-                    /* When user has basic plan, show advanced processing with upgrade button */
-                    <div className="p-3 rounded-md bg-senary">
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <span className="font-medium">Advanced Processing</span>
-                            <Button variant="surface">Upgrade</Button>
-                        </div>
-                        <div className="text-sm font-color-secondary">
-                            Upgrade to enable advanced document processing
-                        </div>
-                    </div>
-                )}
-            </div>
+                    )}
+                </div>
+            )}
             
 
             {/* Totals for selected libraries */}
