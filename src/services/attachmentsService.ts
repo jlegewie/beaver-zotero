@@ -378,57 +378,6 @@ export class AttachmentsService extends ApiService {
         // Return the result
         return result;
     }
-
-    /**
-     * Uploads text content as a compressed file to the backend
-     * @param textContent The text content to upload
-     * @param fileHash The hash of the file
-     * @param lastModifiedAt The last modified date of the file
-     * @returns Promise with the upload response
-     */
-    async uploadFileContent(textContent: string, fileHash: string, lastModifiedAt: Date | null): Promise<UploadResponse> {
-        try {
-            // Step 1: Compress the content using pako
-            const textEncoder = new TextEncoder();
-            const textBytes = textEncoder.encode(textContent);
-            const compressedBytes = pako.gzip(textBytes); // This is a Uint8Array
-
-            // Step 2: Create form data
-            const formData = new FormData();
-
-            // Create a blob from compressed bytes
-            const compressedBlob = new Blob([compressedBytes], { 
-                type: 'application/gzip' 
-            });
-
-            // Add compressed file to form data
-            formData.append('file', compressedBlob, `${fileHash}.gz`);
-            formData.append('file_hash', fileHash);
-            formData.append('last_modified_at', lastModifiedAt?.toISOString() || '');
-            formData.append('is_compressed', 'true');
-
-            // Step 3: Get auth headers (but exclude Content-Type for FormData)
-            const authHeaders = await this.getAuthHeaders();
-            const { 'Content-Type': _, ...headersWithoutContentType } = authHeaders;
-
-            // Step 4: Upload to backend
-            const response = await fetch(`${this.baseUrl}/attachments/upload-file-content`, {
-                method: 'POST',
-                headers: headersWithoutContentType,
-                body: formData,
-            });
-
-            if (!response.ok) {
-                throw new Error(`Upload failed with status ${response.status}`);
-            }
-
-            return response.json() as unknown as Promise<UploadResponse>;
-
-        } catch (error: any) {
-            logger(`Beaver Attachments Service: Error uploading file content for hash ${fileHash}: ${error.message}`, 1);
-            throw error;
-        }
-    }
 }
 
 // Export attachmentsService instance
