@@ -1370,9 +1370,9 @@ export class BeaverDB {
     }
 
     /**
-     * Get all attachments by MD status for a user
+     * Get all attachments by text status for a user
      * @param user_id User ID
-     * @param status MD status to filter by
+     * @param status text status to filter by
      * @returns Array of AttachmentRecord objects
      */
     public async getAttachmentsByTextStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
@@ -1385,9 +1385,9 @@ export class BeaverDB {
     }
 
     /**
-     * Get a paginated list of attachments by MD status for a user.
+     * Get a paginated list of attachments by text status for a user.
      * @param user_id User ID
-     * @param status MD status to filter by
+     * @param status text status to filter by
      * @param limit Number of items per page
      * @param offset Number of items to skip
      * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
