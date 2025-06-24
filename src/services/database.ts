@@ -39,8 +39,10 @@ export interface AttachmentRecord {
     upload_status: UploadStatus | null;
     md_status: ProcessingStatus | null;
     docling_status: ProcessingStatus | null;
+    text_status: ProcessingStatus | null;
     md_error_code: string | null;
     docling_error_code: string | null;
+    text_error_code: string | null;
 }
 
 /* 
@@ -173,8 +175,10 @@ export class BeaverDB {
                 upload_status            TEXT,
                 md_status                TEXT,
                 docling_status           TEXT,
+                text_status              TEXT,
                 md_error_code            TEXT,
                 docling_error_code       TEXT,
+                text_error_code          TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
             );
         `);
@@ -315,14 +319,16 @@ export class BeaverDB {
             upload_status: null,
             md_status: null,
             docling_status: null,
+            text_status: null,
             md_error_code: null,
             docling_error_code: null,
+            text_error_code: null,
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, md_error_code, docling_error_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, text_status, md_error_code, docling_error_code, text_error_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -334,8 +340,10 @@ export class BeaverDB {
                 finalAttachment.upload_status,
                 finalAttachment.md_status,
                 finalAttachment.docling_status,
+                finalAttachment.text_status,
                 finalAttachment.md_error_code,
-                finalAttachment.docling_error_code
+                finalAttachment.docling_error_code,
+                finalAttachment.text_error_code
             ]
         );
         return id;
@@ -413,8 +421,10 @@ export class BeaverDB {
             'upload_status',
             'md_status',
             'docling_status',
+            'text_status',
             'md_error_code',
-            'docling_error_code'
+            'docling_error_code',
+            'text_error_code'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
@@ -564,8 +574,10 @@ export class BeaverDB {
             upload_status: row.upload_status as UploadStatus,
             md_status: row.md_status as ProcessingStatus,
             docling_status: row.docling_status as ProcessingStatus,
+            text_status: row.text_status as ProcessingStatus,
             md_error_code: row.md_error_code,
             docling_error_code: row.docling_error_code,
+            text_error_code: row.text_error_code,
         };
     }
 
@@ -635,8 +647,10 @@ export class BeaverDB {
             upload_status: 'pending',
             md_status: 'unavailable',
             docling_status: 'unavailable',
+            text_status: 'unavailable',
             md_error_code: null,
             docling_error_code: null,
+            text_error_code: null,
         };
 
         const finalIds: string[] = [];
@@ -681,7 +695,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'can_upload', 'upload_status', 'md_status', 'docling_status', 'md_error_code', 'docling_error_code'
+                    'file_hash', 'can_upload', 'upload_status', 'md_status', 'docling_status', 'text_status', 'md_error_code', 'docling_error_code', 'text_error_code'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -712,7 +726,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -726,11 +740,13 @@ export class BeaverDB {
                         attachment.upload_status,
                         attachment.md_status,
                         attachment.docling_status,
+                        attachment.text_status,
                         attachment.md_error_code,
-                        attachment.docling_error_code
+                        attachment.docling_error_code,
+                        attachment.text_error_code
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, md_error_code, docling_error_code) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, text_status, md_error_code, docling_error_code, text_error_code) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
@@ -1338,6 +1354,53 @@ export class BeaverDB {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments 
              WHERE user_id = ? AND upload_status = ?
+             ORDER BY library_id, zotero_key
+             LIMIT ? OFFSET ?`,
+            [user_id, status, limit + 1, offset]
+        );
+
+        const attachments = rows
+            .slice(0, limit)
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+        
+        return {
+            attachments,
+            has_more: rows.length > limit,
+        };
+    }
+
+    /**
+     * Get all attachments by MD status for a user
+     * @param user_id User ID
+     * @param status MD status to filter by
+     * @returns Array of AttachmentRecord objects
+     */
+    public async getAttachmentsByTextStatus(user_id: string, status: ProcessingStatus): Promise<AttachmentRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments WHERE user_id = ? AND text_status = ?
+             ORDER BY library_id, zotero_key`,
+            [user_id, status]
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Get a paginated list of attachments by MD status for a user.
+     * @param user_id User ID
+     * @param status MD status to filter by
+     * @param limit Number of items per page
+     * @param offset Number of items to skip
+     * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
+     */
+    public async getAttachmentsByTextStatusPaginated(
+        user_id: string,
+        status: ProcessingStatus,
+        limit: number,
+        offset: number
+    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachments 
+             WHERE user_id = ? AND text_status = ?
              ORDER BY library_id, zotero_key
              LIMIT ? OFFSET ?`,
             [user_id, status, limit + 1, offset]
