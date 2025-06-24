@@ -231,7 +231,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                 <Button variant="surface">Upgrade</Button>
                             </div>
                             <div className="text-sm font-color-secondary">
-                                Upgrade to enable standard document processing
+                                Better search with semantic document understanding
                             </div>
                         </div>
                     )}
@@ -259,7 +259,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                 <Button variant="surface">Upgrade</Button>
                             </div>
                             <div className="text-sm font-color-secondary">
-                                Upgrade to enable advanced document processing
+                                Best search with state-of-the-art document processing
                             </div>
                         </div>
                     )}
