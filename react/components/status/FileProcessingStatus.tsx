@@ -32,9 +32,11 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
         const textParts: string[] = [];
         if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
         if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} processing`);
+
+        const numFilesToProcess = fileStats.totalProcessingCount - fileStats.failedProcessingCount - fileStats.skippedProcessingCount;
         
-        if (textParts.length === 0 && fileStats.totalProcessingCount > 0) return "Waiting to process...";
-        if (textParts.length === 0 && fileStats.totalProcessingCount === 0) return "No files to process.";
+        if (textParts.length === 0 && numFilesToProcess > 0) return `Waiting to process ${numFilesToProcess.toLocaleString()} files...`;
+        if (textParts.length === 0 && numFilesToProcess === 0) return "No files to process.";
 
         return textParts.join(", ");
     };
