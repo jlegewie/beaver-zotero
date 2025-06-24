@@ -91,6 +91,7 @@ const OnboardingPage: React.FC = () => {
     // Handle authorization
     const handleAuthorize = async () => {
         if (selectedLibraryIds.length === 0 || isAuthorizing) return;
+        if (!profileWithPlan) return;
         
         setIsAuthorizing(true);
         try {
@@ -134,7 +135,7 @@ const OnboardingPage: React.FC = () => {
                 })
                 .filter(library => library !== null);
             
-            await accountService.authorizeAccess(requireOnboarding, libraries);
+            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier);
 
             // Update profile atoms
             if (profileWithPlan) {
