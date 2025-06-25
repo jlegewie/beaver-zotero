@@ -381,9 +381,7 @@ const PreferencePage: React.FC = () => {
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
             <div className="text-sm font-color-secondary mb-3">
-                Providing your own API keys removes rate limits and allows you to select better models like Gemini 2.5 Pro, Claude 3.7 or Open AI 4o.
-                When enabled, Beaver will use your API keys to generate responses and use our own keys as a fallback.
-                Your keys are only stored locally and never on our server.
+                Add your own API key to use better models like Gemini 2.5 Pro, Claude 3.7 or Open AI 4o. Your keys are only stored locally and never on our server.
                 {' '}
                 <a
                     href="#"
