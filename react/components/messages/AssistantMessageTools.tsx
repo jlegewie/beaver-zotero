@@ -52,8 +52,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && numResults > 0) return ArrowRightIcon;
             if(toolCall.function.name === 'related_items_search') return SearchIcon;
-            if(toolCall.function.name === 'hybrid_search') return SearchIcon;
-            if(toolCall.function.name === 'search_zotero_library') return SearchIcon;
+            if(toolCall.function.name === 'tag_search') return SearchIcon;
             if(toolCall.function.name === 'search_references_by_topic') return SearchIcon;
             if(toolCall.function.name === 'get_fulltext_content') return numResults ? ViewIcon : AlertIcon;
             if(toolCall.function.name === 'search_metadata') return SearchIcon;

@@ -4,12 +4,12 @@ import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiT
 import { ProviderType } from '../../react/atoms/models';
 
 export interface ToolRequest {
-    function: "hybrid_search" | "related_items_search";
+    function: "rag_search";
     parameters: Record<string, any>;
 }
 
 export const search_tool_request: ToolRequest = {
-    function: "hybrid_search",
+    function: "rag_search",
     // function: "related_items_search",
     parameters: {}
 }
