@@ -117,7 +117,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
     
     return (
-        <div className="display-flex flex-col gap-3 mb-6 mt-2">
+        <div className="display-flex flex-col gap-3">
             {/* <div className="text-lg font-semibold">Step 1: Select Libraries</div> */}
 
             {/* <div className="text-base font-color-secondary">

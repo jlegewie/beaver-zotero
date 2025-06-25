@@ -225,9 +225,9 @@ const OnboardingPage: React.FC = () => {
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-col gap-3">
-                        <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
-                        <div className="text-base font-color-secondary -mt-2">
+                    <div className="display-flex flex-col gap-4">
+                        <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
+                        <div className="text-base font-color-secondary">
                             Select the libraries you want to sync with Beaver. By continuing, you link this Zotero account to your Beaver account and authorize 
                             Beaver to access your selected libraries, upload your PDFs, and index your files.
                         </div>
@@ -244,14 +244,18 @@ const OnboardingPage: React.FC = () => {
                 {/* ------------- Step 2: Syncing Process ------------- */}
                 {hasAuthorizedAccess && (
                     <div className="display-flex flex-col gap-4">
-                        {/* Syncing your library */}
-                        <DatabaseSyncStatus />
-                        
-                        {/* Uploading files */}
-                        <FileUploadStatus />
-                        
-                        {/* File Processing */}
-                        <FileProcessingStatus connectionStatus={connectionStatus} />
+                        <div className="text-lg font-semibold mb-3">Step 2: Syncing Process</div>
+
+                        <div className="display-flex flex-col gap-4">
+                            {/* Syncing your library */}
+                            <DatabaseSyncStatus />
+                            
+                            {/* Uploading files */}
+                            <FileUploadStatus />
+                            
+                            {/* File Processing */}
+                            <FileProcessingStatus connectionStatus={connectionStatus} />
+                        </div>
 
                     </div>
                 )}
