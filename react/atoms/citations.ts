@@ -20,7 +20,7 @@ export const updateAttachmentCitationsAtom = atom(
     null,
     async (get, set) => {
         const messages = get(threadMessagesAtom);
-        logger(`updateAttachmentCitationsAtom: Starting with ${messages.length} messages`);
+        logger(`updateAttachmentCitationsAtom: Updating citations for ${messages.length} messages`);
 
         // Extract all citation IDs from the message content
         const citationIds: string[] = [];
@@ -38,6 +38,13 @@ export const updateAttachmentCitationsAtom = atom(
         }
 
         logger(`updateAttachmentCitationsAtom: Found ${citationIds.length} citation IDs (${citationIds.join(', ')})`);
+
+        // If the citations haven't changed, don't update the attachment citations atom
+        const existingCitationIds = get(attachmentCitationsAtom).map(cit => `${cit.library_id}-${cit.zotero_key}`);
+        if (citationIds.every(id => existingCitationIds.includes(id))) {
+            logger(`updateAttachmentCitationsAtom: No changes to citations`);
+            return;
+        }
 
         // Get all items
         const items = await Promise.all(citationIds
