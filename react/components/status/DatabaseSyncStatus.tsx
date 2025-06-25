@@ -53,7 +53,7 @@ export const DatabaseSyncStatus: React.FC = () => {
             </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
                 <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                    <div className={`text-lg ${librarySyncProgress.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero database</div>
+                    <div className={`text-lg ${librarySyncProgress.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero Library</div>
                     <div className="flex-1"/>
                     {librarySyncProgress.anyFailed && (
                         <Tooltip content="Retry syncing" showArrow singleLine>
