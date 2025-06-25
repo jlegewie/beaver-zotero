@@ -218,11 +218,8 @@ const OnboardingPage: React.FC = () => {
                 {/* Header section - always shown */}
                 <div className="display-flex flex-col items-start mb-3">
                     <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
-                    <p className="text-base font-color-secondary -mt-2">
-                        {!hasAuthorizedAccess 
-                            ? "Let's set up your Beaver environment by connecting to your Zotero library."
-                            : "Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min."
-                        }
+                    <p className="text-base font-color-secondary -mt-1">
+                        Beaver syncs your library, uploads your PDFs, and indexes your files for search. This process typically takes 20–60 minutes.
                     </p>
                 </div>
 
@@ -230,10 +227,9 @@ const OnboardingPage: React.FC = () => {
                 {!hasAuthorizedAccess && (
                     <div className="display-flex flex-col gap-3">
                         <div className="text-lg font-semibold mb-3">Step 1: Authorize Library Access</div>
-                        <div className="text-base font-color-secondary">
+                        <div className="text-base font-color-secondary -mt-2">
                             Select the libraries you want to sync with Beaver. By continuing, you link this Zotero account to your Beaver account and authorize 
-                            Beaver to access your selected libraries, upload your PDFs, and index your files 
-                            for enhanced search capabilities.
+                            Beaver to access your selected libraries, upload your PDFs, and index your files.
                         </div>
                         
                         {/* Library Selector Component */}
