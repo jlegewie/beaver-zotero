@@ -41,11 +41,9 @@ export interface ProfileBalance {
  * Subscription status enum (based on SubscriptionStatus)
  */
 export enum SubscriptionStatus {
-    ACTIVE = "active",           // Paid subscription that's current
-    CANCELED = "canceled",       // User canceled but period not ended
-    PAST_DUE = "past_due",       // Payment failed but grace period
-    EXPIRED = "expired",         // Subscription period ended
-    NONE = "none"                // No subscription
+    FREE = "free",
+    ACTIVE = "active",
+    PAST_DUE = "past_due"
 }
 
 export enum ProcessingTier {
@@ -66,6 +64,7 @@ export interface SafeProfileModel {
     // Subscription
     current_plan_id: string;     // UUID
     subscription_status: SubscriptionStatus;
+    subscription_cancel_at_period_end: boolean;
     current_period_start?: Date;
     current_period_end?: Date;
     
