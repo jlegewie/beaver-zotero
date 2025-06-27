@@ -29,6 +29,34 @@ export const addPopupMessageAtom = atom(
     }
 );
 
+export type PopupMessageUpdates = Partial<Omit<PopupMessage, 'id'>>;
+
+/**
+ * Updates a popup message by its ID.
+ * @param messageId ID of the message to update.
+ * @param updates Partial message object with fields to update.
+ */
+export const updatePopupMessageAtom = atom(
+    null,
+    (
+        get,
+        set,
+        {
+            messageId,
+            updates,
+        }: {
+            messageId: string;
+            updates: PopupMessageUpdates;
+        },
+    ) => {
+        set(popupMessagesAtom, (prevMessages) =>
+            prevMessages.map((msg) =>
+                msg.id === messageId ? { ...msg, ...updates } : msg,
+            ),
+        );
+    },
+);
+
 export const addOrUpdateFailedUploadMessageAtom = atom(
     null,
     async (get, set, itemRef: ZoteroItemReference) => {
@@ -38,16 +66,11 @@ export const addOrUpdateFailedUploadMessageAtom = atom(
         
         // Update existing message
         if (existingMessage) {
-            set(popupMessagesAtom, (prevMessages) => {
-                return prevMessages.map((msg) => {
-                    if (msg.id == existingMessage.id) {
-                        return {
-                            ...msg,
-                            count: msg.count ? msg.count + 1 : 1
-                        };
-                    }
-                    return msg;
-                });
+            set(updatePopupMessageAtom, {
+                messageId: existingMessage.id,
+                updates: {
+                    count: (existingMessage.count || 0) + 1,
+                },
             });
         // Create new message
         } else {
