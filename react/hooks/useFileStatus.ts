@@ -32,6 +32,7 @@ let subscriberCount = 0;
 let channelRef: RealtimeChannel | null = null;
 let retryTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 let currentUserId: string | null = null;
+let isConnecting = false;
 
 const formatStatus = (statusData: any): FileStatus => ({
     ...statusData,
@@ -59,8 +60,9 @@ const getRetryDelay = (attempt: number): number => {
 };
 
 // These manager functions operate on the module-level state and Jotai atoms.
-const stopSubscription = async (setConnection: (update: FileStatusConnection) => void, setFileStatus: (update: FileStatus | null) => void) => {
+const stopSubscription = async (setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void, setFileStatus: (update: FileStatus | null) => void) => {
     logger(`useFileStatus Manager: Stopping subscription for user ${currentUserId}.`);
+    isConnecting = false;
     if (retryTimeoutRef) {
         clearTimeout(retryTimeoutRef);
         retryTimeoutRef = null;
@@ -77,7 +79,7 @@ const stopSubscription = async (setConnection: (update: FileStatusConnection) =>
 
 const startSubscription = async (
     userId: string,
-    setConnection: (update: FileStatusConnection) => void,
+    setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void,
     setFileStatus: (update: FileStatus | null) => void
 ) => {
     if (channelRef && currentUserId === userId) {
@@ -93,6 +95,12 @@ const startSubscription = async (
     let retryCount = 0;
 
     const setup = async (isRetry: boolean = false) => {
+        if (isConnecting) {
+            logger("useFileStatus Manager: Setup already in progress, skipping.");
+            return;
+        }
+        isConnecting = true;
+
         // Clean up any previous attempt before trying to establish a new one.
         // This is crucial for the retry logic, as retries call setup() directly.
         if (channelRef) {
@@ -142,12 +150,14 @@ const startSubscription = async (
                         logger(`useFileStatus Manager: Subscription successful for ${userId}.`);
                         retryCount = 0;
                         setConnection({ connectionStatus: 'connected', retryCount: 0, lastError: null });
+                        isConnecting = false; // Release lock on success
                     }
                 });
         } catch (err: any) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             logger(`useFileStatus Manager: Setup failed: ${errorMessage}`, 3);
             setConnection({ connectionStatus: 'disconnected', retryCount, lastError: errorMessage });
+            isConnecting = false; // Release lock on failure
             scheduleRetry();
         }
     };
@@ -156,6 +166,7 @@ const startSubscription = async (
         if (retryCount >= maxRetries) {
             logger(`useFileStatus Manager: Max retries exceeded for ${userId}.`, 3);
             setConnection({ connectionStatus: 'failed', retryCount, lastError: "Max retries exceeded." });
+            isConnecting = false; // Release lock on max retries
             return;
         }
         const delay = getRetryDelay(retryCount);
