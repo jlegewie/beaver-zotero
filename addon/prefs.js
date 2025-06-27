@@ -3,6 +3,7 @@
 // User ID and email
 pref("userId", "");
 pref("userEmail", "");
+pref("currentPlanId", "");
 
 // App settings
 pref("selectedLibrary", "{}");

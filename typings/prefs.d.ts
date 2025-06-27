@@ -9,6 +9,7 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "userId": string;
       "userEmail": string;
+      "currentPlanId": string;
       "selectedLibrary": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
