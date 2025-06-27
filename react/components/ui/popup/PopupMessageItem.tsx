@@ -43,21 +43,26 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         }
     };
 
-    const fontColor = message.type === 'error'
-        ? 'font-color-red'
-        : message.type === 'info'
-            ? 'font-color-blue'
-            : 'font-color-yellow';
-    const backgroundColor = message.type === 'error'
-        ? 'var(--tag-red-quinary)'
-        : message.type === 'info'
-            ? 'var(--tag-blue-quinary)'
-            : 'var(--tag-yellow-quinary)';
-    const borderColor = message.type === 'error'
-        ? 'var(--tag-red-quarternary)'
-        : message.type === 'info'
-            ? 'var(--tag-blue-quarternary)'
-            : 'var(--tag-yellow-quarternary)';
+    let fontColor, backgroundColor, borderColor;
+
+    switch (message.type) {
+        case 'error':
+            fontColor = 'font-color-red';
+            backgroundColor = 'var(--tag-red-quinary)';
+            borderColor = 'var(--tag-red-quarternary)';
+            break;
+        case 'info':
+            fontColor = 'font-color-blue';
+            backgroundColor = 'var(--tag-blue-quinary)';
+            borderColor = 'var(--tag-blue-quarternary)';
+            break;
+        case 'warning':
+        default:
+            fontColor = 'font-color-yellow';
+            backgroundColor = 'var(--tag-yellow-quinary)';
+            borderColor = 'var(--tag-yellow-quarternary)';
+            break;
+    }
 
     return (
         <div
