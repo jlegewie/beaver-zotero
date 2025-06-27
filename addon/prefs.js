@@ -4,6 +4,7 @@
 pref("userId", "");
 pref("userEmail", "");
 pref("currentPlanId", "");
+pref("showIndexingCompleteMessage", false);
 
 // App settings
 pref("selectedLibrary", "{}");
