@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useEffect, useRef } from 'react';
+import { useSetAtom, useAtom, useAtomValue } from 'jotai';
+import { atom } from 'jotai';
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { fileStatusAtom } from '../atoms/files';
 import { FileStatus } from '../types/fileStatus';
@@ -8,257 +9,222 @@ import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { hasAuthorizedAccessAtom } from '../atoms/profile';
 
+const maxRetries = 6;
+const baseRetryDelay = 1000; // 1 second
+
+type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'retrying' | 'failed';
+
 export interface FileStatusConnection {
-    connectionStatus: 'idle' | 'connecting' | 'connected' | 'disconnected' | 'retrying' | 'failed';
+    connectionStatus: ConnectionStatus;
     retryCount: number;
     lastError: string | null;
 }
 
+// --- Centralized state ---
+const fileStatusConnectionAtom = atom<FileStatusConnection>({
+    connectionStatus: 'idle',
+    retryCount: 0,
+    lastError: null,
+});
+
+// --- Module-level subscription management ---
+let subscriberCount = 0;
+let channelRef: RealtimeChannel | null = null;
+let retryTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+let currentUserId: string | null = null;
+
+const formatStatus = (statusData: any): FileStatus => ({
+    ...statusData,
+    total_files: Number(statusData.total_files || 0),
+    upload_pending: Number(statusData.upload_pending || 0),
+    upload_completed: Number(statusData.upload_completed || 0),
+    upload_failed: Number(statusData.upload_failed || 0),
+    upload_skipped: Number(statusData.upload_skipped || 0),
+    md_unavailable: Number(statusData.md_unavailable || 0),
+    md_queued: Number(statusData.md_queued || 0),
+    md_processing: Number(statusData.md_processing || 0),
+    md_embedded: Number(statusData.md_embedded || 0),
+    md_failed: Number(statusData.md_failed || 0),
+    md_skipped: Number(statusData.md_skipped || 0),
+    docling_unavailable: Number(statusData.docling_unavailable || 0),
+    docling_queued: Number(statusData.docling_queued || 0),
+    docling_processing: Number(statusData.docling_processing || 0),
+    docling_embedded: Number(statusData.docling_embedded || 0),
+    docling_failed: Number(statusData.docling_failed || 0),
+    docling_skipped: Number(statusData.docling_skipped || 0),
+});
+
+const getRetryDelay = (attempt: number): number => {
+    return Math.min(baseRetryDelay * Math.pow(2, attempt), 30000);
+};
+
+// These manager functions operate on the module-level state and Jotai atoms.
+const stopSubscription = async (setConnection: (update: FileStatusConnection) => void, setFileStatus: (update: FileStatus | null) => void) => {
+    logger(`useFileStatus Manager: Stopping subscription for user ${currentUserId}.`);
+    if (retryTimeoutRef) {
+        clearTimeout(retryTimeoutRef);
+        retryTimeoutRef = null;
+    }
+    if (channelRef) {
+        await channelRef.unsubscribe();
+        supabase.realtime.removeChannel(channelRef);
+        channelRef = null;
+    }
+    currentUserId = null;
+    setConnection({ connectionStatus: 'idle', retryCount: 0, lastError: null });
+    setFileStatus(null);
+};
+
+const startSubscription = async (
+    userId: string,
+    setConnection: (update: FileStatusConnection) => void,
+    setFileStatus: (update: FileStatus | null) => void
+) => {
+    if (channelRef && currentUserId === userId) {
+        logger("useFileStatus Manager: Subscription already active.");
+        return;
+    }
+
+    if (channelRef) {
+        await stopSubscription(setConnection, setFileStatus);
+    }
+    
+    currentUserId = userId;
+    let retryCount = 0;
+
+    const setup = async (isRetry: boolean = false) => {
+        // Clean up any previous attempt before trying to establish a new one.
+        // This is crucial for the retry logic, as retries call setup() directly.
+        if (channelRef) {
+            try {
+                await channelRef.unsubscribe();
+            } catch (e) {
+                logger(`useFileStatus Manager: Unsubscribe in retry failed: ${(e as Error).message}`, 3);
+            }
+            supabase.realtime.removeChannel(channelRef);
+            channelRef = null;
+        }
+
+        try {
+            setConnection({
+                connectionStatus: isRetry ? 'retrying' : 'connecting',
+                retryCount: retryCount,
+                lastError: null
+            });
+            logger(`useFileStatus Manager: Fetching initial status for ${userId}.`);
+            const { data, error } = await supabase.from('files_status').select('*').eq('user_id', userId).maybeSingle();
+            if (error) throw new Error(`Initial fetch failed: ${error.message}`);
+            setFileStatus(data ? formatStatus(data) : null);
+
+            logger(`useFileStatus Manager: Setting up realtime for ${userId}.`);
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (!sessionData.session?.access_token) throw new Error('No access token for realtime.');
+            supabase.realtime.setAuth(sessionData.session.access_token);
+
+            channelRef = supabase
+                .channel(`public:file-status:${userId}`)
+                .on<FileStatus>('postgres_changes', { event: '*', schema: 'public', table: 'files_status', filter: `user_id=eq.${userId}` },
+                    (payload) => {
+                        logger(`useFileStatus Manager: Received event: ${payload.eventType}`);
+                        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                            setFileStatus(formatStatus(payload.new));
+                        } else if (payload.eventType === 'DELETE') {
+                            setFileStatus(null);
+                        }
+                    }
+                )
+                .subscribe((status, err) => {
+                    if (err) {
+                        logger(`useFileStatus Manager: Subscription error: ${err.message}`, 3);
+                        setConnection({ connectionStatus: 'disconnected', retryCount, lastError: err.message });
+                        scheduleRetry();
+                    } else if (status === 'SUBSCRIBED') {
+                        logger(`useFileStatus Manager: Subscription successful for ${userId}.`);
+                        retryCount = 0;
+                        setConnection({ connectionStatus: 'connected', retryCount: 0, lastError: null });
+                    }
+                });
+        } catch (err: any) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            logger(`useFileStatus Manager: Setup failed: ${errorMessage}`, 3);
+            setConnection({ connectionStatus: 'disconnected', retryCount, lastError: errorMessage });
+            scheduleRetry();
+        }
+    };
+
+    const scheduleRetry = () => {
+        if (retryCount >= maxRetries) {
+            logger(`useFileStatus Manager: Max retries exceeded for ${userId}.`, 3);
+            setConnection({ connectionStatus: 'failed', retryCount, lastError: "Max retries exceeded." });
+            return;
+        }
+        const delay = getRetryDelay(retryCount);
+        retryCount++;
+        logger(`useFileStatus Manager: Scheduling retry ${retryCount} in ${delay}ms.`);
+        if (retryTimeoutRef) clearTimeout(retryTimeoutRef);
+        retryTimeoutRef = setTimeout(() => setup(true), delay);
+    };
+
+    setup();
+};
+
+
 /**
  * Hook that fetches the user's file status, keeps the fileStatusAtom updated,
- * and subscribes to realtime changes with retry logic
+ * and subscribes to realtime changes with retry logic. This hook can be used
+ * by multiple components simultaneously without conflicts.
  */
 export const useFileStatus = (): FileStatusConnection => {
     const setFileStatus = useSetAtom(fileStatusAtom);
+    const [connection, setConnection] = useAtom(fileStatusConnectionAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const user = useAtomValue(userAtom);
-    
-    // Connection status state
-    const [connectionStatus, setConnectionStatus] = useState<FileStatusConnection['connectionStatus']>('idle');
-    const [retryCount, setRetryCount] = useState(0);
-    const [lastError, setLastError] = useState<string | null>(null);
-    
-    // Refs for managing instances and timers
-    const channelRef = useRef<RealtimeChannel | null>(null);
-    const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const maxRetries = 6;
-    const baseRetryDelay = 1000; // 1 second
 
-    // Helper to format data
-    const formatStatus = (statusData: any): FileStatus => ({
-        ...statusData,
-        total_files: Number(statusData.total_files || 0),
-        upload_pending: Number(statusData.upload_pending || 0),
-        upload_completed: Number(statusData.upload_completed || 0),
-        upload_failed: Number(statusData.upload_failed || 0),
-        upload_skipped: Number(statusData.upload_skipped || 0),
-        md_unavailable: Number(statusData.md_unavailable || 0),
-        md_queued: Number(statusData.md_queued || 0),
-        md_processing: Number(statusData.md_processing || 0),
-        md_embedded: Number(statusData.md_embedded || 0),
-        md_failed: Number(statusData.md_failed || 0),
-        md_skipped: Number(statusData.md_skipped || 0),
-        docling_unavailable: Number(statusData.docling_unavailable || 0),
-        docling_queued: Number(statusData.docling_queued || 0),
-        docling_processing: Number(statusData.docling_processing || 0),
-        docling_embedded: Number(statusData.docling_embedded || 0),
-        docling_failed: Number(statusData.docling_failed || 0),
-        docling_skipped: Number(statusData.docling_skipped || 0),
-    });
+    // This ref tracks if the current component instance is "active"
+    // and should be counted as a subscriber.
+    const isActiveSubscriber = useRef(false);
 
-    // Calculate retry delay with exponential backoff (max 30 seconds)
-    const getRetryDelay = useCallback((attempt: number): number => {
-        return Math.min(baseRetryDelay * Math.pow(2, attempt), 30000);
-    }, []);
-
-    // Clear retry timeout
-    const clearRetryTimeout = useCallback(() => {
-        if (retryTimeoutRef.current) {
-            clearTimeout(retryTimeoutRef.current);
-            retryTimeoutRef.current = null;
-        }
-    }, []);
-
-    // Reset connection state
-    const resetConnectionState = useCallback(() => {
-        setConnectionStatus('idle');
-        setRetryCount(0);
-        setLastError(null);
-        clearRetryTimeout();
-    }, [clearRetryTimeout]);
-
+    const lastUserId = useRef<string | null>(null);
     useEffect(() => {
-        // --- Guard Clause ---
-        // Only proceed if user is authenticated, user data exists, AND plan supports file processing
-        if (!isAuthenticated || !user || !hasAuthorizedAccess) {
-            logger(`useFileStatus: Skipping setup. Auth: ${isAuthenticated}, User: ${!!user}, HasAuthorizedAccess: ${hasAuthorizedAccess}`);
-            setFileStatus(null); // Clear status if conditions not met
-            resetConnectionState();
-            
-            // Ensure any existing channel is cleaned up if dependencies change mid-subscription
-            if (channelRef.current) {
-                logger(`useFileStatus: Cleaning up existing channel due to unmet conditions.`);
-                channelRef.current.unsubscribe();
-                supabase.realtime.removeChannel(channelRef.current);
-                channelRef.current = null;
+        const isEligible = isAuthenticated && user && hasAuthorizedAccess;
+
+        if (isEligible && !isActiveSubscriber.current) {
+            // This component is becoming an active subscriber
+            subscriberCount++;
+            isActiveSubscriber.current = true;
+            logger(`useFileStatus Hook: Subscriber added. Count: ${subscriberCount}.`);
+            if (subscriberCount === 1) {
+                startSubscription(user.id, setConnection, setFileStatus);
             }
-            return; // Stop the effect here
+        } else if (!isEligible && isActiveSubscriber.current) {
+            // This component is no longer an active subscriber
+            subscriberCount--;
+            isActiveSubscriber.current = false;
+            logger(`useFileStatus Hook: Subscriber removed. Count: ${subscriberCount}.`);
+            if (subscriberCount === 0) {
+                stopSubscription(setConnection, setFileStatus);
+            }
         }
 
-        // Store userId locally for easier use and logging
-        const userId = user.id;
-        logger(`useFileStatus: Conditions met for user ${userId}. Proceeding with setup.`);
+        // User switched while still subscribed
+        if (isEligible && isActiveSubscriber.current && user!.id !== lastUserId.current) {
+            lastUserId.current = user!.id;
+            startSubscription(user!.id, setConnection, setFileStatus);
+        }
 
-        // --- Main Logic (Runs only if guard clause passes) ---
-        let isMounted = true; // Flag to prevent state updates after unmount
-
-        const setupFileStatusSync = async (isRetry: boolean = false, currentRetryCount: number = 0) => {
-            try {
-                if (!isMounted) return;
-
-                setConnectionStatus(isRetry ? 'retrying' : 'connecting');
-                if (isRetry) {
-                    setRetryCount(currentRetryCount);
-                    logger(`useFileStatus: Retry attempt ${currentRetryCount + 1}/${maxRetries} for user: ${userId}`);
-                }
-
-                // 1. Initial Fetch
-                logger(`useFileStatus: Fetching initial file status for user: ${userId}`);
-                const { data, error } = await supabase
-                    .from('files_status')
-                    .select('*')
-                    .eq('user_id', userId)
-                    .maybeSingle();
-
-                if (!isMounted) return; // Check if component unmounted during async fetch
-
-                if (error) {
-                    throw new Error(`Initial fetch failed: ${error.message}`);
-                }
-
-                logger(`useFileStatus: Initial fetch result for ${userId}: ${data ? 'Data received' : 'No record'}`);
-                setFileStatus(data ? formatStatus(data) : null);
-
-                // --- Realtime Setup ---
-
-                // 2. Clean up previous channel (safety check)
-                if (channelRef.current) {
-                    logger(`useFileStatus: Removing existing channel before creating new one for ${userId}.`);
-                    await channelRef.current.unsubscribe();
-                    supabase.realtime.removeChannel(channelRef.current);
-                    channelRef.current = null;
-                }
-
-                // 3. Explicitly set auth token for Realtime
-                logger(`useFileStatus: Setting realtime auth token for ${userId}.`);
-                const { data: sessionData } = await supabase.auth.getSession();
-                if (!sessionData.session?.access_token) {
-                    throw new Error('No access token found for realtime auth');
-                }
-                supabase.realtime.setAuth(sessionData.session.access_token);
-
-                // 4. Create and Subscribe to the channel
-                logger(`useFileStatus: Creating and subscribing to channel 'file-status-${userId}'.`);
-                const newChannel = supabase
-                    .channel(`public:file-status:${userId}`)
-                    .on<FileStatus>(
-                        'postgres_changes',
-                        {
-                            event: '*',
-                            schema: 'public',
-                            table: 'files_status',
-                            filter: `user_id=eq.${userId}`
-                        },
-                        (payload) => {
-                            if (!isMounted) return;
-                            logger(`useFileStatus: Received event: ${payload.eventType} for ${userId}`);
-                            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                                logger(`useFileStatus: Updated data for ${userId}: ${JSON.stringify(payload.new)}`);
-                                setFileStatus(formatStatus(payload.new));
-                            } else if (payload.eventType === 'DELETE') {
-                                logger(`useFileStatus: Record deleted for ${userId}.`);
-                                setFileStatus(null);
-                            }
-                        }
-                    )
-                    .subscribe((status, err) => {
-                        if (!isMounted) return;
-
-                        if (err) {
-                            logger(`useFileStatus: Realtime subscription error for ${userId}: ${JSON.stringify(err)}`, 3);
-                            console.error(`useFileStatus: realtime subscription error:`, err);
-                            setConnectionStatus('disconnected');
-                            setLastError(`Subscription error: ${err.message || 'Unknown error'}`);
-                            
-                            // Trigger retry for subscription errors
-                            scheduleRetry(currentRetryCount);
-                        } else {
-                            logger(`useFileStatus: Realtime subscription status for ${userId}: ${status}`);
-                            if (status === 'SUBSCRIBED') {
-                                setConnectionStatus('connected');
-                                setRetryCount(0);
-                                setLastError(null);
-                                clearRetryTimeout();
-                            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                                setConnectionStatus('disconnected');
-                                setLastError(`Connection ${status.toLowerCase()}`);
-                                scheduleRetry(currentRetryCount);
-                            }
-                        }
-                    });
-
-                channelRef.current = newChannel;
-
-            } catch (err: any) {
-                if (!isMounted) return;
-                
-                const errorMessage = err?.message || 'Unknown error';
-                logger(`useFileStatus: Setup failed for ${userId}: ${errorMessage}`, 3);
-                console.error('useFileStatus setup error:', err);
-                
-                setConnectionStatus('disconnected');
-                setLastError(errorMessage);
-                scheduleRetry(currentRetryCount);
-            }
-        };
-
-        const scheduleRetry = (currentRetryCount: number) => {
-            if (!isMounted || currentRetryCount >= maxRetries) {
-                if (currentRetryCount >= maxRetries) {
-                    logger(`useFileStatus: Max retries (${maxRetries}) exceeded for user ${userId}`, 3);
-                    setConnectionStatus('failed');
-                }
-                return;
-            }
-
-            const nextRetryCount = currentRetryCount + 1;
-            const delay = getRetryDelay(currentRetryCount);
-            
-            logger(`useFileStatus: Scheduling retry ${nextRetryCount} in ${delay}ms for user ${userId}`);
-            
-            clearRetryTimeout();
-            retryTimeoutRef.current = setTimeout(() => {
-                if (isMounted) {
-                    setupFileStatusSync(true, nextRetryCount);
-                }
-            }, delay);
-        };
-
-        // Execute the initial setup
-        setupFileStatusSync();
-
-        // --- Cleanup Function ---
+        // The cleanup function is now robust and always runs on unmount.
         return () => {
-            isMounted = false; // Set flag on unmount/cleanup
-            logger(`useFileStatus: Cleanup triggered for user ${userId}.`);
-            
-            clearRetryTimeout();
-            
-            if (channelRef.current) {
-                logger(`useFileStatus: Unsubscribing and removing channel 'file-status-${userId}'.`);
-                channelRef.current.unsubscribe();
-                supabase.realtime.removeChannel(channelRef.current);
-                channelRef.current = null;
-            } else {
-                logger(`useFileStatus: Cleanup called, no active channel to remove for user ${userId}.`);
+            if (isActiveSubscriber.current) {
+                subscriberCount--;
+                isActiveSubscriber.current = false;
+                logger(`useFileStatus Hook: Subscriber removed on unmount. Count: ${subscriberCount}.`);
+                if (subscriberCount === 0) {
+                    stopSubscription(setConnection, setFileStatus);
+                }
             }
         };
-    }, [isAuthenticated, user, setFileStatus, hasAuthorizedAccess, resetConnectionState, clearRetryTimeout, getRetryDelay]);
+    }, [isAuthenticated, user, hasAuthorizedAccess, setConnection, setFileStatus]);
 
-    return {
-        connectionStatus,
-        retryCount,
-        lastError
-    };
+    return connection;
 };
