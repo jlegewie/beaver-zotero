@@ -11,6 +11,7 @@ import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/inp
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import FileUploadStatus from "../status/FileUploadStatus";
+import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 
 
 const HomePage: React.FC = () => {
@@ -23,6 +24,7 @@ const HomePage: React.FC = () => {
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
+    useIndexingCompleteMessage();
 
     const handleCustomPrompt = async (
         prompt: CustomPrompt
