@@ -50,6 +50,7 @@ export const useProfileSync = () => {
             } else if (currentPlanId !== profileData.profile.current_plan_id) {
                 logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id}.`);
                 setPref("currentPlanId", profileData.profile.current_plan_id);
+                setPref("showIndexingCompleteMessage", true);
                 
                 // Re-attempt file uploads for previously skipped files (if plan allows)
                 if (profileData.profile.plan.upload_files) {

@@ -166,11 +166,15 @@ const OnboardingPage: React.FC = () => {
     const handleCompleteOnboarding = async () => {
         if (isCompletingOnboarding) return;
         if (!profileWithPlan) return;
-        
+                
+        // Set completing onboarding to true
         setIsCompletingOnboarding(true);
         try {            
             // Call the service to complete onboarding
             await accountService.completeOnboarding(profileWithPlan.plan.processing_tier);
+
+            // Show indexing complete message if indexing is not complete
+            if (fileStats.progress < 100) setPref("showIndexingCompleteMessage", true);
 
             // Update profile atom for immediate UI feedback
             if (profileWithPlan) {
