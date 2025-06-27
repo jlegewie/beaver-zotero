@@ -85,24 +85,28 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         // Processing status based on plan features
         let completedFiles = 0;
         let skippedProcessingCount = 0;
+        let balanceInsufficientProcessingCount = 0;
         let failedProcessingCount = 0;
         let activeProcessingCount = 0;
         let queuedProcessingCount = 0;
 
         if(fileStatus && planFeatures.processingTier === 'basic') {
             completedFiles = fileStatus.text_embedded;
+            balanceInsufficientProcessingCount = fileStatus.text_balance_insufficient;
             skippedProcessingCount = fileStatus.text_skipped;
             failedProcessingCount = fileStatus.text_failed;
             activeProcessingCount = (fileStatus.text_processing);
             queuedProcessingCount = fileStatus.text_queued;
         } else if(fileStatus && planFeatures.processingTier === 'standard') {
             completedFiles = fileStatus.md_embedded;
+            balanceInsufficientProcessingCount = fileStatus.md_balance_insufficient;
             skippedProcessingCount = fileStatus.md_skipped;
             failedProcessingCount = fileStatus.md_failed;
             activeProcessingCount = (fileStatus.md_processing);
             queuedProcessingCount = fileStatus.md_queued;
         } else if(fileStatus && planFeatures.processingTier === 'advanced') {
             completedFiles = fileStatus.docling_embedded;
+            balanceInsufficientProcessingCount = fileStatus.docling_balance_insufficient;
             skippedProcessingCount = fileStatus.docling_skipped;
             failedProcessingCount = fileStatus.docling_failed;
             activeProcessingCount = fileStatus.docling_processing;
@@ -111,7 +115,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
 
         const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles + skippedProcessingCount
         const processingProgress = totalProcessingCount > 0
-            ? Math.min((completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100, 100)
+            ? Math.min((completedFiles + skippedProcessingCount + balanceInsufficientProcessingCount + failedProcessingCount) / totalProcessingCount * 100, 100)
             : 0;
 
         // combined stats
@@ -120,7 +124,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         
         // Overall Progress
         const progress = totalFiles > 0
-            ? Math.min((uploadFailedCount + uploadSkippedCount + completedFiles + skippedProcessingCount + failedProcessingCount) / totalFiles * 100, 100)
+            ? Math.min((uploadFailedCount + uploadSkippedCount + completedFiles + skippedProcessingCount + balanceInsufficientProcessingCount + failedProcessingCount) / totalFiles * 100, 100)
             : 0;
 
         return {
@@ -129,6 +133,7 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
             completedFiles,
             failedProcessingCount,
             skippedProcessingCount,
+            balanceInsufficientProcessingCount,
             activeProcessingCount,
             totalProcessingCount,
             processingProgress,
