@@ -119,9 +119,9 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const activeCount = uploadPendingCount + activeProcessingCount;
         
         // Overall Progress
-        const progress = totalProcessingCount > 0
-                ? (completedFiles + skippedProcessingCount + failedProcessingCount) / totalProcessingCount * 100
-                : 0;
+        const progress = totalFiles > 0
+            ? Math.min((uploadFailedCount + uploadSkippedCount + completedFiles + skippedProcessingCount + failedProcessingCount) / totalFiles * 100, 100)
+            : 0;
 
         return {
             fileStatusAvailable: fileStatus !== null,
