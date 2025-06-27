@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { fileUploader } from '../../src/services/FileUploader';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { fileUploader, retrySkippedUploads } from '../../src/services/FileUploader';
 import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
@@ -8,6 +8,8 @@ import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -20,6 +22,7 @@ export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const setModels = useSetAtom(setModelsAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -39,6 +42,29 @@ export const useProfileSync = () => {
             setModels(profileData.model_configs);
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+
+            // Plan change handling
+            const currentPlanId = getPref("currentPlanId");
+            if (currentPlanId === "") {
+                setPref("currentPlanId", profileData.profile.current_plan_id);
+            } else if (currentPlanId !== profileData.profile.current_plan_id) {
+                logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id}.`);
+                setPref("currentPlanId", profileData.profile.current_plan_id);
+                
+                // Re-attempt file uploads for previously skipped files (if plan allows)
+                if (profileData.profile.plan.upload_files) {
+                    logger(`useProfileSync: Re-attempting file uploads for previously skipped files.`);
+                    await retrySkippedUploads();
+                }
+
+                // Message with plan change and processing status
+                const title = `Welcome to the ${profileData.profile.plan.display_name} plan!`;
+                let text = "We're indexing files up to your new plan's limit. Full search will be available once this is complete.";
+                if (profileData.profile.plan.name === "pro") {
+                    text = "We're indexing your files to unlock all Pro features. Full search will be available shortly.";
+                }
+                addPopupMessage({ title, text, type: "plan_change", expire:false });
+            }
 
             // If the plan allows file uploads, start the file uploader
             if (profileData.profile.plan.upload_files) {
