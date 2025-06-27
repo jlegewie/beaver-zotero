@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon } from '../../icons/icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, UserIcon } from '../../icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
+import PlanChangeMessageContent from './PlanChangeMessageContent';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -37,6 +38,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-yellow" />;
             case 'error':
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
+            case 'plan_change':
+                return <Icon icon={UserIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-blue" />;
@@ -50,6 +53,11 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             fontColor = 'font-color-red';
             backgroundColor = 'var(--tag-red-quinary)';
             borderColor = 'var(--tag-red-quarternary)';
+            break;
+        case 'plan_change':
+            fontColor = 'font-color-primary';
+            backgroundColor = 'var(--material-mix-quarternary)';
+            borderColor = 'var(--fill-quinary)';
             break;
         case 'info':
             fontColor = 'font-color-blue';
@@ -105,12 +113,17 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 </div>
 
                 {/* Content */}
-                {message.customContent ? (
-                    <div>
-                        {message.customContent}
-                    </div>
-                ) : (
-                    <div className={`text-base ${fontColor} opacity-60`}>{message.text}</div>
+                {message.type !== 'plan_change' && (
+                    message.customContent ? (
+                        <div>
+                            {message.customContent}
+                        </div>
+                    ) : (
+                        <div className={`text-base ${fontColor} opacity-60`}>{message.text}</div>
+                    )
+                )}
+                {message.type === 'plan_change' && (
+                    <PlanChangeMessageContent message={message} />
                 )}
             </div>
         </div>

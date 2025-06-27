@@ -1,6 +1,6 @@
 export const POPUP_MESSAGE_DURATION = 2000; // 2 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change';
 
 export interface PopupMessage {
     id: string;
