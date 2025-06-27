@@ -1,19 +1,35 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { PopupMessage } from '../../../types/popupMessage';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useFileStatus } from '../../../hooks/useFileStatus';
 import { fileStatusStatsAtom } from '../../../atoms/files';
 import { ProgressBar } from '../../status/ProgressBar';
+import { updatePopupMessageAtom, removePopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { useIndexingCompleteMessage } from '../../../hooks/useIndexingCompleteMessage';
 
 interface PlanChangeMessageContentProps {
     message: PopupMessage;
 }
 
 const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ message }) => {
+    const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
+    const removePopupMessage = useSetAtom(removePopupMessageAtom);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
     const fileStats = useAtomValue(fileStatusStatsAtom);
+    useIndexingCompleteMessage();
+
+    useEffect(() => {
+        // Remove the message when the progress is 100%
+        if(fileStats && fileStats.progress >= 100) {
+            updatePopupMessage({
+                messageId: message.id,
+                updates: {expire: true}
+            });
+        }
+    }, [fileStats]);
+
 
     const getProcessingLeftText = (): string => {
         if(connectionStatus === 'failed') return "";
