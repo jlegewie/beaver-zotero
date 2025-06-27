@@ -136,7 +136,7 @@ const startSubscription = async (
                 .channel(`public:file-status:${userId}`)
                 .on<FileStatus>('postgres_changes', { event: '*', schema: 'public', table: 'files_status', filter: `user_id=eq.${userId}` },
                     (payload) => {
-                        logger(`useFileStatus Manager: Received event: ${payload.eventType}`);
+                        // logger(`useFileStatus Manager: Received event: ${payload.eventType}`);
                         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
                             setFileStatus(formatStatus(payload.new));
                         } else if (payload.eventType === 'DELETE') {
