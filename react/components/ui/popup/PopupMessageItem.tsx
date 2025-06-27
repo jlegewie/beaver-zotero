@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, UserIcon } from '../../icons/icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, UserIcon, PuzzleIcon } from '../../icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
+import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -39,7 +40,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             case 'error':
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
             case 'plan_change':
-                return <Icon icon={UserIcon} className="scale-12 mt-020 font-color-primary" />;
+            case 'indexing_complete':
+                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-blue" />;
@@ -54,21 +56,22 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             backgroundColor = 'var(--tag-red-quinary)';
             borderColor = 'var(--tag-red-quarternary)';
             break;
-        case 'plan_change':
-            fontColor = 'font-color-primary';
-            backgroundColor = 'var(--material-mix-quarternary)';
-            borderColor = 'var(--fill-quinary)';
-            break;
         case 'info':
             fontColor = 'font-color-blue';
             backgroundColor = 'var(--tag-blue-quinary)';
             borderColor = 'var(--tag-blue-quarternary)';
             break;
         case 'warning':
-        default:
             fontColor = 'font-color-yellow';
             backgroundColor = 'var(--tag-yellow-quinary)';
             borderColor = 'var(--tag-yellow-quarternary)';
+            break;
+        case 'plan_change':
+        case 'indexing_complete':
+        default:
+            fontColor = 'font-color-primary';
+            backgroundColor = 'var(--material-mix-quarternary)';
+            borderColor = 'var(--fill-quinary)';
             break;
     }
 
@@ -112,8 +115,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                     </div>
                 </div>
 
-                {/* Content */}
-                {message.type !== 'plan_change' && (
+                {/* Content for info, warning, error */}
+                {['info', 'warning', 'error'].includes(message.type) && (
                     message.customContent ? (
                         <div>
                             {message.customContent}
@@ -122,8 +125,15 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         <div className={`text-base ${fontColor} opacity-60`}>{message.text}</div>
                     )
                 )}
+
+                {/* Content for plan_change */}
                 {message.type === 'plan_change' && (
                     <PlanChangeMessageContent message={message} />
+                )}
+
+                {/* Content for indexing_complete */}
+                {message.type === 'indexing_complete' && (
+                    <IndexingCompleteMessageContent message={message} />
                 )}
             </div>
         </div>
