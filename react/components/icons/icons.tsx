@@ -45,3 +45,4 @@ export { default as AlertCircleIcon } from './AlertCircleIcon';
 export { default as CircleIcon } from './CircleIcon';
 export { default as CircleStatusIcon } from './CircleStatusIcon';
 export { default as DeleteIcon } from './DeleteIcon';
+export { default as PuzzleIcon } from './PuzzleIcon';
