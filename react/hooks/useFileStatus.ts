@@ -60,7 +60,10 @@ const getRetryDelay = (attempt: number): number => {
 };
 
 // These manager functions operate on the module-level state and Jotai atoms.
-const stopSubscription = async (setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void, setFileStatus: (update: FileStatus | null) => void) => {
+const stopSubscription = async (
+    setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void,
+    setFileStatus: (update: FileStatus | null) => void
+) => {
     logger(`useFileStatus Manager: Stopping subscription for user ${currentUserId}.`);
     isConnecting = false;
     if (retryTimeoutRef) {
