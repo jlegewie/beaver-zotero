@@ -455,6 +455,52 @@ export const resetFailedUploads = async (): Promise<void> => {
 
 
 /**
+ * Utility function to retry skipped uploads.
+ */
+export const retrySkippedUploads = async (): Promise<void> => {
+    try {
+        const userId = store.get(userIdAtom);
+        if (!userId) {
+            logger('File Uploader: Cannot retry skipped uploads, user not authenticated.', 2);
+            return;
+        }
+
+        const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'skipped');
+
+        if (skippedAttachments.length === 0) {
+            logger('File Uploader: No skipped attachments to retry.', 3);
+            return;
+        }
+
+        logger(`File Uploader: Found ${skippedAttachments.length} skipped attachments to retry.`, 3);
+
+        const itemsToReset: UploadQueueInput[] = skippedAttachments
+            .filter(a => a.file_hash)
+            .map(attachment => ({
+                file_hash: attachment.file_hash,
+                library_id: attachment.library_id,
+                zotero_key: attachment.zotero_key,
+            }));
+        
+        if (itemsToReset.length > 0) {
+            await Zotero.Beaver.db.resetUploads(userId, itemsToReset);
+            logger(`File Uploader: Re-queued ${itemsToReset.length} skipped attachments.`, 3);
+        }
+
+        await fileUploader.start("manual");
+
+    } catch (error: any) {
+        logger(`File Uploader: Failed to retry skipped uploads: ${error.message}`, 1);
+        if (typeof Zotero !== 'undefined' && Zotero.logError) {
+            Zotero.logError(error);
+        } else {
+            console.error('Failed to retry skipped uploads:', error);
+        }
+    }
+};
+
+
+/**
  * Exports a singleton instance for the file uploader.
  */
 export const fileUploader = new FileUploader();
