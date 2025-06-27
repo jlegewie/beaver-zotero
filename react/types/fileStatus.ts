@@ -50,6 +50,7 @@ export interface FileStatusStats {
     completedFiles: number;
     failedProcessingCount: number;
     skippedProcessingCount: number;
+    balanceInsufficientProcessingCount: number;
     activeProcessingCount: number;
     totalProcessingCount: number;
     processingProgress: number;
