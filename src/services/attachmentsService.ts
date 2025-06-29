@@ -314,17 +314,18 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with paginated list of attachments with the specified status
      */
     async getAttachmentsByStatus(
-        status: ProcessingStatus,
+        status: ProcessingStatus[],
         pipeline: "basic" | "standard" | "advanced" = "basic",
         page: number = 1,
         pageSize: number = 50
     ): Promise<AttachmentStatusPagedResponse> {
-        const params = new URLSearchParams({
-            status: status,
-            pipeline: pipeline,
-            page: page.toString(),
-            page_size: pageSize.toString()
-        });
+        const params = new URLSearchParams();
+        
+        // Add all parameters
+        status.forEach(s => params.append('status', s));
+        params.append('pipeline', pipeline);
+        params.append('page', page.toString());
+        params.append('page_size', pageSize.toString());
         
         const url = `/attachments/by-status?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
