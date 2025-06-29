@@ -118,11 +118,12 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @returns Promise resolving to AttachmentData object for syncing
  */
 async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData | null> {
-    // 1. Extract File Data (can be null)
-    const fileData = await extractFileData(item);
-    if (!fileData) return null;
 
-    // 2. Prepare the object containing only fields for hashing
+    // 1. File: Confirm that the item is an attachment and that the file exists
+    if (!item.isAttachment() || !(await item.fileExists())) return null;
+    const file_hash = await item.attachmentHash;
+
+    // 2. Metadata: Prepare the object containing only fields for hashing
     const hashedFields: AttachmentDataHashedFields = {
         library_id: item.libraryID,
         zotero_key: item.key,
@@ -134,16 +135,16 @@ async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData 
         filename: item.attachmentFilename,
     };
 
-    // ------- 3. Calculate hash from the prepared hashed fields object -------
+    // 3. Metadata Hash: Calculate hash from the prepared hashed fields object
     const metadataHash = await calculateObjectHash(hashedFields);
 
-    // ------- 4. Construct final AttachmentData object -------
+    // 4. AttachmentData: Construct final AttachmentData object
     const attachmentData: AttachmentData = {
         ...hashedFields,
         // Add non-hashed fields
+        file_hash: file_hash,
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
-        ...(fileData || {}),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
     };

@@ -141,8 +141,6 @@ export interface AttachmentData extends ZoteroItemBase {
     // file metadata
     filename: string;
     file_hash: string;
-    size: number;
-    mime_type: string;
 
     // additional fields
     attachment_metadata_hash: string;

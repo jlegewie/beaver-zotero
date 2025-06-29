@@ -211,7 +211,7 @@ export class FileUploader {
             // File metadata
             let mimeType = attachment.attachmentContentType;
             const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
-            // const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
 
             // Get the file path for the attachment
             let filePath: string | null = null;
@@ -277,7 +277,7 @@ export class FileUploader {
                     }
                     
                     // Mark upload as completed
-                    await this.markUploadCompleted(item, mimeType, pageCount, user_id);
+                    await this.markUploadCompleted(item, mimeType, fileSize, pageCount, user_id);
                     uploadSuccess = true;
                 } catch (uploadError: any) {
                     // Network errors
@@ -349,10 +349,10 @@ export class FileUploader {
     /**
      * Marks upload as completed in backend first, then updates local state only if successful
      */
-    private async markUploadCompleted(item: UploadQueueRecord, mimeType: string, pageCount: number | null, user_id: string): Promise<void> {
+    private async markUploadCompleted(item: UploadQueueRecord, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
         try {
             // First, notify backend of completion
-            await attachmentsService.markUploadCompleted(item.file_hash, mimeType, pageCount);
+            await attachmentsService.markUploadCompleted(item.file_hash, mimeType, fileSize, pageCount);
 
             // Only if backend call succeeds, update local state and cleanup
             await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
