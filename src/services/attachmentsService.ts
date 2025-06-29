@@ -72,11 +72,7 @@ export interface AttachmentStatusResponse {
     attachment_id: string;  // UUID
     library_id: number;
     zotero_key: string;
-
-    user_id?: string;
-    file_hash?: string;      // Optional UUID
-    mime_type?: string;
-    page_count?: number;
+    file_hash?: string;
 
     // Processing status
     upload_status?: UploadStatus;
