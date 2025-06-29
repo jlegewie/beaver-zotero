@@ -17,6 +17,7 @@ interface SafePlanModel {
     upload_files: boolean;
     processing_tier: ProcessingTier;
     mcp_server: boolean;
+    supported_file_types: string[];
 
     // Limits
     max_file_size_mb: number;
