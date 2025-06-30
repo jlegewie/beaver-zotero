@@ -17,11 +17,11 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
 
-    if (!message.fileStats) return null;
+    if (!message.fileStatusSummary) return null;
 
-    const fileStats = message.fileStats;
-    const skippedFiles = fileStats?.planLimitCount;
-    const failedFiles = fileStats?.failedCount;
+    const fileStatusSummary = message.fileStatusSummary;
+    const skippedFiles = fileStatusSummary?.planLimitCount;
+    const failedFiles = fileStatusSummary?.failedCount;
 
     const handleShowDetails = async () => {
         if (currentThreadId !== null) {
@@ -39,11 +39,11 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
 
     const getFileCountTexts = (): React.ReactNode[] => {
         const textParts: React.ReactNode[] = [];
-        if (fileStats.completedFiles > 0) textParts.push(
+        if (fileStatusSummary.completedFiles > 0) textParts.push(
             <div className="display-flex flex-row gap-2 items-center">
                 <Icon icon={CheckmarkCircleIcon} className="scale-12 font-color-green" />
                 <span className="font-color-green text-base">
-                    {`${fileStats.completedFiles.toLocaleString()} file${fileStats.completedFiles > 1 ? 's' : ''} completed`}
+                    {`${fileStatusSummary.completedFiles.toLocaleString()} file${fileStatusSummary.completedFiles > 1 ? 's' : ''} completed`}
                 </span>
             </div>
         );

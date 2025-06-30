@@ -3,7 +3,7 @@ import { AlertIcon, InformationCircleIcon } from "../icons/icons";
 import { useAtomValue } from "jotai";
 import { StepThreeIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "./icons";
 import { ProgressBar } from "./ProgressBar";
-import { fileStatusStatsAtom } from "../../atoms/files";
+import { fileStatusSummaryAtom } from "../../atoms/files";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import ExpandableAttachmentList from "./ExpandableAttachmentList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
@@ -12,7 +12,7 @@ import { FileStatusConnection } from "../../hooks/useFileStatus";
 
 const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['connectionStatus'] }> = ({ connectionStatus }) => {
     useErrorCodeStats();
-    const fileStats = useAtomValue(fileStatusStatsAtom);
+    const fileStats = useAtomValue(fileStatusSummaryAtom);
 
     const getProcessingIcon = (): React.ReactNode => {
         if (!fileStats) return StepThreeIcon;

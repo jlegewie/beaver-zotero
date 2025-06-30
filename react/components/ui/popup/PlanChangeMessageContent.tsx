@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { PopupMessage } from '../../../types/popupMessage';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useFileStatus } from '../../../hooks/useFileStatus';
-import { fileStatusStatsAtom } from '../../../atoms/files';
+import { fileStatusSummaryAtom } from '../../../atoms/files';
 import { ProgressBar } from '../../status/ProgressBar';
 import {  removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useIndexingCompleteMessage } from '../../../hooks/useIndexingCompleteMessage';
@@ -16,24 +16,24 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
-    const fileStats = useAtomValue(fileStatusStatsAtom);
+    const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
     useIndexingCompleteMessage();
 
     useEffect(() => {
         // Remove the message when the progress is 100%
-        if(fileStats && fileStats.progress >= 100) {
+        if(fileStatusSummary && fileStatusSummary.progress >= 100) {
             removePopupMessage(message.id);
         }
-    }, [fileStats]);
+    }, [fileStatusSummary]);
 
 
     const getProcessingLeftText = (): string => {
         if(connectionStatus === 'failed') return "";
-        if (!fileStats) return "Loading status...";
+        if (!fileStatusSummary) return "Loading status...";
         
         const textParts: string[] = [];
-        if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
-        if (fileStats.processingProcessingCount > 0) textParts.push(`${fileStats.processingProcessingCount.toLocaleString()} processing`);
+        if (fileStatusSummary.completedFiles > 0) textParts.push(`${fileStatusSummary.completedFiles.toLocaleString()} done`);
+        if (fileStatusSummary.processingProcessingCount > 0) textParts.push(`${fileStatusSummary.processingProcessingCount.toLocaleString()} processing`);
         
         return textParts.join(", ");
     };
@@ -47,12 +47,12 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
             <div className="display-flex flex-col gap-3 items-start flex-1">
 
                 {/* Progress bar */}
-                {fileStats && fileStats.totalProcessingCount > 0 && (
+                {fileStatusSummary && fileStatusSummary.totalProcessingCount > 0 && (
                     <div className="w-full">
-                        <ProgressBar progress={fileStats.progress} />
+                        <ProgressBar progress={fileStatusSummary.progress} />
                     </div>
                 )}
-                {fileStats && fileStats.totalProcessingCount === 0 && (
+                {fileStatusSummary && fileStatusSummary.totalProcessingCount === 0 && (
                     <div className="font-color-tertiary text-base w-full">
                     {getProcessingLeftText()}
                 </div>

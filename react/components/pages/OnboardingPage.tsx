@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { fileStatusStatsAtom } from "../../atoms/files";
+import { fileStatusSummaryAtom } from "../../atoms/files";
 import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom } from '../../atoms/profile';
@@ -50,7 +50,7 @@ const OnboardingPage: React.FC = () => {
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
 
     // Processing state
-    const fileStats = useAtomValue(fileStatusStatsAtom);
+    const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
 
     // Loading states for service calls
     const [isAuthorizing, setIsAuthorizing] = useState(false);
@@ -174,7 +174,7 @@ const OnboardingPage: React.FC = () => {
             await accountService.completeOnboarding(profileWithPlan.plan.processing_tier);
 
             // Show indexing complete message if indexing is not complete
-            if (fileStats.progress < 100) setPref("showIndexingCompleteMessage", true);
+            if (fileStatusSummary.progress < 100) setPref("showIndexingCompleteMessage", true);
 
             // Update profile atom for immediate UI feedback
             if (profileWithPlan) {
@@ -203,7 +203,7 @@ const OnboardingPage: React.FC = () => {
             return "Please wait for the file uploads to complete.";
         } else if (uploadStats && uploadStats.failed > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
-        } else if (isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStats.progress < 100) {
+        } else if (isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStatusSummary.progress < 100) {
             return "Processing incomplete. Expect slower response times & limited search."
         }
         return "";

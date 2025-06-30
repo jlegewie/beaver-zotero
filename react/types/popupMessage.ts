@@ -14,7 +14,7 @@ export interface PopupMessage {
     expire?: boolean; // Defaults to true
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void
-    fileStats?: FileStatusStats;
+    fileStatusSummary?: FileStatusStats;
     planName?: string;
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION

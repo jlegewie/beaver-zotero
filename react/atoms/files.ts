@@ -69,7 +69,7 @@ export const aggregatedErrorMessagesForPlanLimitFilesAtom = atom<Record<string, 
 });
 
 
-export const fileStatusStatsAtom = atom<FileStatusStats>(
+export const fileStatusSummaryAtom = atom<FileStatusStats>(
     (get) => {
         const planFeatures = get(planFeaturesAtom);
         const fileStatus = get(fileStatusAtom);

@@ -3,7 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '../../src/utils/logger';
 import {
     errorCodeStatsAtom,
-    fileStatusStatsAtom,
+    fileStatusSummaryAtom,
     lastFetchedErrorCountsAtom,
     errorCodeStatsIsLoadingAtom,
     errorCodeStatsErrorAtom
@@ -20,7 +20,7 @@ export const useErrorCodeStats = () => {
     const errorCodeStats = useAtomValue(errorCodeStatsAtom);
     const setErrorCodeStats = useSetAtom(errorCodeStatsAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
-    const { failedProcessingCount, planLimitProcessingCount } = useAtomValue(fileStatusStatsAtom);
+    const { failedProcessingCount, planLimitProcessingCount } = useAtomValue(fileStatusSummaryAtom);
     const [lastFetchedCounts, setLastFetchedCounts] = useAtom(lastFetchedErrorCountsAtom);
 
 

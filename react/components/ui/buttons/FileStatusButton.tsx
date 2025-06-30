@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
-import { fileStatusStatsAtom } from '../../../atoms/files';
+import { fileStatusSummaryAtom } from '../../../atoms/files';
 import Button from '../Button';
 import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from '../../icons/icons';
 import { Icon } from '../../icons/icons';
@@ -42,23 +42,23 @@ const FileStatusButton: React.FC<{
     setShowFileStatus: (showFileStatus: boolean) => void
 }> = ({ className = '', showFileStatus = false, setShowFileStatus = () => {} }) => {
 
-    const [fileStats] = useAtom(fileStatusStatsAtom);
+    const [fileStatusSummary] = useAtom(fileStatusSummaryAtom);
     const [isAnimating, setIsAnimating] = useState(false);
     const prevStatusRef = useRef<any>(null);
 
     useEffect(() => {
         // Trigger animation only on updates, not initial load
-        if (prevStatusRef.current && fileStats && JSON.stringify(prevStatusRef.current) !== JSON.stringify(fileStats)) {
+        if (prevStatusRef.current && fileStatusSummary && JSON.stringify(prevStatusRef.current) !== JSON.stringify(fileStatusSummary)) {
             setIsAnimating(true);
             // Adjust timer duration as needed, should match animation duration
             const timer = setTimeout(() => setIsAnimating(false), 400); 
             return () => clearTimeout(timer);
         }
         // Store current status for next comparison
-        prevStatusRef.current = fileStats;
-    }, [fileStats]);
+        prevStatusRef.current = fileStatusSummary;
+    }, [fileStatusSummary]);
 
-    if (!fileStats.fileStatusAvailable) {
+    if (!fileStatusSummary.fileStatusAvailable) {
         // Optionally render a loading state or null
         return null; 
     }
@@ -71,7 +71,7 @@ const FileStatusButton: React.FC<{
     const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
 
     // Conditionally apply 'animate-spin' to SyncIcon
-    const syncIconClassName = `scale-125 text-purple-500 ${fileStats.activeCount > 0 ? 'animate-spin' : ''}`;
+    const syncIconClassName = `scale-125 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
 
     return (
         <Button
@@ -83,10 +83,10 @@ const FileStatusButton: React.FC<{
         >
             {/* <div className="display-flex flex-row gap-2"> */}
             <div className="display-flex flex-row gap-4">
-                <StatusItem icon={ClockIcon} count={fileStats.queuedProcessingCount} textClassName="text-lg" iconClassName="scale-115" />
-                <StatusItem icon={SyncIcon} count={fileStats.processingProcessingCount} textClassName="text-lg" iconClassName={syncIconClassName} />
-                <StatusItem icon={CheckmarkCircleIcon} count={fileStats.completedFiles} textClassName="text-lg" iconClassName="scale-115 text-green-500" />
-                <StatusItem icon={CancelCircleIcon} count={fileStats.failedCount} textClassName="text-lg" iconClassName="scale-115 text-red-500" />
+                <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName="text-lg" iconClassName="scale-115" />
+                <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName="text-lg" iconClassName={syncIconClassName} />
+                <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName="text-lg" iconClassName="scale-115 text-green-500" />
+                <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName="text-lg" iconClassName="scale-115 text-red-500" />
             </div>
         </Button>
     );

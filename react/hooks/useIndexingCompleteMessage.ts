@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom } from 'jotai';
-import { fileStatusStatsAtom } from '../atoms/files';
+import { fileStatusSummaryAtom } from '../atoms/files';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { planNameAtom } from '../atoms/profile';
 import { getPref, setPref } from '../../src/utils/prefs';
@@ -8,12 +8,12 @@ import { logger } from '../../src/utils/logger';
 import { store } from '../index';
 
 export const useIndexingCompleteMessage = () => {
-    const fileStats = useAtomValue(fileStatusStatsAtom);
+    const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     
     useEffect(() => {
         const showMessage = getPref("showIndexingCompleteMessage");
-        if (showMessage && fileStats.progress >= 100 && fileStats.fileStatusAvailable) {
+        if (showMessage && fileStatusSummary.progress >= 100 && fileStatusSummary.fileStatusAvailable) {
             logger("useIndexingCompleteMessage: Indexing complete message triggered");
             const planName = store.get(planNameAtom);
 
@@ -28,10 +28,10 @@ export const useIndexingCompleteMessage = () => {
                 text: message,
                 type: "indexing_complete",
                 expire: false,
-                fileStats: fileStats,
+                fileStatusSummary: fileStatusSummary,
                 planName: planName
             });
 
         }
-    }, [fileStats.progress, fileStats.fileStatusAvailable]);
+    }, [fileStatusSummary.progress, fileStatusSummary.fileStatusAvailable]);
 };
