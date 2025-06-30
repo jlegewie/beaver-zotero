@@ -72,6 +72,32 @@ const formatStatus = (statusData: any): FileStatus => ({
     docling_unsupported_file: Number(statusData.docling_unsupported_file || 0),
 });
 
+/**
+ * Fetches and formats the file status for a given user.
+ * @param userId The ID of the user.
+ * @returns The formatted file status, or null if not found or an error occurs.
+ */
+export const fetchFileStatus = async (userId: string): Promise<FileStatus | null> => {
+    try {
+        const { data, error } = await supabase
+            .from('files_status')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (error) {
+            logger(`Error fetching file status for user ${userId}: ${error.message}`, 3);
+            return null;
+        }
+
+        return data ? formatStatus(data) : null;
+    } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger(`Exception fetching file status for user ${userId}: ${errorMessage}`, 3);
+        return null;
+    }
+};
+
 const getRetryDelay = (attempt: number): number => {
     return Math.min(baseRetryDelay * Math.pow(2, attempt), 30000);
 };
@@ -140,9 +166,8 @@ const startSubscription = async (
                 lastError: null
             });
             logger(`useFileStatus Manager: Fetching initial status for ${userId}.`);
-            const { data, error } = await supabase.from('files_status').select('*').eq('user_id', userId).maybeSingle();
-            if (error) throw new Error(`Initial fetch failed: ${error.message}`);
-            setFileStatus(data ? formatStatus(data) : null);
+            const initialStatus = await fetchFileStatus(userId);
+            setFileStatus(initialStatus);
 
             logger(`useFileStatus Manager: Setting up realtime for ${userId}.`);
             const { data: sessionData } = await supabase.auth.getSession();
