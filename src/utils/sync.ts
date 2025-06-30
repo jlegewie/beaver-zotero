@@ -812,3 +812,115 @@ export async function getItemsToSync(
     const itemsToSync = allItems.filter(filterFunction);
     return itemsToSync;
 }
+
+/**
+ * Performs a consistency check by comparing local metadata hashes with backend
+ * 
+ * @param libraryID Zotero library ID to check
+ * @param filterFunction Optional function to filter which items to sync
+ * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
+ * @param onProgress Optional callback for progress updates (processed, total)
+ * @param batchSize Size of item batches to process (default: 50)
+ * @returns Promise resolving to the sync complete response
+ */
+export async function performConsistencyCheck(
+    libraryID: number,
+    filterFunction: ItemFilterFunction = syncingItemFilter,
+    onStatusChange?: (status: SyncStatus) => void,
+    onProgress?: (processed: number, total: number) => void,
+    batchSize: number = 50
+) {
+    const userId = store.get(userIdAtom);
+    if (!userId) {
+        throw new Error('No user found');
+    }
+
+    try {
+        const libraryName = Zotero.Libraries.getName(libraryID);
+        logger(`Beaver Sync: Starting consistency check for library ${libraryID} (${libraryName})`, 2);
+        
+        onStatusChange?.('in_progress');
+        
+        // 1. Get all items from the library
+        const allItems = await getItemsToSync(libraryID, filterFunction);
+        const totalItems = allItems.length;
+        
+        logger(`Beaver Sync: Found ${totalItems} items for consistency check in library ${libraryID} (${libraryName})`, 3);
+        
+        if (totalItems === 0) {
+            onStatusChange?.('completed');
+            logger('Beaver Sync: No items to check, skipping consistency check', 3);
+            return { status: 'completed', message: 'No items to check' };
+        }
+        
+        // 2. Calculate metadata hashes for all items and attachments
+        onProgress?.(0, totalItems);
+        
+        const regularItems = allItems.filter(item => item.isRegularItem());
+        const attachmentItems = allItems.filter(item => item.isAttachment());
+        
+        logger(`Beaver Sync: Calculating hashes for ${regularItems.length} items and ${attachmentItems.length} attachments`, 3);
+        
+        // Extract data with hashes
+        const [itemsData, attachmentsData] = await Promise.all([
+            Promise.all(regularItems.map(extractItemData)).then(data => 
+                data.filter((item) => item !== null) as ItemData[]
+            ),
+            Promise.all(attachmentItems.map(extractAttachmentData)).then(data => 
+                data.filter((att) => att !== null) as AttachmentData[]
+            )
+        ]);
+        
+        // 3. Prepare hash comparison data
+        const hashComparison = {
+            items: itemsData.map(item => ({
+                zotero_key: item.zotero_key,
+                metadata_hash: item.item_metadata_hash
+            })),
+            attachments: attachmentsData.map(att => ({
+                zotero_key: att.zotero_key,
+                metadata_hash: att.attachment_metadata_hash
+            }))
+        };
+        
+        logger(`Beaver Sync: Sending hash comparison for ${hashComparison.items.length} items and ${hashComparison.attachments.length} attachments`, 3);
+        
+        // 4. Send hash comparison to backend
+        const comparison = await syncService.compareHashes(libraryID, hashComparison);
+        
+        const itemsNeedingSyncCount = comparison.items_needing_sync.length;
+        const attachmentsNeedingSyncCount = comparison.attachments_needing_sync.length;
+        const totalNeedingSync = itemsNeedingSyncCount + attachmentsNeedingSyncCount;
+        
+        logger(`Beaver Sync: Backend indicates ${totalNeedingSync} items need syncing (${itemsNeedingSyncCount} items, ${attachmentsNeedingSyncCount} attachments)`, 3);
+        
+        if (totalNeedingSync === 0) {
+            onStatusChange?.('completed');
+            onProgress?.(totalItems, totalItems);
+            logger('Beaver Sync: All items are up to date', 3);
+            return { status: 'completed', message: 'All items up to date' };
+        }
+        
+        // 5. Get the Zotero items that need syncing
+        const keysNeedingSync = [...comparison.items_needing_sync, ...comparison.attachments_needing_sync];
+        const itemsNeedingSync = allItems.filter(item => keysNeedingSync.includes(item.key));
+        
+        logger(`Beaver Sync: Processing ${itemsNeedingSync.length} items that need syncing`, 3);
+        
+        // 6. Sync the items that need updating using existing sync logic
+        await syncItemsToBackend(
+            libraryID, 
+            itemsNeedingSync, 
+            'consistency', 
+            onStatusChange, 
+            onProgress, 
+            batchSize
+        );
+        
+    } catch (error: any) {
+        logger('Beaver Sync: Error during consistency check: ' + error.message, 1);
+        Zotero.logError(error);
+        onStatusChange?.('failed');
+        throw error;
+    }
+}

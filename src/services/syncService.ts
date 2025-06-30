@@ -84,6 +84,26 @@ export interface AttachmentUpdateResponse {
     enqueued: boolean;
 }
 
+export interface HashComparisonRequest {
+    library_id: number;
+    items: Array<{
+        zotero_key: string;
+        metadata_hash: string;
+    }>;
+    attachments: Array<{
+        zotero_key: string;
+        metadata_hash: string;
+    }>;
+}
+
+export interface HashComparisonResponse {
+    library_id: number;
+    items_needing_sync: string[];      // Array of zotero_keys that need syncing
+    attachments_needing_sync: string[]; // Array of zotero_keys that need syncing
+    items_to_delete: string[];         // Array of zotero_keys that exist in backend but not in Zotero
+    attachments_to_delete: string[];   // Array of zotero_keys that exist in backend but not in Zotero
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -176,6 +196,25 @@ export class SyncService extends ApiService {
         return this.post<DeleteZoteroDataResponse>('/zotero/sync/items/delete', {
             library_id: libraryId,
             zotero_keys: zoteroKeys
+        });
+    }
+
+    /**
+     * Compares local metadata hashes with backend to identify items needing sync
+     * @param libraryId The Zotero library ID
+     * @param hashes Object containing arrays of items and attachments with their hashes
+     * @returns Promise with comparison results indicating which items need syncing
+     */
+    async compareHashes(
+        libraryId: number, 
+        hashes: {
+            items: Array<{zotero_key: string, metadata_hash: string}>,
+            attachments: Array<{zotero_key: string, metadata_hash: string}>
+        }
+    ): Promise<HashComparisonResponse> {
+        return this.post<HashComparisonResponse>('/zotero/sync/compare-hashes', {
+            library_id: libraryId,
+            ...hashes
         });
     }
 }
