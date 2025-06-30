@@ -36,7 +36,12 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
         const textParts: string[] = [];
         if (fileStatusSummary.completedFiles > 0) textParts.push(`${fileStatusSummary.completedFiles.toLocaleString()} done`);
         if (fileStatusSummary.processingProcessingCount > 0) textParts.push(`${fileStatusSummary.processingProcessingCount.toLocaleString()} processing`);
+
+        const numFilesToProcess = fileStatusSummary.queuedProcessingCount + fileStatusSummary.processingProcessingCount;
         
+        if (textParts.length === 0 && numFilesToProcess > 0) return `Waiting to process ${numFilesToProcess.toLocaleString()} files...`;
+        if (textParts.length === 0 && numFilesToProcess === 0) return "No files to process.";
+
         return textParts.join(", ");
     };
 
@@ -46,20 +51,24 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
                 {message.text}
             </div>
 
-            <div className="display-flex flex-col gap-3 items-start flex-1">
+            {showProgress && fileStatusSummary && (
+                <div className="display-flex flex-col items-start flex-1 w-full">
 
-                {/* Progress bar */}
-                {showProgress && fileStatusSummary && fileStatusSummary.totalProcessingCount > 0 && (
+                    {/* Progress bar */}
                     <div className="w-full">
                         <ProgressBar progress={fileStatusSummary.progress} />
                     </div>
-                )}
-                {showProgress && fileStatusSummary && fileStatusSummary.totalProcessingCount === 0 && (
-                    <div className="font-color-tertiary text-base w-full">
-                    {getProcessingLeftText()}
+                    <div className="display-flex flex-row gap-4 w-full">
+                        <div className="font-color-tertiary text-sm">
+                            {getProcessingLeftText()}
+                        </div>
+                        <div className="flex-1"/>
+                        <div className="font-color-tertiary text-sm">
+                            {`${Math.min(fileStatusSummary.processingProgress, 100).toFixed(1)}%`}
+                        </div>
+                    </div>
                 </div>
-                )}
-            </div>
+            )}
         </div>
     );
 };
