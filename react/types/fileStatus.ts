@@ -1,9 +1,12 @@
+import { ProcessingTier } from "./profile";
+
 /**
  * Represents the processing status summary for a user's files.
  * Mirrors the files_status table in the database and the FileStatus type in the backend.
  */
 export interface FileStatus {
     user_id: string;
+    processing_tier: ProcessingTier;
     total_files: number;
 
     // Upload status
