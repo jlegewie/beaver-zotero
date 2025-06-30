@@ -81,7 +81,7 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
                 ))}
             </div>
 
-            {message.planName === "free" && skippedFiles > 0 && (
+            {message.planName === "Starter" && skippedFiles > 0 && (
                 <div className="font-color-secondary text-base">
                     {`You can upgrade your plan to process more files.`}
                 </div>
@@ -89,7 +89,7 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
 
             <div className="display-flex flex-row gap-3 items-center">
                 <div className="flex-1" />
-                {message.planName === "free" && skippedFiles > 0 && (
+                {message.planName === "Starter" && skippedFiles > 0 && (
                     <Button variant="surface">Upgrade</Button>
                 )}
                 {(skippedFiles > 0 || failedFiles > 0) && (
