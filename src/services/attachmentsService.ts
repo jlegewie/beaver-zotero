@@ -167,7 +167,7 @@ export class AttachmentsService extends ApiService {
      * @param type The type of processing ('md' or 'docling') to get stats for.
      * @returns Promise resolving to an object mapping error codes to their counts.
      */
-    async getErrorCodeStats(type: 'md' | 'docling' = 'md'): Promise<ErrorCodeStats[]> {
+    async getErrorCodeStats(type: 'text' | 'md' | 'docling'): Promise<ErrorCodeStats[]> {
         return this.get<ErrorCodeStats[]>(`/attachments/error-code-stats/${type}`);
     }
 
