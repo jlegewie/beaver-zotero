@@ -31,6 +31,7 @@ const fileStatusConnectionAtom = atom<FileStatusConnection>({
 let subscriberCount = 0;
 let channelRef: RealtimeChannel | null = null;
 let retryTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+let stopTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 let currentUserId: string | null = null;
 let isConnecting = false;
 
@@ -220,6 +221,10 @@ export const useFileStatus = (): FileStatusConnection => {
         const isEligible = isAuthenticated && user && hasAuthorizedAccess;
 
         if (isEligible && !isActiveSubscriber.current) {
+            if (stopTimeoutRef) {
+                clearTimeout(stopTimeoutRef);
+                stopTimeoutRef = null;
+            }
             // This component is becoming an active subscriber
             subscriberCount++;
             isActiveSubscriber.current = true;
@@ -233,7 +238,9 @@ export const useFileStatus = (): FileStatusConnection => {
             isActiveSubscriber.current = false;
             logger(`useFileStatus Hook: Subscriber removed. Count: ${subscriberCount}.`);
             if (subscriberCount === 0) {
-                stopSubscription(setConnection, setFileStatus);
+                stopTimeoutRef = setTimeout(() => {
+                    stopSubscription(setConnection, setFileStatus);
+                }, 100);
             }
         }
 
@@ -250,7 +257,9 @@ export const useFileStatus = (): FileStatusConnection => {
                 isActiveSubscriber.current = false;
                 logger(`useFileStatus Hook: Subscriber removed on unmount. Count: ${subscriberCount}.`);
                 if (subscriberCount === 0) {
-                    stopSubscription(setConnection, setFileStatus);
+                    stopTimeoutRef = setTimeout(() => {
+                        stopSubscription(setConnection, setFileStatus);
+                    }, 100);
                 }
             }
         };
