@@ -17,22 +17,11 @@ export const useIndexingCompleteMessage = () => {
             logger("useIndexingCompleteMessage: Indexing complete message triggered");
 
             // Reset the preference immediately to prevent duplicate messages
-            // setPref("showIndexingCompleteMessage", false);
-
-            const skippedFiles = fileStats?.skippedProcessingCount + fileStats?.uploadSkippedCount;
-            const failedFiles = fileStats?.failedProcessingCount + fileStats?.uploadFailedCount;
+            setPref("showIndexingCompleteMessage", false);
 
             // Add the indexing complete message
-            const message = `We completed indexing ${fileStats.completedFiles.toLocaleString()} files for your ${profileWithPlan?.plan.name} plan.`;
-            // if(failedFiles > 0) {
-            //     message += ` ${failedFiles.toLocaleString()} files failed.`;
-            // }
-            // if(skippedFiles > 0) {
-            //     message += ` ${skippedFiles.toLocaleString()} files were skipped.`;
-            // }
-            // if(profileWithPlan?.plan.name === "free" && fileStats.skippedProcessingCount > 0) {
-            //     message += " You can upgrade your plan to process more files.";
-            // }
+            const message = `We completed indexing your files for the ${profileWithPlan?.plan.name} plan.`;
+
             addPopupMessage({
                 title: "File Indexing Complete",
                 text: message,

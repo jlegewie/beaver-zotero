@@ -4,7 +4,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useFileStatus } from '../../../hooks/useFileStatus';
 import { fileStatusStatsAtom } from '../../../atoms/files';
 import { ProgressBar } from '../../status/ProgressBar';
-import { updatePopupMessageAtom, removePopupMessageAtom } from '../../../utils/popupMessageUtils';
+import {  removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useIndexingCompleteMessage } from '../../../hooks/useIndexingCompleteMessage';
 
 interface PlanChangeMessageContentProps {
@@ -12,7 +12,6 @@ interface PlanChangeMessageContentProps {
 }
 
 const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ message }) => {
-    const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
     const removePopupMessage = useSetAtom(removePopupMessageAtom);
 
     // Realtime listening for file status updates
@@ -23,10 +22,7 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
     useEffect(() => {
         // Remove the message when the progress is 100%
         if(fileStats && fileStats.progress >= 100) {
-            updatePopupMessage({
-                messageId: message.id,
-                updates: {expire: true}
-            });
+            removePopupMessage(message.id);
         }
     }, [fileStats]);
 
@@ -37,7 +33,7 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
         
         const textParts: string[] = [];
         if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
-        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} processing`);
+        if (fileStats.processingProcessingCount > 0) textParts.push(`${fileStats.processingProcessingCount.toLocaleString()} processing`);
         
         return textParts.join(", ");
     };
