@@ -37,22 +37,38 @@ let isConnecting = false;
 const formatStatus = (statusData: any): FileStatus => ({
     ...statusData,
     total_files: Number(statusData.total_files || 0),
+
+    // Upload status
     upload_pending: Number(statusData.upload_pending || 0),
     upload_completed: Number(statusData.upload_completed || 0),
     upload_failed: Number(statusData.upload_failed || 0),
-    upload_skipped: Number(statusData.upload_skipped || 0),
-    md_unavailable: Number(statusData.md_unavailable || 0),
+    upload_plan_limit: Number(statusData.upload_plan_limit || 0),
+
+    // Text status
+    text_queued: Number(statusData.text_queued || 0),
+    text_processing: Number(statusData.text_processing || 0),
+    text_completed: Number(statusData.text_completed || 0),
+    text_failed_system: Number(statusData.text_failed_system || 0),
+    text_failed_user: Number(statusData.text_failed_user || 0),
+    text_plan_limit: Number(statusData.text_plan_limit || 0),
+    text_unsupported_file: Number(statusData.text_unsupported_file || 0),
+
+    // Markdown status,
     md_queued: Number(statusData.md_queued || 0),
     md_processing: Number(statusData.md_processing || 0),
-    md_embedded: Number(statusData.md_embedded || 0),
-    md_failed: Number(statusData.md_failed || 0),
-    md_skipped: Number(statusData.md_skipped || 0),
-    docling_unavailable: Number(statusData.docling_unavailable || 0),
+    md_completed: Number(statusData.md_completed || 0),
+    md_failed_system: Number(statusData.md_failed_system || 0),
+    md_failed_user: Number(statusData.md_failed_user || 0),
+    md_plan_limit: Number(statusData.md_plan_limit || 0),
+    md_unsupported_file: Number(statusData.md_unsupported_file || 0),
+
     docling_queued: Number(statusData.docling_queued || 0),
     docling_processing: Number(statusData.docling_processing || 0),
-    docling_embedded: Number(statusData.docling_embedded || 0),
-    docling_failed: Number(statusData.docling_failed || 0),
-    docling_skipped: Number(statusData.docling_skipped || 0),
+    docling_completed: Number(statusData.docling_completed || 0),
+    docling_failed_system: Number(statusData.docling_failed_system || 0),
+    docling_failed_user: Number(statusData.docling_failed_user || 0),
+    docling_plan_limit: Number(statusData.docling_plan_limit || 0),
+    docling_unsupported_file: Number(statusData.docling_unsupported_file || 0),
 });
 
 const getRetryDelay = (attempt: number): number => {

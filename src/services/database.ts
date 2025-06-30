@@ -328,7 +328,7 @@ export class BeaverDB {
 
     /**
      * Insert a record into the 'attachments' table.
-     * Optional fields default to initial states ('pending', 'unavailable', null).
+     * Optional fields default to initial states ('pending', null).
      * @param user_id User ID for the attachment
      * @param attachment Data for the new attachment. 'id' will be generated.
      *                   Requires 'library_id', 'zotero_key', 'attachment_metadata_hash'.
@@ -669,11 +669,10 @@ export class BeaverDB {
         const defaults: Partial<AttachmentRecord> = {
             file_hash: null,
             can_upload: null,
-            // TODO: Should they be set to null as a default?
             upload_status: 'pending',
-            md_status: 'unavailable',
-            docling_status: 'unavailable',
-            text_status: 'unavailable',
+            md_status: null,
+            docling_status: null,
+            text_status: null,
             md_error_code: null,
             docling_error_code: null,
             text_error_code: null,

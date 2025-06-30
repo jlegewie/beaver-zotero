@@ -8,12 +8,11 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { store } from '../../react/index';
 import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
-import pako from 'pako';
 
 // processing_status from backend
-export type ProcessingStatus = "unavailable" | "balance_insufficient" | "queued" | "processing" | "embedded" | "failed" | "skipped";
+export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
 // upload_status_literal from backend
-export type UploadStatus = "pending" | "completed" | "failed" | "skipped";
+export type UploadStatus = "pending" | "completed" | "failed" | "plan_limit";
 
 /**
  * Request body for marking an upload as failed

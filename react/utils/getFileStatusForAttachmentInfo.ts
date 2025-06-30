@@ -86,7 +86,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
 
         // 5. Return the status
         switch (fileStatus) {
-            case 'unavailable':
+            case null:
                 return {
                     text: 'Processing not available',
                     showButton: true,
@@ -94,12 +94,12 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonTooltip: 'File processing is only available for users with a subscription.',
                     buttonDisabled: true
                 };
-            case 'balance_insufficient':
+            case 'plan_limit':
                 return {
-                    text: 'Insufficient balance',
+                    text: 'File exceeds plan limits',
                     showButton: true,
                     buttonIcon: 'chrome://beaver/content/icons/info.svg',
-                    buttonTooltip: 'Your balance is insufficient to process this file.',
+                    buttonTooltip: 'Your plan limit has been reached.',
                     buttonDisabled: true,
                     onClick: () => {attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash); }
                 };
@@ -107,7 +107,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                 return { text: 'Waiting for processing...', showButton: false };
             case 'processing':
                 return { text: 'Processing...', showButton: false };
-            case 'embedded':
+            case 'completed':
                 return {
                     text: 'Completed',
                     showButton: true, // Allow reprocessing
@@ -120,9 +120,8 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                         await fileUploader.start("manual");
                     }
                 };
-            case 'skipped':
-                return { text: 'Skipped', showButton: false };
-            case 'failed': {
+            case 'failed_system':
+            case 'failed_user': {
                 // Error code if any
                 const errorDescription = errorMapping[errorCode as keyof typeof errorMapping] || "Unexpected error";
                 return {

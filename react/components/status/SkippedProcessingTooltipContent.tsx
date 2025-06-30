@@ -1,12 +1,12 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { aggregatedErrorMessagesForSkippedFilesAtom, errorCodeStatsErrorAtom, errorCodeStatsIsLoadingAtom } from '../../atoms/files';
+import { aggregatedErrorMessagesForPlanLimitFilesAtom, errorCodeStatsErrorAtom, errorCodeStatsIsLoadingAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
 
 export const SkippedProcessingTooltipContent: React.FC = () => {
     const isLoading = useAtomValue(errorCodeStatsIsLoadingAtom);
     const error = useAtomValue(errorCodeStatsErrorAtom);
-    const aggregatedMessages = useAtomValue(aggregatedErrorMessagesForSkippedFilesAtom);
+    const aggregatedMessages = useAtomValue(aggregatedErrorMessagesForPlanLimitFilesAtom);
 
     return (
         <div className="display-flex flex-col gap-1">

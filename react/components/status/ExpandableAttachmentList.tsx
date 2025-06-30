@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { userIdAtom } from '../../atoms/auth';
 import { planFeaturesAtom } from '../../atoms/profile';
-import { attachmentsService, AttachmentStatusPagedResponse } from '../../../src/services/attachmentsService';
+import { attachmentsService, AttachmentStatusPagedResponse, ProcessingStatus } from '../../../src/services/attachmentsService';
 import { logger } from '../../../src/utils/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
@@ -13,7 +13,7 @@ import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons'
 const ITEMS_PER_PAGE = 10;
 
 interface ExpandableAttachmentListProps {
-    status: 'failed' | 'skipped';
+    statuses: ProcessingStatus[];
     count: number;
     title: string;
     tooltipTitle: string;
@@ -23,7 +23,7 @@ interface ExpandableAttachmentListProps {
 }
 
 const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
-    status,
+    statuses,
     count,
     title,
     tooltipTitle,
@@ -46,7 +46,7 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
         setIsLoading(true);
         try {
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
-                status,
+                statuses,
                 planFeatures.processingTier,
                 page + 1, // API is 1-based
                 ITEMS_PER_PAGE
@@ -84,13 +84,13 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
             setHasMore(result.has_more);
             setCurrentPage(page);
         } catch (error) {
-            logger(`ExpandableAttachmentList: Error fetching ${status} items: ${error}`);
+            logger(`ExpandableAttachmentList: Error fetching ${statuses.join(', ')} items: ${error}`);
             setAttachments([]);
             setHasMore(false);
         } finally {
             setIsLoading(false);
         }
-    }, [userId, planFeatures.processingTier, status]);
+    }, [userId, planFeatures.processingTier, statuses]);
 
     useEffect(() => {
         if (!userId || count === 0) {

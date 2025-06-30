@@ -10,34 +10,34 @@ export interface FileStatus {
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
-    upload_skipped: number;
+    upload_plan_limit: number;
 
     // Basic processing status (text)
-    text_unavailable: number;
-    text_balance_insufficient: number;
     text_queued: number;
     text_processing: number;
-    text_embedded: number;
-    text_failed: number;
-    text_skipped: number;
+    text_completed: number;
+    text_failed_system: number;
+    text_failed_user: number;
+    text_plan_limit: number;
+    text_unsupported_file: number;
 
     // Standard processing status (markdown)
-    md_unavailable: number;
-    md_balance_insufficient: number;
     md_queued: number;
     md_processing: number;
-    md_embedded: number;
-    md_failed: number;
-    md_skipped: number;
+    md_completed: number;
+    md_failed_system: number;
+    md_failed_user: number;
+    md_plan_limit: number;
+    md_unsupported_file: number;
 
     // Advanced processing status (docling)
-    docling_unavailable: number;
-    docling_balance_insufficient: number;
     docling_queued: number;
     docling_processing: number;
-    docling_embedded: number;
-    docling_failed: number;
-    docling_skipped: number;
+    docling_completed: number;
+    docling_failed_system: number;
+    docling_failed_user: number;
+    docling_plan_limit: number;
+    docling_unsupported_file: number;
 
     // Timestamp for the last update
     last_updated_at: string; // ISO 8601 timestamp string
@@ -45,21 +45,30 @@ export interface FileStatus {
 
 // Aggregated file processing status stats
 export interface FileStatusStats {
-    fileStatusAvailable: boolean;
-    totalFiles: number;
-    completedFiles: number;
-    failedProcessingCount: number;
-    skippedProcessingCount: number;
-    balanceInsufficientProcessingCount: number;
-    activeProcessingCount: number;
-    totalProcessingCount: number;
-    processingProgress: number;
-    progress: number;
-    failedCount: number;
-    activeCount: number;
-    uploadPendingCount: number;
-    queuedProcessingCount: number;
-    uploadCompletedCount: number;
-    uploadFailedCount: number;
-    uploadSkippedCount: number;
+    fileStatusAvailable: boolean,
+
+    // Combined counts
+    totalFiles: number,
+    failedCount: number,
+    activeCount: number,
+    planLimitCount: number,
+
+    // Upload status
+    uploadPendingCount: number,
+    uploadCompletedCount: number,
+    uploadFailedCount: number,
+    uploadPlanLimitCount: number,
+
+    // Processing status
+    queuedProcessingCount: number,
+    processingProcessingCount: number,
+    completedFiles: number,
+    failedProcessingCount: number,
+    planLimitProcessingCount: number,
+    unsupportedFileCount: number,
+
+    // Processing summary
+    totalProcessingCount: number,
+    processingProgress: number,
+    progress: number,
 }

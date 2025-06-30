@@ -48,19 +48,19 @@ export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, num
     if (!errorCodeStats) return {};
     const aggregatedStats: Record<string, number> = {};
     for (const errorCodeStat of errorCodeStats) {
-        if(errorCodeStat.status !== "failed") continue;
+        if(errorCodeStat.status !== "failed_user" && errorCodeStat.status !== "failed_system") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
         aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
     }
     return aggregatedStats;
 });
 
-export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, number>>((get) => {
+export const aggregatedErrorMessagesForPlanLimitFilesAtom = atom<Record<string, number>>((get) => {
     const errorCodeStats = get(errorCodeStatsAtom);
     if (!errorCodeStats) return {};
     const aggregatedStats: Record<string, number> = {};
     for (const errorCodeStat of errorCodeStats) {
-        if(errorCodeStat.status !== "skipped") continue;
+        if(errorCodeStat.status !== "plan_limit") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
         aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
     }
@@ -80,71 +80,84 @@ export const fileStatusStatsAtom = atom<FileStatusStats>(
         const uploadPendingCount = fileStatus?.upload_pending || 0;
         const uploadCompletedCount = fileStatus?.upload_completed || 0;
         const uploadFailedCount = fileStatus?.upload_failed || 0;
-        const uploadSkippedCount = fileStatus?.upload_skipped || 0;
+        const uploadPlanLimitCount = fileStatus?.upload_plan_limit || 0;
 
         // Processing status based on plan features
-        let completedFiles = 0;
-        let skippedProcessingCount = 0;
-        let balanceInsufficientProcessingCount = 0;
-        let failedProcessingCount = 0;
-        let activeProcessingCount = 0;
         let queuedProcessingCount = 0;
+        let processingProcessingCount = 0;
+        let completedFiles = 0;
+        let failedProcessingCount = 0;
+        let planLimitProcessingCount = 0;
+        let unsupportedFileCount = 0;
 
         if(fileStatus && planFeatures.processingTier === 'basic') {
-            completedFiles = fileStatus.text_embedded;
-            balanceInsufficientProcessingCount = fileStatus.text_balance_insufficient;
-            skippedProcessingCount = fileStatus.text_skipped;
-            failedProcessingCount = fileStatus.text_failed;
-            activeProcessingCount = (fileStatus.text_processing);
             queuedProcessingCount = fileStatus.text_queued;
+            processingProcessingCount = (fileStatus.text_processing);
+            completedFiles = fileStatus.text_completed;
+            failedProcessingCount = fileStatus.text_failed_system + fileStatus.text_failed_user;
+            planLimitProcessingCount = fileStatus.text_plan_limit;
+            unsupportedFileCount = fileStatus.text_unsupported_file;
         } else if(fileStatus && planFeatures.processingTier === 'standard') {
-            completedFiles = fileStatus.md_embedded;
-            balanceInsufficientProcessingCount = fileStatus.md_balance_insufficient;
-            skippedProcessingCount = fileStatus.md_skipped;
-            failedProcessingCount = fileStatus.md_failed;
-            activeProcessingCount = (fileStatus.md_processing);
             queuedProcessingCount = fileStatus.md_queued;
+            processingProcessingCount = (fileStatus.md_processing);
+            completedFiles = fileStatus.md_completed;
+            failedProcessingCount = fileStatus.md_failed_system + fileStatus.md_failed_user;
+            planLimitProcessingCount = fileStatus.md_plan_limit;
+            unsupportedFileCount = fileStatus.md_unsupported_file;
         } else if(fileStatus && planFeatures.processingTier === 'advanced') {
-            completedFiles = fileStatus.docling_embedded;
-            balanceInsufficientProcessingCount = fileStatus.docling_balance_insufficient;
-            skippedProcessingCount = fileStatus.docling_skipped;
-            failedProcessingCount = fileStatus.docling_failed;
-            activeProcessingCount = fileStatus.docling_processing;
             queuedProcessingCount = fileStatus.docling_queued;
+            processingProcessingCount = fileStatus.docling_processing;
+            completedFiles = fileStatus.docling_completed;
+            failedProcessingCount = fileStatus.docling_failed_system + fileStatus.docling_failed_user;
+            planLimitProcessingCount = fileStatus.docling_plan_limit;
+            unsupportedFileCount = fileStatus.docling_unsupported_file;
         }
-
-        const totalProcessingCount = failedProcessingCount + activeProcessingCount + queuedProcessingCount + completedFiles + skippedProcessingCount
+            
+        // Processing summary (omitting unsupported files)
+        const totalProcessingCount = queuedProcessingCount + processingProcessingCount + completedFiles + failedProcessingCount + planLimitProcessingCount;
         const processingProgress = totalProcessingCount > 0
-            ? Math.min((completedFiles + skippedProcessingCount + balanceInsufficientProcessingCount + failedProcessingCount) / totalProcessingCount * 100, 100)
+            ? Math.min((completedFiles + failedProcessingCount + planLimitProcessingCount) / totalProcessingCount * 100, 100)
             : 0;
 
-        // combined stats
+        // Combined counts
         const failedCount = uploadFailedCount + failedProcessingCount;
-        const activeCount = uploadPendingCount + activeProcessingCount;
+        const activeCount = uploadPendingCount + processingProcessingCount;
+        const planLimitCount = uploadPlanLimitCount + planLimitProcessingCount;
         
         // Overall Progress
         const progress = totalFiles > 0
-            ? Math.min((uploadFailedCount + uploadSkippedCount + completedFiles + skippedProcessingCount + balanceInsufficientProcessingCount + failedProcessingCount) / totalFiles * 100, 100)
+            // ? Math.min((uploadCompletedCount + uploadFailedCount + uploadPlanLimitCount + completedFiles + failedProcessingCount + planLimitProcessingCount + unsupportedFileCount) / totalFiles * 100, 100)
+            ? Math.min((totalFiles - uploadPendingCount - queuedProcessingCount - processingProcessingCount) / totalFiles * 100, 100)
             : 0;
+            
 
         return {
             fileStatusAvailable: fileStatus !== null,
+
+            // Combined counts
             totalFiles,
+            failedCount,
+            activeCount,
+            planLimitCount,
+
+            // Upload status
+            uploadPendingCount,
+            uploadCompletedCount,
+            uploadFailedCount,
+            uploadPlanLimitCount,
+
+            // Processing status
+            queuedProcessingCount,
+            processingProcessingCount,
             completedFiles,
             failedProcessingCount,
-            skippedProcessingCount,
-            balanceInsufficientProcessingCount,
-            activeProcessingCount,
+            planLimitProcessingCount,
+            unsupportedFileCount,
+
+            // Processing summary
             totalProcessingCount,
             processingProgress,
             progress,
-            failedCount,
-            activeCount,
-            uploadPendingCount,
-            queuedProcessingCount,
-            uploadCompletedCount,
-            uploadFailedCount,
-            uploadSkippedCount,
         } as FileStatusStats;
     }
 );

@@ -16,9 +16,9 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
 
     const getProcessingIcon = (): React.ReactNode => {
         if (!fileStats) return StepThreeIcon;
-        if (!fileStats.completedFiles && !fileStats.failedProcessingCount && !fileStats.activeProcessingCount) return StepThreeIcon;
+        if (!fileStats.completedFiles && !fileStats.failedProcessingCount && !fileStats.processingProcessingCount) return StepThreeIcon;
         
-        const complete = fileStats.processingProgress >= 100 && fileStats.activeProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
+        const complete = fileStats.processingProgress >= 100 && fileStats.processingProcessingCount === 0 && fileStats.queuedProcessingCount === 0;
         // if (complete && fileStats.failedProcessingCount > 0) return CancelIcon;
         if (complete) return CheckmarkIcon;
         
@@ -31,9 +31,9 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
         
         const textParts: string[] = [];
         if (fileStats.completedFiles > 0) textParts.push(`${fileStats.completedFiles.toLocaleString()} done`);
-        if (fileStats.activeProcessingCount > 0) textParts.push(`${fileStats.activeProcessingCount.toLocaleString()} processing`);
+        if (fileStats.processingProcessingCount > 0) textParts.push(`${fileStats.processingProcessingCount.toLocaleString()} processing`);
 
-        const numFilesToProcess = fileStats.totalProcessingCount - fileStats.failedProcessingCount - fileStats.skippedProcessingCount;
+        const numFilesToProcess = fileStats.queuedProcessingCount + fileStats.processingProcessingCount;
         
         if (textParts.length === 0 && numFilesToProcess > 0) return `Waiting to process ${numFilesToProcess.toLocaleString()} files...`;
         if (textParts.length === 0 && numFilesToProcess === 0) return "No files to process.";
@@ -106,12 +106,25 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                 </div>
             </div>
 
-            {/* Failed and Skipped processing items */}
-            {fileStats.skippedProcessingCount > 0 && (
+            {/* Failed processing files */}
+            {fileStats.failedProcessingCount > 0 && (
                 <ExpandableAttachmentList
-                    status="skipped"
-                    count={fileStats.skippedProcessingCount}
-                    title="Skipped Files"
+                    statuses={["failed_user", "failed_system"]}
+                    count={fileStats.failedProcessingCount}
+                    title={`Failed file${fileStats.failedProcessingCount > 1 ? 's' : ''}`}
+                    tooltipTitle="Processing error codes"
+                    tooltipContent={<FailedProcessingTooltipContent />}
+                    icon={AlertIcon}
+                    textColorClassName="font-color-red"
+                />
+            )}
+
+            {/* Plan limit files */}
+            {fileStats.planLimitProcessingCount > 0 && (
+                <ExpandableAttachmentList
+                    statuses={["plan_limit"]}
+                    count={fileStats.planLimitProcessingCount}
+                    title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''} because of plan limits`}
                     tooltipTitle="Processing skip reasons"
                     tooltipContent={<SkippedProcessingTooltipContent />}
                     icon={InformationCircleIcon}
@@ -119,17 +132,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                     textColorClassName="font-color-secondary"
                 />
             )}
-            {fileStats.failedProcessingCount > 0 && (
-                <ExpandableAttachmentList
-                    status="failed"
-                    count={fileStats.failedProcessingCount}
-                    title="Failed Files"
-                    tooltipTitle="Processing error codes"
-                    tooltipContent={<FailedProcessingTooltipContent />}
-                    icon={AlertIcon}
-                    textColorClassName="font-color-red"
-                />
-            )}
+            
         </div>
     );
 };
