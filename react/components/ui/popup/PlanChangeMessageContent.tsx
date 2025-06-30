@@ -14,6 +14,8 @@ interface PlanChangeMessageContentProps {
 const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ message }) => {
     const removePopupMessage = useSetAtom(removePopupMessageAtom);
 
+    const showProgress = message.showProgress === undefined ? true : message.showProgress;
+
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
     const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
@@ -47,12 +49,12 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
             <div className="display-flex flex-col gap-3 items-start flex-1">
 
                 {/* Progress bar */}
-                {fileStatusSummary && fileStatusSummary.totalProcessingCount > 0 && (
+                {showProgress && fileStatusSummary && fileStatusSummary.totalProcessingCount > 0 && (
                     <div className="w-full">
                         <ProgressBar progress={fileStatusSummary.progress} />
                     </div>
                 )}
-                {fileStatusSummary && fileStatusSummary.totalProcessingCount === 0 && (
+                {showProgress && fileStatusSummary && fileStatusSummary.totalProcessingCount === 0 && (
                     <div className="font-color-tertiary text-base w-full">
                     {getProcessingLeftText()}
                 </div>

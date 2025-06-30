@@ -16,6 +16,7 @@ export interface PopupMessage {
     buttonOnClick?: () => void
     fileStatusSummary?: FileStatusSummary;
     planName?: string;
+    showProgress?: boolean;
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
 }
