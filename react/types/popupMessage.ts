@@ -1,4 +1,4 @@
-import { FileStatusStats } from "./fileStatus";
+import { FileStatusSummary } from "./fileStatus";
 
 export const POPUP_MESSAGE_DURATION = 2000; // 2 seconds
 
@@ -14,7 +14,7 @@ export interface PopupMessage {
     expire?: boolean; // Defaults to true
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void
-    fileStatusSummary?: FileStatusStats;
+    fileStatusSummary?: FileStatusSummary;
     planName?: string;
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION

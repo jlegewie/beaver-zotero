@@ -44,7 +44,7 @@ export interface FileStatus {
 }
 
 // Aggregated file processing status stats
-export interface FileStatusStats {
+export interface FileStatusSummary {
     fileStatusAvailable: boolean,
 
     // Combined counts

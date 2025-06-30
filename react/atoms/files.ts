@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { FileStatus, FileStatusStats } from '../types/fileStatus';
+import { FileStatus, FileStatusSummary } from '../types/fileStatus';
 import { planFeaturesAtom } from './profile';
 import { ErrorCodeStats } from 'src/services/attachmentsService';
 
@@ -69,7 +69,7 @@ export const aggregatedErrorMessagesForPlanLimitFilesAtom = atom<Record<string, 
 });
 
 
-export const fileStatusSummaryAtom = atom<FileStatusStats>(
+export const fileStatusSummaryAtom = atom<FileStatusSummary>(
     (get) => {
         const planFeatures = get(planFeaturesAtom);
         const fileStatus = get(fileStatusAtom);
@@ -159,6 +159,6 @@ export const fileStatusSummaryAtom = atom<FileStatusStats>(
             totalProcessingCount,
             processingProgress,
             progress,
-        } as FileStatusStats;
+        } as FileStatusSummary;
     }
 );
