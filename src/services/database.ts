@@ -2022,7 +2022,7 @@ export class BeaverDB {
     const fetchedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Fetched attachment:", fetchedAttachment);
 
-    await db.updateAttachment(1, "ATTACHKEY456", { md_status: "embedded", file_hash: "fileHashUpdated" });
+    await db.updateAttachment(1, "ATTACHKEY456", { md_status: "completed", file_hash: "fileHashUpdated" });
     const updatedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Updated attachment:", updatedAttachment);
 

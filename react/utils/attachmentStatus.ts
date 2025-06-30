@@ -26,21 +26,21 @@ export async function getAttachmentStatus(
         logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
         const processingTier = store.get(planFeaturesAtom).processingTier;
         const attachmentDB = attachmentsDB[0];
-        if (processingTier == "basic" && attachmentDB.file_hash && attachmentDB.text_status && attachmentDB.text_status === 'embedded') {
+        if (processingTier == "basic" && attachmentDB.file_hash && attachmentDB.text_status && attachmentDB.text_status === 'completed') {
             logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
             attachmentStatus = {
                 attachment_id: attachmentDB.id,
                 ...attachmentDB
             } as AttachmentStatusResponse;
         }
-        if (processingTier == "standard" && attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'embedded') {
+        if (processingTier == "standard" && attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'completed') {
             logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
             attachmentStatus = {
                 attachment_id: attachmentDB.id,
                 ...attachmentDB
             } as AttachmentStatusResponse;
         }
-        if (processingTier == "advanced" && attachmentDB.file_hash && attachmentDB.docling_status && attachmentDB.docling_status === 'embedded') {
+        if (processingTier == "advanced" && attachmentDB.file_hash && attachmentDB.docling_status && attachmentDB.docling_status === 'completed') {
             logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
             attachmentStatus = {
                 attachment_id: attachmentDB.id,
