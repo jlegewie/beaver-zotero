@@ -10,7 +10,7 @@ export const SkippedProcessingTooltipContent: React.FC = () => {
 
     return (
         <div className="display-flex flex-col gap-1">
-            <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Reasons for skipping</div>
+            <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Plan limits</div>
             {isLoading &&
                 <div className="text-base font-color-secondary mb-1 items-center display-flex flex-row">
                     <div className="mt-1"><Spinner size={14}/></div>
@@ -20,7 +20,7 @@ export const SkippedProcessingTooltipContent: React.FC = () => {
             {!isLoading && error && <div className="text-base font-color-secondary mb-1">{error}</div>}
             {!isLoading && !error && (
                 (!aggregatedMessages || Object.keys(aggregatedMessages).length === 0) ? (
-                    <div className="text-base font-color-secondary">No specific reasons available.</div>
+                    <div className="text-base font-color-tertiary">No specific reasons available.</div>
                 ) : (
                     Object.entries(aggregatedMessages).map(([message, count]) => (
                         <div key={message} className="display-flex justify-between items-center text-base whitespace-nowrap">
