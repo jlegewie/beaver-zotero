@@ -125,7 +125,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                     statuses={["plan_limit"]}
                     count={fileStats.planLimitProcessingCount}
                     title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''} because of plan limits`}
-                    tooltipTitle="Processing skip reasons"
+                    tooltipTitle="Plan limits"
                     tooltipContent={<SkippedProcessingTooltipContent />}
                     icon={InformationCircleIcon}
                     // textColorClassName="font-color-yellow"
