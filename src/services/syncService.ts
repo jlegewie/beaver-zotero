@@ -142,7 +142,7 @@ export class SyncService extends ApiService {
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentData[],
-        syncType: string,
+        syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
         createLog: boolean,
         closeLog: boolean,
         syncId?: string,

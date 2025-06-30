@@ -319,7 +319,7 @@ async function getCiteKey(item: Zotero.Item): Promise<string | null> {
 export async function syncItemsToBackend(
     libraryID: number,
     items: Zotero.Item[],
-    syncType: string,
+    syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 200
