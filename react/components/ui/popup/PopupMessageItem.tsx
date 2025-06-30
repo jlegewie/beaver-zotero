@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, UserIcon, PuzzleIcon } from '../../icons/icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon } from '../../icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
@@ -19,7 +19,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         if (message.expire !== false) { // Default to true if undefined
             timerId = Zotero.getMainWindow().setTimeout(() => {
                 removeMessage(message.id);
-            }, POPUP_MESSAGE_DURATION);
+            }, message.duration || POPUP_MESSAGE_DURATION);
         }
 
         return () => {
