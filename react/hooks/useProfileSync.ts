@@ -48,7 +48,7 @@ export const useProfileSync = () => {
             if (currentPlanId === "") {
                 setPref("currentPlanId", profileData.profile.current_plan_id);
             } else if (currentPlanId !== profileData.profile.current_plan_id) {
-                logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id}.`);
+                logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id} (${profileData.profile.plan.display_name}).`);
                 setPref("currentPlanId", profileData.profile.current_plan_id);
                 setPref("showIndexingCompleteMessage", true);
                 
