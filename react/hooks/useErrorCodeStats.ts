@@ -36,7 +36,6 @@ export const useErrorCodeStats = () => {
             
         logger(`useErrorCodeStats: useEffect running with shouldFetch=${shouldFetch} (totalErrors=${totalErrors}, failedProcessingCount=${failedProcessingCount}, planLimitProcessingCount=${planLimitProcessingCount})`);
         if (shouldFetch) {
-            logger("useErrorCodeStats: Fetching error code stats");
             const handler = setTimeout(() => {
                 setIsLoading(true);
                 setError(null);
@@ -52,6 +51,7 @@ export const useErrorCodeStats = () => {
                 // Fetch the error code stats
                 attachmentsService.getErrorCodeStats(type as 'text' | 'md' | 'docling')
                     .then(stats => {
+                        logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
                         setErrorCodeStats(stats);
                         setLastFetchedCounts({ failed: failedProcessingCount, skipped: planLimitProcessingCount });
                     })
