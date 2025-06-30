@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Icon, AlertIcon, Spinner, CSSIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom } from "../../atoms/profile";
+import { planFeaturesAtom, profileBalanceAtom, profileWithPlanAtom } from "../../atoms/profile";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 
@@ -15,6 +15,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
     // Track which libraries are selected
@@ -270,7 +271,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
                     <Icon icon={AlertIcon} className="scale-12 mt-1"/>
                     <div className="display-flex flex-col gap-2">
-                        Page limit exceeded. Some documents won't be searchable.
+                        {`File pages in selected libraries exceed the limit for the ${profileWithPlan ? profileWithPlan.plan.name : ''} plan. Some documents won't be searchable.`}
                     </div>
                 </div>
             )}
