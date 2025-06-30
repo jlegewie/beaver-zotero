@@ -3,8 +3,8 @@ import Button from "../ui/Button";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
 import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { isPreferencePageVisibleAtom } from '../../atoms/ui';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../atoms/threads';
 import { generateResponseAtom } from '../../atoms/generateMessages';
 import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/input";
@@ -15,9 +15,9 @@ import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessa
 
 
 const HomePage: React.FC = () => {
-    const [showFileStatus, setShowFileStatus] = useState(false);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
@@ -88,20 +88,20 @@ const HomePage: React.FC = () => {
             <div className="display-flex flex-row justify-between items-center mt-4">
                 <Button
                     variant="ghost-secondary"
-                    onClick={() => setShowFileStatus(!showFileStatus)}
-                    rightIcon={showFileStatus ? ArrowDownIcon : ArrowRightIcon}
+                    onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
+                    rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
                     iconClassName="mr-0 scale-14"
                 >
                     <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
                         File Status
                     </span>
                 </Button>
-                {!showFileStatus && (
-                    <FileStatusButton showFileStatus={showFileStatus} setShowFileStatus={setShowFileStatus}/>
+                {!showFileStatusDetails && (
+                    <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
                 )}
             </div>
             
-            {showFileStatus && (
+            {showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">
                     <FileUploadStatus pollingInterval={3000} />
                     <FileProcessingStatus connectionStatus={connectionStatus} />

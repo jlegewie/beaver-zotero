@@ -8,6 +8,7 @@ import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from './sync';
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
+export const showFileStatusDetailsAtom = atom(false);
 
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
