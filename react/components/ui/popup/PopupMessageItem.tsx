@@ -110,7 +110,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         <IconButton
                             icon={CancelIcon}
                             onClick={handleDismiss}
-                            iconClassName={`${fontColor} scale-11`}
+                            iconClassName={` scale-11`}
                         />
                     </div>
                 </div>
