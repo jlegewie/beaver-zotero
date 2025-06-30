@@ -465,7 +465,7 @@ export const retrySkippedUploads = async (): Promise<void> => {
             return;
         }
 
-        const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'skipped');
+        const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'plan_limit');
 
         if (skippedAttachments.length === 0) {
             logger('File Uploader: No skipped attachments to retry.', 3);
