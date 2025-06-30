@@ -115,13 +115,15 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * Extracts relevant data from a Zotero attachment item for syncing, including a metadata hash.
  * Keeps the 'file' property nested in the final output.
  * @param item Zotero item
+ * @param options Optional parameters
+ * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
  * @returns Promise resolving to AttachmentData object for syncing
  */
-async function extractAttachmentData(item: Zotero.Item): Promise<AttachmentData | null> {
+async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentData | null> {
 
     // 1. File: Confirm that the item is an attachment and that the file exists
     if (!item.isAttachment() || !(await item.fileExists())) return null;
-    const file_hash = await item.attachmentHash;
+    const file_hash = options?.lightweight ? '' : await item.attachmentHash;
 
     // 2. Metadata: Prepare the object containing only fields for hashing
     const hashedFields: AttachmentDataHashedFields = {
@@ -362,7 +364,7 @@ export async function syncItemsToBackend(
                 Promise.all(regularItems.map(extractItemData)).then(data => 
                     data.filter((item) => item !== null) as ItemData[]
                 ),
-                Promise.all(attachmentItems.map(extractAttachmentData)).then(data => 
+                Promise.all(attachmentItems.map((item) => extractAttachmentData(item))).then(data => 
                     data.filter((att) => att !== null) as AttachmentData[]
                 )
             ]);
@@ -829,7 +831,7 @@ export async function performConsistencyCheck(
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 50
-) {
+): Promise<any> {
     const userId = store.get(userIdAtom);
     if (!userId) {
         throw new Error('No user found');
@@ -856,14 +858,14 @@ export async function performConsistencyCheck(
         const regularItems = allItems.filter(item => item.isRegularItem());
         const attachmentItems = allItems.filter(item => item.isAttachment());
 
-        const CHUNK_SIZE = 250;
+        const HASH_CHUNK_SIZE = 250;
         let processedCount = 0;
 
         // --- 2. Process Regular Items in Chunks ---
         const itemsToCompare: { zotero_key: string, metadata_hash: string }[] = [];
-        logger(`Beaver Sync: Hashing ${regularItems.length} items in chunks of ${CHUNK_SIZE}`, 3);
-        for (let i = 0; i < regularItems.length; i += CHUNK_SIZE) {
-            const chunk = regularItems.slice(i, i + CHUNK_SIZE);
+        logger(`Beaver Sync: Hashing ${regularItems.length} items in chunks of ${HASH_CHUNK_SIZE}`, 3);
+        for (let i = 0; i < regularItems.length; i += HASH_CHUNK_SIZE) {
+            const chunk = regularItems.slice(i, i + HASH_CHUNK_SIZE);
             const chunkData = await Promise.all(chunk.map(extractItemData));
             
             itemsToCompare.push(...chunkData.map(item => ({
@@ -878,10 +880,10 @@ export async function performConsistencyCheck(
 
         // --- 3. Process Attachments in Chunks ---
         const attachmentsToCompare: { zotero_key: string, metadata_hash: string }[] = [];
-        logger(`Beaver Sync: Hashing ${attachmentItems.length} attachments in chunks of ${CHUNK_SIZE}`, 3);
-        for (let i = 0; i < attachmentItems.length; i += CHUNK_SIZE) {
-            const chunk = attachmentItems.slice(i, i + CHUNK_SIZE);
-            const chunkData = await Promise.all(chunk.map(extractAttachmentData));
+        logger(`Beaver Sync: Hashing ${attachmentItems.length} attachments in chunks of ${HASH_CHUNK_SIZE}`, 3);
+        for (let i = 0; i < attachmentItems.length; i += HASH_CHUNK_SIZE) {
+            const chunk = attachmentItems.slice(i, i + HASH_CHUNK_SIZE);
+            const chunkData = await Promise.all(chunk.map(item => extractAttachmentData(item, { lightweight: true })));
             
             // Filter out nulls in case attachment file doesn't exist
             const validAttachments = chunkData.filter(att => att) as AttachmentData[];
@@ -906,8 +908,7 @@ export async function performConsistencyCheck(
         // --- 5. Handle Deletions ---
         const keysToDelete = [
             ...itemsComparison.items_to_delete, 
-            ...attachmentsComparison.attachments_to_delete, 
-            ...attachmentsComparison.items_to_delete // items_to_delete from the attachments request
+            ...attachmentsComparison.attachments_to_delete,
         ];
 
         if (keysToDelete.length > 0) {
@@ -936,12 +937,12 @@ export async function performConsistencyCheck(
         
         logger(`Beaver Sync: Processing ${itemsNeedingSync.length} items that need syncing`, 3);
         
-        await syncItemsToBackend(
+        return syncItemsToBackend(
             libraryID, 
             itemsNeedingSync, 
             'consistency', 
             onStatusChange, 
-            onProgress, 
+            undefined, 
             batchSize
         );
         
