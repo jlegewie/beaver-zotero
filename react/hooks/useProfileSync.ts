@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { fileUploader, retrySkippedUploads } from '../../src/services/FileUploader';
+import { fileUploader } from '../../src/services/FileUploader';
 import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
@@ -9,7 +9,7 @@ import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiE
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { planTransitionMessage } from '../utils/planTransitionMessage';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -22,7 +22,6 @@ export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const setModels = useSetAtom(setModelsAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -50,21 +49,7 @@ export const useProfileSync = () => {
             } else if (currentPlanId !== profileData.profile.current_plan_id) {
                 logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id} (${profileData.profile.plan.display_name}).`);
                 setPref("currentPlanId", profileData.profile.current_plan_id);
-                setPref("showIndexingCompleteMessage", true);
-                
-                // Re-attempt file uploads for previously skipped files (if plan allows)
-                if (profileData.profile.plan.upload_files) {
-                    logger(`useProfileSync: Re-attempting file uploads for previously skipped files.`);
-                    await retrySkippedUploads();
-                }
-
-                // Message with plan change and processing status
-                const title = `Welcome to the ${profileData.profile.plan.display_name} plan!`;
-                let text = "We're indexing files up to your new plan's limit. Full search will be available once this is complete.";
-                if (profileData.profile.plan.name === "pro") {
-                    text = "We're indexing your files to unlock all Pro features. Full search will be available shortly.";
-                }
-                addPopupMessage({ title, text, type: "plan_change", expire:false });
+                planTransitionMessage(profileData.profile);
             }
 
             // If the plan allows file uploads, start the file uploader
