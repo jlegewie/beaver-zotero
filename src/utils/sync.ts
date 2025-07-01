@@ -728,6 +728,11 @@ export async function syncZoteroDatabase(
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
     const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
+
+    // Initialize sync status for all libraries
+    for (const libraryID of libraryIds) {
+        updateInitialSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
+    }
     
     // Now perform actual syncs for each library
     for (const library of librariesToSync) {
