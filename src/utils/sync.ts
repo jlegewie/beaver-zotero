@@ -593,7 +593,6 @@ export async function performInitialSync(
     batchSize: number = 50
 ): Promise<any> {
     try {
-        batchSize = 1;
         const library = Zotero.Libraries.get(libraryID);
         if (!library) {
             logger(`Beaver Sync: Library ${libraryID} not found`, 1);
