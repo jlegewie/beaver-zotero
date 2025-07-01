@@ -137,11 +137,12 @@ const OnboardingPage: React.FC = () => {
             
             await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier);
 
-            // Update profile atoms
+            // Update local state
             if (profileWithPlan) {
                 const { userID, localUserKey } = getZoteroUserIdentifier();
                 setProfileWithPlan({
                     ...profileWithPlan,
+                    libraries: libraries,
                     has_authorized_access: true,
                     consented_at: new Date(),
                     zotero_user_id: userID || profileWithPlan.zotero_user_id,
