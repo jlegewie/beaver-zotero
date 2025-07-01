@@ -8,7 +8,6 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { store } from '../../react/index';
 import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
-import { FileHashStatus } from './processingStatusManager';
 
 // processing_status from backend
 export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
@@ -161,26 +160,6 @@ export class AttachmentsService extends ApiService {
     async getAttachmentStatus(libraryId: number, zoteroKey: string): Promise<AttachmentStatusResponse> {
         const url = `/attachments/status/${libraryId}/${zoteroKey}`;
         return this.get<AttachmentStatusResponse>(url);
-    }
-
-    /**
-     * Fetches the processing status for a specific file hash.
-     * @param fileHash The hash of the file to fetch the status for.
-     * @returns Promise with the processing status.
-     */
-    async getFileProcessingStatus(fileHash: string): Promise<FileHashStatus> {
-        const url = `/attachments/processing-status/${fileHash}`;
-        return this.get<FileHashStatus>(url);
-    }
-
-    /**
-     * Fetches the processing status for multiple files.
-     * @param fileHashes The hashes of the files to fetch the status for.
-     * @returns Promise with a map of file hashes to processing statuses.
-     */
-    async getFileProcessingStatusBatch(fileHashes: string[]): Promise<Map<string, FileHashStatus>> {
-        const url = `/attachments/processing-status/batch`;
-        return this.post<Map<string, FileHashStatus>>(url, fileHashes);
     }
 
     /**
