@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ProcessingStatus, UploadStatus } from './attachmentsService';
+import { UploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
@@ -23,7 +23,7 @@ export interface ItemRecord {
  * Interface for the 'attachments' table row
  * 
  * Table stores the current state of a zotero attachment. This includes
- * the syncing state (file metadata), upload status and processing status.
+ * the syncing state (file metadata) and upload status.
  * 
  */
 export interface AttachmentRecord {
@@ -34,16 +34,9 @@ export interface AttachmentRecord {
     attachment_metadata_hash: string;
     file_hash: string | null;
 
-    // Processing status
+    // Upload status
     can_upload: boolean | null;
     upload_status: UploadStatus | null;
-
-    md_status: ProcessingStatus | null;
-    docling_status: ProcessingStatus | null;
-    text_status: ProcessingStatus | null;
-    md_error_code: string | null;
-    docling_error_code: string | null;
-    text_error_code: string | null;
 }
 
 /* 
@@ -174,13 +167,6 @@ export class BeaverDB {
                 file_hash                TEXT,
                 can_upload               BOOLEAN,
                 upload_status            TEXT,
-
-                md_status                TEXT,
-                docling_status           TEXT,
-                text_status              TEXT,
-                md_error_code            TEXT,
-                docling_error_code       TEXT,
-                text_error_code          TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
             );
         `);
@@ -247,11 +233,6 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachments_user_hash
             ON attachments(user_id, file_hash);
-        `);
-
-        await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_attachments_user_processing_status
-            ON attachments(user_id, text_status, md_status, docling_status);
         `);
 
         await this.conn.queryAsync(`
@@ -345,18 +326,12 @@ export class BeaverDB {
             file_hash: null,
             can_upload: null,
             upload_status: null,
-            md_status: null,
-            docling_status: null,
-            text_status: null,
-            md_error_code: null,
-            docling_error_code: null,
-            text_error_code: null,
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, text_status, md_error_code, docling_error_code, text_error_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -365,13 +340,7 @@ export class BeaverDB {
                 finalAttachment.attachment_metadata_hash,
                 finalAttachment.file_hash,
                 finalAttachment.can_upload,
-                finalAttachment.upload_status,
-                finalAttachment.md_status,
-                finalAttachment.docling_status,
-                finalAttachment.text_status,
-                finalAttachment.md_error_code,
-                finalAttachment.docling_error_code,
-                finalAttachment.text_error_code
+                finalAttachment.upload_status
             ]
         );
         return id;
@@ -446,13 +415,7 @@ export class BeaverDB {
             'attachment_metadata_hash',
             'file_hash',
             'can_upload',
-            'upload_status',
-            'md_status',
-            'docling_status',
-            'text_status',
-            'md_error_code',
-            'docling_error_code',
-            'text_error_code'
+            'upload_status'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
@@ -600,12 +563,6 @@ export class BeaverDB {
             file_hash: row.file_hash,
             can_upload: typeof row.can_upload === 'number' ? Boolean(row.can_upload) : row.can_upload,
             upload_status: row.upload_status as UploadStatus,
-            md_status: row.md_status as ProcessingStatus,
-            docling_status: row.docling_status as ProcessingStatus,
-            text_status: row.text_status as ProcessingStatus,
-            md_error_code: row.md_error_code,
-            docling_error_code: row.docling_error_code,
-            text_error_code: row.text_error_code,
         };
     }
 
@@ -672,12 +629,6 @@ export class BeaverDB {
             file_hash: null,
             can_upload: null,
             upload_status: 'pending',
-            md_status: null,
-            docling_status: null,
-            text_status: null,
-            md_error_code: null,
-            docling_error_code: null,
-            text_error_code: null,
         };
 
         const finalIds: string[] = [];
@@ -722,7 +673,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'can_upload', 'upload_status', 'md_status', 'docling_status', 'text_status', 'md_error_code', 'docling_error_code', 'text_error_code'
+                    'file_hash', 'can_upload', 'upload_status'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -753,7 +704,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -764,16 +715,10 @@ export class BeaverDB {
                         attachment.attachment_metadata_hash,
                         attachment.file_hash,
                         attachment.can_upload,
-                        attachment.upload_status,
-                        attachment.md_status,
-                        attachment.docling_status,
-                        attachment.text_status,
-                        attachment.md_error_code,
-                        attachment.docling_error_code,
-                        attachment.text_error_code
+                        attachment.upload_status
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status, md_status, docling_status, text_status, md_error_code, docling_error_code, text_error_code) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
@@ -1883,7 +1828,7 @@ export class BeaverDB {
     const fetchedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Fetched attachment:", fetchedAttachment);
 
-    await db.updateAttachment(1, "ATTACHKEY456", { md_status: "completed", file_hash: "fileHashUpdated" });
+    await db.updateAttachment(1, "ATTACHKEY456", { upload_status: "completed", file_hash: "fileHashUpdated" });
     const updatedAttachment = await db.getAttachmentByZoteroKey(1, "ATTACHKEY456");
     console.log("Updated attachment:", updatedAttachment);
 
