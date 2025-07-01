@@ -18,35 +18,18 @@ export async function getAttachmentStatus(
     attachmentItem: Zotero.Item,
     user_id: string
 ): Promise<AttachmentStatusResponse> {
+    // Initialize attachment status
+    let attachmentStatus: AttachmentStatusResponse | null = null;
 
     // 1. Get attachment status from Beaver DB
     const attachmentsDB = await Zotero.Beaver.db.getAttachmentsByZoteroKeys(user_id, attachmentItem.libraryID, [attachmentItem.key]);
-    let attachmentStatus: AttachmentStatusResponse | null = null;
     if (attachmentsDB && attachmentsDB.length > 0) {
         logger(`getFileStatusForAttachmentInfo: Beaver DB found attachment status for ${attachmentItem.key}`);
-        const processingTier = store.get(planFeaturesAtom).processingTier;
         const attachmentDB = attachmentsDB[0];
-        if (processingTier == "basic" && attachmentDB.file_hash && attachmentDB.text_status && attachmentDB.text_status === 'completed') {
-            logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
-            attachmentStatus = {
-                attachment_id: attachmentDB.id,
-                ...attachmentDB
-            } as AttachmentStatusResponse;
-        }
-        if (processingTier == "standard" && attachmentDB.file_hash && attachmentDB.md_status && attachmentDB.md_status === 'completed') {
-            logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
-            attachmentStatus = {
-                attachment_id: attachmentDB.id,
-                ...attachmentDB
-            } as AttachmentStatusResponse;
-        }
-        if (processingTier == "advanced" && attachmentDB.file_hash && attachmentDB.docling_status && attachmentDB.docling_status === 'completed') {
-            logger(`getFileStatusForAttachmentInfo: Using stored attachment status for ${attachmentItem.key}`);
-            attachmentStatus = {
-                attachment_id: attachmentDB.id,
-                ...attachmentDB
-            } as AttachmentStatusResponse;
-        }
+        attachmentStatus = {
+            attachment_id: attachmentDB.id,
+            ...attachmentDB
+        } as AttachmentStatusResponse;
     }
 
     // 2. If no status in Beaver DB, get status from backend

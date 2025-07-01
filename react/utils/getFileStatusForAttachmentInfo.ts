@@ -6,7 +6,7 @@ import { AttachmentStatusResponse, attachmentsService } from '../../src/services
 import { store } from '../index';
 import { userAtom } from '../atoms/auth';
 import { getAttachmentStatus } from './attachmentStatus';
-import { planFeaturesAtom } from '../atoms/profile';
+import { planFeaturesAtom, syncLibraryIdsAtom } from '../atoms/profile';
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
@@ -22,16 +22,18 @@ interface BeaverStatusInfo {
 export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item): Promise<BeaverStatusInfo> {
     logger(`getFileStatusForAttachmentInfo: Getting Beaver status for item ${attachmentItem.id}`);
     try {
+        const libraryIds = store.get(syncLibraryIdsAtom);
         const user = store.get(userAtom);
         if (!user) {
             return { text: 'Not logged in', showButton: false };
         }
         
         // 1. Is file valid
-        if (attachmentItem.libraryID !== 1) {
-            return { text: 'Unsupported library', showButton: false };
+        if (!libraryIds.includes(attachmentItem.libraryID)) {
+            return { text: 'Library not synced', showButton: false };
         }
         if (!syncingItemFilter(attachmentItem)) {
+            if (attachmentItem.isInTrash()) return {text: 'File not synced', showButton: false };
             return {
                 text: 'Unsupported file type',
                 showButton: true,
@@ -89,20 +91,15 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             case null:
                 return {
                     text: 'Processing not available',
-                    showButton: true,
-                    buttonIcon: 'chrome://beaver/content/icons/info.svg',
-                    buttonTooltip: 'File processing is only available for users with a subscription.',
-                    buttonDisabled: true
+                    showButton: false,
                 };
-            case 'plan_limit':
+            case 'plan_limit': {
+                const errorDescription = errorMapping[errorCode as keyof typeof errorMapping] || "Unexpected error";
                 return {
-                    text: 'File exceeds plan limits',
-                    showButton: true,
-                    buttonIcon: 'chrome://beaver/content/icons/info.svg',
-                    buttonTooltip: 'Your plan limit has been reached.',
-                    buttonDisabled: true,
-                    onClick: () => {attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash); }
+                    text: `Plan limit: ${errorDescription}`,
+                    showButton: false,
                 };
+            }
             case 'queued':
                 return { text: 'Waiting for processing...', showButton: false };
             case 'processing':
@@ -110,7 +107,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             case 'completed':
                 return {
                     text: 'Completed',
-                    showButton: true, // Allow reprocessing
+                    showButton: true,
                     buttonTooltip: 'Reprocess this attachment',
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
@@ -125,7 +122,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                 // Error code if any
                 const errorDescription = errorMapping[errorCode as keyof typeof errorMapping] || "Unexpected error";
                 return {
-                    text: `Processing failed: ${errorDescription}`,
+                    text: `Failed: ${errorDescription}`,
                     showButton: true, // Allow retry
                     buttonTooltip: 'Retry processing',
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
