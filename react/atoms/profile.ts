@@ -1,11 +1,19 @@
 import { atom } from "jotai";
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
-import { ZoteroLibrary } from "../types/zotero";
+import { getZoteroUserIdentifier } from "../../src/utils/zoteroIdentifier";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
+
+// Device authorization state
+export const isDeviceAuthorizedAtom = atom<boolean>((get) => {
+    const { localUserKey } = getZoteroUserIdentifier();
+    const profile = get(profileWithPlanAtom);
+    return profile?.has_authorized_access && profile?.zotero_local_ids?.includes(localUserKey) || false;
+});
+
 
 // Sync libraries
 export const syncLibraryIdsAtom =  atom<number[]>((get) => {
