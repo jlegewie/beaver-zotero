@@ -11,11 +11,12 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
 import PreferencePage from './pages/PreferencePage';
+import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
-import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -28,6 +29,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
+    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
 
     useEffect(() => {
@@ -53,11 +55,22 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
         );
     }
 
+    {/* Onboarding page */}
     if(!hasAuthorizedAccess || !hasCompletedOnboarding) {
         return (
             <div className="bg-sidepane h-full display-flex flex-col min-w-0">
                 <Header />
                 <OnboardingPage />
+            </div>
+        );
+    }
+
+    {/* Device authorization page */}
+    if (!isDeviceAuthorized) {
+        return (
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+                <Header />
+                <DeviceAuthorizationPage />
             </div>
         );
     }
