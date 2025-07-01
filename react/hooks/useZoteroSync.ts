@@ -181,12 +181,14 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         eventsRef.current.timestamp = Date.now();
                         
                         if (event === 'add') {
-                            // Collect add events
-                            ids.forEach(id => {
-                                // Items not in sync libraries are filtered out in processAddModifyEvents
-                                eventsRef.current.addModify.add(id);
-                                eventsRef.current.delete.delete(id);
-                            });
+                            // Filter add events by library immediately
+                            const items = await Zotero.Items.getAsync(ids as number[]);
+                            items
+                                .filter(item => syncLibraryIds.includes(item.libraryID))
+                                .forEach(item => {
+                                    eventsRef.current.addModify.add(item.id);
+                                    eventsRef.current.delete.delete(item.id);
+                                });
                         } else if (event === 'modify') {
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             // Handle items in trash
