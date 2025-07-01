@@ -763,24 +763,39 @@ export async function syncZoteroDatabase(
         const libraryName = library.name;
         
         try {
-            logger(`Beaver Sync: Syncing library ${libraryID} (${libraryName})`, 3);
+            logger(`Beaver Sync: Determining sync strategy for library ${libraryID} (${libraryName})`, 3);
         
-            // Get the last sync date for this library
-            const response = await syncService.getLastSyncDate(libraryID);
-            const lastSyncDate = response.last_sync_date;
+            // Get the sync state for this library
+            const syncState = await syncService.getLibrarySyncState(libraryID);
+            const { last_global_sync_date, last_local_sync_date } = syncState;
             
-            // Perform initial sync if no previous sync date is found, otherwise perform periodic sync
-            if (!lastSyncDate) {
+            // SCENARIO A: True Initial Sync
+            if (!last_global_sync_date) {
+                logger(`Beaver Sync: Performing Initial Sync for library ${libraryID}.`, 2);
                 await performInitialSync(libraryID, onStatusChange, onProgress, batchSize);
+            
+            // SCENARIO B: Consistency Sync (Bootstrap new computer)
+            } else if (!last_local_sync_date) {
+                logger(`Beaver Sync: Performing Consistency Sync for library ${libraryID}.`, 2);
+                await performConsistencyCheck(
+                    libraryID,
+                    filterFunction,
+                    onStatusChange,
+                    onProgress,
+                    batchSize,
+                    true // Request population of local DB
+                );
+            
+            // SCENARIO C: Periodic Sync
             } else {
-                // Mark initial sync as complete
-                ensureCompletionOfLibrarySyncStatus(libraryID);
-                // Perform periodic sync
-                await performPeriodicSync(libraryID, lastSyncDate, filterFunction, onStatusChange, onProgress, batchSize);
+                logger(`Beaver Sync: Performing Periodic Sync for library ${libraryID}.`, 2);
+                await ensureCompletionOfLibrarySyncStatus(libraryID);
+                await performPeriodicSync(libraryID, last_local_sync_date, filterFunction, onStatusChange, onProgress, batchSize);
             }
         } catch (error: any) {
             logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
             Zotero.logError(error);
+            updateLibrarySyncStatus(libraryID, { status: 'failed' });
             // Continue with next library even if one fails
         }
     }
@@ -823,6 +838,7 @@ export async function getItemsToSync(
  * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @param batchSize Size of item batches to process (default: 50)
+ * @param populateLocalDB Optional flag to populate local DB with up-to-date items
  * @returns Promise resolving to the sync complete response
  */
 export async function performConsistencyCheck(
@@ -830,7 +846,8 @@ export async function performConsistencyCheck(
     filterFunction: ItemFilterFunction = syncingItemFilter,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 50
+    batchSize: number = 50,
+    populateLocalDB: boolean = false
 ): Promise<any> {
     const userId = store.get(userIdAtom);
     if (!userId) {
@@ -901,11 +918,38 @@ export async function performConsistencyCheck(
         // --- 4. Send Split Hash Comparison Requests to Backend ---
         logger(`Beaver Sync: Sending hash comparisons for ${itemsToCompare.length} items and ${attachmentsToCompare.length} attachments`, 3);
         const [itemsComparison, attachmentsComparison] = await Promise.all([
-            syncService.compareHashes(libraryID, { items: itemsToCompare, attachments: [] }),
-            syncService.compareHashes(libraryID, { items: [], attachments: attachmentsToCompare })
+            syncService.compareHashes(libraryID, { items: itemsToCompare, attachments: [] }, populateLocalDB),
+            syncService.compareHashes(libraryID, { items: [], attachments: attachmentsToCompare }, populateLocalDB)
         ]);
 
-        // --- 5. Handle Deletions ---
+        // --- 5. Populate local DB with up-to-date items (if requested) ---
+        if (populateLocalDB) {
+            const upToDateItems = itemsComparison.items_up_to_date || [];
+            if (upToDateItems.length > 0) {
+                logger(`Beaver Sync: Populating local DB with ${upToDateItems.length} up-to-date items.`, 3);
+                const itemsForDB = upToDateItems.map(item => ({
+                    library_id: libraryID,
+                    zotero_key: item.zotero_key,
+                    item_metadata_hash: item.metadata_hash
+                }));
+                await Zotero.Beaver.db.upsertItemsBatch(userId, itemsForDB);
+            }
+
+            const upToDateAttachments = attachmentsComparison.attachments_up_to_date || [];
+            if (upToDateAttachments.length > 0) {
+                logger(`Beaver Sync: Populating local DB with ${upToDateAttachments.length} up-to-date attachments.`, 3);
+                const attachmentsForDB = upToDateAttachments.map(attachment => ({
+                    library_id: libraryID,
+                    zotero_key: attachment.zotero_key,
+                    attachment_metadata_hash: attachment.metadata_hash,
+                    file_hash: attachment.file_hash,
+                    upload_status: attachment.upload_status,
+                }));
+                await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
+            }
+        }
+
+        // --- 6. Handle Deletions ---
         const keysToDelete = [
             ...itemsComparison.items_to_delete, 
             ...attachmentsComparison.attachments_to_delete,
@@ -918,7 +962,7 @@ export async function performConsistencyCheck(
             if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(userId, libraryID, allKeys);
         }
 
-        // --- 6. Handle Items Needing Sync ---
+        // --- 7. Handle Items Needing Sync ---
         const keysNeedingSync = [
             ...itemsComparison.items_needing_sync,
             ...attachmentsComparison.attachments_needing_sync

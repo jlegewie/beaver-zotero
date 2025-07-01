@@ -97,6 +97,20 @@ export interface HashComparisonRequest {
         zotero_key: string;
         metadata_hash: string;
     }>;
+    populate_local_db?: boolean;
+}
+
+// Add new minimal result interfaces for the consistency sync
+export interface ItemHashData {
+    zotero_key: string;
+    metadata_hash: string;
+}
+
+export interface AttachmentHashData {
+    zotero_key: string;
+    metadata_hash: string;
+    upload_status: UploadStatus;
+    file_hash: string;
 }
 
 export interface HashComparisonResponse {
@@ -105,6 +119,9 @@ export interface HashComparisonResponse {
     attachments_needing_sync: string[]; // Array of zotero_keys that need syncing
     items_to_delete: string[];         // Array of zotero_keys that exist in backend but not in Zotero
     attachments_to_delete: string[];   // Array of zotero_keys that exist in backend but not in Zotero
+    // Use minimal result objects to reduce response size
+    items_up_to_date?: ItemHashData[];
+    attachments_up_to_date?: AttachmentHashData[];
 }
 
 /**
@@ -233,12 +250,17 @@ export class SyncService extends ApiService {
         hashes: {
             items: Array<{zotero_key: string, metadata_hash: string}>,
             attachments: Array<{zotero_key: string, metadata_hash: string}>
-        }
+        },
+        populateLocalDB: boolean = false
     ): Promise<HashComparisonResponse> {
-        return this.post<HashComparisonResponse>('/zotero/sync/compare-hashes', {
+        const payload: HashComparisonRequest = {
             library_id: libraryId,
             ...hashes
-        });
+        };
+        if (populateLocalDB) {
+            payload.populate_local_db = true;
+        }
+        return this.post<HashComparisonResponse>('/zotero/sync/compare-hashes', payload);
     }
 }
 
