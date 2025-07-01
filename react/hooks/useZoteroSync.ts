@@ -65,7 +65,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             const items = await Zotero.Items.getAsync(itemIds as number[]);
             
             // Filter items that match our criteria
-            const filteredItems = items.filter(filterFunction);
+            const filteredItems = items.filter(filterFunction).filter(item => syncLibraryIds.includes(item.libraryID));
             
             if (filteredItems.length === 0) return;
             
@@ -115,10 +115,12 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             const keysByLibrary = new Map<number, string[]>();
             
             for (const { libraryID, key } of eventsRef.current.delete.values()) {
-                if (!keysByLibrary.has(libraryID)) {
-                    keysByLibrary.set(libraryID, []);
+                if(syncLibraryIds.includes(libraryID)) {
+                    if (!keysByLibrary.has(libraryID)) {
+                        keysByLibrary.set(libraryID, []);
+                    }
+                    keysByLibrary.get(libraryID)?.push(key);
                 }
-                keysByLibrary.get(libraryID)?.push(key);
             }
             
             // Process each library's deletions
@@ -181,19 +183,24 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         if (event === 'add') {
                             // Collect add events
                             ids.forEach(id => {
+                                // Items not in sync libraries are filtered out in processAddModifyEvents
                                 eventsRef.current.addModify.add(id);
                                 eventsRef.current.delete.delete(id);
                             });
                         } else if (event === 'modify') {
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             // Handle items in trash
-                            items.filter(item => item.isInTrash())
+                            items
+                                .filter(item => syncLibraryIds.includes(item.libraryID))
+                                .filter(item => item.isInTrash())
                                 .forEach(item => {
                                     eventsRef.current.delete.set(item.id, { libraryID: item.libraryID, key: item.key });
                                     eventsRef.current.addModify.delete(item.id);
                                 });
                             // Handle all other items
-                            items.filter(item => !item.isInTrash())
+                            items
+                                .filter(item => syncLibraryIds.includes(item.libraryID))
+                                .filter(item => !item.isInTrash())
                                 .forEach(item => {
                                     eventsRef.current.addModify.add(item.id);
                                     eventsRef.current.delete.delete(item.id);
@@ -204,8 +211,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key) {
-                                        eventsRef.current.delete.set(id, { libraryID, key });
-                                        eventsRef.current.addModify.delete(id); // Ensure mutual exclusivity
+                                        if(syncLibraryIds.includes(libraryID)) {
+                                            eventsRef.current.delete.set(id, { libraryID, key });
+                                            eventsRef.current.addModify.delete(id); // Ensure mutual exclusivity
+                                        }
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
                                     }
