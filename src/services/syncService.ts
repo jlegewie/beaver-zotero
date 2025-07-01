@@ -89,14 +89,8 @@ export interface AttachmentUpdateResponse {
 
 export interface HashComparisonRequest {
     library_id: number;
-    items: Array<{
-        zotero_key: string;
-        metadata_hash: string;
-    }>;
-    attachments: Array<{
-        zotero_key: string;
-        metadata_hash: string;
-    }>;
+    items: ItemHashData[];
+    attachments: ItemHashData[];
     populate_local_db?: boolean;
 }
 
@@ -247,15 +241,14 @@ export class SyncService extends ApiService {
      */
     async compareHashes(
         libraryId: number, 
-        hashes: {
-            items: Array<{zotero_key: string, metadata_hash: string}>,
-            attachments: Array<{zotero_key: string, metadata_hash: string}>
-        },
+        items: ItemHashData[],
+        attachments: ItemHashData[],
         populateLocalDB: boolean = false
     ): Promise<HashComparisonResponse> {
         const payload: HashComparisonRequest = {
             library_id: libraryId,
-            ...hashes
+            items: items,
+            attachments: attachments,
         };
         if (populateLocalDB) {
             payload.populate_local_db = true;

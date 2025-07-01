@@ -1,4 +1,4 @@
-import { syncService } from '../services/syncService';
+import { syncService, ItemHashData } from '../services/syncService';
 import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
@@ -896,7 +896,7 @@ export async function performConsistencyCheck(
         }
 
         // --- 3. Process Attachments in Chunks ---
-        const attachmentsToCompare: { zotero_key: string, metadata_hash: string }[] = [];
+        const attachmentsToCompare: ItemHashData[] = [];
         logger(`Beaver Sync: Hashing ${attachmentItems.length} attachments in chunks of ${HASH_CHUNK_SIZE}`, 3);
         for (let i = 0; i < attachmentItems.length; i += HASH_CHUNK_SIZE) {
             const chunk = attachmentItems.slice(i, i + HASH_CHUNK_SIZE);
@@ -908,7 +908,7 @@ export async function performConsistencyCheck(
             attachmentsToCompare.push(...validAttachments.map(att => ({
                 zotero_key: att.zotero_key,
                 metadata_hash: att.attachment_metadata_hash,
-            })));
+            } as ItemHashData)));
 
             processedCount += chunk.length;
             onProgress?.(processedCount, totalItems);
@@ -918,8 +918,8 @@ export async function performConsistencyCheck(
         // --- 4. Send Split Hash Comparison Requests to Backend ---
         logger(`Beaver Sync: Sending hash comparisons for ${itemsToCompare.length} items and ${attachmentsToCompare.length} attachments`, 3);
         const [itemsComparison, attachmentsComparison] = await Promise.all([
-            syncService.compareHashes(libraryID, { items: itemsToCompare, attachments: [] }, populateLocalDB),
-            syncService.compareHashes(libraryID, { items: [], attachments: attachmentsToCompare }, populateLocalDB)
+            syncService.compareHashes(libraryID, itemsToCompare, [], populateLocalDB),
+            syncService.compareHashes(libraryID, [], attachmentsToCompare, populateLocalDB)
         ]);
 
         // --- 5. Populate local DB with up-to-date items (if requested) ---
