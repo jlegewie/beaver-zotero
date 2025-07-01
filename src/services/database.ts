@@ -40,14 +40,12 @@ export interface AttachmentRecord {
  * Interface for the 'upload_queue' table row
  * 
  * Table stores upload queue for each unique file hash with visibility,
- * attempt count, file metadata and reference to representative attachment record.
+ * attempt count and reference to representative attachment record.
  * 
  */
 export interface UploadQueueRecord {
     file_hash: string;
     user_id: string;
-    page_count: number | null;
-    file_size: number | null;
     queue_visibility: string; 
     attempt_count: number;
     
@@ -59,8 +57,6 @@ export interface UploadQueueRecord {
 // Add a new interface for queue item input that allows optional file_hash
 export interface UploadQueueInput {
     file_hash?: string | null;  // Allow optional/null for input
-    page_count?: number | null;
-    file_size?: number | null;
     queue_visibility?: string | null;
     attempt_count?: number;
     library_id: number;
@@ -171,8 +167,6 @@ export class BeaverDB {
             CREATE TABLE IF NOT EXISTS upload_queue (
                 file_hash                TEXT NOT NULL,
                 user_id                  TEXT(36) NOT NULL,
-                page_count               INTEGER,
-                file_size                INTEGER,
                 queue_visibility         TEXT, 
                 attempt_count            INTEGER DEFAULT 0 NOT NULL,
                 library_id               INTEGER NOT NULL,
@@ -851,8 +845,6 @@ export class BeaverDB {
         return {
             file_hash: row.file_hash,
             user_id: row.user_id,
-            page_count: row.page_count,
-            file_size: row.file_size,
             queue_visibility: row.queue_visibility,
             attempt_count: row.attempt_count,
             library_id: row.library_id,
@@ -1025,7 +1017,7 @@ export class BeaverDB {
         user_id: string,
         item: UploadQueueInput
     ): Promise<void> {
-        const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
+        const { file_hash, queue_visibility, attempt_count, library_id, zotero_key } = item;
         
         // Validate that file_hash is provided and not empty
         if (!file_hash || file_hash.trim() === '') {
@@ -1034,8 +1026,6 @@ export class BeaverDB {
         
         // Build the update clauses dynamically based on what fields are provided
         const updateClauses = [
-            'page_count = excluded.page_count',
-            'file_size = excluded.file_size',
             'library_id = excluded.library_id',
             'zotero_key = excluded.zotero_key'
         ];
@@ -1050,14 +1040,12 @@ export class BeaverDB {
         }
         
         await this.conn.queryAsync(
-            `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-             VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+            `INSERT INTO upload_queue (user_id, file_hash, queue_visibility, attempt_count, library_id, zotero_key)
+             VALUES (?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
              ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
             [
                 user_id, 
                 file_hash, 
-                page_count ?? null,
-                file_size ?? null,
                 queue_visibility ?? null,
                 attempt_count ?? null,
                 library_id, 
@@ -1088,12 +1076,10 @@ export class BeaverDB {
         
         await this.conn.executeTransaction(async () => {
             for (const item of validItems) {
-                const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = item;
+                const { file_hash, queue_visibility, attempt_count, library_id, zotero_key } = item;
                 
                 // Build the update clauses dynamically based on what fields are provided
                 const updateClauses = [
-                    'page_count = excluded.page_count',
-                    'file_size = excluded.file_size',
                     'library_id = excluded.library_id',
                     'zotero_key = excluded.zotero_key'
                 ];
@@ -1108,14 +1094,12 @@ export class BeaverDB {
                 }
                 
                 await this.conn.queryAsync(
-                    `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+                    `INSERT INTO upload_queue (user_id, file_hash, queue_visibility, attempt_count, library_id, zotero_key)
+                     VALUES (?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
                         file_hash!, // We know this is valid because of the filter above
-                        page_count ?? null, 
-                        file_size ?? null, 
                         queue_visibility ?? null,
                         attempt_count ?? null,
                         library_id, 
@@ -1162,20 +1146,16 @@ export class BeaverDB {
 
                 const queueItem: UploadQueueInput = {
                     file_hash: item.file_hash,
-                    page_count: null,
-                    file_size: null,
-                    queue_visibility: null, // Changed from undefined to null
+                    queue_visibility: null,
                     attempt_count: 0,
                     library_id: item.library_id,
                     zotero_key: item.zotero_key
                 };  
 
                 // Use the existing upsert logic inline since we're already in a transaction
-                const { file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key } = queueItem;
+                const { file_hash, queue_visibility, attempt_count, library_id, zotero_key } = queueItem;
                 
                 const updateClauses = [
-                    'page_count = excluded.page_count',
-                    'file_size = excluded.file_size',
                     'library_id = excluded.library_id',
                     'zotero_key = excluded.zotero_key',
                     'queue_visibility = excluded.queue_visibility',  // Explicitly reset
@@ -1183,14 +1163,12 @@ export class BeaverDB {
                 ];
                 
                 await this.conn.queryAsync(
-                    `INSERT INTO upload_queue (user_id, file_hash, page_count, file_size, queue_visibility, attempt_count, library_id, zotero_key)
-                     VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
+                    `INSERT INTO upload_queue (user_id, file_hash, queue_visibility, attempt_count, library_id, zotero_key)
+                     VALUES (?, ?, COALESCE(?, datetime('now')), COALESCE(?, 0), ?, ?)
                      ON CONFLICT(user_id, file_hash) DO UPDATE SET ${updateClauses.join(', ')}`,
                     [
                         user_id, 
                         file_hash!, 
-                        page_count, 
-                        file_size, 
                         queue_visibility,
                         attempt_count,
                         library_id, 
