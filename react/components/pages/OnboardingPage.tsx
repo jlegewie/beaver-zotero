@@ -9,11 +9,9 @@ import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom } from '../../atom
 import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
-import { syncZoteroDatabase } from "../../../src/utils/sync";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
 import FileUploadStatus from "../status/FileUploadStatus";
-import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
