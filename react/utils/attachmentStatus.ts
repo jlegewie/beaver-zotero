@@ -1,7 +1,7 @@
-import { planFeaturesAtom } from "../atoms/profile";
 import { attachmentsService, AttachmentStatusResponse } from "../../src/services/attachmentsService";
 import { logger } from "../../src/utils/logger";
 import { store } from "../index";
+import { ProcessingTier } from "../types/profile";
 
 /**
  * Fetches the attachment status for a given attachment item and user ID.
@@ -16,8 +16,10 @@ import { store } from "../index";
  */
 export async function getAttachmentStatus(
     attachmentItem: Zotero.Item,
-    user_id: string
-): Promise<AttachmentStatusResponse> {
+    user_id: string,
+    processingTier: ProcessingTier,
+    refetch: boolean = true
+): Promise<AttachmentStatusResponse | null> {
     // Initialize attachment status
     let attachmentStatus: AttachmentStatusResponse | null = null;
 
@@ -31,9 +33,16 @@ export async function getAttachmentStatus(
             ...attachmentDB
         } as AttachmentStatusResponse;
     }
+    
 
     // 2. If no status in Beaver DB, get status from backend
-    if (!attachmentStatus) {
+    const finalStatues = ['completed', 'failed_system', 'failed_user', 'plan_limit', 'unsupported_file'];
+    const shouldRefetch = !attachmentStatus || (refetch && (
+        (processingTier === 'basic' && attachmentStatus.text_status && !finalStatues.includes(attachmentStatus.text_status)) ||
+        (processingTier === 'standard' && attachmentStatus.md_status && !finalStatues.includes(attachmentStatus.md_status)) ||
+        (processingTier === 'advanced' && attachmentStatus.docling_status && !finalStatues.includes(attachmentStatus.docling_status))
+    ));
+    if (shouldRefetch) {
         logger(`getFileStatusForAttachmentInfo: Getting status from backend.`);
         attachmentStatus = await attachmentsService.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key);
 

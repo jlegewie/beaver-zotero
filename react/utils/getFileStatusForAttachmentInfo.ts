@@ -49,9 +49,10 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         }
 
         // 3. Get attachment status from Beaver DB (local cache first, then backend)
+        const planFeatures = store.get(planFeaturesAtom);
         let attachmentStatus: AttachmentStatusResponse | null = null;
         try {
-            attachmentStatus = await getAttachmentStatus(attachmentItem, user.id);
+            attachmentStatus = await getAttachmentStatus(attachmentItem, user.id, planFeatures.processingTier, true);
         } catch (error) {
             logger(`getFileStatusForAttachmentInfo: Error getting attachment status for ${attachmentItem.key}: ${error}`);
         }
@@ -60,7 +61,6 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         }
 
         // Processing status of file
-        const planFeatures = store.get(planFeaturesAtom);
         let fileStatus = attachmentStatus.text_status;
         let errorCode = attachmentStatus.text_error_code;
         if(planFeatures.processingTier === 'standard') {
