@@ -1,3 +1,4 @@
+import { ZoteroLibrary } from "./zotero";
 
 /**
  * Plan model interface based on backend SafePlanModel
@@ -75,7 +76,7 @@ export interface SafeProfileModel {
     has_authorized_access: boolean;
     consented_at: Date;
     has_completed_onboarding: boolean;
-    libraries?: Record<string, any>[];
+    libraries?: ZoteroLibrary[];
     
     // Balances
     basic_page_balance: number;
