@@ -33,9 +33,6 @@ export interface AttachmentRecord {
     zotero_key: string;
     attachment_metadata_hash: string;
     file_hash: string | null;
-
-    // Upload status
-    can_upload: boolean | null;
     upload_status: UploadStatus | null;
 }
 
@@ -165,7 +162,6 @@ export class BeaverDB {
                 zotero_key               TEXT NOT NULL,
                 attachment_metadata_hash TEXT NOT NULL,
                 file_hash                TEXT,
-                can_upload               BOOLEAN,
                 upload_status            TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
             );
@@ -324,14 +320,13 @@ export class BeaverDB {
         const id = uuidv4();
         const defaults: Partial<AttachmentRecord> = {
             file_hash: null,
-            can_upload: null,
             upload_status: null,
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
@@ -339,7 +334,6 @@ export class BeaverDB {
                 finalAttachment.zotero_key,
                 finalAttachment.attachment_metadata_hash,
                 finalAttachment.file_hash,
-                finalAttachment.can_upload,
                 finalAttachment.upload_status
             ]
         );
@@ -414,7 +408,6 @@ export class BeaverDB {
         const allowedFields: (keyof AttachmentRecord)[] = [
             'attachment_metadata_hash',
             'file_hash',
-            'can_upload',
             'upload_status'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
@@ -561,7 +554,6 @@ export class BeaverDB {
             zotero_key: row.zotero_key,
             attachment_metadata_hash: row.attachment_metadata_hash,
             file_hash: row.file_hash,
-            can_upload: typeof row.can_upload === 'number' ? Boolean(row.can_upload) : row.can_upload,
             upload_status: row.upload_status as UploadStatus,
         };
     }
@@ -627,7 +619,6 @@ export class BeaverDB {
 
         const defaults: Partial<AttachmentRecord> = {
             file_hash: null,
-            can_upload: null,
             upload_status: 'pending',
         };
 
@@ -673,7 +664,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'can_upload', 'upload_status'
+                    'file_hash', 'upload_status'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -704,7 +695,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -714,11 +705,10 @@ export class BeaverDB {
                         attachment.zotero_key,
                         attachment.attachment_metadata_hash,
                         attachment.file_hash,
-                        attachment.can_upload,
                         attachment.upload_status
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, can_upload, upload_status) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
