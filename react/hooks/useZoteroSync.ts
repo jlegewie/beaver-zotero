@@ -5,7 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader } from "../../src/services/FileUploader";
-import { planFeaturesAtom, hasAuthorizedAccessAtom } from "../atoms/profile";
+import { planFeaturesAtom, hasAuthorizedAccessAtom, syncLibraryIdsAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
@@ -37,6 +37,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const zoteroNotifierIdRef = useRef<string | null>(null);
@@ -156,6 +157,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!planFeatures.databaseSync) return;
+        if (syncLibraryIds.length === 0) return;
 
         // Set initial status to in_progress
         logger("useZoteroSync: Setting up Zotero sync", 3);
@@ -229,11 +231,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
         };
         
-        // Create an async initialization function
+        // Initialize sync operations
         const initializeSync = async () => {
             try {
                 // First sync the database
-                await syncZoteroDatabase(filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
+                await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
                 // Then set up the observer after sync completes
                 setupObserver();
                 // Start file uploader after sync completes

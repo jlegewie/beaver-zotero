@@ -4,6 +4,7 @@ import { syncingAtom, syncErrorAtom } from "../../../atoms/ui";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { DatabaseStatusIcon } from "../../icons/icons";
+import { syncLibraryIdsAtom } from "../../../atoms/profile";
 
 // Possible icon states
 type IconState = {
@@ -16,6 +17,7 @@ const DatabaseStatusButton: React.FC = () => {
     // Combined atoms
     const isSyncing = useAtomValue(syncingAtom);
     const hasError = useAtomValue(syncErrorAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     
     // Determine the icon state based on current sync status
     const getIconState = (): IconState => {
@@ -38,7 +40,7 @@ const DatabaseStatusButton: React.FC = () => {
         
     // Handle manual sync button click
     const handleSyncClick = () => {
-        syncZoteroDatabase();
+        syncZoteroDatabase(syncLibraryIds);
     };
     
     const [isHovering, setIsHovering] = useState(false);

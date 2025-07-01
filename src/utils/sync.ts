@@ -7,7 +7,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { getPref, setPref } from './prefs';
 import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData } from '../../react/types/zotero';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, ZoteroLibrary } from '../../react/types/zotero';
 
 /**
  * Interface for item filter function
@@ -747,15 +747,15 @@ export async function performPeriodicSync(
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
+    libraryIds: number[],
     filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
-    // Get the selected libraries from the preferences
-    const selectedLibraries = JSON.parse(getPref("selectedLibrary") || "{}");
+    // Get libraries
     const libraries = Zotero.Libraries.getAll();
-    const librariesToSync = libraries.filter((library) => selectedLibraries[library.libraryID]);
+    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
     
     // Now perform actual syncs for each library
     for (const library of librariesToSync) {
