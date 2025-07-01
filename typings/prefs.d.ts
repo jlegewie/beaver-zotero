@@ -11,7 +11,6 @@ declare namespace _ZoteroTypes {
       "userEmail": string;
       "currentPlanId": string;
       "showIndexingCompleteMessage": boolean;
-      "selectedLibrary": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
       "statefulChat": boolean;

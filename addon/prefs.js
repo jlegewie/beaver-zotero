@@ -7,7 +7,6 @@ pref("currentPlanId", "");
 pref("showIndexingCompleteMessage", false);
 
 // App settings
-pref("selectedLibrary", "{}");
 pref("keyboardShortcut", "l");
 pref("updateSourcesFromZoteroSelection", false);
 pref("statefulChat", true);

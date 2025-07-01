@@ -5,8 +5,7 @@ import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
-import { getPref, setPref } from './prefs';
-import { librariesSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
+import { initialSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, ZoteroLibrary } from '../../react/types/zotero';
 
 /**
@@ -553,13 +552,12 @@ export async function syncItemsToBackend(
 }
 
 /**
- * Updates the library-specific sync status atom
+ * Updates the initial sync status for a library
  * @param libraryID Zotero library ID
  * @param updates Partial LibrarySyncStatus object containing only the fields to update
  */
-const updateLibrarySyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
-    // Update the library-specific status atom
-    store.set(librariesSyncStatusAtom, (current) => ({
+const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
+    store.set(initialSyncStatusAtom, (current) => ({
         ...current,
         [libraryID]: {
             ...(current[libraryID] || {}),
@@ -567,42 +565,15 @@ const updateLibrarySyncStatus = (libraryID: number, updates: Partial<LibrarySync
             libraryID
         }
     }));
-
-    setPref('selectedLibrary', JSON.stringify(store.get(librariesSyncStatusAtom)));
 };
 
 /*
  * Ensures that the library sync status is completed
  * @param libraryID Zotero library ID
  */
-const ensureCompletionOfLibrarySyncStatus = async (libraryID: number) => {
-    const current = store.get(librariesSyncStatusAtom);
-    const library = current[libraryID];
-
-    // If the library is not found, create a new library sync status
-    // (should never happen)
-    if (!library) {
-        logger(`Beaver Sync: Library ${libraryID} not found, creating new library sync status`, 1);
-        const itemsToSync = await getItemsToSync(libraryID);
-        const newStatus: LibrarySyncStatus = {
-            libraryID,
-            libraryName: Zotero.Libraries.getName(libraryID),
-            itemCount: itemsToSync.length,
-            syncedCount: itemsToSync.length,
-            status: 'completed'
-        };
-        updateLibrarySyncStatus(libraryID, newStatus);
-    }
-
-    // If the library is found, but not completed, update the library sync status to completed
-    if (library.status !== 'completed' || library.syncedCount < library.itemCount) {
-        const newStatus: Partial<LibrarySyncStatus> = {
-            ...library,
-            status: 'completed',
-            syncedCount: library.itemCount,
-        };
-        updateLibrarySyncStatus(libraryID, newStatus);
-    }
+const markInitialSyncAsComplete = async (libraryID: number) => {
+    logger(`Beaver Sync: Marking initial sync as complete for library ${libraryID}`, 2);
+    updateInitialSyncStatus(libraryID, { status: 'completed' });
 }
 
 /**
@@ -622,6 +593,7 @@ export async function performInitialSync(
     batchSize: number = 50
 ): Promise<any> {
     try {
+        batchSize = 1;
         const library = Zotero.Libraries.get(libraryID);
         if (!library) {
             logger(`Beaver Sync: Library ${libraryID} not found`, 1);
@@ -646,16 +618,16 @@ export async function performInitialSync(
         
         if (totalItems === 0) {
             logger(`Beaver Sync: No items to sync for library ${libraryID} (${libraryName})`, 3);
-            updateLibrarySyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
+            updateInitialSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
             return { status: 'completed', message: 'No items to sync' };
         }
         
-        updateLibrarySyncStatus(libraryID, libraryInitialStatus);
+        updateInitialSyncStatus(libraryID, libraryInitialStatus);
 
         // Add custom progress callback that updates library-specific progress
         const librarySpecificProgress = (processed: number, total: number) => {
             const status = processed >= total ? 'completed' : 'in_progress';
-            updateLibrarySyncStatus(libraryID, { syncedCount: processed, status });
+            updateInitialSyncStatus(libraryID, { syncedCount: processed, status });
             
             // Also call the original progress callback if provided
             if (onProgress) {
@@ -665,7 +637,7 @@ export async function performInitialSync(
 
         // Add custom status change callback
         const librarySpecificStatusChange = (status: SyncStatus) => {
-            updateLibrarySyncStatus(libraryID, { status });
+            updateInitialSyncStatus(libraryID, { status });
             if (onStatusChange) {
                 onStatusChange(status);
             }
@@ -684,7 +656,7 @@ export async function performInitialSync(
     } catch (error: any) {
         logger('Beaver Sync: Error during initial sync: ' + error.message, 1);
         Zotero.logError(error);
-        updateLibrarySyncStatus(libraryID, { status: 'failed' });
+        updateInitialSyncStatus(libraryID, { status: 'failed' });
         throw error;
     }
 }
@@ -768,6 +740,11 @@ export async function syncZoteroDatabase(
             // Get the sync state for this library
             const syncState = await syncService.getLibrarySyncState(libraryID);
             const { last_global_sync_date, last_local_sync_date } = syncState;
+
+            logger(`Beaver Sync: Sync state for library ${libraryID} (${libraryName}): last_global_sync_date: ${last_global_sync_date}, last_local_sync_date: ${last_local_sync_date}`, 3);
+
+            // Mark initial sync as complete if no sync failed
+            if (last_global_sync_date) markInitialSyncAsComplete(libraryID);
             
             // SCENARIO A: True Initial Sync
             if (!last_global_sync_date) {
@@ -789,13 +766,12 @@ export async function syncZoteroDatabase(
             // SCENARIO C: Periodic Sync
             } else {
                 logger(`Beaver Sync: Performing Periodic Sync for library ${libraryID}.`, 2);
-                await ensureCompletionOfLibrarySyncStatus(libraryID);
                 await performPeriodicSync(libraryID, last_local_sync_date, filterFunction, onStatusChange, onProgress, batchSize);
             }
         } catch (error: any) {
             logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
             Zotero.logError(error);
-            updateLibrarySyncStatus(libraryID, { status: 'failed' });
+            updateInitialSyncStatus(libraryID, { status: 'failed' });
             // Continue with next library even if one fails
         }
     }

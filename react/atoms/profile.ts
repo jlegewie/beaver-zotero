@@ -66,5 +66,3 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.has_completed_onboarding || false;
 });
-
-export const hasCompletedInitialSyncAtom = atom<boolean>(false);

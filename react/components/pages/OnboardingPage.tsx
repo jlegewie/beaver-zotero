@@ -3,9 +3,9 @@ import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
-import { librariesSyncStatusAtom, librarySyncProgressAtom, LibrarySyncStatus } from "../../atoms/sync";
+import { isInitialSyncCompleteAtom, initialSyncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
-import { hasAuthorizedAccessAtom, hasCompletedInitialSyncAtom } from '../../atoms/profile';
+import { hasAuthorizedAccessAtom } from '../../atoms/profile';
 import LibrarySelector from "../auth/LibrarySelector";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
@@ -28,7 +28,6 @@ const OnboardingPage: React.FC = () => {
     
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
-    const [hasCompletedInitialSync, setHasCompletedInitialSync] = useAtom(hasCompletedInitialSyncAtom);
     const isUploadComplete = useAtomValue(isUploadCompleteAtom);
     const uploadStats = useAtomValue(uploadStatsAtom);
 
@@ -40,9 +39,8 @@ const OnboardingPage: React.FC = () => {
     const { connectionStatus } = useFileStatus();
 
     // Library sync state
-    const setLibrariesSyncStatus = useSetAtom(librariesSyncStatusAtom);
-    
-    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
+    const setInitialSyncStatus = useSetAtom(initialSyncStatusAtom);
+    const isInitialSyncComplete = useAtomValue(isInitialSyncCompleteAtom);
     
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
@@ -53,14 +51,6 @@ const OnboardingPage: React.FC = () => {
     // Loading states for service calls
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
-
-    // Library Sync complete: Set hasCompletedInitialSync and start upload polling
-    useEffect(() => {
-        const isSyncComplete = librarySyncProgress.progress >= 100 && !librarySyncProgress.anyFailed;
-
-        // Set hasCompletedInitialSync
-        setHasCompletedInitialSync(isSyncComplete);
-    }, [librarySyncProgress.progress, librarySyncProgress.anyFailed]);
 
     // Handle library selection change
     const handleLibrarySelectionChange = (libraryIds: number[]) => {
@@ -94,8 +84,7 @@ const OnboardingPage: React.FC = () => {
             );
 
             // Save the sync status for the selected libraries
-            setPref('selectedLibrary', JSON.stringify(selectedLibraries));
-            setLibrariesSyncStatus(selectedLibraries);
+            setInitialSyncStatus(selectedLibraries);
             
             // Determine if onboarding is required
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
@@ -180,7 +169,7 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getFooterMessage = () => {
-        if (!isUploadComplete || !hasCompletedInitialSync) {
+        if (!isUploadComplete || !isInitialSyncComplete) {
             return "Please wait for the file uploads to complete.";
         } else if (uploadStats && uploadStats.failed > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
@@ -278,7 +267,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadComplete || !hasCompletedInitialSync || isCompletingOnboarding}
+                            disabled={!isUploadComplete || !isInitialSyncComplete || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete

@@ -3,7 +3,7 @@ import { RepeatIcon } from "../icons/icons";
 import Tooltip from "../ui/Tooltip";
 import IconButton from "../ui/IconButton";
 import { ProgressBar } from "../status/ProgressBar";
-import { librarySyncProgressAtom, librariesSyncStatusAtom } from "../../atoms/sync";
+import { initialSyncStatusSummaryAtom, initialSyncStatusAtom, isInitialSyncCompleteAtom } from "../../atoms/sync";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
@@ -14,11 +14,13 @@ import { syncLibraryIdsAtom } from "../../atoms/profile";
 export const DatabaseSyncStatus: React.FC = () => {
 
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-    const librarySyncProgress = useAtomValue(librarySyncProgressAtom);
-    const setLibrariesSyncStatus = useSetAtom(librariesSyncStatusAtom);
+    const librarySyncProgress = useAtomValue(initialSyncStatusSummaryAtom);
+    const setInitialSyncStatus = useSetAtom(initialSyncStatusAtom);
+    const isInitialSyncComplete = useAtomValue(isInitialSyncCompleteAtom);
 
-    const handleSyncRetryClick = () => {
-        setLibrariesSyncStatus(currentStatus => {
+    const handleSyncRetryClick = async () => {
+        // Reset the sync status for all libraries for instant UI update
+        setInitialSyncStatus(currentStatus => {
             const newStatus: Record<number, LibrarySyncStatus> = {};
             for (const libIdStr in currentStatus) {
                 const libId = Number(libIdStr);
@@ -33,7 +35,7 @@ export const DatabaseSyncStatus: React.FC = () => {
             }
             return newStatus;
         });
-        syncZoteroDatabase(syncLibraryIds);
+        await syncZoteroDatabase(syncLibraryIds);
     };
     
     const getLeftText = (): string => {
@@ -42,6 +44,7 @@ export const DatabaseSyncStatus: React.FC = () => {
     };
 
     const getSyncIcon = (): React.ReactNode => {
+        if (isInitialSyncComplete) return CheckmarkIcon;
         if (librarySyncProgress.anyFailed) return CancelIcon;
         if (librarySyncProgress.progress < 100) return SpinnerIcon;
         if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
@@ -63,16 +66,16 @@ export const DatabaseSyncStatus: React.FC = () => {
                         </Tooltip>
                     )}
                 </div>
-                {librarySyncProgress.progress !== undefined && (
+                {(librarySyncProgress.progress !== undefined || isInitialSyncComplete) && (
                     <div className="w-full">
-                        <ProgressBar progress={librarySyncProgress.progress} />
+                        <ProgressBar progress={isInitialSyncComplete ? 100 : librarySyncProgress.progress} />
                         <div className="display-flex flex-row gap-4">
                             <div className="font-color-tertiary text-base">
                                 {getLeftText()}
                             </div>
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
-                                {librarySyncProgress ? librarySyncProgress.progress.toFixed(1) + "%" : ""}
+                                {isInitialSyncComplete ? "100%" : librarySyncProgress ? librarySyncProgress.progress.toFixed(1) + "%" : ""}
                             </div>
                         </div>
                     </div>
