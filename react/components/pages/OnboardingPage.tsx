@@ -115,7 +115,7 @@ const OnboardingPage: React.FC = () => {
                     has_authorized_access: true,
                     consented_at: new Date(),
                     zotero_user_id: userID || profileWithPlan.zotero_user_id,
-                    zotero_local_id: localUserKey,
+                    zotero_local_ids: [localUserKey],
                     has_completed_onboarding: !requireOnboarding || profileWithPlan.has_completed_onboarding
                 });
             }

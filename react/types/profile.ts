@@ -72,7 +72,7 @@ export interface SafeProfileModel {
     
     // Authorization and onboarding status
     zotero_user_id: string | null;
-    zotero_local_id: string | null;
+    zotero_local_ids: string[] | null;
     has_authorized_access: boolean;
     consented_at: Date;
     has_completed_onboarding: boolean;
