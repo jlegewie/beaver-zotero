@@ -170,6 +170,10 @@ attachment-box .metadata-table #beaver-status {
     background-color: var(--fill-quarternary);
 }
 
+[id^="beaver-pane-"] .bg-senary {
+    background-color: var(--fill-senary);
+}
+
 [id^="beaver-pane-"] .bg-tertiary {
     background-color: var(--fill-tertiary);
 }
