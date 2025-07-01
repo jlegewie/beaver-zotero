@@ -15,6 +15,9 @@ const DeviceAuthorizationPage: React.FC = () => {
     
     // Loading state
     const [isAuthorizing, setIsAuthorizing] = useState(false);
+    
+    // Feedback state
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     // Device id and user id
     const { userID, localUserKey } = getZoteroUserIdentifier();
@@ -27,6 +30,8 @@ const DeviceAuthorizationPage: React.FC = () => {
         if (isAuthorizing || !profileWithPlan || !userID || !localUserKey) return;
         
         setIsAuthorizing(true);
+        setErrorMsg(null);
+        
         try {
             // Get libraries from existing profile
             const libraries = profileWithPlan.libraries || [];
@@ -42,6 +47,7 @@ const DeviceAuthorizationPage: React.FC = () => {
             
         } catch (error) {
             logger(`DeviceAuthorizationPage: Error authorizing device: ${error}`);
+            setErrorMsg('An unexpected error occurred. Please try again.');
         } finally {
             setIsAuthorizing(false);
         }
@@ -73,6 +79,10 @@ const DeviceAuthorizationPage: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Error messages */}
+                    {errorMsg && (
+                        <p className="text-sm font-color-red text-center mt-4">{errorMsg}</p>
+                    )}
                 </div>
             </div>
 
