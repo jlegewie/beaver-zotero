@@ -60,6 +60,12 @@ export interface LastSyncDateResponse {
     last_sync_date: string | null;
 }
 
+export interface LibrarySyncStateResponse {
+    library_id: number;
+    last_global_sync_date: string | null;
+    last_local_sync_date: string | null;
+}
+
 export interface ItemDeleteRequest {
     library_id: number;
     zotero_keys: string[];
@@ -187,6 +193,20 @@ export class SyncService extends ApiService {
      */
     async getLastSyncDate(libraryId: number): Promise<LastSyncDateResponse> {
         return this.get<LastSyncDateResponse>(`/zotero/sync/library/${libraryId}/last-sync-date`);
+    }
+
+    /**
+     * Gets the last sync state for a library from both global and local perspectives.
+     * @param libraryId The Zotero library ID
+     * @returns Promise with the library sync state response
+     */
+    async getLibrarySyncState(libraryId: number): Promise<LibrarySyncStateResponse> {
+        const { localUserKey } = getZoteroUserIdentifier();
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+            zotero_local_id: localUserKey,
+        });
+        return this.get<LibrarySyncStateResponse>(`/zotero/sync/library-state?${params.toString()}`);
     }
 
     /**
