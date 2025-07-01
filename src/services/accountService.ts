@@ -22,6 +22,7 @@ interface ProfileRequest {
 interface ProfileResponse {
     profile: SafeProfileWithPlan
     model_configs: FullModelConfig[]
+    device_requires_authorization: boolean;
 }
 
 interface OnboardingRequest {
