@@ -8,9 +8,9 @@ export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
 // Sync libraries
-export const syncLibrariesAtom =  atom<ZoteroLibrary[]>((get) => {
+export const syncLibraryIdsAtom =  atom<number[]>((get) => {
     const profile = get(profileWithPlanAtom);
-    return profile?.libraries || [];
+    return profile?.libraries?.map((library) => library.library_id) || [];
 });
 
 // Plan data
