@@ -109,6 +109,17 @@ export class AccountService extends ApiService {
     }
 
     /**
+     * Authorizes a device to access the user's account
+     * @returns Promise with the response message
+     */
+    async authorizeDevice(userID: string, localUserKey: string): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/account/authorize-device', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID
+        } as AuthorizationRequest);
+    }
+
+    /**
      * Sets the user's onboarding status to completed
      * @param processingTier The processing tier to set for the user
      * @returns Promise with the response message
