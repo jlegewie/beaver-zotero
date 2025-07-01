@@ -1,11 +1,19 @@
 import { atom } from "jotai";
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
+import { ZoteroLibrary } from "../types/zotero";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
+// Sync libraries
+export const syncLibrariesAtom =  atom<ZoteroLibrary[]>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.libraries || [];
+});
+
+// Plan data
 export const planIdAtom = atom<string>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.plan.id || '';
