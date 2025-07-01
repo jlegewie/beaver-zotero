@@ -1,19 +1,6 @@
 import { atom } from "jotai";
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 
-// Onboarding state
-export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.has_authorized_access || false;
-});
-
-export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.has_completed_onboarding || false;
-});
-
-export const hasCompletedInitialSyncAtom = atom<boolean>(false);
-
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
@@ -60,3 +47,16 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
         chatMessagesRemaining: chatMessagesRemaining
     } as ProfileBalance;
 });
+
+// Onboarding state
+export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.has_authorized_access || false;
+});
+
+export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.has_completed_onboarding || false;
+});
+
+export const hasCompletedInitialSyncAtom = atom<boolean>(false);
