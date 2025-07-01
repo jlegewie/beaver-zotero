@@ -5,7 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader } from "../../src/services/FileUploader";
-import { planFeaturesAtom, hasAuthorizedAccessAtom, syncLibraryIdsAtom } from "../atoms/profile";
+import { planFeaturesAtom, hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
@@ -35,6 +35,7 @@ interface CollectedEvents {
 export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFilter, debounceMs: number = DEBOUNCE_MS) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
+    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
@@ -158,6 +159,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         // Conditions for sync
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
+        if (!isDeviceAuthorized) return;
         if (!planFeatures.databaseSync) return;
         if (syncLibraryIds.length === 0) return;
 
@@ -286,5 +288,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 processEvents();
             }
         };
-    }, [isAuthenticated, filterFunction, debounceMs, planFeatures.databaseSync, isAuthorized]);
+    }, [isAuthenticated, filterFunction, debounceMs, planFeatures.databaseSync, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
 }

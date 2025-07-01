@@ -7,7 +7,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 
 const maxRetries = 6;
 const baseRetryDelay = 1000; // 1 second
@@ -235,6 +235,7 @@ export const useFileStatus = (): FileStatusConnection => {
     const [connection, setConnection] = useAtom(fileStatusConnectionAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
+    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
 
     // This ref tracks if the current component instance is "active"
@@ -243,7 +244,7 @@ export const useFileStatus = (): FileStatusConnection => {
 
     const lastUserId = useRef<string | null>(null);
     useEffect(() => {
-        const isEligible = isAuthenticated && user && hasAuthorizedAccess;
+        const isEligible = isAuthenticated && user && hasAuthorizedAccess && isDeviceAuthorized;
 
         if (isEligible && !isActiveSubscriber.current) {
             if (stopTimeoutRef) {
@@ -288,7 +289,7 @@ export const useFileStatus = (): FileStatusConnection => {
                 }
             }
         };
-    }, [isAuthenticated, user, hasAuthorizedAccess, setConnection, setFileStatus]);
+    }, [isAuthenticated, user, hasAuthorizedAccess, isDeviceAuthorized, setConnection, setFileStatus]);
 
     return connection;
 };

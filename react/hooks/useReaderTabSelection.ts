@@ -5,7 +5,7 @@ import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { hasAuthorizedAccessAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -16,6 +16,7 @@ import { hasAuthorizedAccessAtom } from '../atoms/profile';
 export function useReaderTabSelection() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorized = useAtomValue(hasAuthorizedAccessAtom);
+    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
@@ -122,7 +123,7 @@ export function useReaderTabSelection() {
 
 
     useEffect(() => {
-        if (!isAuthenticated || !hasAuthorized) return;
+        if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized) return;
         logger("useReaderTabSelection: Hook mounted");
 
         // Initial setup: Get the current reader and set it up
@@ -222,6 +223,6 @@ export function useReaderTabSelection() {
             // Reset atom state on unmount
             setReaderTextSelection(null);
         };
-    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader, isAuthenticated, hasAuthorized]);
+    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
 
 }
