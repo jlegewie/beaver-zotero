@@ -1,14 +1,9 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { FileHashReference } from '../../react/types/zotero';
-import { UploadQueueInput } from './database';
-import { userAtom } from '../../react/atoms/auth';
-import { store } from '../../react';
-import { fileUploader } from './FileUploader';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, AttachmentData } from '../../react/types/zotero';
-import { logger } from '../utils/logger';
 import { ZoteroItemReference } from '../../react/types/zotero';
+import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 
 // Types that match the backend models
 export interface SyncResponse {
@@ -19,6 +14,8 @@ export interface SyncResponse {
 }
 
 export interface ItemBatchRequest {
+    zotero_local_id: string;
+    zotero_user_id: string | undefined;
     library_id: number;
     items: ItemData[];
     attachments: AttachmentData[];
@@ -123,7 +120,10 @@ export class SyncService extends ApiService {
      * @returns Promise with the sync response
      */
     async startSync(libraryId: number, sync_type: string, totalItems: number, syncDate: string): Promise<SyncResponse> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<SyncResponse>('/zotero/sync/start', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
             library_id: libraryId,
             sync_type: sync_type,
             total_items: totalItems,
@@ -147,7 +147,10 @@ export class SyncService extends ApiService {
         closeLog: boolean,
         syncId?: string,
     ): Promise<SyncItemsResponse> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
         const payload: ItemBatchRequest = {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
             library_id: libraryId,
             items: items,
             attachments: attachments,
