@@ -163,6 +163,26 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
+     * Fetches the processing status for a specific file hash.
+     * @param fileHash The hash of the file to fetch the status for.
+     * @returns Promise with the processing status.
+     */
+    async getFileProcessingStatus(fileHash: string): Promise<ProcessingStatus> {
+        const url = `/attachments/processing-status/${fileHash}`;
+        return this.get<ProcessingStatus>(url);
+    }
+
+    /**
+     * Fetches the processing status for multiple files.
+     * @param fileHashes The hashes of the files to fetch the status for.
+     * @returns Promise with a map of file hashes to processing statuses.
+     */
+    async getFileProcessingStatusBatch(fileHashes: string[]): Promise<Map<string, ProcessingStatus>> {
+        const url = `/attachments/processing-status/batch`;
+        return this.post<Map<string, ProcessingStatus>>(url, fileHashes);
+    }
+
+    /**
      * Fetches the statistics for error codes encountered during processing.
      * @param type The type of processing ('md' or 'docling') to get stats for.
      * @returns Promise resolving to an object mapping error codes to their counts.
