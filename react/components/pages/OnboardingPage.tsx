@@ -64,24 +64,6 @@ const OnboardingPage: React.FC = () => {
         setHasCompletedInitialSync(isSyncComplete);
     }, [librarySyncProgress.progress, librarySyncProgress.anyFailed]);
 
-    // Calculate progress percentages
-    const calculateProgress = (current: number, total: number): number => {
-        if (total <= 0) return 0;
-        return Math.min(Math.round((current / total) * 100), 100);
-    };
-
-    // Handle retry clicks
-    const handleSyncRetryClick = () => {
-        syncZoteroDatabase();
-    };
-
-    const getSyncIcon = (): React.ReactNode => {
-        if (librarySyncProgress.anyFailed) return CancelIcon;
-        if (librarySyncProgress.progress < 100) return SpinnerIcon;
-        if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
-        return SpinnerIcon;
-    };
-
     // Handle library selection change
     const handleLibrarySelectionChange = (libraryIds: number[]) => {
         setSelectedLibraryIds(libraryIds);
