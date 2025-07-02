@@ -326,7 +326,7 @@ declare namespace Zotero {
              * @param offset Number of items to skip
              * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
              */
-            getAttachmentsByUploadStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").UploadStatus, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+            getAttachmentsByUploadStatusPaginated(user_id: string, status: import("../src/services/attachmentsService").UploadStatus, limit: number, offset: number): Promise<import("../src/services/attachmentsService").AttachmentStatusPagedResponse>;
 
             /**
              * Fix pending attachments without queue entries

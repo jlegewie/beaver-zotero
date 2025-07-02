@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { UploadStatus } from './attachmentsService';
+import { AttachmentStatusPagedResponse, AttachmentStatusResponse, UploadStatus } from './attachmentsService';
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
@@ -1293,7 +1293,7 @@ export class BeaverDB {
         status: UploadStatus,
         limit: number,
         offset: number
-    ): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }> {
+    ): Promise<AttachmentStatusPagedResponse> {
         const rows = await this.conn.queryAsync(
             `SELECT * FROM attachments 
              WHERE user_id = ? AND upload_status = ?
@@ -1304,12 +1304,21 @@ export class BeaverDB {
 
         const attachments = rows
             .slice(0, limit)
-            .map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+            .map((row: any) => BeaverDB.rowToAttachmentRecord(row))
+            .map((attachment: AttachmentRecord) => ({
+                attachment_id: attachment.id,
+                library_id: attachment.library_id,
+                zotero_key: attachment.zotero_key,
+                file_hash: attachment.file_hash,
+                upload_status: attachment.upload_status,
+            } as AttachmentStatusResponse));
         
         return {
-            attachments,
+            items: attachments,
+            page: offset,
+            page_size: limit,
             has_more: rows.length > limit,
-        };
+        } as AttachmentStatusPagedResponse;
     }
 
     /**
