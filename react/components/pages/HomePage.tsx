@@ -39,7 +39,7 @@ const HomePage: React.FC = () => {
             isLibrarySearch: prompt.librarySearch
         });
 
-        console.log('Chat completion:', prompt.text);
+        // console.log('Chat completion:', prompt.text);
     };
 
     const prompts: CustomPrompt[] = getCustomPromptsFromPreferences();
