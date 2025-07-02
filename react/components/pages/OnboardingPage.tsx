@@ -19,6 +19,7 @@ import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroIdentifier";
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
+import { useUploadQueueManager } from "../../hooks/useUploadQueueManager";
 
 
 const OnboardingPage: React.FC = () => {
@@ -36,6 +37,9 @@ const OnboardingPage: React.FC = () => {
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
+
+    // Upload queue manager
+    useUploadQueueManager();
 
     // Library sync state
     const setInitialSyncStatus = useSetAtom(initialSyncStatusAtom);
