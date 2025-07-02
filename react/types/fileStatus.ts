@@ -72,6 +72,7 @@ export interface FileStatusSummary {
 
     // Processing summary
     totalProcessingCount: number,
+    uploadProgress: number,
     processingProgress: number,
     progress: number,
 }
