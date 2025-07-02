@@ -5,8 +5,8 @@ import { errorMapping } from '../atoms/files';
 import { AttachmentStatusResponse, attachmentsService } from '../../src/services/attachmentsService';
 import { store } from '../index';
 import { userAtom } from '../atoms/auth';
-import { getAttachmentStatus } from './attachmentStatus';
 import { planFeaturesAtom, syncLibraryIdsAtom } from '../atoms/profile';
+import attachmentStatusManager from '../../src/services/attachmentStatusManager';
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
@@ -52,7 +52,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
         const planFeatures = store.get(planFeaturesAtom);
         let attachmentStatus: AttachmentStatusResponse | null = null;
         try {
-            attachmentStatus = await getAttachmentStatus(attachmentItem, user.id, planFeatures.processingTier, true);
+            attachmentStatus = await attachmentStatusManager.getAttachmentStatus(attachmentItem.libraryID, attachmentItem.key);
         } catch (error) {
             logger(`getFileStatusForAttachmentInfo: Error getting attachment status for ${attachmentItem.key}: ${error}`);
         }
