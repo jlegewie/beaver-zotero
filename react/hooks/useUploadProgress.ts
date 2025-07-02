@@ -4,9 +4,14 @@ import { logger } from '../../src/utils/logger';
 import { store } from '../index';
 import { userIdAtom } from '../atoms/auth';
 import { fileUploader } from '../../src/services/FileUploader';
-import { uploadStatsAtom, uploadErrorAtom, uploadProgressAtom, isUploadCompleteAtom } from '../atoms/status';
 import { useSetAtom } from 'jotai';
+import { atom } from "jotai";
 
+// Upload status atoms
+export const uploadStatsAtom = atom<AttachmentUploadStatistics | null>(null);
+export const uploadErrorAtom = atom<Error | null>(null);
+export const uploadProgressAtom = atom<number>(0);
+export const isUploadCompleteAtom = atom<boolean>(false);
 
 // Hook configuration options
 interface UseUploadProgressOptions {
