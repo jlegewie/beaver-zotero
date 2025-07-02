@@ -315,6 +315,7 @@ async function getCiteKey(item: Zotero.Item): Promise<string | null> {
  * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @param batchSize Size of item batches to process (default: 50)
+ * @param useLocalHashFilter If true, filter items by local database hash (default: false)
  * @returns Total number of successfully processed items
  */
 export async function syncItemsToBackend(
@@ -323,7 +324,8 @@ export async function syncItemsToBackend(
     syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 200
+    batchSize: number = 200,
+    useLocalHashFilter: boolean = true
 ) {
     const userId = store.get(userIdAtom);
     if (!userId) {
@@ -368,32 +370,41 @@ export async function syncItemsToBackend(
                 )
             ]);
             
-            // ------- Get database records for this batch -------
-            const [batchItemsDB, batchAttachmentsDB] = await Promise.all([
-                batchItemsData.length > 0
-                    ? Zotero.Beaver.db.getItemsByZoteroKeys(userId, libraryID, batchItemsData.map(item => item.zotero_key))
-                    : Promise.resolve([]),
-                batchAttachmentsData.length > 0
-                    ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
-                    : Promise.resolve([])
-            ]);
-            
             // ------- Filter items that need syncing in this batch -------
-            const itemsDBMap = new Map(batchItemsDB.map(item => [item.zotero_key, item]));
-            const attachmentsDBMap = new Map(batchAttachmentsDB.map(att => [att.zotero_key, att]));
-
-            const itemsNeedingSync = batchItemsData.filter((item) => {
-                const itemDB = itemsDBMap.get(item.zotero_key);
-                if (!itemDB) return true;
-                return itemDB.item_metadata_hash !== item.item_metadata_hash;
-            });
-
-            const attachmentsNeedingSync = batchAttachmentsData.filter((att) => {
-                const attDB = attachmentsDBMap.get(att.zotero_key);
-                if (!attDB) return true;
-                return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
-            });
+            let itemsNeedingSync: ItemData[] = [];
+            let attachmentsNeedingSync: AttachmentData[] = [];
             
+            if (useLocalHashFilter) {
+                // ------- Get database records for this batch -------
+                const [batchItemsDB, batchAttachmentsDB] = await Promise.all([
+                    batchItemsData.length > 0
+                        ? Zotero.Beaver.db.getItemsByZoteroKeys(userId, libraryID, batchItemsData.map(item => item.zotero_key))
+                        : Promise.resolve([]),
+                    batchAttachmentsData.length > 0
+                        ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
+                        : Promise.resolve([])
+                ]);
+                
+                // ------- Filter items that need syncing in this batch -------
+                const itemsDBMap = new Map(batchItemsDB.map(item => [item.zotero_key, item]));
+                const attachmentsDBMap = new Map(batchAttachmentsDB.map(att => [att.zotero_key, att]));
+
+                itemsNeedingSync = batchItemsData.filter((item) => {
+                    const itemDB = itemsDBMap.get(item.zotero_key);
+                    if (!itemDB) return true;
+                    return itemDB.item_metadata_hash !== item.item_metadata_hash;
+                });
+            
+                attachmentsNeedingSync = batchAttachmentsData.filter((att) => {
+                    const attDB = attachmentsDBMap.get(att.zotero_key);
+                    if (!attDB) return true;
+                    return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
+                });
+            } else {
+                itemsNeedingSync = batchItemsData;
+                attachmentsNeedingSync = batchAttachmentsData;
+            }
+
             const batchNeedingSync = itemsNeedingSync.length + attachmentsNeedingSync.length;
             const batchFiltered = (batchItemsData.length - itemsNeedingSync.length) + 
                                   (batchAttachmentsData.length - attachmentsNeedingSync.length);
@@ -962,12 +973,13 @@ export async function performConsistencyCheck(
         logger(`Beaver Sync: Processing ${itemsNeedingSync.length} items that need syncing`, 3);
         
         return syncItemsToBackend(
-            libraryID, 
-            itemsNeedingSync, 
-            'consistency', 
-            onStatusChange, 
-            undefined, 
-            batchSize
+            libraryID,
+            itemsNeedingSync,
+            'consistency',
+            onStatusChange,
+            undefined,
+            batchSize,
+            false // Don't filter by local database hash
         );
         
     } catch (error: any) {
