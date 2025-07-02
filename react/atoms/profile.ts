@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { selectAtom } from 'jotai/utils';
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroIdentifier";
 
@@ -8,18 +9,20 @@ export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
 // Device authorization state
-export const isDeviceAuthorizedAtom = atom<boolean>((get) => {
-    const { localUserKey } = getZoteroUserIdentifier();
-    const profile = get(profileWithPlanAtom);
-    return profile?.has_authorized_access && profile?.zotero_local_ids?.includes(localUserKey) || false;
-});
-
+const { localUserKey } = getZoteroUserIdentifier();
+export const isDeviceAuthorizedAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => {
+        return profile?.has_authorized_access && profile?.zotero_local_ids?.includes(localUserKey) || false;
+    }
+);
 
 // Sync libraries
-export const syncLibraryIdsAtom =  atom<number[]>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.libraries?.map((library) => library.library_id) || [];
-});
+export const syncLibraryIdsAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.libraries?.map((library) => library.library_id) || [],
+    (a: number[], b: number[]) => a.length === b.length && a.every((value, index) => value === b[index]) // only notify if value actually changed
+);
 
 // Plan data
 export const planIdAtom = atom<string>((get) => {
@@ -65,10 +68,10 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
 });
 
 // Onboarding state
-export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.has_authorized_access || false;
-});
+export const hasAuthorizedAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_authorized_access || false
+);
 
 export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
