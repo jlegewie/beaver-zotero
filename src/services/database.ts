@@ -32,7 +32,9 @@ export interface AttachmentRecord {
     library_id: number;
     zotero_key: string;
     attachment_metadata_hash: string;
-    file_hash: string | null;
+
+    // File metadata
+    file_hash: string | null;  // processed file hash (can differ from current file hash)
     upload_status: UploadStatus | null;
 }
 
