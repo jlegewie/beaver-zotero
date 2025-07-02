@@ -2,12 +2,13 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
+import { performConsistencyCheck, syncingItemFilter } from "../../../src/utils/sync";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
 
@@ -28,6 +29,10 @@ const PreferencePage: React.FC = () => {
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
     const profileWithPlan = useAtomValue(profileWithPlanAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+
+    // --- Sync Verification State ---
+    const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
 
     // Helper function to save custom prompts array to preferences
     const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
@@ -83,6 +88,36 @@ const PreferencePage: React.FC = () => {
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
 
+    // --- Verify Sync Handler ---
+    const handleVerifySync = useCallback(async () => {
+        if (verifyStatus === 'running') return;
+        
+        setVerifyStatus('running');
+        logger('handleVerifySync: Starting sync verification');
+        
+        try {
+            // Run consistency check for all sync libraries
+            const promises = syncLibraryIds.map(libraryID => 
+                performConsistencyCheck(libraryID, syncingItemFilter, undefined, undefined, 50, false)
+            );
+            
+            await Promise.all(promises);
+            
+            logger('Sync verification completed successfully');
+            setVerifyStatus('completed');
+            
+            // Reset to idle after 2 seconds
+            setTimeout(() => {
+                setVerifyStatus('idle');
+            }, 2000);
+            
+        } catch (error: any) {
+            logger(`Sync verification failed: ${error.message}`, 1);
+            Zotero.logError(error);
+            setVerifyStatus('idle');
+        }
+    }, [syncLibraryIds, verifyStatus]);
+
     // --- Remove Prompt Handler ---
     const handleRemovePrompt = useCallback((indexToRemove: number) => {
         setCustomPrompts((currentPrompts) => {
@@ -91,6 +126,35 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [saveCustomPromptsToPrefs]);
+
+    // Helper function to get button icon and class
+    const getSyncButtonProps = () => {
+        switch (verifyStatus) {
+            case 'running':
+                return {
+                    icon: SyncIcon,
+                    iconClassName: 'animate-spin',
+                    disabled: true,
+                    text: 'Verifying...'
+                };
+            case 'completed':
+                return {
+                    icon: TickIcon,
+                    iconClassName: '',
+                    disabled: true,
+                    text: 'Verified'
+                };
+            default:
+                return {
+                    icon: SyncIcon,
+                    iconClassName: '',
+                    disabled: false,
+                    text: 'Verify'
+                };
+        }
+    };
+
+    const syncButtonProps = getSyncButtonProps();
 
     return (
         <div
@@ -108,12 +172,24 @@ const PreferencePage: React.FC = () => {
             {user ? (
                 <div className="display-flex flex-col gap-3">
                     <div className="display-flex flex-row items-center gap-2">
-                        <span className="font-color-secondary">Signed in as:</span>
-                        <span className="font-semibold font-color-primary">{user.email}</span>
+                        <div className="font-color-secondary">Signed in as:</div>
+                        <div className="font-semibold font-color-primary">{user.email}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-2">
-                        <span className="font-color-secondary">Plan:</span>
-                        <span className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</span>
+                        <div className="font-color-secondary">Plan:</div>
+                        <div className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
+                    </div>
+                    <div className="display-flex flex-row items-center gap-3 mt-2">
+                        <div className="font-color-secondary">Sync Status:</div>
+                        <Button 
+                            variant="outline" 
+                            icon={syncButtonProps.icon}
+                            iconClassName={syncButtonProps.iconClassName}
+                            onClick={handleVerifySync}
+                            disabled={syncButtonProps.disabled}
+                        >
+                            {syncButtonProps.text}
+                        </Button>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button variant="outline" disabled={true} icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
