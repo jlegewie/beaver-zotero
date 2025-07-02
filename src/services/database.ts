@@ -866,7 +866,7 @@ export class BeaverDB {
             pendingResult,
             completedResult,
             failedResult,
-            skippedResult,
+            planLimitResult,
             // aggregatesResult
         ] = await Promise.all([
             this.conn.queryAsync(
@@ -886,7 +886,7 @@ export class BeaverDB {
                 [user_id]
             ),
             this.conn.queryAsync(
-                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "skipped"',
+                'SELECT COUNT(*) as count FROM attachments WHERE user_id = ? AND file_hash IS NOT NULL AND upload_status = "plan_limit"',
                 [user_id]
             )
             // this.conn.queryAsync(
@@ -900,10 +900,10 @@ export class BeaverDB {
             pending: pendingResult[0]?.count || 0,
             completed: completedResult[0]?.count || 0,
             failed: failedResult[0]?.count || 0,
-            skipped: skippedResult[0]?.count || 0,
+            skipped: planLimitResult[0]?.count || 0,
             // totalPages: aggregatesResult[0]?.totalPages || 0,
             // totalSize: aggregatesResult[0]?.totalSize || 0
-        };
+        } as AttachmentUploadStatistics;
     }
 
     /**
