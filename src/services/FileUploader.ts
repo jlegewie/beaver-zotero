@@ -222,6 +222,17 @@ export class FileUploader {
                 return;
             }
 
+            // File size limit
+            // const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
+            // const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
+            // // if (fileSizeInMB > sizeLimit) {
+            // if (fileSizeInMB > 0.5) {
+            //     logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
+            //     await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
+            //     return;
+            // }
+            // maxPageCount
+
             // Validate/correct MIME type by checking actual file if needed
             if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
                 try {
@@ -343,6 +354,24 @@ export class FileUploader {
             logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE} minutes`, 2);
             // Re-throw the error so callers know the operation failed
             throw failError;
+        }
+    }
+
+    /**
+     * Handles plan limit failures by marking items as failed in the backend first, 
+     * then in the local database only if backend update succeeds
+     */
+    private async handlePlanLimitFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+        logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
+        try {
+            // First, notify backend of failure
+            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
+
+            // Only if backend call succeeds, update local state
+            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash, 'plan_limit');
+            
+        } catch (failError: any) {
+            logger(`File Uploader: Failed to mark item as plan limit failure (will retry later): ${failError.message}`, 2);
         }
     }
 
