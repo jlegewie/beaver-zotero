@@ -5,7 +5,7 @@ import { StepThreeIcon, CancelIcon, CheckmarkIcon, SpinnerIcon } from "./icons";
 import { ProgressBar } from "./ProgressBar";
 import { fileStatusSummaryAtom } from "../../atoms/files";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
-import ExpandableAttachmentList from "./ExpandableAttachmentList";
+import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
 import { useErrorCodeStats } from "../../hooks/useErrorCodeStats";
 import { FileStatusConnection } from "../../hooks/useFileStatus";
@@ -108,7 +108,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
 
             {/* Failed processing files */}
             {fileStats.failedProcessingCount > 0 && (
-                <ExpandableAttachmentList
+                <PaginatedFailedProcessingList
                     statuses={["failed_user", "failed_system"]}
                     count={fileStats.failedProcessingCount}
                     title={`Failed file${fileStats.failedProcessingCount > 1 ? 's' : ''}`}
@@ -121,7 +121,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
 
             {/* Plan limit files */}
             {fileStats.planLimitProcessingCount > 0 && (
-                <ExpandableAttachmentList
+                <PaginatedFailedProcessingList
                     statuses={["plan_limit"]}
                     count={fileStats.planLimitProcessingCount}
                     title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''} because of plan limits`}

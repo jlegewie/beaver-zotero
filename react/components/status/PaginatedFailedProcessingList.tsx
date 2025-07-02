@@ -12,7 +12,7 @@ import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons'
 
 const ITEMS_PER_PAGE = 10;
 
-interface ExpandableAttachmentListProps {
+interface PaginatedFailedProcessingListProps {
     statuses: ProcessingStatus[];
     count: number;
     title: string;
@@ -22,7 +22,7 @@ interface ExpandableAttachmentListProps {
     textColorClassName?: string;
 }
 
-const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
+const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps> = ({
     statuses,
     count,
     title,
@@ -84,7 +84,7 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
             setHasMore(result.has_more);
             setCurrentPage(page);
         } catch (error) {
-            logger(`ExpandableAttachmentList: Error fetching ${statuses.join(', ')} items: ${error}`);
+            logger(`PaginatedFailedProcessingList: Error fetching ${statuses.join(', ')} items: ${error}`);
             setAttachments([]);
             setHasMore(false);
         } finally {
@@ -182,4 +182,4 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
     );
 };
 
-export default ExpandableAttachmentList;
+export default PaginatedFailedProcessingList;
