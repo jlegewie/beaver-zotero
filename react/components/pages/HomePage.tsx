@@ -103,7 +103,7 @@ const HomePage: React.FC = () => {
             
             {showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                    <FileUploadStatus pollingInterval={3000} />
+                    <FileUploadStatus connectionStatus={connectionStatus}/>
                     <FileProcessingStatus connectionStatus={connectionStatus} />
                 </div>
             )}
