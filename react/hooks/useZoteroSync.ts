@@ -5,7 +5,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, SyncStatus } from "../atoms/ui";
 import { fileUploader } from "../../src/services/FileUploader";
-import { planFeaturesAtom, hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom } from "../atoms/profile";
+import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 
@@ -36,7 +36,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
@@ -160,7 +159,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
-        if (!planFeatures.databaseSync) return;
+        // if (!planFeatures.databaseSync) return;
         if (syncLibraryIds.length === 0) return;
 
         // Set initial status to in_progress
@@ -252,7 +251,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 // Then set up the observer after sync completes
                 setupObserver();
                 // Start file uploader after sync completes
-                if (planFeatures.uploadFiles) {
+                if (store.get(planFeaturesAtom)?.uploadFiles) {
                     await fileUploader.start();
                 }
             } catch (error: any) {
@@ -288,5 +287,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 processEvents();
             }
         };
-    }, [isAuthenticated, filterFunction, debounceMs, planFeatures.databaseSync, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
+    }, [isAuthenticated, filterFunction, debounceMs, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
 }
