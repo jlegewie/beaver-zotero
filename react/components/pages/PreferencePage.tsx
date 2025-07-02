@@ -126,6 +126,10 @@ const PreferencePage: React.FC = () => {
                 </div>
             )}
 
+            {/* --- Library Syncing Section --- */}
+            {/* <SectionHeader>Library Syncing</SectionHeader>
+            <LibrarySelection /> */}
+
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
             <div className="text-sm font-color-secondary mb-3">
