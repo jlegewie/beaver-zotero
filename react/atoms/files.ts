@@ -34,7 +34,11 @@ export const errorMapping = {
     "task_parsing_failed": "Unexpected error",
     "max_retries": "Unexpected error",
     "timeout": "Unexpected error",
-    "unexpected_error": "Unexpected error"
+    "unexpected_error": "Unexpected error",
+    // Upload file errors (frontent)
+    "file_size": "File too big",
+    "missing_file": "File missing",
+    "incorrect_item": "Incorrect item"
 }
 
 // File processing status summary
