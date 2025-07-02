@@ -244,8 +244,9 @@ declare namespace Zotero {
              * This involves deleting it from 'upload_queue' and updating 'attachments'.
              * @param user_id User ID
              * @param file_hash The file_hash of the failed item
+             * @param status Optional. The status to update the upload to. Defaults to 'failed'.
              */
-            failQueueItem(user_id: string, file_hash: string): Promise<void>;
+            failQueueItem(user_id: string, file_hash: string, status?: import("../src/services/attachmentsService").UploadStatus): Promise<void>;
 
             /**
              * Upsert a single record into the 'upload_queue' table.

@@ -988,8 +988,9 @@ export class BeaverDB {
      * This involves deleting it from 'upload_queue' and updating 'attachments'.
      * @param user_id User ID
      * @param file_hash The file_hash of the failed item
+     * @param status The status to update the upload to. Defaults to 'failed'.
      */
-    public async failQueueItem(user_id: string, file_hash: string): Promise<void> {
+    public async failQueueItem(user_id: string, file_hash: string, status: UploadStatus = 'failed'): Promise<void> {
         await this.conn.executeTransaction(async () => {
             // Delete from upload_queue
             await this.conn.queryAsync(
@@ -1000,9 +1001,9 @@ export class BeaverDB {
             // Update all attachments with this file_hash to 'failed'
             await this.conn.queryAsync(
                 `UPDATE attachments
-                 SET upload_status = 'failed'
+                 SET upload_status = ?
                  WHERE user_id = ? AND file_hash = ?`,
-                [user_id, file_hash]
+                [status, user_id, file_hash]
             );
         });
     }
