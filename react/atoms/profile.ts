@@ -42,6 +42,8 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
         uploadFiles: profile?.plan.upload_files || false,
         processingTier: profile?.plan.processing_tier || 'basic',
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
+        uploadFileSizeLimit: profile?.plan.max_file_size_mb || 10,
+        maxPageCount: profile?.plan.max_page_count || 100,
     } as PlanFeatures;
 });
 
