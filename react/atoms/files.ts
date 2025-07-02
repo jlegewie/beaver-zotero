@@ -172,3 +172,8 @@ export const fileStatusSummaryAtom = atom<FileStatusSummary>(
         return calculateFileStatusSummary(fileStatus, planFeatures.processingTier);
     }
 );
+
+export const isUploadCompleteAtom = atom<boolean>((get) => {
+    const fileStatusSummary = get(fileStatusSummaryAtom);
+    return fileStatusSummary.uploadProgress >= 100;
+});

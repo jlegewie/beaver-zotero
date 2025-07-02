@@ -12,7 +12,7 @@ import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
 import FileUploadStatus from "../status/FileUploadStatus";
-import { isUploadCompleteAtom, uploadStatsAtom } from "../../atoms/status";
+import { isUploadCompleteAtom } from "../../atoms/files";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
@@ -29,7 +29,6 @@ const OnboardingPage: React.FC = () => {
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const isUploadComplete = useAtomValue(isUploadCompleteAtom);
-    const uploadStats = useAtomValue(uploadStatsAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -171,9 +170,9 @@ const OnboardingPage: React.FC = () => {
     const getFooterMessage = () => {
         if (!isUploadComplete || !isInitialSyncComplete) {
             return "Please wait for the file uploads to complete.";
-        } else if (uploadStats && uploadStats.failed > 0) {
+        } else if (fileStatusSummary && fileStatusSummary.uploadFailedCount > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
-        } else if (isUploadComplete && uploadStats && uploadStats.failed === 0 && fileStatusSummary.progress < 100) {
+        } else if (isUploadComplete && fileStatusSummary && fileStatusSummary.uploadFailedCount === 0 && fileStatusSummary.progress < 100) {
             return "Processing incomplete. Expect slower response times & limited search."
         }
         return "";
@@ -225,7 +224,7 @@ const OnboardingPage: React.FC = () => {
                             <DatabaseSyncStatus />
                             
                             {/* Uploading files */}
-                            <FileUploadStatus />
+                            <FileUploadStatus connectionStatus={connectionStatus} />
                             
                             {/* File Processing */}
                             <FileProcessingStatus connectionStatus={connectionStatus} />
