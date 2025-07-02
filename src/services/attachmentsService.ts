@@ -237,6 +237,29 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
+     * Fetches attachments by upload status.
+     * @param status The upload status to filter by
+     * @param page Page number (1-based, default: 1)
+     * @param pageSize Number of items per page (default: 50, max: 100)
+     * @returns Promise with paginated list of attachments with the specified status
+     */
+    async getAttachmentsByUploadStatus(
+        status: UploadStatus[],
+        page: number = 1,
+        pageSize: number = 50
+    ): Promise<AttachmentStatusPagedResponse> {
+        const params = new URLSearchParams();
+        
+        // Add all parameters
+        status.forEach(s => params.append('status', s));
+        params.append('page', page.toString());
+        params.append('page_size', pageSize.toString());
+        
+        const url = `/attachments/by-upload-status?${params.toString()}`;
+        return this.get<AttachmentStatusPagedResponse>(url);
+    }
+
+    /**
      * Forces update of an attachment's file hash
      * @param libraryId The Zotero library ID
      * @param zoteroKey The Zotero key of the attachment
