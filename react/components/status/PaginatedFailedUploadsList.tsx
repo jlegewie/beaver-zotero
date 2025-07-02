@@ -10,6 +10,8 @@ import { resetFailedUploads } from "../../../src/services/FileUploader";
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
+import { store } from '../../../react/index';
+import { planFeaturesAtom } from '../../atoms/profile';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -42,6 +44,24 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
 
     const userId = useAtomValue(userIdAtom);
 
+    const getErrorMessage = async (attachment: Zotero.Item | false) => {
+        if(!attachment) return "incorrect_item"
+        if(!attachment.isAttachment()) return "incorrect_item"
+
+        // Reason: missing file
+        let filePath: string | null = null;
+        filePath = await attachment.getFilePathAsync() || null;
+        if(!filePath) return "missing_file"
+
+        // Reason: file size limit
+        const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+        const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
+        const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
+        if (fileSizeInMB > sizeLimit) return 'file_size';
+
+        return 'unexpected_error';
+    }
+
     const fetchItems = useCallback(async (page: number) => {
         if (!userId || isLoading) return;
 
@@ -57,8 +77,8 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
             );
 
             const newItems = await Promise.all(result.items.map(async (item) => {
-                // const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
-                const errorCode = '';
+                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                const errorCode = await getErrorMessage(attachment);
 
                 return {
                     file_hash: item.file_hash || '',
