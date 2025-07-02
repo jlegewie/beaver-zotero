@@ -1,10 +1,16 @@
-import React, { useState } from 'react';
-import { ProcessingStatus } from '../../../src/services/attachmentsService';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAtomValue } from 'jotai';
+import { userIdAtom } from '../../atoms/auth';
+import { planFeaturesAtom } from '../../atoms/profile';
+import { attachmentsService, AttachmentStatusPagedResponse, ProcessingStatus } from '../../../src/services/attachmentsService';
+import { logger } from '../../../src/utils/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
-import { Icon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
-import { usePaginatedAttachmentStatusList } from '../../hooks/usePaginatedAttachmentStatusList';
+import { FailedFileReference } from '../../types/zotero';
+import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
+
+const ITEMS_PER_PAGE = 10;
 
 interface ExpandableAttachmentListProps {
     statuses: ProcessingStatus[];
@@ -26,19 +32,95 @@ const ExpandableAttachmentList: React.FC<ExpandableAttachmentListProps> = ({
     textColorClassName = 'font-color-secondary',
 }) => {
     const [showList, setShowList] = useState(false);
-    const {
-        attachments,
-        hasMore,
-        isLoading,
-        fetchNextPage,
-    } = usePaginatedAttachmentStatusList(statuses, showList, count);
+    const [attachments, setAttachments] = useState<FailedFileReference[]>([]);
+    const [currentPage, setCurrentPage] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+
+    const userId = useAtomValue(userIdAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
+
+    const fetchItems = useCallback(async (page: number) => {
+        if (!userId || isLoading) return;
+
+        setIsLoading(true);
+        try {
+            const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
+                statuses,
+                planFeatures.processingTier,
+                page + 1, // API is 1-based
+                ITEMS_PER_PAGE
+            );
+
+            const newItems = await Promise.all(result.items.map(async (item) => {
+                let enableRetry = false;
+                let fileHash: string | undefined = undefined;
+                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                if (zoteroItem && zoteroItem.isAttachment()) {
+                    fileHash = await zoteroItem.attachmentHash;
+                    if (fileHash !== item.file_hash) enableRetry = true;
+                }
+                let errorCode = item.text_error_code;
+                if(planFeatures.processingTier === 'standard') {
+                    errorCode = item.md_error_code;
+                } else if(planFeatures.processingTier === 'advanced') {
+                    errorCode = item.docling_error_code;
+                }
+
+                return {
+                    file_hash: item.file_hash || '',
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                    errorCode: errorCode,
+                    buttonText: enableRetry && fileHash ? 'Retry' : undefined,
+                    buttonAction: enableRetry && fileHash ? () => {
+                        attachmentsService.updateFile(item.library_id, item.zotero_key, fileHash);
+                    } : undefined,
+                    buttonIcon: enableRetry && fileHash ? RepeatIcon : undefined,
+                } as FailedFileReference;
+            }));
+
+            setAttachments(prevItems => (page === 0 ? newItems : [...prevItems, ...newItems]));
+            setHasMore(result.has_more);
+            setCurrentPage(page);
+        } catch (error) {
+            logger(`ExpandableAttachmentList: Error fetching ${statuses.join(', ')} items: ${error}`);
+            setAttachments([]);
+            setHasMore(false);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [userId, planFeatures.processingTier, statuses]);
+
+    useEffect(() => {
+        if (!userId || count === 0) {
+            setAttachments([]);
+            setCurrentPage(0);
+            setHasMore(false);
+            setShowList(false);
+            return;
+        }
+
+        if (showList) {
+            fetchItems(0);
+        }
+    }, [userId, count, showList, fetchItems]);
+
+    useEffect(() => {
+        if (showList && count > 0) {
+            const currentlyFetchedCount = attachments.length;
+            setHasMore(count > currentlyFetchedCount);
+        }
+    }, [count, attachments.length, showList]);
 
     const handleToggleShowList = () => {
-        setShowList((prev) => !prev);
+        setShowList(prevShow => !prevShow);
     };
 
     const handleShowMore = () => {
-        fetchNextPage();
+        if (hasMore && !isLoading) {
+            fetchItems(currentPage + 1);
+        }
     };
 
     if (count === 0) {
