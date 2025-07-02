@@ -316,7 +316,7 @@ export class FileUploader {
         
         try {
             // First, notify backend of failure
-            await attachmentsService.markUploadFailed(item.file_hash);
+            await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
             
             // Only if backend call succeeds, update local state
             await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
