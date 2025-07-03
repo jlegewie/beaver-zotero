@@ -46,7 +46,7 @@ export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
 export const errorCodeStatsIsLoadingAtom = atom<boolean>(false);
 export const errorCodeStatsErrorAtom = atom<string | null>(null);
-export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number } | null>(null);
+export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number; processingTier: ProcessingTier } | null>(null);
 
 // Aggregated error messages for failed and skipped files
 export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, number>>((get) => {
