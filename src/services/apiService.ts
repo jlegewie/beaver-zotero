@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { ApiError, ServerError } from '../../react/types/apiErrors';
-import { logger } from 'src/utils/logger';
+import { logger } from '../utils/logger';
 
 /**
 * Base API service that handles authentication and common HTTP methods
