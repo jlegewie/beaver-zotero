@@ -123,14 +123,14 @@ export class FileUploader {
                 const isAuthenticated = store.get(isAuthenticatedAtom);
                 const user = store.get(userAtom);
                 if (!isAuthenticated || !user?.id) {
-                    logger('File Uploader: Not authenticated or no user ID. Stopping.', 3);
+                    logger('File Uploader Queue: Not authenticated or no user ID. Stopping.', 3);
                     this.isRunning = false;
                     break;
                 }
 
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
-                    logger(`File Uploader: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
+                    logger(`File Uploader Queue: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
                     await new Promise(resolve => setTimeout(resolve, errorBackoffTime));
                     // Exponential backoff with max of 1 minute
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
@@ -144,7 +144,7 @@ export class FileUploader {
                     this.VISIBILITY_TIMEOUT
                 );
 
-                logger(`File Uploader: Read ${items.length} items from local queue`, 3);
+                logger(`File Uploader Queue: Read ${items.length} items from local queue`, 3);
 
                 // If no items, we're done
                 if (items.length === 0) {
@@ -163,14 +163,14 @@ export class FileUploader {
                 // Wait for these uploads to finish before reading the next batch
                 await this.uploadQueue.onIdle();
             } catch (error: any) {
-                logger('File Uploader: runQueue encountered an error: ' + error.message, 1);
+                logger('File Uploader Queue: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
                 
                 consecutiveErrors++;
                 
                 // If we've hit max consecutive errors, stop the session
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    logger(`File Uploader: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping session`, 2);
+                    logger(`File Uploader Queue: Hit ${MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping session`, 2);
                     throw new Error('Max consecutive errors reached');
                 }
 
@@ -181,7 +181,7 @@ export class FileUploader {
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
-        logger('File Uploader: Finished processing queue.', 3);
+        logger('File Uploader Queue: Finished processing queue.', 3);
         store.set(isFileUploaderRunningAtom, false);
     }
 
@@ -191,19 +191,19 @@ export class FileUploader {
      */
     private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
         try {
-            logger(`File Uploader: Uploading file for ${item.zotero_key}`, 3);
+            logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
 
             // Get the user ID from the store
             const userId = store.get(userIdAtom);
             if (!userId) {
-                logger('File Uploader: No user ID found. Stopping.', 3);
+                logger(`File Uploader uploadFile ${item.zotero_key}: No user ID found. Stopping.`, 3);
                 throw new Error('No user ID found');
             }
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
-                logger(`File Uploader: Attachment not found: ${item.zotero_key}`, 1);
+                logger(`File Uploader uploadFile ${item.zotero_key}: Attachment not found`, 1);
                 await this.handlePermanentFailure(item, user_id, "Attachment not found in Zotero");
                 return;
             }
@@ -217,7 +217,7 @@ export class FileUploader {
             let filePath: string | null = null;
             filePath = await attachment.getFilePathAsync() || null;
             if (!filePath) {
-                logger(`File Uploader: File path not found for attachment: ${item.zotero_key}`, 1);
+                logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
                 await this.handlePermanentFailure(item, user_id, "File path not found");
                 return;
             }
@@ -239,10 +239,10 @@ export class FileUploader {
                     const detectedMimeType = await Zotero.MIME.getMIMETypeFromFile(filePath);
                     if (detectedMimeType) {
                         mimeType = detectedMimeType;
-                        logger(`File Uploader: Corrected MIME type from '${attachment.attachmentContentType}' to '${mimeType}' for ${item.zotero_key}`, 2);
+                        logger(`File Uploader uploadFile ${item.zotero_key}: Corrected MIME type from '${attachment.attachmentContentType}' to '${mimeType}'`, 2);
                     }
                 } catch (error) {
-                    logger(`File Uploader: Failed to detect MIME type for ${item.zotero_key}, using stored type`, 2);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Failed to detect MIME type, using stored type`, 2);
                     // Fall back to stored type or default
                     mimeType = attachment.attachmentContentType || 'application/octet-stream';
                 }
@@ -253,7 +253,7 @@ export class FileUploader {
             try {
                 fileArrayBuffer = await IOUtils.read(filePath);
             } catch (readError: any) {
-                logger(`File Uploader: Error reading file: ${item.zotero_key}`, 1);
+                logger(`File Uploader uploadFile ${item.zotero_key}: Error reading file`, 1);
                 Zotero.logError(readError);
                 await this.handlePermanentFailure(item, user_id, "Error reading file");
                 return;
@@ -264,14 +264,15 @@ export class FileUploader {
 
             // Perform the file upload with retry for network issues
             let uploadSuccess = false;
-            let attempt = 0;
+            let uploadAttempt = 0;
             const maxUploadAttempts = 3;
             const storagePath = `${userId}/attachments/${item.file_hash}/original`;
 
-            while (!uploadSuccess && attempt < maxUploadAttempts) {
-                attempt++;
+            // First retry loop: Storage upload
+            while (!uploadSuccess && uploadAttempt < maxUploadAttempts) {
+                uploadAttempt++;
                 try {
-                    logger(`File Uploader: Uploading file to ${storagePath}`, 3);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${storagePath} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
                     const { data, error } = await supabase
                         .storage
                         .from('files')
@@ -282,34 +283,58 @@ export class FileUploader {
 
                     if (error) {
                         // Retry with backoff
-                        logger(`File Uploader: Server error ${JSON.stringify(error)} on attempt ${attempt}, will retry`, 2);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                        logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload error ${JSON.stringify(error)} on attempt ${uploadAttempt}, will retry`, 2);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt)); // Increasing backoff
                         continue;
                     }
                     
-                    // Mark upload as completed
-                    await this.markUploadCompleted(item, mimeType, fileSize, pageCount, user_id);
                     uploadSuccess = true;
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}`, 3);
+
                 } catch (uploadError: any) {
-                    // Network errors
                     if (uploadError instanceof TypeError) {
                         // Network error, retry with backoff
-                        logger(`File Uploader: Network error on attempt ${attempt}, will retry: ${uploadError.message}`, 2);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Increasing backoff
+                        logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload network error on attempt ${uploadAttempt}, will retry: ${uploadError.message}`, 2);
                     } else {
-                        // Other errors, rethrow to be handled by outer catch
-                        throw uploadError;
+                        // Other errors, retry with backoff
+                        logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload error on attempt ${uploadAttempt}, will retry: ${uploadError.message}`, 2);
                     }
+                    await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt)); // Increasing backoff
                 }
             }
             
-            // If we exhausted retries without success
+            // If storage upload failed after all retries
             if (!uploadSuccess) {
-                throw new Error(`Failed to upload after ${maxUploadAttempts} attempts`);
+                throw new Error(`Failed to upload file to storage after ${maxUploadAttempts} attempts`);
+            }
+
+            // Second retry loop: Mark upload as completed in backend
+            let markCompletedSuccess = false;
+            let markCompletedAttempt = 0;
+            const maxMarkCompletedAttempts = 3;
+
+            while (!markCompletedSuccess && markCompletedAttempt < maxMarkCompletedAttempts) {
+                markCompletedAttempt++;
+                try {
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Marking upload as completed in backend (attempt ${markCompletedAttempt}/${maxMarkCompletedAttempts})`, 3);
+                    await this.markUploadCompleted(item, mimeType, fileSize, pageCount, user_id);
+                    markCompletedSuccess = true;
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Backend completion marking successful on attempt ${markCompletedAttempt}`, 3);
+                } catch (markCompletedError: any) {
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Backend completion marking error on attempt ${markCompletedAttempt}, will retry: ${markCompletedError.message}`, 2);
+                    if (markCompletedAttempt < maxMarkCompletedAttempts) {
+                        await new Promise(resolve => setTimeout(resolve, 2000 * markCompletedAttempt)); // Increasing backoff
+                    }
+                }
+            }
+
+            // If marking as completed failed after all retries
+            if (!markCompletedSuccess) {
+                throw new Error(`Failed to mark upload as completed in backend after ${maxMarkCompletedAttempts} attempts`);
             }
 
         } catch (error: any) {
-            logger(`File Uploader: Error uploading file for attachment ${item.zotero_key}: ${error.message}`, 1);
+            logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${error.message}`, 1);
             Zotero.logError(error);
 
             // Treat as permanently failed with message for manual retry
