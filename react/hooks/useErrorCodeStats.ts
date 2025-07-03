@@ -17,6 +17,7 @@ const DEBOUNCE_DELAY = 1000;
  * Custom hook to fetch and manage error code statistics for file processing.
  * It automatically fetches stats when the number of failed or skipped files changes.
  * Fetching is debounced to avoid excessive API calls.
+ * Uses in-memory caching to avoid redundant backend calls.
  */
 export const useErrorCodeStats = () => {
     const errorCodeStats = useAtomValue(errorCodeStatsAtom);
@@ -25,18 +26,32 @@ export const useErrorCodeStats = () => {
     const { failedProcessingCount, planLimitProcessingCount } = useAtomValue(fileStatusSummaryAtom);
     const [lastFetchedCounts, setLastFetchedCounts] = useAtom(lastFetchedErrorCountsAtom);
 
-
     const setIsLoading = useSetAtom(errorCodeStatsIsLoadingAtom);
     const setError = useSetAtom(errorCodeStatsErrorAtom);
-    
     
     useEffect(() => {
         const totalErrors = failedProcessingCount + planLimitProcessingCount;
 
-        const shouldFetch = totalErrors > 0 &&
-            (!lastFetchedCounts || failedProcessingCount !== lastFetchedCounts.failed || planLimitProcessingCount !== lastFetchedCounts.skipped);
+        // If no errors, clear the stats and cache
+        if (totalErrors === 0) {
+            if (errorCodeStats !== null) {
+                setErrorCodeStats(null);
+                setLastFetchedCounts(null);
+            }
+            return;
+        }
+
+        // Check if we have valid cached data for current counts and processing tier
+        const hasValidCache = lastFetchedCounts &&
+            failedProcessingCount === lastFetchedCounts.failed &&
+            planLimitProcessingCount === lastFetchedCounts.skipped &&
+            lastFetchedCounts.processingTier === planFeatures.processingTier &&
+            errorCodeStats !== null;
+
+        const shouldFetch = totalErrors > 0 && !hasValidCache;
             
-        logger(`useErrorCodeStats: useEffect running with shouldFetch=${shouldFetch} (totalErrors=${totalErrors}, failedProcessingCount=${failedProcessingCount}, planLimitProcessingCount=${planLimitProcessingCount})`);
+        logger(`useErrorCodeStats: useEffect running with shouldFetch=${shouldFetch} (totalErrors=${totalErrors}, hasValidCache=${hasValidCache}, failedProcessingCount=${failedProcessingCount}, planLimitProcessingCount=${planLimitProcessingCount})`);
+        
         if (shouldFetch) {
             const handler = setTimeout(() => {
                 setIsLoading(true);
@@ -55,7 +70,11 @@ export const useErrorCodeStats = () => {
                     .then(stats => {
                         logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
                         setErrorCodeStats(stats);
-                        setLastFetchedCounts({ failed: failedProcessingCount, skipped: planLimitProcessingCount });
+                        setLastFetchedCounts({ 
+                            failed: failedProcessingCount, 
+                            skipped: planLimitProcessingCount,
+                            processingTier: planFeatures.processingTier
+                        });
                     })
                     .catch(err => {
                         console.error("Failed to fetch error code stats:", err);
@@ -69,10 +88,6 @@ export const useErrorCodeStats = () => {
             return () => {
                 clearTimeout(handler);
             };
-        } else if (totalErrors === 0 && errorCodeStats !== null) {
-            // Reset stats if error count goes to 0
-            setErrorCodeStats(null);
-            setLastFetchedCounts(null);
         }
     }, [
         failedProcessingCount,
