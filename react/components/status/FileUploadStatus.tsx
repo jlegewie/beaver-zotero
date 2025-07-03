@@ -88,6 +88,7 @@ const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['conne
                 title="Failed Uploads"
                 tooltipTitle="Failed Uploads"
                 textColorClassName="font-color-red"
+                retryButton={true}
                 // tooltipContent={<FailedProcessingTooltipContent />}
             />
 
