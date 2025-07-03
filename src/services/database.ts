@@ -83,6 +83,7 @@ export interface AttachmentUploadStatistics {
  */
 export interface ThreadRecord {
     id: string;
+    user_id: string;
     name: string | null;
     created_at: string;
     updated_at: string;
@@ -98,6 +99,7 @@ export interface ThreadRecord {
  */
 export interface MessageRecord {
     id: string;
+    user_id: string;
     thread_id: string;
     
     // OpenAI-message fields
@@ -181,6 +183,7 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS threads (
                 id                       TEXT(36) PRIMARY KEY,
+                user_id                  TEXT(36) NOT NULL,
                 name                     TEXT,
                 created_at               TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at               TEXT NOT NULL DEFAULT (datetime('now'))
@@ -190,6 +193,7 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS messages (
                 id                       TEXT(36) PRIMARY KEY,
+                user_id                  TEXT(36) NOT NULL,
                 thread_id                TEXT(36) NOT NULL,
                 role                     TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
                 content                  TEXT,
@@ -208,13 +212,13 @@ export class BeaverDB {
 
         // DB indexes
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_messages_thread_id
-            ON messages(thread_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_user_thread
+            ON messages(user_id, thread_id);
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_threads_updated
-            ON threads(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_threads_user_updated
+            ON threads(user_id, updated_at DESC);
         `);
 
         await this.conn.queryAsync(`
@@ -233,8 +237,8 @@ export class BeaverDB {
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_messages_thread_created
-            ON messages(thread_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_messages_user_thread_created
+            ON messages(user_id, thread_id, created_at);
         `);
     }
 
@@ -1372,6 +1376,7 @@ export class BeaverDB {
     private static rowToThreadRecord(row: any): ThreadRecord {
         return {
             id: row.id,
+            user_id: row.user_id,
             name: row.name,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -1410,6 +1415,7 @@ export class BeaverDB {
     private static rowToMessageRecord(row: any): MessageRecord {
         return {
             id: row.id,
+            user_id: row.user_id,
             thread_id: row.thread_id,
             role: row.role as 'user' | 'assistant' | 'system',
             content: row.content,
@@ -1447,17 +1453,18 @@ export class BeaverDB {
 
     /**
      * Create a new chat thread.
+     * @param user_id The user_id of the thread
      * @param name Optional name for the thread
      * @returns The complete ThreadData for the newly created thread
      */
-    public async createThread(name: string = ''): Promise<ThreadData> {
+    public async createThread(user_id: string, name: string = ''): Promise<ThreadData> {
         const id = uuidv4();
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         const dbName = name || null; // Convert empty string to null for database
         
         await this.conn.queryAsync(
-            `INSERT INTO threads (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-            [id, dbName, now, now]
+            `INSERT INTO threads (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+            [id, user_id, dbName, now, now]
         );
         
         return {
@@ -1470,13 +1477,14 @@ export class BeaverDB {
 
     /**
      * Retrieve a thread by its ID.
+     * @param user_id The user_id of the thread
      * @param id The ID of the thread to retrieve
      * @returns The ThreadData if found, otherwise null
      */
-    public async getThread(id: string): Promise<ThreadData | null> {
+    public async getThread(user_id: string, id: string): Promise<ThreadData | null> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM threads WHERE id = ?`,
-            [id]
+            `SELECT * FROM threads WHERE user_id = ? AND id = ?`,
+            [user_id, id]
         );
         if (rows.length === 0) {
             return null;
@@ -1487,17 +1495,19 @@ export class BeaverDB {
 
     /**
      * Get a paginated list of threads.
+     * @param user_id The user_id of the threads
      * @param limit Number of threads per page
      * @param offset Number of threads to skip
      * @returns Object containing an array of ThreadData objects and a boolean indicating if there are more items
      */
     public async getThreadsPaginated(
+        user_id: string,
         limit: number,
         offset: number
     ): Promise<{ threads: ThreadData[]; has_more: boolean }> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM threads ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
-            [limit + 1, offset]
+            `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+            [user_id, limit + 1, offset]
         );
 
         const threads = rows
@@ -1515,33 +1525,37 @@ export class BeaverDB {
 
     /**
      * Delete a thread and all its messages.
+     * @param user_id The user_id of the thread
      * @param id The ID of the thread to delete
      */
-    public async deleteThread(id: string): Promise<void> {
+    public async deleteThread(user_id: string, id: string): Promise<void> {
         await this.conn.queryAsync(
-            `DELETE FROM threads WHERE id = ?`,
-            [id]
+            `DELETE FROM threads WHERE user_id = ? AND id = ?`,
+            [user_id, id]
         );
     }
 
     /**
      * Rename a thread.
+     * @param user_id The user_id of the thread
      * @param id The ID of the thread to rename
      * @param name The new name for the thread
      */
-    public async renameThread(id: string, name: string): Promise<void> {
+    public async renameThread(user_id: string, id: string, name: string): Promise<void> {
         await this.conn.queryAsync(
-            `UPDATE threads SET name = ?, updated_at = datetime('now') WHERE id = ?`,
-            [name, id]
+            `UPDATE threads SET name = ?, updated_at = datetime('now') WHERE user_id = ? AND id = ?`,
+            [name, user_id, id]
         );
     }
 
     /**
      * Update a thread. Currently only supports renaming.
+     * @param user_id The user_id of the thread
      * @param id The ID of the thread to update
      * @param updates An object containing the fields to update (using ThreadData format)
      */
     public async updateThread(
+        user_id: string,
         id: string,
         updates: Partial<Omit<ThreadData, 'id' | 'createdAt'>>
     ): Promise<void> {
@@ -1565,10 +1579,10 @@ export class BeaverDB {
             return; // Nothing to update
         }
 
-        values.push(id);
+        values.push(user_id, id);
         
         await this.conn.queryAsync(
-            `UPDATE threads SET ${fieldsToUpdate.join(', ')} WHERE id = ?`,
+            `UPDATE threads SET ${fieldsToUpdate.join(', ')} WHERE user_id = ? AND id = ?`,
             values
         );
     }
@@ -1577,13 +1591,14 @@ export class BeaverDB {
 
     /**
      * Retrieve all messages from a specific thread, ordered by creation date.
+     * @param user_id The user_id of the thread
      * @param threadId The ID of the thread
      * @returns An array of MessageModel objects
      */
-    public async getMessagesFromThread(threadId: string): Promise<MessageModel[]> {
+    public async getMessagesFromThread(user_id: string, threadId: string): Promise<MessageModel[]> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at ASC`,
-            [threadId]
+            `SELECT * FROM messages WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+            [user_id, threadId]
         );
         return rows.map((row: any) => {
             const record = BeaverDB.rowToMessageRecord(row);
@@ -1593,6 +1608,7 @@ export class BeaverDB {
 
     /**
      * Deletes the specified message and all subsequent messages in a thread.
+     * @param user_id The user_id of the thread
      * @param thread_id ID of the thread to modify
      * @param message_id ID of the message to reset from
      * @param messages List of messages to operate on
@@ -1600,6 +1616,7 @@ export class BeaverDB {
      * @returns A list of the remaining messages in the thread
      */
     public async resetFromMessage(
+        user_id: string,
         thread_id: string,
         message_id: string,
         messages: MessageModel[],
@@ -1622,10 +1639,10 @@ export class BeaverDB {
         
         if (messagesToDelete.length > 0) {
             const messageIdsToDelete = messagesToDelete.map(msg => msg.id);
-            await this.deleteMessagesBatch(messageIdsToDelete);
+            await this.deleteMessagesBatch(user_id, messageIdsToDelete);
 
             // Also update thread's updated_at timestamp
-            await this.updateThread(thread_id, { 
+            await this.updateThread(user_id, thread_id, { 
                 updatedAt: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
             });
         }
@@ -1637,9 +1654,10 @@ export class BeaverDB {
     /**
      * Upsert a message in the database.
      * Inserts a new message or updates an existing one based on the message ID.
+     * @param user_id The user_id of the message
      * @param message The complete message object to upsert
      */
-    public async upsertMessage(message: MessageModel): Promise<void> {
+    public async upsertMessage(user_id: string, message: MessageModel): Promise<void> {
         // Validate required fields
         if (!message.id) {
             throw new Error('Message ID is required');
@@ -1678,9 +1696,10 @@ export class BeaverDB {
         } = record;
 
         await this.conn.queryAsync(
-            `INSERT INTO messages (id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?)
+            `INSERT INTO messages (id, user_id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?)
              ON CONFLICT(id) DO UPDATE SET
+                user_id = excluded.user_id,
                 thread_id = excluded.thread_id,
                 role = excluded.role,
                 content = excluded.content,
@@ -1692,16 +1711,17 @@ export class BeaverDB {
                 status = excluded.status,
                 metadata = excluded.metadata,
                 error = excluded.error`,
-            [id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error]
+            [id, user_id, thread_id, role, content, reasoning_content, tool_calls, reader_state, attachments, tool_request, status, created_at, metadata, error]
         );
     }
 
     /**
      * Update an existing message.
+     * @param user_id The user_id of the message
      * @param id The ID of the message to update
      * @param updates A partial message object with fields to update
      */
-    public async updateMessage(id: string, updates: Partial<MessageModel>): Promise<void> {
+    public async updateMessage(user_id: string, id: string, updates: Partial<MessageModel>): Promise<void> {
         const recordUpdates: any = { ...updates };
 
         if (updates.tool_calls !== undefined) recordUpdates.tool_calls = JSON.stringify(updates.tool_calls);
@@ -1710,7 +1730,7 @@ export class BeaverDB {
         if (updates.tool_request !== undefined) recordUpdates.tool_request = JSON.stringify(updates.tool_request);
         if (updates.metadata !== undefined) recordUpdates.metadata = JSON.stringify(updates.metadata);
 
-        const fieldsToUpdate = Object.keys(recordUpdates).filter(key => key !== 'id' && key !== 'thread_id' && key !== 'created_at');
+        const fieldsToUpdate = Object.keys(recordUpdates).filter(key => key !== 'id' && key !== 'user_id' && key !== 'thread_id' && key !== 'created_at');
 
         if (fieldsToUpdate.length === 0) {
             return; // Nothing to update
@@ -1718,28 +1738,30 @@ export class BeaverDB {
 
         const setClauses = fieldsToUpdate.map(field => `${field} = ?`).join(', ');
         const values = fieldsToUpdate.map(field => (recordUpdates as any)[field]);
-        values.push(id);
+        values.push(user_id, id);
 
-        const query = `UPDATE messages SET ${setClauses} WHERE id = ?`;
+        const query = `UPDATE messages SET ${setClauses} WHERE user_id = ? AND id = ?`;
         await this.conn.queryAsync(query, values);
     }
 
     /**
      * Delete a message by its ID.
+     * @param user_id The user_id of the message
      * @param id The ID of the message to delete
      */
-    public async deleteMessage(id: string): Promise<void> {
+    public async deleteMessage(user_id: string, id: string): Promise<void> {
         await this.conn.queryAsync(
-            `DELETE FROM messages WHERE id = ?`,
-            [id]
+            `DELETE FROM messages WHERE user_id = ? AND id = ?`,
+            [user_id, id]
         );
     }
 
     /**
      * Delete multiple messages by their IDs in a single transaction.
+     * @param user_id The user_id of the messages
      * @param ids The IDs of the messages to delete
      */
-    public async deleteMessagesBatch(ids: string[]): Promise<void> {
+    private async deleteMessagesBatch(user_id: string, ids: string[]): Promise<void> {
         if (ids.length === 0) {
             return;
         }
@@ -1747,20 +1769,21 @@ export class BeaverDB {
         const placeholders = ids.map(() => '?').join(',');
         
         await this.conn.queryAsync(
-            `DELETE FROM messages WHERE id IN (${placeholders})`,
-            ids
+            `DELETE FROM messages WHERE user_id = ? AND id IN (${placeholders})`,
+            [user_id, ...ids]
         );
     }
 
     /**
      * Retrieve a message by its ID.
+     * @param user_id The user_id of the message
      * @param id The ID of the message to retrieve
      * @returns The MessageModel if found, otherwise null
      */
-    public async getMessage(id: string): Promise<MessageModel | null> {
+    public async getMessage(user_id: string, id: string): Promise<MessageModel | null> {
         const rows = await this.conn.queryAsync(
-            `SELECT * FROM messages WHERE id = ?`,
-            [id]
+            `SELECT * FROM messages WHERE user_id = ? AND id = ?`,
+            [user_id, id]
         );
         if (rows.length === 0) {
             return null;

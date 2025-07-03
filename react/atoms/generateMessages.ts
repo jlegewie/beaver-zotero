@@ -37,7 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { updateAttachmentCitationsAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
-import { getZoteroUserIdentifier } from '../../src/utils/zoteroIdentifier';
+import { userIdAtom } from './auth';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -370,15 +370,20 @@ function getUserApiKey(model: FullModelConfig, get:any, set: any): string | unde
 async function _handleThreadMessages(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
     let messages: MessageData[] = [];
 
+    const user_id = store.get(userIdAtom);
+    if (!user_id) {
+        throw new Error('User ID not found');
+    }
+
     // Initialize thread
     if (!threadId) {
-        const thread = await Zotero.Beaver.db.createThread();
+        const thread = await Zotero.Beaver.db.createThread(user_id);
         threadId = thread.id;
         set(currentThreadIdAtom, thread.id);
     }
     // Existing thread
     else {
-        const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(threadId);
+        const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id,threadId);
         messages = messagesDB.map(m => toMessageData(m));
     }
     
@@ -389,12 +394,12 @@ async function _handleThreadMessages(userMessage: MessageData, threadId: string 
     if (!existingMessage) {
         messages = [...messages, userMessage];
         // Add user message to local DB
-        await Zotero.Beaver.db.upsertMessage(toMessageModel(userMessage, threadId));
+        await Zotero.Beaver.db.upsertMessage(user_id, toMessageModel(userMessage, threadId));
     }
 
     // Case 2: Retry flow (existing user message)
     else if (existingMessage) {
-        const resetMessages = await Zotero.Beaver.db.resetFromMessage(threadId, existingMessage.id, messages.map(m => toMessageModel(m, threadId)), true);
+        const resetMessages = await Zotero.Beaver.db.resetFromMessage(user_id, threadId, existingMessage.id, messages.map(m => toMessageModel(m, threadId)), true);
         messages = resetMessages.map(m => toMessageData(m));
     }
 
@@ -508,7 +513,11 @@ async function _processChatCompletionViaBackend(
 
                 // Store message locally
                 if (!getPref('statefulChat')) {
-                    Zotero.Beaver.db.upsertMessage(msg);
+                    const user_id = store.get(userIdAtom);
+                    if (!user_id) {
+                        throw new Error('User ID not found');
+                    }
+                    Zotero.Beaver.db.upsertMessage(user_id, msg);
                 }
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {

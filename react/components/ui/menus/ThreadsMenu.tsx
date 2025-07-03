@@ -7,7 +7,7 @@ import { threadService } from '../../../../src/services/threadService';
 import { ThreadData } from '../../../types/chat/uiTypes';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
-import { userAtom } from '../../../atoms/auth';
+import { userAtom, userIdAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
@@ -71,7 +71,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             try {
                 if (!statefulChat) {
                     // Use local database
-                    const response = await Zotero.Beaver.db.getThreadsPaginated(10, 0);
+                    const response = await Zotero.Beaver.db.getThreadsPaginated(user.id, 10, 0);
                     setThreads(response.threads);
                     setOffset(10);
                     setHasMore(response.has_more);
@@ -101,13 +101,13 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
 
     // Load more threads
     const loadMoreThreads = async () => {
-        if (isLoading || (!nextCursor && !hasMore)) return;
+        if (!user || isLoading || (!nextCursor && !hasMore)) return;
         
         setIsLoading(true);
         try {
             if (!statefulChat) {
                 // Use local database with offset pagination
-                const response = await Zotero.Beaver.db.getThreadsPaginated(10, offset);
+                const response = await Zotero.Beaver.db.getThreadsPaginated(user.id, 10, offset);
                 setThreads(prevThreads => [...prevThreads, ...response.threads]);
                 setOffset(prev => prev + 10);
                 setHasMore(response.has_more);
@@ -134,8 +134,11 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     };
 
     const handleLoadThread = async (threadId: string) => {
+        if (!user) {
+            throw new Error('User not found');
+        }
         try {
-            loadThread({threadId: threadId});
+            loadThread({user_id: user.id, threadId: threadId});
         } catch (error) {
             console.error('Error loading thread:', error);
         }
@@ -145,7 +148,10 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         try {
             if (!statefulChat) {
                 // Use local database
-                await Zotero.Beaver.db.deleteThread(threadId);
+                if (!user) {
+                    throw new Error('User not found');
+                }
+                await Zotero.Beaver.db.deleteThread(user.id,threadId);
             } else {
                 // Use remote API
                 await threadService.deleteThread(threadId);
@@ -172,7 +178,10 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         try {
             if (!statefulChat) {
                 // Use local database
-                await Zotero.Beaver.db.renameThread(threadId, newName);
+                if (!user) {
+                    throw new Error('User not found');
+                }
+                await Zotero.Beaver.db.renameThread(user.id, threadId, newName);
             } else {
                 // Use remote API
                 await threadService.renameThread(threadId, newName);

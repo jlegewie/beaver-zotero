@@ -109,7 +109,7 @@ export const newThreadAtom = atom(
 
 export const loadThreadAtom = atom(
     null,
-    async (get, set, { threadId }: { threadId: string }) => {
+    async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
         set(userScrolledAtom, false);
         // Set the current thread ID
         set(currentThreadIdAtom, threadId);
@@ -118,7 +118,7 @@ export const loadThreadAtom = atom(
         const statefulChat = getPref('statefulChat');
         
         if (!statefulChat) {
-            const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(threadId);
+            const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
             logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
             const messages = messagesDB.map(toMessageUI);
             
