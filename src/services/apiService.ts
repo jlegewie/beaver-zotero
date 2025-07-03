@@ -24,7 +24,13 @@ export class ApiService {
     * Gets authentication headers with JWT token if user is signed in
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
-        const { data } = await supabase.auth.getSession();
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+            logger(`getAuthHeaders: Session error: ${error.message}`);
+            throw new ApiError(401, 'Authentication failed');
+        }
+        
         const token = data.session?.access_token;
         
         return {
