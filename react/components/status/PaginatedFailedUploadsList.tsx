@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { userIdAtom } from '../../atoms/auth';
 import { attachmentsService, AttachmentStatusPagedResponse, UploadStatus } from '../../../src/services/attachmentsService';
@@ -41,6 +41,9 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
     const [currentPage, setCurrentPage] = useState(0);
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+
+    // Track previous count to detect actual changes
+    const prevCountRef = useRef<number>();
 
     const userId = useAtomValue(userIdAtom);
 
@@ -106,10 +109,13 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
             setCurrentPage(0);
             setHasMore(false);
             setShowList(false);
+            prevCountRef.current = 0;
             return;
         }
 
-        if (showList) {
+        // Only fetch if showList is true AND count has actually changed
+        if (showList && prevCountRef.current !== count) {
+            prevCountRef.current = count;
             fetchItems(0);
         }
     }, [userId, count, showList, fetchItems]);

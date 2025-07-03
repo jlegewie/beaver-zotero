@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { userIdAtom } from '../../atoms/auth';
 import { planFeaturesAtom } from '../../atoms/profile';
@@ -37,8 +37,12 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    const prevCountRef = useRef<number>();
+
     const userId = useAtomValue(userIdAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
+
+    const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
 
     const fetchItems = useCallback(async (page: number) => {
         if (!userId || isLoading) return;
@@ -47,7 +51,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
         try {
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
                 statuses,
-                planFeatures.processingTier,
+                processingTier,
                 page + 1, // API is 1-based
                 ITEMS_PER_PAGE
             );
@@ -90,7 +94,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
         } finally {
             setIsLoading(false);
         }
-    }, [userId, planFeatures.processingTier, statuses]);
+    }, [userId, processingTier, statuses]);
 
     useEffect(() => {
         if (!userId || count === 0) {
@@ -98,10 +102,12 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             setCurrentPage(0);
             setHasMore(false);
             setShowList(false);
+            prevCountRef.current = 0;
             return;
         }
 
-        if (showList) {
+        if (showList && prevCountRef.current !== count) {
+            prevCountRef.current = count;
             fetchItems(0);
         }
     }, [userId, count, showList, fetchItems]);
