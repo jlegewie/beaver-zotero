@@ -11,14 +11,19 @@ import { ProcessingTier } from '../types/profile';
 
 // Mapping of error codes to user error messages (covers error codes from ProcessingErrorCode pydantic model)
 export const errorMapping = {
+    // Queue failed
     "queue_failed": "Unexpected error",
     "queue_failed_invalid_user": "Unexpected error",
-    "queue_failed_invalid_file_type": "File Type not supported",
     "queue_failed_invalid_page_count": "Unable to read file",
-    "queue_failed_exceeds_plan_page_limit": "File too large",
-    "queue_failed_insufficient_balance": "Insufficient balance",
-    "queue_failed_file_too_large": "File size too large",
     "queue_failed_database_error": "Unexpected error",
+    
+    // Plan limits
+    "plan_limit_unsupported_file": "File Type not supported",
+    "plan_limit_max_pages": "File too large",
+    "plan_limit_insufficient_balance": "Insufficient balance",
+    "plan_limit_file_size": "File too large",
+    
+    // File errors
     "encrypted": "File is encrypted",
     "no_text_layer": "File requires OCR",
     "insufficient_text": "Insufficient text",
@@ -31,13 +36,9 @@ export const errorMapping = {
     "chunk_failed": "Unexpected error",
     "embedding_failed": "Unexpected error",
     "db_update_failed": "Unexpected error",
-    "task_parsing_failed": "Unexpected error",
     "max_retries": "Unexpected error",
     "timeout": "Unexpected error",
-    "unexpected_error": "Unexpected error",
-    // Upload file errors (frontent)
-    "file_size": "File too big",
-    "incorrect_item": "Incorrect item"
+    "unexpected_error": "Unexpected error"
 }
 
 // File processing status summary

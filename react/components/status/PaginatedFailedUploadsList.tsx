@@ -45,8 +45,8 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
     const userId = useAtomValue(userIdAtom);
 
     const getErrorMessage = async (attachment: Zotero.Item | false) => {
-        if(!attachment) return "incorrect_item"
-        if(!attachment.isAttachment()) return "incorrect_item"
+        if(!attachment) return "file_missing"
+        if(!attachment.isAttachment()) return "file_missing"
 
         // Reason: missing file
         let filePath: string | null = null;
@@ -57,7 +57,7 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
         const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
         const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
         const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
-        if (fileSizeInMB > sizeLimit) return 'file_size';
+        if (fileSizeInMB > sizeLimit) return 'plan_limit_file_size';
 
         return 'unexpected_error';
     }
