@@ -11,6 +11,8 @@ import {
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { planFeaturesAtom } from '../atoms/profile';
 
+const DEBOUNCE_DELAY = 1000;
+
 /**
  * Custom hook to fetch and manage error code statistics for file processing.
  * It automatically fetches stats when the number of failed or skipped files changes.
@@ -62,7 +64,7 @@ export const useErrorCodeStats = () => {
                     .finally(() => {
                         setIsLoading(false);
                     });
-            }, 500); // 500ms debounce delay
+            }, DEBOUNCE_DELAY);
 
             return () => {
                 clearTimeout(handler);
