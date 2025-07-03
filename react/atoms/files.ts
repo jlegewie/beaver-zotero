@@ -37,7 +37,6 @@ export const errorMapping = {
     "unexpected_error": "Unexpected error",
     // Upload file errors (frontent)
     "file_size": "File too big",
-    "missing_file": "File missing",
     "incorrect_item": "Incorrect item"
 }
 

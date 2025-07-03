@@ -51,7 +51,7 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
         // Reason: missing file
         let filePath: string | null = null;
         filePath = await attachment.getFilePathAsync() || null;
-        if(!filePath) return "missing_file"
+        if(!filePath) return "file_missing"
 
         // Reason: file size limit
         const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
