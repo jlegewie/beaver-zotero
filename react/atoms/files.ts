@@ -19,7 +19,7 @@ export const errorMapping = {
     
     // Plan limits
     "plan_limit_unsupported_file": "File Type not supported",
-    "plan_limit_max_pages": "File too large",
+    "plan_limit_max_pages": "Too many pages",
     "plan_limit_insufficient_balance": "Insufficient balance",
     "plan_limit_file_size": "File too large",
     
