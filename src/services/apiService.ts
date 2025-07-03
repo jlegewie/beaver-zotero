@@ -61,7 +61,7 @@ export class ApiService {
         // Return the response as JSON or throw an error if it's not valid JSON
         const responseText = await response.text();
         try {
-            return response.json() as Promise<T>;
+            return JSON.parse(responseText) as T;
         } catch (parseError) {
             logger(`GET: JSON parse error. Response text: ${responseText}`);
             throw parseError;
@@ -86,7 +86,7 @@ export class ApiService {
         // Return the response as JSON or throw an error if it's not valid JSON
         const responseText = await response.text();
         try {
-            return response.json() as Promise<T>;
+            return JSON.parse(responseText) as T;
         } catch (parseError) {
             logger(`POST: JSON parse error. Response text: ${responseText}`);
             throw parseError;
@@ -111,7 +111,7 @@ export class ApiService {
         // Return the response as JSON or throw an error if it's not valid JSON
         const responseText = await response.text();
         try {
-            return response.json() as Promise<T>;
+            return JSON.parse(responseText) as T;
         } catch (parseError) {
             logger(`PATCH: JSON parse error. Response text: ${responseText}`);
             throw parseError;
