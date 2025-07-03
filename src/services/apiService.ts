@@ -24,14 +24,36 @@ export class ApiService {
     * Gets authentication headers with JWT token if user is signed in
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
+        // Get the current session
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {
             logger(`getAuthHeaders: Session error: ${error.message}`);
             throw new ApiError(401, 'Authentication failed');
         }
+
+        let session = data.session;
         
-        const token = data.session?.access_token;
+        // Check if token is expired or expires soon (within 5 minutes)
+        if (session) {
+            const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+            const now = Date.now();
+            const fiveMinutes = 5 * 60 * 1000;
+            
+            if (expiresAt - now < fiveMinutes) {
+                logger(`getAuthHeaders: Token expires soon, refreshing...`);
+                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+                
+                if (refreshError) {
+                    logger(`getAuthHeaders: Refresh failed: ${refreshError.message}`);
+                    throw new ApiError(401, 'Token refresh failed');
+                }
+                
+                session = refreshData.session;
+            }
+        }
+        
+        const token = session?.access_token;
         
         return {
             'Content-Type': 'application/json',
