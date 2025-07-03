@@ -8,6 +8,7 @@ import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttach
 import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
 import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
+import { getPref, setPref } from "./utils/prefs";
 
 const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -23,6 +24,7 @@ async function onStartup() {
 
 	// -------- Store plugin version --------
 	addon.pluginVersion = version;
+	ztoolkit.log(`Plugin version: ${version}`);
 
 	// -------- Initialize database --------
 	const dbConnection = new Zotero.DBConnection("beaver");
@@ -31,7 +33,7 @@ async function onStartup() {
 
 	// Test connection and initialize schema
 	await dbConnection.test();
-	await beaverDB.initDatabase();
+	await beaverDB.initDatabase(version);
 	
 	// -------- Initialize Generative AI provider for direct API calls --------
 	// let provider;
@@ -57,6 +59,10 @@ async function onStartup() {
 	await Promise.all(
 		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
 	);
+
+	// -------- Set installed version --------
+	setPref('installedVersion', version);
+	ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {

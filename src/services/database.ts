@@ -3,6 +3,7 @@ import { AttachmentStatusPagedResponse, AttachmentStatusResponse, UploadStatus }
 import { logger } from '../utils/logger';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
+import { getPref } from '../utils/prefs';
 
 /* 
  * Interface for the 'items' table row
@@ -142,7 +143,20 @@ export class BeaverDB {
      * Initialize the database by creating tables if they don't exist.
      * Should be called once after constructing the class.
      */
-    public async initDatabase(): Promise<void> {
+    public async initDatabase(pluginVersion: string): Promise<void> {
+        const previousVersion = getPref('installedVersion') || '0.1';
+
+        // Delete all tables in test versions
+        if (previousVersion.startsWith('0.1')) {
+            ztoolkit.log(`Deleting all tables for plugin version ${pluginVersion}`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS items`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS attachments`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS threads`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS messages`);
+        }
+
+        // Create database schema
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS items (
                 id                       TEXT(36) PRIMARY KEY,

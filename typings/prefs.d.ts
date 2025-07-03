@@ -10,6 +10,7 @@ declare namespace _ZoteroTypes {
       "userId": string;
       "userEmail": string;
       "currentPlanId": string;
+      "installedVersion": string;
       "showIndexingCompleteMessage": boolean;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
