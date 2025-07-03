@@ -50,7 +50,7 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
             fileStatusSummary: fileStatusSummary,
             type: "indexing_complete",
             expire: false,
-            planName: profile.plan.display_name
+            planName: profile.plan.name
         });
     }
 

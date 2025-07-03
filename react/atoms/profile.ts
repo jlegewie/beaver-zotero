@@ -32,6 +32,11 @@ export const planIdAtom = atom<string>((get) => {
 
 export const planNameAtom = atom<string>((get) => {
     const profile = get(profileWithPlanAtom);
+    return profile?.plan.name || 'Unknown';
+});
+
+export const planDisplayNameAtom = atom<string>((get) => {
+    const profile = get(profileWithPlanAtom);
     return profile?.plan.display_name || 'Unknown';
 });
 
