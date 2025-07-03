@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { ApiError, ServerError } from '../../react/types/apiErrors';
+import { logger } from 'src/utils/logger';
 
 /**
 * Base API service that handles authentication and common HTTP methods
@@ -57,7 +58,14 @@ export class ApiService {
             this.handleApiError(response);
         }
         
-        return response.json() as Promise<T>;
+        // Return the response as JSON or throw an error if it's not valid JSON
+        const responseText = await response.text();
+        try {
+            return response.json() as Promise<T>;
+        } catch (parseError) {
+            logger(`GET: JSON parse error. Response text: ${responseText}`);
+            throw parseError;
+        }
     }
     
     /**
@@ -75,7 +83,14 @@ export class ApiService {
             this.handleApiError(response);
         }
         
-        return response.json() as Promise<T>;
+        // Return the response as JSON or throw an error if it's not valid JSON
+        const responseText = await response.text();
+        try {
+            return response.json() as Promise<T>;
+        } catch (parseError) {
+            logger(`POST: JSON parse error. Response text: ${responseText}`);
+            throw parseError;
+        }
     }
     
     /**
@@ -93,7 +108,14 @@ export class ApiService {
             this.handleApiError(response);
         }
         
-        return response.json() as Promise<T>;
+        // Return the response as JSON or throw an error if it's not valid JSON
+        const responseText = await response.text();
+        try {
+            return response.json() as Promise<T>;
+        } catch (parseError) {
+            logger(`PATCH: JSON parse error. Response text: ${responseText}`);
+            throw parseError;
+        }
     }
     
     /**
