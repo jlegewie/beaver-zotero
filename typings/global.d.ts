@@ -5,6 +5,10 @@ declare const _globalThis: {
   addon: typeof addon;
 };
 
+declare interface SymbolConstructor {
+  readonly observable: symbol;
+}
+
 declare type ZToolkit = ReturnType<
   typeof import("../src/utils/ztoolkit").createZToolkit
 >;
