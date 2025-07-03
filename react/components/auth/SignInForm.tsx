@@ -66,7 +66,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
 
         // Check if Zotero instance is already associated with another account
         const storedUserEmail = getPref("userEmail");
-        if (storedUserEmail && storedUserEmail !== email) {
+        if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
             setErrorMsg(`This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`);
             setIsLoading(false)
             return;
