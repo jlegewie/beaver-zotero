@@ -38,6 +38,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         {
             label: 'Save as Note',
             onClick: () => saveAsNote()
+        },
+        {
+            label: 'Copy Request ID',
+            onClick: () => copyRequestId()
         }
     ];
 
@@ -64,6 +68,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         }
         await newNote.saveTx();
         selectItem(newNote);
+    }
+
+    const copyRequestId = async () => {
+        await copyToClipboard(message.id);
     }
 
     return (
