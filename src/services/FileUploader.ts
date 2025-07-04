@@ -40,7 +40,7 @@ export class FileUploader {
     private completionBatch: Array<{ item: UploadQueueRecord, request: CompleteUploadRequest }> = [];
     private batchTimer: NodeJS.Timeout | null = null;
     private readonly BATCH_SEND_SIZE: number = 5; // Send after 5 completions
-    private readonly BATCH_SEND_TIMEOUT: number = 1000; // Send after 1 second
+    private readonly BATCH_SEND_TIMEOUT: number = 1500; // Send after 1.5 seconds
 
     /**
      * Starts the file uploader if it's not already running.
