@@ -253,6 +253,15 @@ declare namespace Zotero {
             failQueueItem(user_id: string, file_hash: string, status?: import("../src/services/attachmentsService").UploadStatus): Promise<void>;
 
             /**
+             * Mark multiple items in the upload queue as failed.
+             * This involves deleting them from 'upload_queue' and updating 'attachments'.
+             * @param user_id User ID
+             * @param file_hashes Array of file_hashes of the failed items
+             * @param status Optional. The status to update the upload to. Defaults to 'failed'.
+             */
+            failQueueItems(user_id: string, file_hashes: string[], status?: import("../src/services/attachmentsService").UploadStatus): Promise<void>;
+
+            /**
              * Upsert a single record into the 'upload_queue' table.
              * If a record with the same user_id and file_hash exists, it's updated. Otherwise, a new record is inserted.
              * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.

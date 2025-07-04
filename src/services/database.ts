@@ -1027,6 +1027,43 @@ export class BeaverDB {
     }
 
     /**
+     * Mark multiple items in the upload queue as failed.
+     * This involves deleting them from 'upload_queue' and updating 'attachments'.
+     * @param user_id User ID
+     * @param file_hashes Array of file_hashes of the failed items
+     * @param status The status to update the upload to. Defaults to 'failed'.
+     */
+    public async failQueueItems(user_id: string, file_hashes: string[], status: UploadStatus = 'failed'): Promise<void> {
+        if (file_hashes.length === 0) {
+            return;
+        }
+
+        // Filter out any invalid file_hashes
+        const validHashes = file_hashes.filter(hash => hash && hash.trim() !== '');
+        if (validHashes.length === 0) {
+            return;
+        }
+
+        await this.conn.executeTransaction(async () => {
+            const placeholders = validHashes.map(() => '?').join(',');
+            
+            // Delete from upload_queue
+            await this.conn.queryAsync(
+                `DELETE FROM upload_queue WHERE user_id = ? AND file_hash IN (${placeholders})`,
+                [user_id, ...validHashes]
+            );
+
+            // Update all attachments with these file_hashes to the specified status
+            await this.conn.queryAsync(
+                `UPDATE attachments
+                 SET upload_status = ?
+                 WHERE user_id = ? AND file_hash IN (${placeholders})`,
+                [status, user_id, ...validHashes]
+            );
+        });
+    }
+
+    /**
      * Upsert a single record into the 'upload_queue' table.
      * If a record with the same user_id and file_hash exists, it's updated. Otherwise, a new record is inserted.
      * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
