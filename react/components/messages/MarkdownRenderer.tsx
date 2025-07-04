@@ -71,7 +71,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     
     const preprocessedContent = processedContent
         .replace(
-            /<citation\s+((?:[^>])+?)\s*\/>/g,
+            /<[\u200B-\u200D\uFEFF\u00AD-]*citation\s+((?:[^>])+?)\s*\/>/g,
             (match, attributesStr) => {
                 // Extract the ID from attributes
                 const idMatch = attributesStr.match(/id="([^"]+)"/);
