@@ -203,6 +203,15 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
+     * Marks multiple uploads as completed in a batch operation.
+     * @param requests Array of complete upload requests
+     * @returns Promise with an array of upload completed responses
+     */
+    async markUploadCompletedBatch(requests: CompleteUploadRequest[]): Promise<CompleteUploadResult[]> {
+        return this.post<CompleteUploadResult[]>('/attachments/complete-upload-batch', requests);
+    }
+
+    /**
      * Resets all failed uploads by changing their status back to pending.
      * @returns Promise with an array of reset failed upload results
      */
