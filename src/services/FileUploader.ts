@@ -11,7 +11,7 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, ResetFailedResult } from './attachmentsService';
+import { attachmentsService, ResetFailedResult, CompleteUploadRequest } from './attachmentsService';
 import { UploadQueueInput, UploadQueueRecord } from './database';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
@@ -35,6 +35,12 @@ export class FileUploader {
     private readonly MAX_ATTEMPTS: number = 3;
     private readonly VISIBILITY_TIMEOUT: number = 0.5; // 30 seconds timeout for reads
     private readonly VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE: number = 5;  // 5 minutes timeout for retries
+
+    // completion batching
+    private completionBatch: Array<{ item: UploadQueueRecord, request: CompleteUploadRequest }> = [];
+    private batchTimer: NodeJS.Timeout | null = null;
+    private readonly BATCH_SEND_SIZE: number = 5; // Send after 5 completions
+    private readonly BATCH_SEND_TIMEOUT: number = 1000; // Send after 1 second
 
     /**
      * Starts the file uploader if it's not already running.
@@ -95,7 +101,11 @@ export class FileUploader {
 
         // Wait for all queued tasks to finish, if any
         try {
-            await this.uploadQueue.onIdle();            
+            await this.uploadQueue.onIdle();
+            
+            // Flush any remaining completion batches
+            await this.flushCompletionBatch();
+            
             // Clear session
             store.set(isFileUploaderRunningAtom, false);
         } catch (error: any) {
@@ -179,6 +189,9 @@ export class FileUploader {
             }
         }
 
+        // Mark all items in the queue as failed
+        await this.flushCompletionBatch();
+
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
         logger('File Uploader Queue: Finished processing queue.', 3);
@@ -187,7 +200,7 @@ export class FileUploader {
 
     /**
      * Uploads a single file item. 
-     * On success, the item is marked completed; on failure, we may retry or fail permanently.
+     * On success, the item is added to the completion batch; on failure, we may retry or fail permanently.
      */
     private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
         try {
@@ -308,30 +321,8 @@ export class FileUploader {
                 throw new Error(`Failed to upload file to storage after ${maxUploadAttempts} attempts`);
             }
 
-            // Second retry loop: Mark upload as completed in backend
-            let markCompletedSuccess = false;
-            let markCompletedAttempt = 0;
-            const maxMarkCompletedAttempts = 3;
-
-            while (!markCompletedSuccess && markCompletedAttempt < maxMarkCompletedAttempts) {
-                markCompletedAttempt++;
-                try {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Marking upload as completed in backend (attempt ${markCompletedAttempt}/${maxMarkCompletedAttempts})`, 3);
-                    await this.markUploadCompleted(item, mimeType, fileSize, pageCount, user_id);
-                    markCompletedSuccess = true;
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Backend completion marking successful on attempt ${markCompletedAttempt}`, 3);
-                } catch (markCompletedError: any) {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Backend completion marking error on attempt ${markCompletedAttempt}, will retry: ${markCompletedError.message}`, 2);
-                    if (markCompletedAttempt < maxMarkCompletedAttempts) {
-                        await new Promise(resolve => setTimeout(resolve, 2000 * markCompletedAttempt)); // Increasing backoff
-                    }
-                }
-            }
-
-            // If marking as completed failed after all retries
-            if (!markCompletedSuccess) {
-                throw new Error(`Failed to mark upload as completed in backend after ${maxMarkCompletedAttempts} attempts`);
-            }
+            // Add to completion batch instead of marking completed directly
+            await this.addCompletionToBatch(item, mimeType, fileSize, pageCount, user_id);
 
         } catch (error: any) {
             logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${error.message}`, 1);
@@ -339,7 +330,122 @@ export class FileUploader {
 
             // Treat as permanently failed with message for manual retry
             await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
+        }
+    }
+
+    /**
+     * Adds a completion to the batch and manages batch sending
+     */
+    private async addCompletionToBatch(item: UploadQueueRecord, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
+        const request: CompleteUploadRequest = {
+            file_hash: item.file_hash,
+            mime_type: mimeType,
+            file_size: fileSize,
+            page_count: pageCount
+        };
+
+        this.completionBatch.push({ item, request });
+
+        // If batch is full, flush it immediately
+        if (this.completionBatch.length >= this.BATCH_SEND_SIZE) {
+            await this.flushCompletionBatch();
+        } else {
+            // Otherwise, set/reset a timer to flush it after a short delay
+            if (this.batchTimer) {
+                clearTimeout(this.batchTimer);
+            }
+            this.batchTimer = setTimeout(() => this.flushCompletionBatch(), this.BATCH_SEND_TIMEOUT);
+        }
+    }
+
+    /**
+     * Flushes the completion batch to the backend
+     */
+    private async flushCompletionBatch(): Promise<void> {
+        // Clear any pending timer
+        if (this.batchTimer) {
+            clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+        }
+
+        if (this.completionBatch.length === 0) {
+            return;
+        }
+
+        // Make a copy of the current batch and clear the original immediately
+        // This prevents race conditions if more items are added while the request is in-flight
+        const batchToSend = [...this.completionBatch];
+        this.completionBatch = [];
+
+        const userId = store.get(userIdAtom);
+        if (!userId) {
+            logger('File Uploader: Cannot flush batch, no user ID.', 2);
+            // Re-add items to batch to be retried later
+            this.completionBatch.push(...batchToSend);
+            return;
+        }
+
+        logger(`File Uploader: Flushing completion batch of ${batchToSend.length} items.`, 3);
+
+        // Retry mechanism for batch completion
+        let batchSuccess = false;
+        let batchAttempt = 0;
+        const maxBatchAttempts = 3;
+
+        while (!batchSuccess && batchAttempt < maxBatchAttempts) {
+            batchAttempt++;
+            try {
+                logger(`File Uploader: Attempting to flush batch (attempt ${batchAttempt}/${maxBatchAttempts})`, 3);
+                const requests = batchToSend.map(b => b.request);
+                const results = await attachmentsService.markUploadCompletedBatch(requests);
+
+                // Process the response for each item
+                for (const result of results) {
+                    const batchItem = batchToSend.find(b => b.item.file_hash === result.hash);
+                    if (!batchItem) {
+                        logger(`File Uploader: Batch item not found for hash ${result.hash}`, 1);
+                        continue;
+                    }
+
+                    if (result.upload_completed) {
+                        // On success, update local DB
+                        await Zotero.Beaver.db.completeQueueItem(userId, batchItem.item.file_hash);
+                        logger(`File Uploader: Successfully uploaded file for attachment ${batchItem.item.zotero_key} (page count: ${batchItem.request.page_count})`, 3);
+                    } else {
+                        // On failure, log it. The item remains in the queue (since completeQueueItem wasn't called)
+                        // and will be retried automatically on a future run.
+                        logger(`File Uploader: Backend failed to complete ${batchItem.item.zotero_key}: ${result.error}`, 1);
+                    }
+                }
+                
+                batchSuccess = true;
+                logger(`File Uploader: Batch flush successful on attempt ${batchAttempt}`, 3);
+                
+            } catch (batchError: any) {
+                logger(`File Uploader: Batch flush error on attempt ${batchAttempt}, will retry: ${batchError.message}`, 2);
+                if (batchAttempt < maxBatchAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 2000 * batchAttempt)); // Increasing backoff
+                }
+            }
+        }
+
+        // If batch flush failed after all retries, mark all items as permanently failed
+        if (!batchSuccess) {
+            logger(`File Uploader: Failed to flush batch after ${maxBatchAttempts} attempts, marking all items as permanently failed`, 1);
             
+            // Mark each item in the batch as permanently failed
+            for (const batchItem of batchToSend) {
+                try {
+                    await this.handlePermanentFailure(
+                        batchItem.item, 
+                        userId, 
+                        `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
+                    );
+                } catch (failError: any) {
+                    logger(`File Uploader: Failed to mark batch item ${batchItem.item.zotero_key} as permanently failed: ${failError.message}`, 1);
+                    // If we can't mark it as failed, it will be retried on next run due to visibility timeout
+                }
+            }
         }
     }
     
@@ -397,27 +503,6 @@ export class FileUploader {
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure (will retry later): ${failError.message}`, 2);
-        }
-    }
-
-    /**
-     * Marks upload as completed in backend first, then updates local state only if successful
-     */
-    private async markUploadCompleted(item: UploadQueueRecord, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
-        try {
-            // First, notify backend of completion
-            await attachmentsService.markUploadCompleted(item.file_hash, mimeType, fileSize, pageCount);
-
-            // Only if backend call succeeds, update local state and cleanup
-            await Zotero.Beaver.db.completeQueueItem(user_id, item.file_hash);
-
-            logger(`File Uploader: Successfully uploaded file for attachment ${item.zotero_key} (page count: ${pageCount})`, 3);
-            
-        } catch (error: any) {
-            logger(`File Uploader: Error marking upload as completed: ${error.message}`, 1);
-            Zotero.logError(error);
-            // Re-throw the error so callers know the completion marking failed
-            throw error;
         }
     }
 }
