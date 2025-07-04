@@ -59,10 +59,8 @@ export interface CompleteUploadResponse {
 
 export interface CompleteUploadResult {
     upload_completed: boolean;
-    queued: boolean;
+    hash: string;
     error: string;
-    required_pages: number | null;
-    remaining_pages: number | null;
 }
 
 /**
