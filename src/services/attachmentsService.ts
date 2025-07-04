@@ -18,7 +18,7 @@ export type UploadStatus = "pending" | "completed" | "failed" | "plan_limit";
  * Request body for marking an upload as failed
  */
 export interface UpdateUploadStatusRequest {
-    file_hash: string;
+    file_hash: string | string[];
     status: UploadStatus;
 }
 
@@ -178,7 +178,7 @@ export class AttachmentsService extends ApiService {
      * @param status The status to update the upload to
      * @returns Promise with the upload failed response
      */
-    async updateUploadStatus(fileHash: string, status: UploadStatus): Promise<UpdateUploadStatusResponse> {
+    async updateUploadStatus(fileHash: string | string[], status: UploadStatus): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
             file_hash: fileHash,
             status: status
