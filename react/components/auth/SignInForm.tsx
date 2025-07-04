@@ -25,6 +25,14 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
         emailInputRef?.current?.focus();
     }, []);
 
+    // Prefill email if stored email exists
+    useEffect(() => {
+        const storedUserEmail = getPref("userEmail");
+        if (storedUserEmail) {
+            setEmail(storedUserEmail);
+        }
+    }, []);
+
     // Add timeout for profile loading
     useEffect(() => {
         if (isWaitingForProfile) {
