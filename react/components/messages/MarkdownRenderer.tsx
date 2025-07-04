@@ -37,7 +37,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     // Process partial tags at the end of content
     const processPartialContent = (content: string): string => {
         let processed = content;
-        
+
+        // Remove invisible or control characters
+        // Includes: zero-width space, zero-width non-joiner, soft hyphen, etc.
+        processed = processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
+            
         // Complete unclosed code blocks
         // const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;
         // const codeBlockMatch = processed.match(codeBlockRegex);
@@ -71,7 +75,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     
     const preprocessedContent = processedContent
         .replace(
-            /<[\u200B-\u200D\uFEFF\u00AD-]*citation\s+((?:[^>])+?)\s*\/>/g,
+            /<citation\s+((?:[^>])+?)\s*\/>/g,
             (match, attributesStr) => {
                 // Extract the ID from attributes
                 const idMatch = attributesStr.match(/id="([^"]+)"/);
