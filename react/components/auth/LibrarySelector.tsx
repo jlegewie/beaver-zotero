@@ -169,9 +169,9 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                                             </div>
                                         ) : statistics ? (
                                             <>
-                                                {statistics.itemCount} items,{' '}
-                                                {statistics.attachmentCount} attachments,{' '}
-                                                {statistics.pageCount} pages
+                                                {statistics.itemCount.toLocaleString()} items,{' '}
+                                                {statistics.attachmentCount.toLocaleString()} attachments,{' '}
+                                                {statistics.pageCount.toLocaleString()} pages
                                             </>
                                         ) : (
                                             "No statistics available"
