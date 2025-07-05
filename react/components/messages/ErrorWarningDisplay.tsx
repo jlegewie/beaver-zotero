@@ -81,7 +81,7 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                             <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
-                                Update API Key
+                                Settings
                             </Button>
                         }
                     </div>
