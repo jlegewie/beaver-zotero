@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '../../src/utils/logger';
 import {
@@ -11,13 +11,9 @@ import {
 import { attachmentsService } from '../../src/services/attachmentsService';
 import { planFeaturesAtom } from '../atoms/profile';
 
-const DEBOUNCE_DELAY = 1000;
-
 /**
  * Custom hook to fetch and manage error code statistics for file processing.
- * It automatically fetches stats when the number of failed or skipped files changes.
- * Fetching is debounced to avoid excessive API calls.
- * Uses in-memory caching to avoid redundant backend calls.
+ * Only fetches when explicitly called, with caching to avoid redundant requests.
  */
 export const useErrorCodeStats = () => {
     const errorCodeStats = useAtomValue(errorCodeStatsAtom);
@@ -29,15 +25,22 @@ export const useErrorCodeStats = () => {
     const setIsLoading = useSetAtom(errorCodeStatsIsLoadingAtom);
     const setError = useSetAtom(errorCodeStatsErrorAtom);
     
+    // Clear stats when there are no errors
     useEffect(() => {
         const totalErrors = failedProcessingCount + planLimitProcessingCount;
-
-        // If no errors, clear the stats and cache
         if (totalErrors === 0) {
             if (errorCodeStats !== null) {
                 setErrorCodeStats(null);
                 setLastFetchedCounts(null);
             }
+        }
+    }, [failedProcessingCount, planLimitProcessingCount, errorCodeStats, setErrorCodeStats, setLastFetchedCounts]);
+
+    const fetchStats = useCallback(async () => {
+        const totalErrors = failedProcessingCount + planLimitProcessingCount;
+
+        // Don't fetch if no errors
+        if (totalErrors === 0) {
             return;
         }
 
@@ -48,46 +51,41 @@ export const useErrorCodeStats = () => {
             lastFetchedCounts.processingTier === planFeatures.processingTier &&
             errorCodeStats !== null;
 
-        const shouldFetch = totalErrors > 0 && !hasValidCache;
-            
-        logger(`useErrorCodeStats: useEffect running with shouldFetch=${shouldFetch} (totalErrors=${totalErrors}, hasValidCache=${hasValidCache}, failedProcessingCount=${failedProcessingCount}, planLimitProcessingCount=${planLimitProcessingCount})`);
+        // Don't fetch if we have valid cached data
+        if (hasValidCache) {
+            logger(`useErrorCodeStats: Using cached data for failed=${failedProcessingCount}, skipped=${planLimitProcessingCount}, tier=${planFeatures.processingTier}`);
+            return;
+        }
+
+        logger(`useErrorCodeStats: Fetching error code stats for failed=${failedProcessingCount}, skipped=${planLimitProcessingCount}, tier=${planFeatures.processingTier}`);
         
-        if (shouldFetch) {
-            const handler = setTimeout(() => {
-                setIsLoading(true);
-                setError(null);
+        setIsLoading(true);
+        setError(null);
 
-                // Set the type of processing to fetch stats for
-                let type = 'text';
-                if (planFeatures.processingTier === 'standard') {
-                    type = 'md';
-                } else if (planFeatures.processingTier === 'advanced') {
-                    type = 'docling';
-                }
+        try {
+            // Set the type of processing to fetch stats for
+            let type = 'text';
+            if (planFeatures.processingTier === 'standard') {
+                type = 'md';
+            } else if (planFeatures.processingTier === 'advanced') {
+                type = 'docling';
+            }
 
-                // Fetch the error code stats
-                attachmentsService.getErrorCodeStats(type as 'text' | 'md' | 'docling')
-                    .then(stats => {
-                        logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
-                        setErrorCodeStats(stats);
-                        setLastFetchedCounts({ 
-                            failed: failedProcessingCount, 
-                            skipped: planLimitProcessingCount,
-                            processingTier: planFeatures.processingTier
-                        });
-                    })
-                    .catch(err => {
-                        console.error("Failed to fetch error code stats:", err);
-                        setError("Could not load details.");
-                    })
-                    .finally(() => {
-                        setIsLoading(false);
-                    });
-            }, DEBOUNCE_DELAY);
-
-            return () => {
-                clearTimeout(handler);
-            };
+            // Fetch the error code stats
+            const stats = await attachmentsService.getErrorCodeStats(type as 'text' | 'md' | 'docling');
+            
+            logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
+            setErrorCodeStats(stats);
+            setLastFetchedCounts({ 
+                failed: failedProcessingCount, 
+                skipped: planLimitProcessingCount,
+                processingTier: planFeatures.processingTier
+            });
+        } catch (err) {
+            console.error("Failed to fetch error code stats:", err);
+            setError("Could not load details.");
+        } finally {
+            setIsLoading(false);
         }
     }, [
         failedProcessingCount,
@@ -100,4 +98,6 @@ export const useErrorCodeStats = () => {
         setError,
         planFeatures.processingTier
     ]);
+
+    return { fetchStats };
 };

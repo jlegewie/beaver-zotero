@@ -1,12 +1,23 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { aggregatedErrorMessagesForPlanLimitFilesAtom, errorCodeStatsErrorAtom, errorCodeStatsIsLoadingAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
+import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 
+/**
+ * Tooltip content component for displaying plan limit reasons.
+ * Fetches error stats when the tooltip is shown (component mounts).
+ */
 export const SkippedProcessingTooltipContent: React.FC = () => {
+    const { fetchStats } = useErrorCodeStats();
     const isLoading = useAtomValue(errorCodeStatsIsLoadingAtom);
     const error = useAtomValue(errorCodeStatsErrorAtom);
     const aggregatedMessages = useAtomValue(aggregatedErrorMessagesForPlanLimitFilesAtom);
+
+    // Fetch stats when tooltip is shown (component mounts)
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
 
     return (
         <div className="display-flex flex-col gap-1">

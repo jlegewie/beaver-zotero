@@ -1,15 +1,23 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { aggregatedErrorMessagesForFailedFilesAtom, errorCodeStatsErrorAtom, errorCodeStatsIsLoadingAtom } from '../../atoms/files';
 import { Spinner } from '../icons/icons';
+import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 
 /**
  * Tooltip content component for displaying processing error codes.
+ * Fetches error stats when the tooltip is shown (component mounts).
  */
 export const FailedProcessingTooltipContent: React.FC = () => {
+    const { fetchStats } = useErrorCodeStats();
     const isLoading = useAtomValue(errorCodeStatsIsLoadingAtom);
     const error = useAtomValue(errorCodeStatsErrorAtom);
     const aggregatedErrorMessagesForFailedFiles = useAtomValue(aggregatedErrorMessagesForFailedFilesAtom);
+
+    // Fetch stats when tooltip is shown (component mounts)
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
 
     // Display error codes and counts
     return (

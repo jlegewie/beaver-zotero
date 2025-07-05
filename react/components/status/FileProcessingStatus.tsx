@@ -7,11 +7,9 @@ import { fileStatusSummaryAtom } from "../../atoms/files";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
-import { useErrorCodeStats } from "../../hooks/useErrorCodeStats";
 import { FileStatusConnection } from "../../hooks/useFileStatus";
 
 const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['connectionStatus'] }> = ({ connectionStatus }) => {
-    useErrorCodeStats();
     const fileStats = useAtomValue(fileStatusSummaryAtom);
 
     const getProcessingIcon = (): React.ReactNode => {
