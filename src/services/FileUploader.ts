@@ -236,15 +236,14 @@ export class FileUploader {
             }
 
             // File size limit
-            // const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
-            // const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
-            // // if (fileSizeInMB > sizeLimit) {
-            // if (fileSizeInMB > 0.5) {
-            //     logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-            //     await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
-            //     return;
-            // }
-            // maxPageCount
+            const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
+            const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
+            logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
+            if (fileSizeInMB > sizeLimit) {
+                logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
+                await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
+                return;
+            }
 
             // Validate/correct MIME type by checking actual file if needed
             if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
