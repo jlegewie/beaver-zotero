@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import Button from '../ui/Button'
 import { getPref, setPref } from '../../../src/utils/prefs'
@@ -20,16 +20,19 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
     const isProfileInvalid = useAtomValue(isProfileInvalidAtom)
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom)
+    
+    const passwordInputRef = useRef<HTMLInputElement>(null)
 
-    useEffect(() => {
-        emailInputRef?.current?.focus();
-    }, []);
-
-    // Prefill email if stored email exists
+    // Handle initial focus and email prefill
     useEffect(() => {
         const storedUserEmail = getPref("userEmail");
         if (storedUserEmail) {
             setEmail(storedUserEmail);
+            // Focus password field if email is prefilled
+            passwordInputRef.current?.focus();
+        } else {
+            // Focus email field if no stored email
+            emailInputRef?.current?.focus();
         }
     }, []);
 
@@ -141,6 +144,7 @@ const SignInForm: React.FC<SignInFormProps> = ({ setErrorMsg, emailInputRef }) =
                     required
                     className="border-quinary rounded-md -ml-05 p-2 bg-quaternary transition outline-none"
                     placeholder="••••••••"
+                    ref={passwordInputRef}
                 />
             </div>
             
