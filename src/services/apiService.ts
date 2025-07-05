@@ -1,6 +1,7 @@
-import { supabase } from './supabaseClient';
 import { ApiError, ServerError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
+import { store } from '../../react/index';
+import { sessionAtom } from '../../react/atoms/auth';
 
 /**
 * Base API service that handles authentication and common HTTP methods
@@ -25,50 +26,38 @@ export class ApiService {
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
         // Get the current session
-        const { data, error } = await supabase.auth.getSession();
-        
-        if (error) {
-            logger(`getAuthHeaders: Session error: ${error.message}`);
-            throw new ApiError(401, 'Authentication failed');
+        const session = store.get(sessionAtom);
+        if (!session) {
+            throw new ApiError(401, 'User not authenticated');
         }
 
-        let session = data.session;
-        
-        // Check if token is expired or expires soon (within 5 minutes)
-        if (session) {
-            const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-            const now = Date.now();
-            const fiveMinutes = 5 * 60 * 1000;
-            
-            if (expiresAt - now < fiveMinutes) {
-                logger(`getAuthHeaders: Token expires soon, refreshing...`);
-                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-                
-                if (refreshError) {
-                    logger(`getAuthHeaders: Refresh failed: ${refreshError.message}`);
-                    throw new ApiError(401, 'Token refresh failed');
-                }
-                
-                session = refreshData.session;
-            }
+        const token = session.access_token;
+        if (!token) {
+            throw new ApiError(401, 'No access token available');
         }
-        
-        const token = session?.access_token;
-        
+
         return {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            'Authorization': `Bearer ${token}`
         };
     }
     
     /**
     * Handles API response errors and throws appropriate custom errors
     */
-    private handleApiError(response: Response): never {
+    private async handleApiError(response: Response): Promise<never> {
         if (response.status >= 500) {
             throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
         } else {
-            throw new ApiError(response.status, response.statusText);
+            // Try to parse error response as JSON, but don't fail if it's not
+            let errorBody = '';
+            try {
+                errorBody = await response.text();
+                const errorJson = JSON.parse(errorBody);
+                throw new ApiError(response.status, errorJson.message || response.statusText);
+            } catch (e) {
+                throw new ApiError(response.status, response.statusText);
+            }
         }
     }
     
@@ -77,13 +66,14 @@ export class ApiService {
     */
     async get<T>(endpoint: string): Promise<T> {
         const headers = await this.getAuthHeaders();
+        logger(`GET: ${endpoint}`);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'GET',
             headers
         });
         
         if (!response.ok) {
-            this.handleApiError(response);
+            await this.handleApiError(response);
         }
         
         // Return the response as JSON or throw an error if it's not valid JSON
@@ -101,6 +91,7 @@ export class ApiService {
     */
     async post<T>(endpoint: string, body: any): Promise<T> {
         const headers = await this.getAuthHeaders();
+        logger(`POST: ${endpoint} ${JSON.stringify(body)}`);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'POST',
             headers,
@@ -108,7 +99,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            this.handleApiError(response);
+            await this.handleApiError(response);
         }
         
         // Return the response as JSON or throw an error if it's not valid JSON
@@ -126,6 +117,7 @@ export class ApiService {
     */
     async patch<T>(endpoint: string, body: any): Promise<T> {
         const headers = await this.getAuthHeaders();
+        logger(`PATCH: ${endpoint} ${JSON.stringify(body)}`);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'PATCH',
             headers,
@@ -133,7 +125,7 @@ export class ApiService {
         });
         
         if (!response.ok) {
-            this.handleApiError(response);
+            await this.handleApiError(response);
         }
         
         // Return the response as JSON or throw an error if it's not valid JSON
@@ -151,13 +143,14 @@ export class ApiService {
     */
     async delete(endpoint: string): Promise<void> {
         const headers = await this.getAuthHeaders();
+        logger(`DELETE: ${endpoint}`);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'DELETE',
             headers
         });
         
         if (!response.ok) {
-            this.handleApiError(response);
+            await this.handleApiError(response);
         }
         
         return;
