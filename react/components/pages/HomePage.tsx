@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Button from "../ui/Button";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
-import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { AlertIcon, ArrowDownIcon, ArrowRightIcon, Icon, Spinner } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
@@ -107,8 +107,24 @@ const HomePage: React.FC = () => {
             
             {showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                    <FileUploadStatus connectionStatus={connectionStatus}/>
-                    <FileProcessingStatus connectionStatus={connectionStatus} />
+                    {(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') && (
+                        <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                            <Icon icon={AlertIcon} className="scale-12 mt-020"/>
+                            <div>No connection</div>
+                        </div>
+                    )}
+                    {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
+                        <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                            <Spinner size={14} className="mt-015"/>
+                            <div>Connecting...</div>
+                        </div>
+                    )}
+                    {connectionStatus === 'connected' && (
+                        <>
+                            <FileUploadStatus/>
+                            <FileProcessingStatus />
+                        </>
+                    )}
                 </div>
             )}
         </div>

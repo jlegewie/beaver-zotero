@@ -8,7 +8,7 @@ import { FileStatusConnection } from "../../hooks/useFileStatus";
 import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 
 
-const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['connectionStatus'] }> = ({ connectionStatus }) => {
+const FileUploadStatus: React.FC = () => {
     const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
     const isUploadComplete = fileStatusSummary && fileStatusSummary.uploadPendingCount === 0 && fileStatusSummary.totalFiles > 0;
 
@@ -27,7 +27,6 @@ const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['conne
     };
 
     const getUploadLeftText = (): string => {
-        if(connectionStatus === 'failed') return "";
         if (fileStatusSummary === null  || fileStatusSummary === undefined || !fileStatusSummary) return "Waiting to upload...";
         
         const textParts: string[] = [];
@@ -51,14 +50,9 @@ const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['conne
                             File Uploads
                         </div>
                         <div className="flex-1"/>
-                        {connectionStatus === 'connected' && fileStatusSummary && (
+                        {fileStatusSummary && (
                             <div className="font-color-tertiary text-base">
                                 {fileStatusSummary.totalFiles.toLocaleString()} Files
-                            </div>
-                        )}
-                        {connectionStatus === 'failed' && (
-                            <div className="font-color-tertiary text-sm items-end">
-                                Connection failed
                             </div>
                         )}
                     </div>

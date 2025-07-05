@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Spinner, ArrowRightIcon } from "../icons/icons";
+import { Spinner, ArrowRightIcon, Icon, AlertIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
@@ -226,12 +226,29 @@ const OnboardingPage: React.FC = () => {
                         <div className="display-flex flex-col gap-4">
                             {/* Syncing your library */}
                             <DatabaseSyncStatus />
-                            
-                            {/* Uploading files */}
-                            <FileUploadStatus connectionStatus={connectionStatus} />
-                            
-                            {/* File Processing */}
-                            <FileProcessingStatus connectionStatus={connectionStatus} />
+
+                            {(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') && (
+                                <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                                    <Icon icon={AlertIcon} className="scale-12 mt-020"/>
+                                    {/* TODO: Retry button */}
+                                    <div>No connection. Please reconnect to continue with the onboarding process.</div>
+                                </div>
+                            )}
+                            {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
+                                <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                                    <Spinner size={14} className="mt-015"/>
+                                    <div>Connecting...</div>
+                                </div>
+                            )}
+                            {connectionStatus === 'connected' && (
+                                <>
+                                    {/* Uploading files */}
+                                    <FileUploadStatus/>
+
+                                    {/* File Processing */}
+                                    <FileProcessingStatus />
+                                </>
+                            )}
                         </div>
 
                     </div>

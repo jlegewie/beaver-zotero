@@ -30,8 +30,8 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
 
 
     const getProcessingLeftText = (): string => {
-        if(connectionStatus === 'failed') return "";
-        if (!fileStatusSummary) return "Loading status...";
+        if(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return "No connection";
+        if ((connectionStatus === 'connecting' || connectionStatus === 'reconnecting') || !fileStatusSummary) return "Loading status...";
         
         const textParts: string[] = [];
         if (fileStatusSummary.completedFiles > 0) textParts.push(`${fileStatusSummary.completedFiles.toLocaleString()} done`);

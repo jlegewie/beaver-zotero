@@ -9,7 +9,7 @@ import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
 import { FileStatusConnection } from "../../hooks/useFileStatus";
 
-const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['connectionStatus'] }> = ({ connectionStatus }) => {
+const FileProcessingStatus: React.FC = () => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
 
     const getProcessingIcon = (): React.ReactNode => {
@@ -24,7 +24,6 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
     };
 
     const getProcessingLeftText = (): string => {
-        if(connectionStatus === 'failed') return "";
         if (!fileStats) return "Loading status...";
         
         const textParts: string[] = [];
@@ -67,14 +66,9 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                             File Processing
                         </div>
                         <div className="flex-1"/>
-                        {connectionStatus === 'connected' && fileStats && (
+                        {fileStats && (
                             <div className="font-color-tertiary text-base">
                                 {fileStats.totalProcessingCount.toLocaleString()} Files
-                            </div>
-                        )}
-                        {connectionStatus === 'failed' && (
-                            <div className="font-color-tertiary text-sm items-end">
-                                Connection failed
                             </div>
                         )}
                     </div>
