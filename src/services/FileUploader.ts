@@ -629,13 +629,13 @@ export const retrySkippedUploads = async (): Promise<void> => {
         );
         const uploadQueueItemsFiltered = results.filter(item => item !== null);
         
-        logger(`retrySkippedUploads: Filtered out ${uploadQueueItems.length - uploadQueueItemsFiltered.length} attachments that are too large.`, 3);
+        logger(`retrySkippedUploads: ${uploadQueueItemsFiltered.length} attachments to retry, ${uploadQueueItems.length - uploadQueueItemsFiltered.length} attachments filtered out.`, 3);
         
         // Re-queue the remaining attachments
         if (uploadQueueItemsFiltered.length > 0) {
             await Zotero.Beaver.db.resetUploads(userId, uploadQueueItemsFiltered);
             logger(`retrySkippedUploads: Re-queued ${uploadQueueItemsFiltered.length} attachments for upload.`, 3);
-            await fileUploader.start("manual");
+            // await fileUploader.start("manual");
         }
 
     } catch (error: any) {

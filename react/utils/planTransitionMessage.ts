@@ -18,12 +18,6 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
     }
     const {totalFiles, progress} = fileStatusSummary;
 
-    // Re-attempt file uploads for previously skipped files (if plan allows)
-    if (profile.plan.upload_files) {
-        logger(`useProfileSync: Re-attempting file uploads for previously skipped files.`);
-        await retrySkippedUploads();
-    }
-
     // Message: Plan change and processing status
     const title = `Welcome to the ${profile.plan.display_name} plan!`;
     if (totalFiles > 0 && progress < 100) {
