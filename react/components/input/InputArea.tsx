@@ -67,11 +67,11 @@ const InputArea: React.FC<InputAreaProps> = ({
             isLibrarySearch: isLibrarySearch
         });
 
-        Zotero.debug(`Chat completion: ${query}`);
+        logger(`Chat completion: ${query}`);
     };
 
     const handleStop = () => {
-        Zotero.debug('Stopping chat completion');
+        logger('Stopping chat completion');
         if (isCancellable && cancellerHolder.current) {
             // Set the cancelling state to true so that onError will cancel the message
             setIsCancelling(true);
@@ -81,12 +81,12 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Reset the cancellable state to false
             setIsCancellable(false);
         } else {
-            Zotero.debug('WARNING: handleStop called but no canceller function was found in holder.');
+            logger('WARNING: handleStop called but no canceller function was found in holder.');
         }
     };
 
     const handleAddSources = async () => {
-        Zotero.debug('Adding context item');
+        logger('Adding context item');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
