@@ -67,7 +67,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Filter items that match our criteria
             const filteredItems = items.filter(filterFunction).filter(item => syncLibraryIds.includes(item.libraryID));
             
-            if (filteredItems.length === 0) return;
+            if (filteredItems.length === 0) {
+                logger(`useZoteroSync: No items to sync`, 3);
+                return;
+            }
             
             // Group items by library ID and sync each group separately
             const itemsByLibrary = new Map<number, Zotero.Item[]>();
