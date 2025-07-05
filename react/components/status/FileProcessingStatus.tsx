@@ -24,7 +24,7 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
     };
 
     const getProcessingLeftText = (): string => {
-        if(connectionStatus === 'failed') return "";
+        if(connectionStatus === 'failed' || connectionStatus === 'disconnected') return "";
         if (!fileStats) return "Loading status...";
         
         const textParts: string[] = [];
@@ -75,6 +75,11 @@ const FileProcessingStatus: React.FC<{ connectionStatus: FileStatusConnection['c
                         {connectionStatus === 'failed' && (
                             <div className="font-color-tertiary text-sm items-end">
                                 Connection failed
+                            </div>
+                        )}
+                        {connectionStatus === 'disconnected' && (
+                            <div className="font-color-tertiary text-sm items-end">
+                                No connection
                             </div>
                         )}
                     </div>

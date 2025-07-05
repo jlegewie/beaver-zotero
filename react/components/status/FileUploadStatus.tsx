@@ -27,7 +27,7 @@ const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['conne
     };
 
     const getUploadLeftText = (): string => {
-        if(connectionStatus === 'failed') return "";
+        if(connectionStatus === 'failed' || connectionStatus === 'disconnected') return "";
         if (fileStatusSummary === null  || fileStatusSummary === undefined || !fileStatusSummary) return "Waiting to upload...";
         
         const textParts: string[] = [];
@@ -59,6 +59,11 @@ const FileUploadStatus: React.FC<{ connectionStatus: FileStatusConnection['conne
                         {connectionStatus === 'failed' && (
                             <div className="font-color-tertiary text-sm items-end">
                                 Connection failed
+                            </div>
+                        )}
+                        {connectionStatus === 'disconnected' && (
+                            <div className="font-color-tertiary text-sm items-end">
+                                No connection
                             </div>
                         )}
                     </div>
