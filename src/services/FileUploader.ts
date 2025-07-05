@@ -593,20 +593,22 @@ export const retrySkippedUploads = async (): Promise<void> => {
     try {
         const userId = store.get(userIdAtom);
         if (!userId) {
-            logger('File Uploader: Cannot retry skipped uploads, user not authenticated.', 2);
+            logger('retrySkippedUploads: Cannot retry skipped uploads, user not authenticated.', 2);
             return;
         }
 
+        // Get all attachments that are in the plan limit status
         const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'plan_limit');
 
         if (skippedAttachments.length === 0) {
-            logger('File Uploader: No skipped attachments to retry.', 3);
+            logger('retrySkippedUploads: No skipped attachments to retry.', 3);
             return;
         }
 
-        logger(`File Uploader: Found ${skippedAttachments.length} skipped attachments to retry.`, 3);
+        logger(`retrySkippedUploads: Found ${skippedAttachments.length} attachments in plan limit status.`, 3);
 
-        const itemsToReset: UploadQueueInput[] = skippedAttachments
+        // Create upload queue items for the skipped attachments
+        const uploadQueueItems: UploadQueueInput[] = skippedAttachments
             .filter(a => a.file_hash)
             .map(attachment => ({
                 file_hash: attachment.file_hash,
@@ -614,19 +616,34 @@ export const retrySkippedUploads = async (): Promise<void> => {
                 zotero_key: attachment.zotero_key,
             }));
         
-        if (itemsToReset.length > 0) {
-            await Zotero.Beaver.db.resetUploads(userId, itemsToReset);
-            logger(`File Uploader: Re-queued ${itemsToReset.length} skipped attachments.`, 3);
+        // Filter out attachments that are too large
+        const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
+        const results = await Promise.all(
+            uploadQueueItems.map(async item => {
+                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                if (!attachment || !attachment.isAttachment()) return null;
+                const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+                const fileSizeInMB = fileSize / 1024 / 1024;
+                return fileSizeInMB <= sizeLimit ? item : null;
+            })
+        );
+        const uploadQueueItemsFiltered = results.filter(item => item !== null);
+        
+        logger(`retrySkippedUploads: Filtered out ${uploadQueueItems.length - uploadQueueItemsFiltered.length} attachments that are too large.`, 3);
+        
+        // Re-queue the remaining attachments
+        if (uploadQueueItemsFiltered.length > 0) {
+            await Zotero.Beaver.db.resetUploads(userId, uploadQueueItemsFiltered);
+            logger(`retrySkippedUploads: Re-queued ${uploadQueueItemsFiltered.length} attachments for upload.`, 3);
+            await fileUploader.start("manual");
         }
 
-        await fileUploader.start("manual");
-
     } catch (error: any) {
-        logger(`File Uploader: Failed to retry skipped uploads: ${error.message}`, 1);
+        logger(`retrySkippedUploads: Failed to retry skipped uploads: ${error.message}`, 1);
         if (typeof Zotero !== 'undefined' && Zotero.logError) {
             Zotero.logError(error);
         } else {
-            console.error('Failed to retry skipped uploads:', error);
+            console.error('retrySkippedUploads: Failed to retry skipped uploads:', error);
         }
     }
 };
