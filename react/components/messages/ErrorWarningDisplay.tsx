@@ -34,7 +34,7 @@ const getErrorMessage = (errorType: string) => {
         case 'inactive_subscription':
             return "Your subscription is inactive. Please upgrade or change to the free version.";
         case 'app_key_limit_exceeded':
-            return "Monthly chat limit reached. Add your own API key in settings.";
+            return "You've reached your monthly chat limit. Please upgrade your account or use your own API key.";
         case 'user_key_failed_unexpected':
             return "Unexpected error with your API key.";
         case 'user_key_rate_limit_exceeded':
