@@ -12,9 +12,8 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 const maxRetries = 6;
 const baseRetryDelay = 1000; // 1 second
 
-// Connection health monitoring constants
-const STALE_CONNECTION_TIMEOUT = 90000; // 90 seconds - no data received
-const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds - check connection health
+// Reduced monitoring - focus on connection health, not data activity
+const TOKEN_REFRESH_CHECK_INTERVAL = 300000; // 5 minutes - only check token expiration
 const CONNECTION_TIMEOUT = 15000; // 15 seconds - initial connection timeout
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'retrying' | 'failed';
@@ -24,7 +23,6 @@ export interface FileStatusConnection {
     retryCount: number;
     lastError: string | null;
     lastDataReceived?: Date;
-    connectionHealth?: 'healthy' | 'stale' | 'unknown';
 }
 
 // --- Centralized state ---
@@ -33,7 +31,6 @@ const fileStatusConnectionAtom = atom<FileStatusConnection>({
     retryCount: 0,
     lastError: null,
     lastDataReceived: undefined,
-    connectionHealth: 'unknown',
 });
 
 // --- Module-level subscription management ---
@@ -41,7 +38,7 @@ let subscriberCount = 0;
 let channelRef: RealtimeChannel | null = null;
 let retryTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 let stopTimeoutRef: ReturnType<typeof setTimeout> | null = null;
-let healthCheckIntervalRef: ReturnType<typeof setInterval> | null = null;
+let tokenCheckIntervalRef: ReturnType<typeof setInterval> | null = null;
 let currentUserId: string | null = null;
 let isConnecting = false;
 
@@ -154,53 +151,20 @@ const refreshTokenIfNeeded = async (): Promise<boolean> => {
 };
 
 /**
- * Starts connection health monitoring
+ * Starts periodic token checking (much less aggressive than before)
  */
-const startHealthMonitoring = (
+const startTokenMonitoring = (
     setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void,
     scheduleRetry: () => void
 ) => {
-    if (healthCheckIntervalRef) {
-        clearInterval(healthCheckIntervalRef);
+    if (tokenCheckIntervalRef) {
+        clearInterval(tokenCheckIntervalRef);
     }
     
-    healthCheckIntervalRef = setInterval(async () => {
+    tokenCheckIntervalRef = setInterval(async () => {
         if (!channelRef || !currentUserId) return;
         
-        const now = new Date();
-        
-        // Check if we've received data recently
-        setConnection((prev) => {
-            const lastReceived = prev.lastDataReceived;
-            const timeSinceLastData = lastReceived ? now.getTime() - lastReceived.getTime() : null;
-            
-            // If no data received in STALE_CONNECTION_TIMEOUT, consider connection stale
-            if (timeSinceLastData && timeSinceLastData > STALE_CONNECTION_TIMEOUT) {
-                logger(`useFileStatus startHealthMonitoring: Connection appears stale (${Math.round(timeSinceLastData / 1000)}s since last data), reconnecting...`, 2);
-                
-                // Schedule reconnection
-                setTimeout(() => scheduleRetry(), 100);
-                
-                return {
-                    ...prev,
-                    connectionStatus: 'disconnected',
-                    connectionHealth: 'stale',
-                    lastError: 'Connection timeout - no data received'
-                };
-            }
-            
-            // Update connection health based on data recency
-            const health = timeSinceLastData ? 
-                (timeSinceLastData < HEALTH_CHECK_INTERVAL * 2 ? 'healthy' : 'stale') : 
-                'unknown';
-            
-            return {
-                ...prev,
-                connectionHealth: health
-            };
-        });
-        
-        // Also check token expiration
+        // Only check token expiration - don't check data staleness
         const tokenValid = await refreshTokenIfNeeded();
         if (!tokenValid) {
             logger('useFileStatus startHealthMonitoring: Token refresh failed, triggering reconnection', 2);
@@ -211,20 +175,19 @@ const startHealthMonitoring = (
             }));
             scheduleRetry();
         }
-    }, HEALTH_CHECK_INTERVAL);
+    }, TOKEN_REFRESH_CHECK_INTERVAL);
 };
 
 /**
- * Stops connection health monitoring
+ * Stops token monitoring
  */
-const stopHealthMonitoring = () => {
-    if (healthCheckIntervalRef) {
-        clearInterval(healthCheckIntervalRef);
-        healthCheckIntervalRef = null;
+const stopTokenMonitoring = () => {
+    if (tokenCheckIntervalRef) {
+        clearInterval(tokenCheckIntervalRef);
+        tokenCheckIntervalRef = null;
     }
 };
 
-// These manager functions operate on the module-level state and Jotai atoms.
 const stopSubscription = async (
     setConnection: (update: FileStatusConnection | ((prev: FileStatusConnection) => FileStatusConnection)) => void,
     setFileStatus: (update: FileStatus | null) => void
@@ -237,7 +200,7 @@ const stopSubscription = async (
         clearTimeout(retryTimeoutRef);
         retryTimeoutRef = null;
     }
-    stopHealthMonitoring();
+    stopTokenMonitoring();
     
     if (channelRef) {
         await channelRef.unsubscribe();
@@ -250,8 +213,7 @@ const stopSubscription = async (
         connectionStatus: 'idle', 
         retryCount: 0, 
         lastError: null,
-        lastDataReceived: undefined,
-        connectionHealth: 'unknown'
+        lastDataReceived: undefined
     });
     setFileStatus(null);
 };
@@ -279,8 +241,7 @@ const startSubscription = async (
             setConnection({ 
                 connectionStatus: 'failed', 
                 retryCount, 
-                lastError: "Max retries exceeded.",
-                connectionHealth: 'unknown'
+                lastError: "Max retries exceeded."
             });
             isConnecting = false;
             return;
@@ -316,8 +277,7 @@ const startSubscription = async (
             setConnection({
                 connectionStatus: isRetry ? 'retrying' : 'connecting',
                 retryCount: retryCount,
-                lastError: null,
-                connectionHealth: 'unknown'
+                lastError: null
             });
             
             logger(`useFileStatus Manager: Fetching initial status for ${userId}.`);
@@ -339,15 +299,14 @@ const startSubscription = async (
             
             supabase.realtime.setAuth(sessionData.session.access_token);
 
-            // Add connection timeout
+            // Add connection timeout for initial setup only
             const connectionTimeout = setTimeout(() => {
                 if (isConnecting) {
                     logger('useFileStatus: Connection timeout during setup', 2);
                     setConnection({
                         connectionStatus: 'disconnected',
                         retryCount,
-                        lastError: 'Connection timeout during setup',
-                        connectionHealth: 'unknown'
+                        lastError: 'Connection timeout during setup'
                     });
                     isConnecting = false;
                     scheduleRetry();
@@ -362,12 +321,12 @@ const startSubscription = async (
                     table: 'files_status', 
                     filter: `user_id=eq.${userId}` 
                 }, (payload) => {
-                    // Track data reception for health monitoring
+                    // Simply track when we receive data (for informational purposes)
+                    // but don't use this for connection health decisions
                     const now = new Date();
                     setConnection((prev) => ({
                         ...prev,
-                        lastDataReceived: now,
-                        connectionHealth: 'healthy'
+                        lastDataReceived: now
                     }));
                     
                     // Process the payload
@@ -385,8 +344,7 @@ const startSubscription = async (
                         setConnection({ 
                             connectionStatus: 'disconnected', 
                             retryCount, 
-                            lastError: err.message,
-                            connectionHealth: 'unknown'
+                            lastError: err.message
                         });
                         isConnecting = false;
                         scheduleRetry();
@@ -398,13 +356,12 @@ const startSubscription = async (
                             connectionStatus: 'connected', 
                             retryCount: 0, 
                             lastError: null,
-                            lastDataReceived: now,
-                            connectionHealth: 'healthy'
+                            lastDataReceived: now
                         });
                         isConnecting = false;
                         
-                        // Start health monitoring
-                        startHealthMonitoring(setConnection, scheduleRetry);
+                        // Start token monitoring (much less aggressive than before)
+                        startTokenMonitoring(setConnection, scheduleRetry);
                     }
                 });
         } catch (err: any) {
@@ -413,8 +370,7 @@ const startSubscription = async (
             setConnection({ 
                 connectionStatus: 'disconnected', 
                 retryCount, 
-                lastError: errorMessage,
-                connectionHealth: 'unknown'
+                lastError: errorMessage
             });
             isConnecting = false;
             scheduleRetry();
@@ -426,7 +382,7 @@ const startSubscription = async (
 
 /**
  * Hook that fetches the user's file status, keeps the fileStatusAtom updated,
- * and subscribes to realtime changes with retry logic and connection health monitoring.
+ * and subscribes to realtime changes with retry logic and token management.
  * This hook can be used by multiple components simultaneously without conflicts.
  */
 export const useFileStatus = (): FileStatusConnection => {
@@ -437,7 +393,6 @@ export const useFileStatus = (): FileStatusConnection => {
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
 
-    // This ref tracks if the current component instance is "active"
     const isActiveSubscriber = useRef(false);
     const lastUserId = useRef<string | null>(null);
 
@@ -449,7 +404,6 @@ export const useFileStatus = (): FileStatusConnection => {
                 clearTimeout(stopTimeoutRef);
                 stopTimeoutRef = null;
             }
-            // This component is becoming an active subscriber
             subscriberCount++;
             isActiveSubscriber.current = true;
             logger(`useFileStatus Hook: Subscriber added. Count: ${subscriberCount}.`);
@@ -457,7 +411,6 @@ export const useFileStatus = (): FileStatusConnection => {
                 startSubscription(user.id, setConnection, setFileStatus);
             }
         } else if (!isEligible && isActiveSubscriber.current) {
-            // This component is no longer an active subscriber
             subscriberCount--;
             isActiveSubscriber.current = false;
             logger(`useFileStatus Hook: Subscriber removed. Count: ${subscriberCount}.`);
@@ -474,7 +427,6 @@ export const useFileStatus = (): FileStatusConnection => {
             startSubscription(user!.id, setConnection, setFileStatus);
         }
 
-        // Cleanup on unmount
         return () => {
             if (isActiveSubscriber.current) {
                 subscriberCount--;
