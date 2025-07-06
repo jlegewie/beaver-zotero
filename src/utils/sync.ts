@@ -870,7 +870,7 @@ export async function performConsistencyCheck(
         let processedCount = 0;
 
         // --- 2. Process Regular Items in Chunks ---
-        const itemsToCompare: { zotero_key: string, metadata_hash: string }[] = [];
+        const itemsToCompare: ItemSyncState[] = [];
         logger(`Beaver Sync: Hashing ${regularItems.length} items in chunks of ${HASH_CHUNK_SIZE}`, 3);
         for (let i = 0; i < regularItems.length; i += HASH_CHUNK_SIZE) {
             const chunk = regularItems.slice(i, i + HASH_CHUNK_SIZE);
@@ -879,6 +879,7 @@ export async function performConsistencyCheck(
             itemsToCompare.push(...chunkData.map(item => ({
                 zotero_key: item.zotero_key,
                 metadata_hash: item.item_metadata_hash,
+                zotero_version: item.zotero_version,
             })));
 
             processedCount += chunk.length;
@@ -887,7 +888,7 @@ export async function performConsistencyCheck(
         }
 
         // --- 3. Process Attachments in Chunks ---
-        const attachmentsToCompare: ItemHashData[] = [];
+        const attachmentsToCompare: ItemSyncState[] = [];
         logger(`Beaver Sync: Hashing ${attachmentItems.length} attachments in chunks of ${HASH_CHUNK_SIZE}`, 3);
         for (let i = 0; i < attachmentItems.length; i += HASH_CHUNK_SIZE) {
             const chunk = attachmentItems.slice(i, i + HASH_CHUNK_SIZE);
@@ -899,7 +900,8 @@ export async function performConsistencyCheck(
             attachmentsToCompare.push(...validAttachments.map(att => ({
                 zotero_key: att.zotero_key,
                 metadata_hash: att.attachment_metadata_hash,
-            } as ItemHashData)));
+                zotero_version: att.zotero_version,
+            } as ItemSyncState)));
 
             processedCount += chunk.length;
             onProgress?.(processedCount, totalItems);
@@ -909,8 +911,8 @@ export async function performConsistencyCheck(
         // --- 4. Send Split Hash Comparison Requests to Backend ---
         logger(`Beaver Sync: Sending hash comparisons for ${itemsToCompare.length} items and ${attachmentsToCompare.length} attachments`, 3);
         const [itemsComparison, attachmentsComparison] = await Promise.all([
-            syncService.compareHashes(libraryID, itemsToCompare, [], populateLocalDB),
-            syncService.compareHashes(libraryID, [], attachmentsToCompare, populateLocalDB)
+            syncService.compareSyncState(libraryID, itemsToCompare, [], populateLocalDB),
+            syncService.compareSyncState(libraryID, [], attachmentsToCompare, populateLocalDB)
         ]);
 
         // --- 5. Populate local DB with up-to-date items (if requested) ---
@@ -921,7 +923,9 @@ export async function performConsistencyCheck(
                 const itemsForDB = upToDateItems.map(item => ({
                     library_id: libraryID,
                     zotero_key: item.zotero_key,
-                    item_metadata_hash: item.metadata_hash
+                    item_metadata_hash: item.metadata_hash,
+                    zotero_version: item.zotero_version,
+                    zotero_synced: true  // TODO: This is wrong and should be retrived from DB
                 }));
                 await Zotero.Beaver.db.upsertItemsBatch(userId, itemsForDB);
             }
@@ -933,6 +937,8 @@ export async function performConsistencyCheck(
                     library_id: libraryID,
                     zotero_key: attachment.zotero_key,
                     attachment_metadata_hash: attachment.metadata_hash,
+                    zotero_version: attachment.zotero_version,
+                    zotero_synced: true,  // TODO: This is wrong and should be retrived from DB
                     file_hash: attachment.file_hash,
                     upload_status: attachment.upload_status,
                 }));

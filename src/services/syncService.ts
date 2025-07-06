@@ -33,6 +33,8 @@ export interface ItemResult {
     library_id: number;
     zotero_key: string;
     metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export interface AttachmentResult {
@@ -42,6 +44,8 @@ export interface AttachmentResult {
     file_hash: string;
     upload_status: UploadStatus;
     metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export interface SyncItemsResponse {
@@ -87,35 +91,37 @@ export interface AttachmentUpdateResponse {
     enqueued: boolean;
 }
 
-export interface HashComparisonRequest {
+export interface SyncStatusComparisonRequest {
     library_id: number;
-    items: ItemHashData[];
-    attachments: ItemHashData[];
+    items: ItemSyncState[];
+    attachments: ItemSyncState[];
     populate_local_db?: boolean;
 }
 
 // Add new minimal result interfaces for the consistency sync
-export interface ItemHashData {
+export interface ItemSyncState {
     zotero_key: string;
     metadata_hash: string;
+    zotero_version: number;
 }
 
-export interface AttachmentHashData {
+export interface AttachmentSyncState {
     zotero_key: string;
     metadata_hash: string;
+    zotero_version: number;
     upload_status: UploadStatus;
     file_hash: string;
 }
 
-export interface HashComparisonResponse {
+export interface SyncStatusComparisonResponse {
     library_id: number;
     items_needing_sync: string[];      // Array of zotero_keys that need syncing
     attachments_needing_sync: string[]; // Array of zotero_keys that need syncing
     items_to_delete: string[];         // Array of zotero_keys that exist in backend but not in Zotero
     attachments_to_delete: string[];   // Array of zotero_keys that exist in backend but not in Zotero
     // Use minimal result objects to reduce response size
-    items_up_to_date?: ItemHashData[];
-    attachments_up_to_date?: AttachmentHashData[];
+    items_up_to_date?: ItemSyncState[];
+    attachments_up_to_date?: AttachmentSyncState[];
 }
 
 /**
@@ -239,13 +245,13 @@ export class SyncService extends ApiService {
      * @param hashes Object containing arrays of items and attachments with their hashes
      * @returns Promise with comparison results indicating which items need syncing
      */
-    async compareHashes(
+    async compareSyncState(
         libraryId: number, 
-        items: ItemHashData[],
-        attachments: ItemHashData[],
+        items: ItemSyncState[],
+        attachments: ItemSyncState[],
         populateLocalDB: boolean = false
-    ): Promise<HashComparisonResponse> {
-        const payload: HashComparisonRequest = {
+    ): Promise<SyncStatusComparisonResponse> {
+        const payload: SyncStatusComparisonRequest = {
             library_id: libraryId,
             items: items,
             attachments: attachments,
@@ -253,7 +259,7 @@ export class SyncService extends ApiService {
         if (populateLocalDB) {
             payload.populate_local_db = true;
         }
-        return this.post<HashComparisonResponse>('/zotero/sync/compare-hashes', payload);
+        return this.post<SyncStatusComparisonResponse>('/zotero/sync/compare-sync-state', payload);
     }
 }
 
