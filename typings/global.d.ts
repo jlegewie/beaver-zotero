@@ -213,6 +213,24 @@ declare namespace Zotero {
             getAttachmentsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").AttachmentRecord[]>;
 
             /**
+             * Retrieve the sync state of multiple items by their user_id, library_id and zotero_keys.
+             * @param user_id The user_id of the items.
+             * @param libraryId The library_id of the items.
+             * @param zoteroKeys Array of zotero_keys to retrieve.
+             * @returns Array of SyncState objects found, empty array if none found.
+             */
+            getItemSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").SyncState[]>;
+
+            /**
+             * Retrieve the sync state of multiple attachments by their user_id, library_id and zotero_keys.
+             * @param user_id The user_id of the attachments.
+             * @param libraryId The library_id of the attachments.
+             * @param zoteroKeys Array of zotero_keys to retrieve.
+             * @returns Array of SyncState objects found, empty array if none found.
+             */
+            getAttachmentSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").SyncState[]>;
+
+            /**
              * Get comprehensive upload statistics
              * @param user_id User ID
              * @returns Upload statistics

@@ -5,6 +5,17 @@ import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
 import { getPref } from '../utils/prefs';
 
+/*
+ * Backend sync state of item or attachment
+ */
+export interface SyncState {
+    library_id: number;
+    zotero_key: string;
+    metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
+}
+
 /* 
  * Interface for the 'items' table row
  * 
@@ -887,6 +898,28 @@ export class BeaverDB {
     }
 
     /**
+     * Retrieve the sync state of multiple items by their user_id, library_id and zotero_keys.
+     * @param user_id The user_id of the items.
+     * @param libraryId The library_id of the items.
+     * @param zoteroKeys Array of zotero_keys to retrieve.
+     * @returns Array of SyncState objects found, empty array if none found.
+     */
+    public async getItemSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<SyncState[]> {
+        if (zoteroKeys.length === 0) {
+            return [];
+        }
+
+        const items = await this.getItemsByZoteroKeys(user_id, libraryId, zoteroKeys);
+        return items.map((item: ItemRecord) => ({
+            library_id: item.library_id,
+            zotero_key: item.zotero_key,
+            metadata_hash: item.item_metadata_hash,
+            zotero_version: item.zotero_version,
+            zotero_synced: item.zotero_synced
+        } as SyncState));
+    }
+
+    /**
      * Retrieve multiple attachment records by their user_id, library_id and zotero_keys.
      * @param user_id The user_id of the attachments.
      * @param libraryId The library_id of the attachments.
@@ -905,6 +938,29 @@ export class BeaverDB {
         );
         
         return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
+    }
+
+    /**
+     * Retrieve the sync state of multiple attachments by their user_id, library_id and zotero_keys.
+     * @param user_id The user_id of the attachments.
+     * @param libraryId The library_id of the attachments.
+     * @param zoteroKeys Array of zotero_keys to retrieve.
+     * @returns Array of SyncState objects found, empty array if none found.
+     */
+    public async getAttachmentSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<SyncState[]> {
+        if (zoteroKeys.length === 0) {
+            return [];
+        }
+
+        const attachments = await this.getAttachmentsByZoteroKeys(user_id, libraryId, zoteroKeys);
+        return attachments.map((attachment: AttachmentRecord) => ({
+            library_id: attachment.library_id,
+            zotero_key: attachment.zotero_key,
+            metadata_hash: attachment.attachment_metadata_hash,
+            zotero_version: attachment.zotero_version,
+            zotero_synced: attachment.zotero_synced
+        } as SyncState));
+        
     }
 
     /**
