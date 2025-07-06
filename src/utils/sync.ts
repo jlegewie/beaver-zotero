@@ -1,4 +1,4 @@
-import { syncService, ItemHashData } from '../services/syncService';
+import { syncService, ItemSyncState } from '../services/syncService';
 import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
@@ -7,6 +7,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { initialSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, ZoteroLibrary } from '../../react/types/zotero';
+import { SyncState } from '../services/database';
 
 /**
  * Interface for item filter function
@@ -67,6 +68,8 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         // Add the calculated hash
+        zotero_version: item.version,
+        zotero_synced: item.synced,
         item_metadata_hash: metadataHash,
     };
 
@@ -148,6 +151,8 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
+        zotero_version: item.version,
+        zotero_synced: item.synced,
     };
 
     return attachmentData;
@@ -307,6 +312,34 @@ async function getCiteKey(item: Zotero.Item): Promise<string | null> {
 }
 
 /**
+ * Determines if an item needs to be synced to the backend
+ * @param item ItemData or AttachmentData
+ * @param currentHash Current hash of the item
+ * @param syncState SyncState of the item
+ * @returns True if the item needs to be synced, false otherwise
+ */
+function needsSync(currentVersion: number, currentHash: string, syncState: SyncState | undefined): boolean {
+    // Sync if we've never seen this item (doesn't exist in backend)
+    if (!syncState) return true;
+    
+    // Always sync items if the version is higher
+    if (currentVersion > syncState.zotero_version) {
+        return true;
+    }
+    
+    // If version is the same, use hash comparison to determine if it needs to be synced
+    // This covers two cases:
+    // 1. The user has no zotero account. zotero_version is always 0 (and item.synced is always false)
+    // 2. The item has changed but not yet synced with Zotero (version only updates after zotero sync is complete)
+    //    (We will sync item again in a later sync session)
+    if (currentVersion === syncState.zotero_version && currentHash !== syncState.metadata_hash) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
  * Syncs an array of Zotero items to the backend in batches
  * 
  * @param libraryID Zotero library ID
@@ -325,6 +358,7 @@ export async function syncItemsToBackend(
     onStatusChange?: (status: SyncStatus) => void,
     onProgress?: (processed: number, total: number) => void,
     batchSize: number = 200,
+    // TODO: THIS SHOULD BE REMOVED FOR NEW SYNC PROCESS (update local DB first, sync second)
     useLocalHashFilter: boolean = true
 ) {
     const userId = store.get(userIdAtom);
@@ -376,30 +410,29 @@ export async function syncItemsToBackend(
             
             if (useLocalHashFilter) {
                 // ------- Get database records for this batch -------
-                const [batchItemsDB, batchAttachmentsDB] = await Promise.all([
+                const [batchItemsSyncState, batchAttachmentsSyncState] = await Promise.all([
                     batchItemsData.length > 0
-                        ? Zotero.Beaver.db.getItemsByZoteroKeys(userId, libraryID, batchItemsData.map(item => item.zotero_key))
+                        ? Zotero.Beaver.db.getItemSyncState(userId, libraryID, batchItemsData.map(item => item.zotero_key))
                         : Promise.resolve([]),
                     batchAttachmentsData.length > 0
-                        ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
+                        ? Zotero.Beaver.db.getAttachmentSyncState(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
                         : Promise.resolve([])
                 ]);
                 
                 // ------- Filter items that need syncing in this batch -------
-                const itemsDBMap = new Map(batchItemsDB.map(item => [item.zotero_key, item]));
-                const attachmentsDBMap = new Map(batchAttachmentsDB.map(att => [att.zotero_key, att]));
+                const itemsSyncStateMap = new Map(batchItemsSyncState.map(item => [item.zotero_key, item]));
+                const attachmentsSyncStateMap = new Map(batchAttachmentsSyncState.map(att => [att.zotero_key, att]));
 
                 itemsNeedingSync = batchItemsData.filter((item) => {
-                    const itemDB = itemsDBMap.get(item.zotero_key);
-                    if (!itemDB) return true;
-                    return itemDB.item_metadata_hash !== item.item_metadata_hash;
+                    const syncState = itemsSyncStateMap.get(item.zotero_key);
+                    return needsSync(item.zotero_version, item.item_metadata_hash, syncState);
                 });
             
                 attachmentsNeedingSync = batchAttachmentsData.filter((att) => {
-                    const attDB = attachmentsDBMap.get(att.zotero_key);
-                    if (!attDB) return true;
-                    return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
+                    const syncState = attachmentsSyncStateMap.get(att.zotero_key);
+                    return needsSync(att.zotero_version, att.attachment_metadata_hash, syncState);
                 });
+
             } else {
                 itemsNeedingSync = batchItemsData;
                 attachmentsNeedingSync = batchAttachmentsData;
@@ -460,7 +493,9 @@ export async function syncItemsToBackend(
                     const items = batchResult.items.map(item => ({
                         library_id: item.library_id,
                         zotero_key: item.zotero_key,
-                        item_metadata_hash: item.metadata_hash
+                        item_metadata_hash: item.metadata_hash,
+                        zotero_version: item.zotero_version,
+                        zotero_synced: item.zotero_synced,
                     }));
                     await Zotero.Beaver.db.upsertItemsBatch(userId, items);
                 }
@@ -473,6 +508,8 @@ export async function syncItemsToBackend(
                         library_id: attachment.library_id,
                         zotero_key: attachment.zotero_key,
                         attachment_metadata_hash: attachment.metadata_hash,
+                        zotero_version: attachment.zotero_version,
+                        zotero_synced: attachment.zotero_synced,
                         file_hash: attachment.file_hash,
                         upload_status: attachment.upload_status || 'pending',
                     }));
