@@ -106,8 +106,10 @@ export interface ItemData extends ZoteroItemBase {
     collections?: any[] | null;
     citation_key?: string | null;
 
-    // Hash of item metadata for efficient updates
+    // Item metadata hash and zotero version
     item_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export type ItemDataHashedFields = Pick<ItemData,
@@ -144,6 +146,8 @@ export interface AttachmentData extends ZoteroItemBase {
 
     // additional fields
     attachment_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export type AttachmentDataHashedFields = Pick<AttachmentData,
