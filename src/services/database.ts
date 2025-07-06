@@ -18,6 +18,8 @@ export interface ItemRecord {
     library_id: number;
     zotero_key: string;
     item_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;   // was item synced with zotero when sync was last performed
 }
 
 /* 
@@ -33,6 +35,8 @@ export interface AttachmentRecord {
     library_id: number;
     zotero_key: string;
     attachment_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;   // was attachment synced with zotero when sync was last performed
 
     // File metadata
     file_hash: string | null;  // processed file hash (can differ from current file hash)
@@ -164,6 +168,8 @@ export class BeaverDB {
                 library_id               INTEGER NOT NULL,
                 zotero_key               TEXT NOT NULL,
                 item_metadata_hash       TEXT NOT NULL,
+                zotero_version           INTEGER NOT NULL DEFAULT 0,
+                zotero_synced            BOOLEAN NOT NULL DEFAULT FALSE,
                 UNIQUE(user_id, library_id, zotero_key)
             );
         `);
@@ -175,6 +181,8 @@ export class BeaverDB {
                 library_id               INTEGER NOT NULL,
                 zotero_key               TEXT NOT NULL,
                 attachment_metadata_hash TEXT NOT NULL,
+                zotero_version           INTEGER NOT NULL DEFAULT 0,
+                zotero_synced            BOOLEAN NOT NULL DEFAULT FALSE,
                 file_hash                TEXT,
                 upload_status            TEXT,
                 UNIQUE(user_id, library_id, zotero_key)
@@ -272,14 +280,16 @@ export class BeaverDB {
     public async insertItem(user_id: string, item: Omit<ItemRecord, 'id' | 'user_id'>): Promise<string> {
         const id = uuidv4();
         await this.conn.queryAsync(
-            `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash)
-             VALUES (?, ?, ?, ?, ?)`,
+            `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash, zotero_version, zotero_synced)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
                 item.library_id,
                 item.zotero_key,
-                item.item_metadata_hash
+                item.item_metadata_hash,
+                item.zotero_version || 0,
+                item.zotero_synced || false
             ]
         );
         return id;
@@ -297,7 +307,7 @@ export class BeaverDB {
         }
 
         const generatedIds: string[] = items.map(() => uuidv4());
-        const placeholders = items.map(() => '(?, ?, ?, ?, ?)').join(', ');
+        const placeholders = items.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
         const values: any[] = [];
         items.forEach((item, index) => {
             values.push(
@@ -305,11 +315,13 @@ export class BeaverDB {
                 user_id,
                 item.library_id,
                 item.zotero_key,
-                item.item_metadata_hash
+                item.item_metadata_hash,
+                item.zotero_version || 0,
+                item.zotero_synced || false
             );
         });
 
-        const query = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash) VALUES ${placeholders}`;
+        const query = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash, zotero_version, zotero_synced) VALUES ${placeholders}`;
 
         // Using executeTransaction ensures atomicity
         await this.conn.executeTransaction(async () => {
@@ -333,20 +345,24 @@ export class BeaverDB {
     ): Promise<string> {
         const id = uuidv4();
         const defaults: Partial<AttachmentRecord> = {
+            zotero_version: 0,
+            zotero_synced: false,
             file_hash: null,
             upload_status: null,
         };
         const finalAttachment = { ...defaults, ...attachment };
 
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, zotero_version, zotero_synced, file_hash, upload_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 id,
                 user_id,
                 finalAttachment.library_id,
                 finalAttachment.zotero_key,
                 finalAttachment.attachment_metadata_hash,
+                finalAttachment.zotero_version,
+                finalAttachment.zotero_synced,
                 finalAttachment.file_hash,
                 finalAttachment.upload_status
             ]
@@ -390,7 +406,6 @@ export class BeaverDB {
 
     /**
      * Update an existing item record identified by user_id, library_id and zotero_key.
-     * Only 'item_metadata_hash' can be updated.
      * @param user_id The user_id of the item.
      * @param libraryId The library_id of the item.
      * @param zoteroKey The zotero_key of the item.
@@ -400,9 +415,9 @@ export class BeaverDB {
         user_id: string,
         libraryId: number,
         zoteroKey: string,
-        updates: Partial<Pick<ItemRecord, 'item_metadata_hash'>>
+        updates: Partial<Pick<ItemRecord, 'item_metadata_hash' | 'zotero_version' | 'zotero_synced'>>
     ): Promise<void> {
-        const allowedFields: (keyof ItemRecord)[] = ['item_metadata_hash'];
+        const allowedFields: (keyof ItemRecord)[] = ['item_metadata_hash', 'zotero_version', 'zotero_synced'];
         await this.executeUpdate<ItemRecord>('items', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
 
@@ -421,6 +436,8 @@ export class BeaverDB {
     ): Promise<void> {
         const allowedFields: (keyof AttachmentRecord)[] = [
             'attachment_metadata_hash',
+            'zotero_version',
+            'zotero_synced',
             'file_hash',
             'upload_status'
         ];
@@ -461,7 +478,7 @@ export class BeaverDB {
 
         const finalIds: string[] = [];
         const itemsToInsert: (Omit<ItemRecord, 'id' | 'user_id'> & { generatedId: string })[] = [];
-        const itemsToUpdate: { libraryId: number; zoteroKey: string; item_metadata_hash: string }[] = [];
+        const itemsToUpdate: { libraryId: number; zoteroKey: string; item_metadata_hash: string; zotero_version: number; zotero_synced: boolean }[] = [];
         const itemMap = new Map<string, Omit<ItemRecord, 'id' | 'user_id'>>(); // Key: "libraryId-zoteroKey"
         items.forEach(item => itemMap.set(`${item.library_id}-${item.zotero_key}`, item));
 
@@ -489,6 +506,8 @@ export class BeaverDB {
                         libraryId: item.library_id,
                         zoteroKey: item.zotero_key,
                         item_metadata_hash: item.item_metadata_hash,
+                        zotero_version: item.zotero_version,
+                        zotero_synced: item.zotero_synced,
                     });
                 }
             } else {
@@ -502,7 +521,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (itemsToInsert.length > 0) {
-                const insertPlaceholders = itemsToInsert.map(() => '(?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = itemsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 itemsToInsert.forEach(item => {
                     insertValues.push(
@@ -510,20 +529,42 @@ export class BeaverDB {
                         user_id,
                         item.library_id,
                         item.zotero_key,
-                        item.item_metadata_hash
+                        item.item_metadata_hash,
+                        item.zotero_version || 0,
+                        item.zotero_synced || false
                     );
                 });
-                const insertQuery = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash, zotero_version, zotero_synced) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
             // Updates (individually within the transaction)
             for (const update of itemsToUpdate) {
-                 await this.conn.queryAsync(
-                     `UPDATE items SET item_metadata_hash = ? WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-                     [update.item_metadata_hash, user_id, update.libraryId, update.zoteroKey]
-                 );
-             }
+                // Build update fields dynamically to handle all possible fields
+                const updateFields: string[] = [];
+                const updateValues: any[] = [];
+                
+                if (update.item_metadata_hash !== undefined) {
+                    updateFields.push('item_metadata_hash = ?');
+                    updateValues.push(update.item_metadata_hash);
+                }
+                if (update.zotero_version !== undefined) {
+                    updateFields.push('zotero_version = ?');
+                    updateValues.push(update.zotero_version);
+                }
+                if (update.zotero_synced !== undefined) {
+                    updateFields.push('zotero_synced = ?');
+                    updateValues.push(update.zotero_synced);
+                }
+                
+                if (updateFields.length > 0) {
+                    updateValues.push(user_id, update.libraryId, update.zoteroKey);
+                    await this.conn.queryAsync(
+                        `UPDATE items SET ${updateFields.join(', ')} WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
+                        updateValues
+                    );
+                }
+            }
         });
 
         return finalIds;
@@ -539,6 +580,8 @@ export class BeaverDB {
             library_id: row.library_id,
             zotero_key: row.zotero_key,
             item_metadata_hash: row.item_metadata_hash,
+            zotero_version: row.zotero_version || 0,
+            zotero_synced: row.zotero_synced || false,
         };
     }
 
@@ -567,6 +610,8 @@ export class BeaverDB {
             library_id: row.library_id,
             zotero_key: row.zotero_key,
             attachment_metadata_hash: row.attachment_metadata_hash,
+            zotero_version: row.zotero_version || 0,
+            zotero_synced: row.zotero_synced || false,
             file_hash: row.file_hash,
             upload_status: row.upload_status as UploadStatus,
         };
@@ -632,6 +677,8 @@ export class BeaverDB {
         }
 
         const defaults: Partial<AttachmentRecord> = {
+            zotero_version: 0,
+            zotero_synced: false,
             file_hash: null,
             upload_status: 'pending',
         };
@@ -678,7 +725,7 @@ export class BeaverDB {
                 
                 // Check all other fields for changes
                 const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'upload_status'
+                    'zotero_version', 'zotero_synced', 'file_hash', 'upload_status'
                 ];
                 
                 fieldsToCheck.forEach(field => {
@@ -709,7 +756,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             // Batch Insert
             if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
                 const insertValues: any[] = [];
                 attachmentsToInsert.forEach(attachment => {
                     insertValues.push(
@@ -718,11 +765,13 @@ export class BeaverDB {
                         attachment.library_id,
                         attachment.zotero_key,
                         attachment.attachment_metadata_hash,
+                        attachment.zotero_version || 0,
+                        attachment.zotero_synced || false,
                         attachment.file_hash,
                         attachment.upload_status
                     );
                 });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status) VALUES ${insertPlaceholders}`;
+                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, zotero_version, zotero_synced, file_hash, upload_status) VALUES ${insertPlaceholders}`;
                 await this.conn.queryAsync(insertQuery, insertValues);
             }
 
