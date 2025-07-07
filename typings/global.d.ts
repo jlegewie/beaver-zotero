@@ -1,3 +1,5 @@
+import { ItemRecord, AttachmentRecord } from "../src/services/database";
+
 declare const _globalThis: {
   [key: string]: any;
   Zotero: _ZoteroTypes.Zotero;
@@ -30,7 +32,7 @@ declare namespace Zotero {
              * Initialize the database by creating tables if they don't exist.
              * Should be called once after constructing the class.
              */
-            initDatabase(): Promise<void>;
+            initDatabase(pluginVersion: string): Promise<void>;
 
             /**
              * Close the database connection.
@@ -40,31 +42,26 @@ declare namespace Zotero {
             /**
              * Insert a record into the 'items' table.
              * @param user_id User ID for the item
-             * @param item Data for the new item record. 'id' will be generated.
-             * @returns The generated 'id' of the inserted item.
+             * @param item Data for the new item record.
              */
-            insertItem(user_id: string, item: Omit<import("../src/services/database").ItemRecord, 'id' | 'user_id'>): Promise<string>;
+            insertItem(user_id: string, item: Omit<ItemRecord, 'user_id'>): Promise<void>;
 
             /**
              * Insert multiple records into the 'items' table in a single transaction.
              * @param user_id User ID for the items
-             * @param items An array of item data. 'id' will be generated for each.
-             * @returns An array of the generated 'id's for the inserted items.
+             * @param items An array of item data.
              */
-            insertItemsBatch(user_id: string, items: Omit<import("../src/services/database").ItemRecord, 'id' | 'user_id'>[]): Promise<string[]>;
+            insertItemsBatch(user_id: string, items: Omit<ItemRecord, 'user_id'>[]): Promise<void>;
 
             /**
              * Insert a record into the 'attachments' table.
-             * Optional fields default to initial states ('pending', 'unavailable', null).
              * @param user_id User ID for the attachment
-             * @param attachment Data for the new attachment. 'id' will be generated.
-             * @returns The generated 'id' of the inserted attachment.
+             * @param attachment Data for the new attachment.
              */
             insertAttachment(
                 user_id: string,
-                attachment: Pick<import("../src/services/database").AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & 
-                           Partial<Omit<import("../src/services/database").AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>
-            ): Promise<string>;
+                attachment: Omit<AttachmentRecord, 'user_id'>
+            ): Promise<void>;
 
             /**
              * Update an existing item record identified by user_id, library_id and zotero_key.
@@ -78,7 +75,7 @@ declare namespace Zotero {
                 user_id: string,
                 libraryId: number,
                 zoteroKey: string,
-                updates: Partial<Pick<import("../src/services/database").ItemRecord, 'item_metadata_hash'>>
+                updates: Partial<Omit<ItemRecord, 'user_id' | 'library_id' | 'zotero_key'>>
             ): Promise<void>;
 
             /**
@@ -92,25 +89,16 @@ declare namespace Zotero {
                 user_id: string,
                 libraryId: number,
                 zoteroKey: string,
-                updates: Partial<Omit<import("../src/services/database").AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key'>>
+                updates: Partial<Omit<AttachmentRecord, 'user_id' | 'library_id' | 'zotero_key'>>
             ): Promise<void>;
-
-            /**
-             * Update an existing item record or insert a new one if it doesn't exist.
-             * @param user_id User ID for the item
-             * @param item Data for the item record. Requires 'library_id', 'zotero_key', 'item_metadata_hash'.
-             * @returns The internal 'id' of the upserted item.
-             */
-            upsertItem(user_id: string, item: Omit<import("../src/services/database").ItemRecord, 'id' | 'user_id'>): Promise<string>;
 
             /**
              * Upsert multiple item records in a single transaction.
              * Inserts items that don't exist, updates items where 'item_metadata_hash' has changed.
              * @param user_id User ID for the items
              * @param items An array of item data. Requires 'library_id', 'zotero_key', 'item_metadata_hash'.
-             * @returns An array of the internal 'id's corresponding to the input items (either existing or newly inserted).
              */
-            upsertItemsBatch(user_id: string, items: Omit<import("../src/services/database").ItemRecord, 'id' | 'user_id'>[]): Promise<string[]>;
+            upsertItemsBatch(user_id: string, items: Omit<ItemRecord, 'user_id'>[]): Promise<void>;
 
             /**
              * Retrieve an item record by its user_id, library_id and zotero_key.
@@ -119,7 +107,7 @@ declare namespace Zotero {
              * @param zoteroKey The zotero_key of the item.
              * @returns The ItemRecord if found, otherwise null.
              */
-            getItemByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<import("../src/services/database").ItemRecord | null>;
+            getItemByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<ItemRecord | null>;
 
             /**
              * Retrieve an attachment record by its user_id, library_id and zotero_key.
@@ -128,7 +116,7 @@ declare namespace Zotero {
              * @param zoteroKey The zotero_key of the attachment.
              * @returns The AttachmentRecord if found, otherwise null.
              */
-            getAttachmentByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<import("../src/services/database").AttachmentRecord | null>;
+            getAttachmentByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<AttachmentRecord | null>;
 
             /**
              * Retrieve an upload queue record by its user_id, library_id and zotero_key.
@@ -156,9 +144,9 @@ declare namespace Zotero {
              */
             upsertAttachmentsBatch(
                 user_id: string, 
-                attachments: (Pick<import("../src/services/database").AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & 
-                             Partial<Omit<import("../src/services/database").AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>)[]
-            ): Promise<string[]>;
+                attachments: (Pick<AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & 
+                             Partial<Omit<AttachmentRecord, 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>)[]
+            ): Promise<void>;
 
             /**
              * Delete an item record by user_id, library_id and zotero_key.
@@ -201,7 +189,7 @@ declare namespace Zotero {
              * @param zoteroKeys Array of zotero_keys to retrieve.
              * @returns Array of ItemRecord objects found, empty array if none found.
              */
-            getItemsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").ItemRecord[]>;
+            getItemsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<ItemRecord[]>;
 
             /**
              * Retrieve multiple attachment records by their user_id, library_id and zotero_keys.
@@ -210,7 +198,7 @@ declare namespace Zotero {
              * @param zoteroKeys Array of zotero_keys to retrieve.
              * @returns Array of AttachmentRecord objects found, empty array if none found.
              */
-            getAttachmentsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").AttachmentRecord[]>;
+            getAttachmentsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<AttachmentRecord[]>;
 
             /**
              * Retrieve the sync state of multiple items by their user_id, library_id and zotero_keys.
@@ -330,7 +318,7 @@ declare namespace Zotero {
              * @param user_id User ID
              * @returns Array of AttachmentRecord objects with failed upload status
              */
-            getFailedAttachments(user_id: string): Promise<import("../src/services/database").AttachmentRecord[]>;
+            getFailedAttachments(user_id: string): Promise<AttachmentRecord[]>;
 
             /**
              * Get paginated failed attachments for a user
@@ -339,7 +327,7 @@ declare namespace Zotero {
              * @param offset Number of items to skip
              * @returns Object containing an array of AttachmentRecord objects and a boolean indicating if there are more items
              */
-            getFailedAttachmentsPaginated(user_id: string, limit: number, offset: number): Promise<{ attachments: import("../src/services/database").AttachmentRecord[]; has_more: boolean }>;
+            getFailedAttachmentsPaginated(user_id: string, limit: number, offset: number): Promise<{ attachments: AttachmentRecord[]; has_more: boolean }>;
 
             /**
              * Get all attachments by upload status for a user
@@ -347,7 +335,7 @@ declare namespace Zotero {
              * @param status Upload status to filter by
              * @returns Array of AttachmentRecord objects
              */
-            getAttachmentsByUploadStatus(user_id: string, status: import("../src/services/attachmentsService").UploadStatus): Promise<import("../src/services/database").AttachmentRecord[]>;
+            getAttachmentsByUploadStatus(user_id: string, status: import("../src/services/attachmentsService").UploadStatus): Promise<AttachmentRecord[]>;
 
             /**
              * Get a paginated list of attachments by upload status for a user.
