@@ -79,7 +79,8 @@ export interface UploadQueueRecord {
 export interface LibrarySyncStateRecord {
     user_id: string;
     library_id: number;
-    last_synced_zotero_version: number;
+    last_synced_version: number;
+    last_synced_date: string;
 }
 
 // Add a new interface for queue item input that allows optional file_hash
@@ -251,12 +252,12 @@ export class BeaverDB {
             );
         `);
 
-        // TODO: ADD LAST_SYNCED_DATE!!!!
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS library_sync_state (
-                user_id                     TEXT(36) NOT NULL,
-                library_id                  INTEGER NOT NULL,
-                last_synced_zotero_version  INTEGER NOT NULL,
+                user_id                  TEXT(36) NOT NULL,
+                library_id               INTEGER NOT NULL,
+                last_synced_version      INTEGER NOT NULL,
+                last_synced_date         TEXT NOT NULL,
                 PRIMARY KEY(user_id, library_id)
             );
         `);
@@ -1791,7 +1792,8 @@ export class BeaverDB {
         return {
             user_id: row.user_id,
             library_id: row.library_id,
-            last_synced_zotero_version: row.last_synced_zotero_version,
+            last_synced_version: row.last_synced_version,
+            last_synced_date: row.last_synced_date,
         };
     }
 
@@ -1815,12 +1817,13 @@ export class BeaverDB {
      */
     public async insertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_zotero_version)
-             VALUES (?, ?, ?)`,
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_synced_date)
+             VALUES (?, ?, ?, ?)`,
             [
                 record.user_id,
                 record.library_id,
-                record.last_synced_zotero_version,
+                record.last_synced_version,
+                record.last_synced_date,
             ]
         );
     }
@@ -1854,14 +1857,16 @@ export class BeaverDB {
      */
     public async upsertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_zotero_version)
-             VALUES (?, ?, ?)
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_synced_date)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT(user_id, library_id) DO UPDATE SET
-                last_synced_zotero_version = excluded.last_synced_zotero_version`,
+                last_synced_version = excluded.last_synced_version,
+                last_synced_date = excluded.last_synced_date`,
             [
                 record.user_id,
                 record.library_id,
-                record.last_synced_zotero_version,
+                record.last_synced_version,
+                record.last_synced_date,
             ]
         );
     }
