@@ -73,8 +73,9 @@ export interface UploadQueueRecord {
 /*
  * Interface for the 'library_sync_state' table row
  *
- * Table stores the sync version for each library, tracking the last
- * synced versions between the backend and the local Zotero database.
+ * Table stores the backend library version at the time of the last sync and the last sync date for each library.
+ * The backend library version is the version of the backend library (corresponding to Zotero's library version)
+ * The last sync date is the date of the last sync from this local device.
  */
 export interface LibrarySyncStateRecord {
     user_id: string;
