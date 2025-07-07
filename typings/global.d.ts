@@ -479,6 +479,44 @@ declare namespace Zotero {
              * @returns The MessageModel if found, otherwise null
              */
             getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
+
+
+            // --- Library Sync State Methods ---
+
+            /**
+             * Get the sync state for a library
+             * @param user_id The user_id of the library
+             * @param library_id The library_id of the library
+             */
+            getLibrarySyncState(user_id: string, library_id: number): Promise<import("../src/services/database").LibrarySyncStateRecord | null>;
+
+            /**
+             * Insert a library sync state record
+             * @param record The library sync state record to insert
+             */
+            insertLibrarySyncState(record: import("../src/services/database").LibrarySyncStateRecord): Promise<void>;
+
+            /**
+             * Update the sync state for a library
+             * @param user_id The user_id of the library
+             * @param library_id The library_id of the library
+             * @param updates The updates to the library sync state record
+             */
+            updateLibrarySyncState(user_id: string, library_id: number, updates: Partial<import("../src/services/database").LibrarySyncStateRecord>): Promise<void>;
+
+            /**
+             * Upsert a library sync state record
+             * @param record The library sync state record to upsert
+             */
+            upsertLibrarySyncState(record: import("../src/services/database").LibrarySyncStateRecord): Promise<void>;
+
+            /**
+             * Delete a library sync state record
+             * @param user_id The user_id of the library
+             * @param library_id The library_id of the library
+             */
+            deleteLibrarySyncState(user_id: string, library_id: number): Promise<void>;
+
         }
 
         /**

@@ -72,6 +72,18 @@ export interface UploadQueueRecord {
     zotero_key: string;
 }
 
+/*
+ * Interface for the 'library_sync_state' table row
+ *
+ * Table stores the sync version for each library, tracking the last
+ * synced versions between the backend and the local Zotero database.
+ */
+export interface LibrarySyncStateRecord {
+    user_id: string;
+    library_id: number;
+    last_synced_zotero_version: number;
+}
+
 // Add a new interface for queue item input that allows optional file_hash
 export interface UploadQueueInput {
     file_hash?: string | null;  // Allow optional/null for input
@@ -169,6 +181,7 @@ export class BeaverDB {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS threads`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS messages`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
         }
 
         // Create database schema
@@ -240,6 +253,15 @@ export class BeaverDB {
                 metadata                 TEXT,
                 error                    TEXT,
                 FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS library_sync_state (
+                user_id                     TEXT(36) NOT NULL,
+                library_id                  INTEGER NOT NULL,
+                last_synced_zotero_version  INTEGER NOT NULL,
+                PRIMARY KEY(user_id, library_id)
             );
         `);
 
@@ -512,7 +534,12 @@ export class BeaverDB {
             const existing = existingItemsMap.get(key);
             if (existing) {
                 finalIds.push(existing.id); // Use existing ID
-                if (existing.item_metadata_hash !== item.item_metadata_hash) {
+                // An update is needed if any of the sync-related fields have changed.
+                if (
+                    existing.item_metadata_hash !== item.item_metadata_hash ||
+                    existing.zotero_version !== item.zotero_version ||
+                    existing.zotero_synced !== item.zotero_synced
+                ) {
                     itemsToUpdate.push({
                         libraryId: item.library_id,
                         zoteroKey: item.zotero_key,
@@ -1946,6 +1973,97 @@ export class BeaverDB {
         }
         const record = BeaverDB.rowToMessageRecord(rows[0]);
         return BeaverDB.messageRecordToModel(record);
+    }
+
+    /**
+     * Helper method to construct LibrarySyncStateRecord from a database row
+     */
+    private static rowToLibrarySyncStateRecord(row: any): LibrarySyncStateRecord {
+        return {
+            user_id: row.user_id,
+            library_id: row.library_id,
+            last_synced_zotero_version: row.last_synced_zotero_version,
+        };
+    }
+
+    /**
+     * Retrieve a library sync state record by its user_id and library_id.
+     * @param user_id The user_id of the record.
+     * @param libraryId The library_id of the record.
+     * @returns The LibrarySyncStateRecord if found, otherwise null.
+     */
+    public async getLibrarySyncState(user_id: string, libraryId: number): Promise<LibrarySyncStateRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM library_sync_state WHERE user_id = ?1 AND library_id = ?2`,
+            [user_id, libraryId]
+        );
+        return rows.length === 0 ? null : BeaverDB.rowToLibrarySyncStateRecord(rows[0]);
+    }
+
+    /**
+     * Insert a record into the 'library_sync_state' table.
+     * @param record Data for the new record.
+     */
+    public async insertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
+        await this.conn.queryAsync(
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_zotero_version)
+             VALUES (?, ?, ?)`,
+            [
+                record.user_id,
+                record.library_id,
+                record.last_synced_zotero_version,
+            ]
+        );
+    }
+
+    /**
+     * Update an existing library sync state record.
+     * @param user_id The user_id of the record.
+     * @param libraryId The library_id of the record.
+     * @param updates An object containing the fields to update.
+     */
+    public async updateLibrarySyncState(
+        user_id: string,
+        libraryId: number,
+        updates: Partial<Omit<LibrarySyncStateRecord, 'user_id' | 'library_id'>>
+    ): Promise<void> {
+        const fieldsToUpdate = Object.keys(updates);
+        if (fieldsToUpdate.length === 0) {
+            return;
+        }
+
+        const setClauses = fieldsToUpdate.map(field => `${field} = ?`).join(', ');
+        const values = [...Object.values(updates), user_id, libraryId];
+
+        const query = `UPDATE library_sync_state SET ${setClauses} WHERE user_id = ? AND library_id = ?`;
+        await this.conn.queryAsync(query, values);
+    }
+
+    /**
+     * Update an existing library sync state record or insert a new one if it doesn't exist.
+     * @param record Data for the library sync state record.
+     */
+    public async upsertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
+        await this.conn.queryAsync(
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_zotero_version)
+             VALUES (?, ?, ?)
+             ON CONFLICT(user_id, library_id) DO UPDATE SET
+                last_synced_zotero_version = excluded.last_synced_zotero_version`,
+            [
+                record.user_id,
+                record.library_id,
+                record.last_synced_zotero_version,
+            ]
+        );
+    }
+
+    /**
+     * Delete a library sync state record.
+     * @param user_id The user_id of the library
+     * @param library_id The library_id of the library
+     */
+    public async deleteLibrarySyncState(user_id: string, library_id: number): Promise<void> {
+        await this.conn.queryAsync(`DELETE FROM library_sync_state WHERE user_id = ? AND library_id = ?`, [user_id, library_id]);
     }
 }
 
