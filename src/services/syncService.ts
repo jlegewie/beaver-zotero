@@ -103,14 +103,12 @@ export interface ItemSyncState {
     zotero_key: string;
     metadata_hash: string;
     zotero_version: number;
+    zotero_synced: boolean;
 }
 
-export interface AttachmentSyncState {
-    zotero_key: string;
-    metadata_hash: string;
-    zotero_version: number;
-    upload_status: UploadStatus;
+export interface AttachmentSyncState extends ItemSyncState {
     file_hash: string;
+    upload_status: UploadStatus;
 }
 
 export interface SyncStatusComparisonResponse {
@@ -123,6 +121,12 @@ export interface SyncStatusComparisonResponse {
     items_up_to_date?: ItemSyncState[];
     attachments_up_to_date?: AttachmentSyncState[];
 }
+
+export interface SyncStateResponse {
+    pull_required: "none" | "delta" | "full";
+    backend_library_version: number;
+}
+
 
 /**
  * Sync-specific API service that extends the base API service
@@ -224,6 +228,25 @@ export class SyncService extends ApiService {
             zotero_local_id: localUserKey,
         });
         return this.get<LibrarySyncStateResponse>(`/zotero/sync/library-state?${params.toString()}`);
+    }
+
+    /**
+     * Gets the sync state for a library
+     * @param libraryId The Zotero library ID
+     * @param lastSyncZoteroVersion The last synced Zotero version (null for initial sync)
+     * @returns Promise with the sync state response
+     */
+    async getSyncState(libraryId: number, lastSyncZoteroVersion: number | null = null): Promise<SyncStateResponse> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+        });
+        
+        // Only add last_synced_version parameter if it's not null
+        if (lastSyncZoteroVersion !== null) {
+            params.append('last_synced_version', String(lastSyncZoteroVersion));
+        }
+        
+        return this.get<SyncStateResponse>(`/zotero/sync/state?${params.toString()}`);
     }
 
     /**
