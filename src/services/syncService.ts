@@ -127,6 +127,12 @@ export interface SyncStateResponse {
     backend_library_version: number;
 }
 
+export interface SyncDataResponse {
+    library_id: number;
+    items_state: ItemSyncState[];
+    attachments_state: AttachmentSyncState[];
+    has_more: boolean;
+}
 
 /**
  * Sync-specific API service that extends the base API service
@@ -260,6 +266,31 @@ export class SyncService extends ApiService {
             library_id: libraryId,
             zotero_keys: zoteroKeys
         });
+    }
+
+    /**
+     * Gets paginated sync data for a library
+     * @param libraryId The Zotero library ID
+     * @param updateSinceLibraryVersion Version to sync from (null for full sync)
+     * @param page Page number (0-indexed)
+     * @param pageSize Items per page (max 1000)
+     * @returns Promise with paginated sync data response
+     */
+    async getSyncData(
+        libraryId: number,
+        updateSinceLibraryVersion: number | null = null,
+        page: number = 0,
+        pageSize: number = 500
+    ): Promise<SyncDataResponse> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+            page: String(page),
+            page_size: String(pageSize),
+        });
+        if (updateSinceLibraryVersion !== null) {
+            params.append('update_since_library_version', String(updateSinceLibraryVersion));
+        }
+        return this.get<SyncDataResponse>(`/zotero/sync/data?${params.toString()}`);
     }
 
     /**
