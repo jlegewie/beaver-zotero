@@ -228,14 +228,14 @@ const OnboardingPage: React.FC = () => {
                             <DatabaseSyncStatus />
 
                             {(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') && (
-                                <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                                <div className="p-2 font-color-tertiary display-flex flex-row gap-3 items-start">
                                     <Icon icon={AlertIcon} className="scale-12 mt-020"/>
                                     {/* TODO: Retry button */}
                                     <div>No connection. Please reconnect to continue with the onboarding process.</div>
                                 </div>
                             )}
                             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
-                                <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                                <div className="p-2 font-color-tertiary display-flex flex-row gap-3 items-start">
                                     <Spinner size={14} className="mt-015"/>
                                     <div>Connecting...</div>
                                 </div>
