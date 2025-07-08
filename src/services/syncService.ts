@@ -278,7 +278,8 @@ export class SyncService extends ApiService {
      */
     async getSyncData(
         libraryId: number,
-        updateSinceLibraryVersion: number | null = null,
+        sinceLibraryVersion: number | null = null,
+        toLibraryVersion: number | null = null,
         page: number = 0,
         pageSize: number = 500
     ): Promise<SyncDataResponse> {
@@ -287,8 +288,11 @@ export class SyncService extends ApiService {
             page: String(page),
             page_size: String(pageSize),
         });
-        if (updateSinceLibraryVersion !== null) {
-            params.append('update_since_library_version', String(updateSinceLibraryVersion));
+        if (sinceLibraryVersion !== null) {
+            params.append('since_version', String(sinceLibraryVersion));
+        }
+        if (toLibraryVersion !== null) {
+            params.append('to_version', String(toLibraryVersion));
         }
         return this.get<SyncDataResponse>(`/zotero/sync/data?${params.toString()}`);
     }
