@@ -1,4 +1,4 @@
-import { getItemsToSync } from "./sync";
+import { getAllItemsToSync } from "./sync";
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../react/utils/pdfUtils';
 
 export interface LibraryStatistics {
@@ -22,7 +22,7 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     
     // Collect all attachments first
     const allLibraryData = await Promise.all(userLibraries.map(async (library) => {
-        const allItems = await getItemsToSync(library.libraryID);
+        const allItems = await getAllItemsToSync(library.libraryID);
         const attachments = allItems.filter(item => item.isAttachment());
         const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
         
