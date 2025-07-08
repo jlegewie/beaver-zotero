@@ -1880,6 +1880,24 @@ export class BeaverDB {
     public async deleteLibrarySyncState(user_id: string, library_id: number): Promise<void> {
         await this.conn.queryAsync(`DELETE FROM library_sync_state WHERE user_id = ? AND library_id = ?`, [user_id, library_id]);
     }
+
+    /**
+     * Get all zotero_keys from both items and attachments for a user.
+     * @param user_id The user_id to get keys for
+     * @param libraryId library_id to filter by.
+     * @returns Array of zotero_keys from both items and attachments
+     */
+    public async getAllZoteroKeys(user_id: string, libraryId: number): Promise<string[]> {
+        const query = `
+            SELECT zotero_key FROM items WHERE user_id = ? AND library_id = ?
+            UNION
+            SELECT zotero_key FROM attachments WHERE user_id = ? AND library_id = ?
+        `;
+        const params = [user_id, libraryId, user_id, libraryId];
+
+        const rows = await this.conn.queryAsync(query, params);
+        return rows.map((row: any) => row.zotero_key);
+    }
 }
 
 /* Example Usage:

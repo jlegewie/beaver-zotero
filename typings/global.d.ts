@@ -503,6 +503,14 @@ declare namespace Zotero {
              */
             deleteLibrarySyncState(user_id: string, library_id: number): Promise<void>;
 
+            /**
+             * Get all zotero_keys from both items and attachments for a user.
+             * @param user_id The user_id to get keys for
+             * @param libraryId library_id to filter by.
+             * @returns Array of zotero_keys from both items and attachments
+             */
+            getAllZoteroKeys(user_id: string, libraryId: number): Promise<string[]>;
+
         }
 
         /**
