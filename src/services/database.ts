@@ -81,7 +81,7 @@ export interface LibrarySyncStateRecord {
     user_id: string;
     library_id: number;
     last_synced_version: number;
-    last_synced_date: string;
+    last_sync_date_modified: string;
 }
 
 // Add a new interface for queue item input that allows optional file_hash
@@ -258,7 +258,7 @@ export class BeaverDB {
                 user_id                  TEXT(36) NOT NULL,
                 library_id               INTEGER NOT NULL,
                 last_synced_version      INTEGER NOT NULL,
-                last_synced_date         TEXT NOT NULL,
+                last_sync_date_modified  TEXT NOT NULL,
                 PRIMARY KEY(user_id, library_id)
             );
         `);
@@ -1794,7 +1794,7 @@ export class BeaverDB {
             user_id: row.user_id,
             library_id: row.library_id,
             last_synced_version: row.last_synced_version,
-            last_synced_date: row.last_synced_date,
+            last_sync_date_modified: row.last_sync_date_modified,
         };
     }
 
@@ -1818,13 +1818,13 @@ export class BeaverDB {
      */
     public async insertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_synced_date)
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_sync_date_modified)
              VALUES (?, ?, ?, ?)`,
             [
                 record.user_id,
                 record.library_id,
                 record.last_synced_version,
-                record.last_synced_date,
+                record.last_sync_date_modified,
             ]
         );
     }
@@ -1858,16 +1858,16 @@ export class BeaverDB {
      */
     public async upsertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_synced_date)
+            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_sync_date_modified)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(user_id, library_id) DO UPDATE SET
                 last_synced_version = excluded.last_synced_version,
-                last_synced_date = excluded.last_synced_date`,
+                last_sync_date_modified = excluded.last_sync_date_modified`,
             [
                 record.user_id,
                 record.library_id,
                 record.last_synced_version,
-                record.last_synced_date,
+                record.last_sync_date_modified,
             ]
         );
     }
