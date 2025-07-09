@@ -6,13 +6,6 @@ import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 
 // Types that match the backend models
-export interface SyncResponse {
-    sync_id: string;
-    library_id: number;
-    total_items: number;
-    sync_type: string;
-}
-
 export interface ItemBatchRequest {
     session_id: string; // UUID
     sync_type: 'initial' | 'incremental' | 'consistency' | 'verification';
@@ -50,21 +43,6 @@ export interface SyncItemsResponse {
     sync_status: "in_progress" | "completed" | "failed";
     items: ItemResult[];
     attachments: AttachmentResult[];
-}
-
-export interface SyncCompleteResponse {
-    status: string;
-}
-
-export interface LastSyncDateResponse {
-    library_id: number;
-    last_sync_date: string | null;
-}
-
-export interface LibrarySyncStateResponse {
-    library_id: number;
-    last_global_sync_date: string | null;
-    last_local_sync_date: string | null;
 }
 
 export interface ItemDeleteRequest {
@@ -147,24 +125,6 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Initiates a sync for a library
-     * @param libraryId The Zotero library ID
-     * @param totalItems Total number of items to sync
-     * @returns Promise with the sync response
-     */
-    async startSync(libraryId: number, sync_type: string, totalItems: number, syncDate: string): Promise<SyncResponse> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
-        return this.post<SyncResponse>('/zotero/sync/start', {
-            zotero_local_id: localUserKey,
-            zotero_user_id: userID,
-            library_id: libraryId,
-            sync_type: sync_type,
-            total_items: totalItems,
-            zotero_sync_date: syncDate
-        });
-    }
-
-    /**
      * Processes a batch of items for syncing
      * @param syncId The sync operation ID
      * @param syncType The type of sync operation
@@ -195,46 +155,6 @@ export class SyncService extends ApiService {
             deletions: deletions,
         };
         return this.post<SyncItemsResponse>('/zotero/sync/items', payload);
-    }
-
-    /**
-     * Completes a sync operation
-     * @param syncId The sync operation ID
-     * @returns Promise with the complete sync response
-     */
-    async completeSync(syncId: string): Promise<SyncCompleteResponse> {
-        return this.post<SyncCompleteResponse>(`/zotero/sync/${syncId}/complete`, {});
-    }
-
-    /**
-     * Gets active sync operations
-     * @returns Promise with array of active syncs
-     */
-    async getActiveSyncs(): Promise<any[]> {
-        return this.get<any[]>('/zotero/sync/active');
-    }
-
-    /**
-     * Gets the last sync date for a library
-     * @param libraryId The Zotero library ID
-     * @returns Promise with the last sync date response
-     */
-    async getLastSyncDate(libraryId: number): Promise<LastSyncDateResponse> {
-        return this.get<LastSyncDateResponse>(`/zotero/sync/library/${libraryId}/last-sync-date`);
-    }
-
-    /**
-     * Gets the last sync state for a library from both global and local perspectives.
-     * @param libraryId The Zotero library ID
-     * @returns Promise with the library sync state response
-     */
-    async getLibrarySyncState(libraryId: number): Promise<LibrarySyncStateResponse> {
-        const { localUserKey } = getZoteroUserIdentifier();
-        const params = new URLSearchParams({
-            library_id: String(libraryId),
-            zotero_local_id: localUserKey,
-        });
-        return this.get<LibrarySyncStateResponse>(`/zotero/sync/library-state?${params.toString()}`);
     }
 
     /**
