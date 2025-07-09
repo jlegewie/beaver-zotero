@@ -602,7 +602,7 @@ export const deleteItems = async (userId: string, libraryID: number, zoteroKeys:
  * @param updates Partial LibrarySyncStatus object containing only the fields to update
  */
 const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
-    store.set(initialSyncStatusAtom, (current) => ({
+    store.set(initialSyncStatusAtom, (current: Record<number, LibrarySyncStatus>) => ({
         ...current,
         [libraryID]: {
             ...(current[libraryID] || {}),
