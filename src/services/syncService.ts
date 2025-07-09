@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, AttachmentData } from '../../react/types/zotero';
+import { ItemData, AttachmentData, DeleteData } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
 
@@ -14,18 +14,14 @@ export interface SyncResponse {
 }
 
 export interface ItemBatchRequest {
+    session_id: string; // UUID
+    sync_type: 'initial' | 'incremental' | 'consistency' | 'verification';
     zotero_local_id: string;
     zotero_user_id: string | undefined;
     library_id: number;
     items: ItemData[];
     attachments: AttachmentData[];
-    sync_type: string;
-    zotero_sync_date: string;
-    // sync options
-    sync_id?: string;
-    create_log?: boolean;
-    update_log?: boolean;
-    close_log?: boolean;
+    deletions: DeleteData[];
 }
 
 export interface ItemResult {
@@ -123,8 +119,11 @@ export interface SyncStatusComparisonResponse {
 }
 
 export interface SyncStateResponse {
-    pull_required: "none" | "delta" | "full";
-    backend_library_version: number;
+    last_sync_method: 'version' | 'date_modified';
+    last_sync_version: number;
+    last_sync_date_modified: string;
+    last_sync_timestamp: string;
+    last_sync_zotero_local_id: string;
 }
 
 export interface SyncDataResponse {
@@ -166,33 +165,33 @@ export class SyncService extends ApiService {
 
     /**
      * Processes a batch of items for syncing
+     * @param syncId The sync operation ID
+     * @param syncType The type of sync operation
      * @param libraryId The Zotero library ID
      * @param items Array of items to process
-     * @param syncId The sync operation ID (optional)
+     * @param attachments Array of attachments to process
+     * @param keysToDelete Array of keys to delete
      * @returns Promise with the batch processing result
      */
     async processItemsBatch(
+        sessionId: string,
+        syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentData[],
-        syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
-        createLog: boolean,
-        closeLog: boolean,
-        syncId?: string,
+        deletions: DeleteData[],
     ): Promise<SyncItemsResponse> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         const payload: ItemBatchRequest = {
+            session_id: sessionId,
+            sync_type: syncType,
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
             library_id: libraryId,
             items: items,
             attachments: attachments,
-            sync_type: syncType,
-            zotero_sync_date: Zotero.Date.dateToSQL(new Date(), true),
-            create_log: createLog,
-            close_log: closeLog
+            deletions: deletions,
         };
-        if (syncId) payload.sync_id = syncId;
         return this.post<SyncItemsResponse>('/zotero/sync/items', payload);
     }
 
@@ -242,17 +241,12 @@ export class SyncService extends ApiService {
      * @param lastSyncZoteroVersion The last synced Zotero version (null for initial sync)
      * @returns Promise with the sync state response
      */
-    async getSyncState(libraryId: number, lastSyncZoteroVersion: number | null = null): Promise<SyncStateResponse> {
+    async getSyncState(libraryId: number, syncMethod: 'version' | 'date_modified'): Promise<SyncStateResponse | null> {
         const params = new URLSearchParams({
             library_id: String(libraryId),
-        });
-        
-        // Only add last_synced_version parameter if it's not null
-        if (lastSyncZoteroVersion !== null) {
-            params.append('last_synced_version', String(lastSyncZoteroVersion));
-        }
-        
-        return this.get<SyncStateResponse>(`/zotero/sync/state?${params.toString()}`);
+            sync_method: syncMethod,
+        });        
+        return this.get<SyncStateResponse | null>(`/zotero/sync/state?${params.toString()}`);
     }
 
     /**

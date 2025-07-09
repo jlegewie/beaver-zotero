@@ -1,6 +1,6 @@
+import { v4 as uuidv4 } from 'uuid';
 import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
-import { syncService } from "../../src/services/syncService";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { syncStatusAtom, SyncStatus } from "../atoms/ui";
@@ -8,6 +8,7 @@ import { fileUploader } from "../../src/services/FileUploader";
 import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
+import { deleteItems } from "../../src/utils/sync";
 
 const DEBOUNCE_MS = 2000;
 const SYNC_BATCH_SIZE_INITIAL = 100;
@@ -87,8 +88,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
                 logger(`useZoteroSync: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
                 await syncItemsToBackend(
+                    uuidv4(),
                     libraryID,
-                    libraryItems,
+                    libraryItems.map(item => ({ action: 'upsert', item })),
                     'incremental', 
                     (status) => setSyncStatus(status), 
                     (processed, total) => { },
@@ -129,10 +131,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
                 logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
-                const response = await syncService.deleteItems(libraryID, keys);
-                // Update local database
-                const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
-                if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(user.id, libraryID, allKeys);
+                await deleteItems(user.id, libraryID, keys);
             }
         } catch (error: any) {
             logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);
@@ -199,6 +198,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             items
                                 .filter(item => syncLibraryIds.includes(item.libraryID))
                                 .filter(item => item.isInTrash())
+                                // Only include items that match syncing criteria
+                                .filter(filterFunction)
+                                .filter(item => syncLibraryIds.includes(item.libraryID))
+                                // Add to delete events
                                 .forEach(item => {
                                     eventsRef.current.delete.set(item.id, { libraryID: item.libraryID, key: item.key });
                                     eventsRef.current.addModify.delete(item.id);
