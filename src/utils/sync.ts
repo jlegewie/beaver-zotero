@@ -685,6 +685,12 @@ export async function syncZoteroDatabase(
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
 
             logger(`Beaver Sync '${syncSessionId}':   Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
+
+            if(!isInitialSync && syncMethod == 'version' && lastSyncVersion == library.libraryVersion) {
+                logger(`Beaver Sync '${syncSessionId}':   Library version up to date (${lastSyncVersion})`, 3);
+                updateSyncStatus(libraryID, { status: 'completed' });
+                continue;
+            }
         
             // ----- 3. Items to sync and delete -----
             logger(`Beaver Sync '${syncSessionId}': (2) Get items to sync and delete`, 3);
