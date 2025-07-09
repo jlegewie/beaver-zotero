@@ -652,8 +652,6 @@ export async function syncZoteroDatabase(
         const libraryID = library.id;
         const libraryName = library.name;
 
-
-        
         try {
             logger(`Beaver Sync '${syncSessionId}': Syncing library ${libraryID} (${libraryName})`, 2);
 
