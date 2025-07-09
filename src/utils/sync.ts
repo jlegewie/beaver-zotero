@@ -8,6 +8,7 @@ import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, DeleteData, ZoteroLibrary } from '../../react/types/zotero';
 import { isLibrarySynced } from './zoteroIdentifier';
 import { v4 as uuidv4 } from 'uuid';
+import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 
 /**
  * Interface for item filter function
@@ -660,11 +661,18 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             const syncMethod = isSyncedWithZotero ? 'version' : 'date_modified';
             
-            // User warning if library is synced but user is logout out or last zotero version is old
-            // TODO: WARNING that library is synced but no user ID is set
-            // if(isSyncedWithZotero && !Zotero.Users.getCurrentUserID()) {
-            //     "Unable to sync library. Please log in to Zotero and try again."
-            // }
+            // Warning: 'version' sync but not signed into zotero
+            if(isSyncedWithZotero && !Zotero.Users.getCurrentUserID()) {
+                onStatusChange(libraryID, 'failed');
+                store.set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Unable to Complete Sync with Beaver',
+                    text: `Please sign into your Zotero account to continue syncing with Beaver.`,
+                    expire: true
+                });
+                continue;
+
+            }
             // if(isSyncedWithZotero && library.lastSync && library.lastSync.sync_type === 'initial') {}
             
             // ----- 2. Get backend sync status -----
@@ -692,6 +700,7 @@ export async function syncZoteroDatabase(
             } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
                 items = await getModifiedItems(libraryID, lastSyncDate);
             } else {
+                onStatusChange(libraryID, 'failed');
                 throw new Error(`Beaver Sync '${syncSessionId}': Invalid sync state: ${syncState}`);
             }
 
