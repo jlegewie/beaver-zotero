@@ -83,6 +83,12 @@ export interface BibliographicIdentifier {
     archiveID?: string;
 }
 
+export interface DeleteData extends ZoteroItemReference {
+    zotero_version: number | null;
+    zotero_synced: boolean | null;
+    date_modified: string | null;
+}
+
 export interface ItemData extends ZoteroItemBase {
     // Core fields that most items have
     item_type: string;
