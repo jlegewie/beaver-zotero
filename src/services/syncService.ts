@@ -16,6 +16,7 @@ export interface SyncResponse {
 export interface ItemBatchRequest {
     session_id: string; // UUID
     sync_type: 'initial' | 'incremental' | 'consistency' | 'verification';
+    sync_method: 'version' | 'date_modified';
     zotero_local_id: string;
     zotero_user_id: string | undefined;
     library_id: number;
@@ -185,6 +186,7 @@ export class SyncService extends ApiService {
         const payload: ItemBatchRequest = {
             session_id: sessionId,
             sync_type: syncType,
+            sync_method: 'version',
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
             library_id: libraryId,

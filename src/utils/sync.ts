@@ -21,7 +21,9 @@ export type ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => b
  * @returns true if the item should be synced
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => {
-    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) && !item.isInTrash() && (collectionId ? item.inCollection(collectionId) : true);
+    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) &&
+        !item.isInTrash()
+        // (collectionId ? item.inCollection(collectionId) : true);
 };
 
 
@@ -569,7 +571,7 @@ export async function syncItemsToBackend(
         }
     }
     if (!syncFailed) {
-        logger(`Beaver Sync '${syncSessionId}': All ${totalItems} items requiring sync were processed; no backend sync session established or required for this set, and no errors occurred. Marking as complete.`, 3);
+        logger(`Beaver Sync '${syncSessionId}': All ${totalItems} items requiring sync were processed; marking as complete.`, 3);
         onStatusChange?.('completed');
         if (onProgress) {
             onProgress(totalItems, totalItems);
@@ -669,7 +671,7 @@ export async function syncZoteroDatabase(
             // if(isSyncedWithZotero && library.lastSync && library.lastSync.sync_type === 'initial') {}
             
             // ----- 2. Get backend sync status -----
-            logger(`Beaver Sync '${syncSessionId}': (2) Get backend sync status`, 3);
+            logger(`Beaver Sync '${syncSessionId}': (1) Get backend sync status (syncMethod: ${syncMethod})`, 3);
             const syncState = await syncService.getSyncState(libraryID, syncMethod);
 
             const isInitialSync = syncState === null;
@@ -680,7 +682,7 @@ export async function syncZoteroDatabase(
             // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
 
-            logger(`Beaver Sync '${syncSessionId}': Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
+            logger(`Beaver Sync '${syncSessionId}':     Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
         
             // ----- 3. Items to sync and delete -----
             logger(`Beaver Sync '${syncSessionId}': (2) Get items to sync and delete`, 3);
@@ -688,9 +690,9 @@ export async function syncZoteroDatabase(
             let items: Zotero.Item[] = [];
             if (isInitialSync) {
                 items = await Zotero.Items.getAll(libraryID, false, false, false);
-            } else if (lastSyncVersion && syncMethod === 'version') {
+            } else if (lastSyncVersion !== null && syncMethod === 'version') {
                 items = await getItemsSinceVersion(libraryID, lastSyncVersion);
-            } else if (lastSyncDate && syncMethod === 'date_modified') {
+            } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
                 items = await getModifiedItems(libraryID, lastSyncDate);
             } else {
                 throw new Error(`Beaver Sync '${syncSessionId}': Invalid sync state: ${syncState}`);
