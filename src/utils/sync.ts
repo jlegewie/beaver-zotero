@@ -396,8 +396,8 @@ export async function syncItemsToBackend(
     libraryID: number,
     items: SyncItem[],
     syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void,
+    onStatusChange?: (libraryID: number, status: SyncStatus) => void,
+    onProgress?: (libraryID: number, processed: number, total: number) => void,
     batchSize: number = 200,
 ) {
     const userId = store.get(userIdAtom);
@@ -410,12 +410,12 @@ export async function syncItemsToBackend(
     let processedCount = 0;
     let syncFailed = false;
     const syncCompleted = false;
-    onStatusChange?.('in_progress');
+    onStatusChange?.(libraryID, 'in_progress');
     
     if (totalItems === 0) {
         logger(`Beaver Sync '${syncSessionId}':   No items to process`, 3);
-        onStatusChange?.('completed');
-        if (onProgress) onProgress(0, 0);
+        onStatusChange?.(libraryID, 'completed');
+        if (onProgress) onProgress(libraryID, 0, 0);
         return;
     }
     
@@ -557,24 +557,20 @@ export async function syncItemsToBackend(
 
             // Update progress for this batch
             processedCount += batchItems.length;
-            if (onProgress) {
-                onProgress(processedCount, totalItems);
-            }
+            if (onProgress) onProgress(libraryID, processedCount, totalItems);
             
         } catch (error: any) {
             logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${error.message}`, 1);
             Zotero.logError(error);
             syncFailed = true;
-            onStatusChange?.('failed');
+            onStatusChange?.(libraryID, 'failed');
             break;
         }
     }
     if (!syncFailed) {
         logger(`Beaver Sync '${syncSessionId}':   All ${totalItems} items requiring sync were processed; marking as complete.`, 3);
-        onStatusChange?.('completed');
-        if (onProgress) {
-            onProgress(totalItems, totalItems);
-        }
+        onStatusChange?.(libraryID, 'completed');
+        if (onProgress) onProgress(libraryID, totalItems, totalItems);
     }
 }
 
@@ -600,7 +596,7 @@ export const deleteItems = async (userId: string, libraryID: number, zoteroKeys:
  * @param libraryID Zotero library ID
  * @param updates Partial LibrarySyncStatus object containing only the fields to update
  */
-const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
+const updateSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
     store.set(syncStatusAtom, (current: Record<number, LibrarySyncStatus>) => ({
         ...current,
         [libraryID]: {
@@ -611,29 +607,16 @@ const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySync
     }));
 };
 
-/*
- * Ensures that the library sync status is completed
- * @param libraryID Zotero library ID
- */
-const markInitialSyncAsComplete = async (libraryID: number) => {
-    logger(`Beaver Sync: Marking initial sync as complete for library ${libraryID}`, 2);
-    updateInitialSyncStatus(libraryID, { status: 'completed' });
-}
-
 /**
- * Performs initial or periodic sync for all libraries
+ * Performs sync for all libraries
  * @param filterFunction Optional function to filter which items to sync
  * @param batchSize Size of item batches to process (default: 50)
- * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
- * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
     libraryIds: number[],
     filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void
 ): Promise<void> {
     const syncSessionId = uuidv4();
 
@@ -643,7 +626,7 @@ export async function syncZoteroDatabase(
 
     // Initialize sync status for all libraries
     for (const libraryID of libraryIds) {
-        updateInitialSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
+        updateSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
     }
 
     // Get user ID
@@ -651,33 +634,27 @@ export async function syncZoteroDatabase(
     if (!userId) {
         throw new Error('No user found');
     }
+
+    // On progress callback
+    const onProgress = (libraryID: number, processed: number, total: number) => {
+        const status = processed >= total ? 'completed' : 'in_progress';
+        updateSyncStatus(libraryID, { syncedCount: processed, status });
+    };
+
+    // On status change callback for this library
+    const onStatusChange = (libraryID: number, status: SyncStatus) => {
+        updateSyncStatus(libraryID, { status });
+    };
     
     // Sync each library
     for (const library of librariesToSync) {
         const libraryID = library.id;
         const libraryName = library.name;
+
+
         
         try {
             logger(`Beaver Sync '${syncSessionId}': Syncing library ${libraryID} (${libraryName})`, 2);
-
-            // Add custom progress callback that updates library-specific progress
-            const librarySpecificProgress = (processed: number, total: number) => {
-                const status = processed >= total ? 'completed' : 'in_progress';
-                updateInitialSyncStatus(libraryID, { syncedCount: processed, status });
-                
-                // Also call the original progress callback if provided
-                if (onProgress) {
-                    onProgress(processed, total);
-                }
-            };
-
-            // Add custom status change callback
-            const librarySpecificStatusChange = (status: SyncStatus) => {
-                updateInitialSyncStatus(libraryID, { status });
-                if (onStatusChange) {
-                    onStatusChange(status);
-                }
-            };
 
             // ----- 1. Determine sync method -----
             const isSyncedWithZotero = isLibrarySynced(libraryID);
@@ -750,10 +727,10 @@ export async function syncZoteroDatabase(
 
             if (itemCount === 0) {
                 logger(`Beaver Sync '${syncSessionId}':   Sync complete`, 3);
-                updateInitialSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
+                updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
             }
-            updateInitialSyncStatus(libraryID, libraryInitialStatus);
+            updateSyncStatus(libraryID, libraryInitialStatus);
 
             
             
@@ -761,12 +738,14 @@ export async function syncZoteroDatabase(
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
             const syncType = isInitialSync ? 'initial' : 'verification';
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
-            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, librarySpecificStatusChange, librarySpecificProgress, batchSize);
+            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, onStatusChange, onProgress, batchSize);
+
+            onStatusChange(libraryID, 'completed');
             
         } catch (error: any) {
             logger(`Beaver Sync '${syncSessionId}': Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
             Zotero.logError(error);
-            updateInitialSyncStatus(libraryID, { status: 'failed' });
+            updateSyncStatus(libraryID, { status: 'failed' });
             // Continue with next library even if one fails
         }
     }

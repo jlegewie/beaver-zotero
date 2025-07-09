@@ -168,12 +168,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         logger("useZoteroSync: Setting up Zotero sync", 3);
         // setSyncStatus('in_progress');
         
-        // Status change callback
-        const onStatusChange = (status: SyncStatus) => {
-            // setSyncStatus(status);
-        }
-        const onProgress = (processed: number, total: number) => { }
-        
         // Function to create the observer
         const setupObserver = () => {
             // Create the notification observer with debouncing
@@ -253,7 +247,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         const initializeSync = async () => {
             try {
                 // First sync the database
-                await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
+                await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL);
                 // Then set up the observer after sync completes
                 // setupObserver();
                 // Start file uploader after sync completes
