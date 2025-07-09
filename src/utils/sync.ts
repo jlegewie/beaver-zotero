@@ -669,7 +669,6 @@ export async function syncZoteroDatabase(
                     expire: true
                 });
                 continue;
-
             }
             // if(isSyncedWithZotero && library.lastSync && library.lastSync.sync_type === 'initial') {}
             
@@ -757,7 +756,7 @@ export async function syncZoteroDatabase(
         }
     }
         
-    logger('Beaver Sync: Sync completed for all libraries', 2);
+    logger(`Beaver Sync ${syncSessionId}: Sync completed for all libraries`, 2);
 }
 
 /**
