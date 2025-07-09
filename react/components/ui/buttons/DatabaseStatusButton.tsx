@@ -5,6 +5,7 @@ import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { DatabaseStatusIcon } from "../../icons/icons";
 import { syncLibraryIdsAtom } from "../../../atoms/profile";
+import { logger } from '../../../../src/utils/logger';
 
 // Possible icon states
 type IconState = {
@@ -40,7 +41,10 @@ const DatabaseStatusButton: React.FC = () => {
         
     // Handle manual sync button click
     const handleSyncClick = () => {
-        syncZoteroDatabase(syncLibraryIds);
+        if(!isSyncing) {
+            logger(`Beaver Sync: User-initiated database sync`)
+            syncZoteroDatabase(syncLibraryIds);
+        }
     };
     
     const [isHovering, setIsHovering] = useState(false);
