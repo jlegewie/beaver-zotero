@@ -659,17 +659,6 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             const syncMethod = isSyncedWithZotero ? 'version' : 'date_modified';
             
-            // Warning: 'version' sync but not signed into zotero
-            if(isSyncedWithZotero && !Zotero.Users.getCurrentUserID()) {
-                onStatusChange(libraryID, 'failed');
-                store.set(addPopupMessageAtom, {
-                    type: 'warning',
-                    title: 'Unable to Complete Sync with Beaver',
-                    text: `Please sign into your Zotero account to continue syncing with Beaver.`,
-                    expire: true
-                });
-                continue;
-            }
             // if(isSyncedWithZotero && library.lastSync && library.lastSync.sync_type === 'initial') {}
             
             // ----- 2. Get backend sync status -----
