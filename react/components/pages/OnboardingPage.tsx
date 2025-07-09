@@ -3,7 +3,7 @@ import { Spinner, ArrowRightIcon, Icon, AlertIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
-import { isInitialSyncCompleteAtom, initialSyncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
+import { isSyncCompleteAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { hasAuthorizedAccessAtom } from '../../atoms/profile';
 import LibrarySelector from "../auth/LibrarySelector";
@@ -42,8 +42,8 @@ const OnboardingPage: React.FC = () => {
     useUploadQueueManager();
 
     // Library sync state
-    const setInitialSyncStatus = useSetAtom(initialSyncStatusAtom);
-    const isInitialSyncComplete = useAtomValue(isInitialSyncCompleteAtom);
+    const setSyncStatus = useSetAtom(syncStatusAtom);
+    const isSyncComplete = useAtomValue(isSyncCompleteAtom);
     
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
@@ -87,7 +87,7 @@ const OnboardingPage: React.FC = () => {
             );
 
             // Save the sync status for the selected libraries
-            setInitialSyncStatus(selectedLibraries);
+            setSyncStatus(selectedLibraries);
             
             // Determine if onboarding is required
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
@@ -172,7 +172,7 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getFooterMessage = () => {
-        if (!isUploadComplete || !isInitialSyncComplete) {
+        if (!isUploadComplete || !isSyncComplete) {
             return "Please wait for the file uploads to complete.";
         } else if (fileStatusSummary && fileStatusSummary.uploadFailedCount > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
@@ -287,7 +287,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadComplete || !isInitialSyncComplete || isCompletingOnboarding}
+                            disabled={!isUploadComplete || !isSyncComplete || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete

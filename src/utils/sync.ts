@@ -1,11 +1,10 @@
 import { syncService } from '../services/syncService';
-import { SyncStatus } from '../../react/atoms/ui';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
-import { initialSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
+import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, DeleteData, ZoteroLibrary } from '../../react/types/zotero';
 import { isLibrarySynced } from './zoteroIdentifier';
 import { v4 as uuidv4 } from 'uuid';
@@ -602,7 +601,7 @@ export const deleteItems = async (userId: string, libraryID: number, zoteroKeys:
  * @param updates Partial LibrarySyncStatus object containing only the fields to update
  */
 const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
-    store.set(initialSyncStatusAtom, (current: Record<number, LibrarySyncStatus>) => ({
+    store.set(syncStatusAtom, (current: Record<number, LibrarySyncStatus>) => ({
         ...current,
         [libraryID]: {
             ...(current[libraryID] || {}),
