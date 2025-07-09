@@ -37,21 +37,7 @@ declare namespace Zotero {
              * Close the database connection.
              */
             closeDatabase(): Promise<void>;
-
-            /**
-             * Insert a record into the 'items' table.
-             * @param user_id User ID for the item
-             * @param item Data for the new item record.
-             */
-            insertItem(user_id: string, item: Omit<import("../src/services/database").ItemRecord, 'user_id'>): Promise<void>;
-
-            /**
-             * Insert multiple records into the 'items' table in a single transaction.
-             * @param user_id User ID for the items
-             * @param items An array of item data.
-             */
-            insertItemsBatch(user_id: string, items: Omit<import("../src/services/database").ItemRecord, 'user_id'>[]): Promise<void>;
-
+            
             /**
              * Insert a record into the 'attachments' table.
              * @param user_id User ID for the attachment
@@ -60,21 +46,6 @@ declare namespace Zotero {
             insertAttachment(
                 user_id: string,
                 attachment: Omit<import("../src/services/database").AttachmentRecord, 'user_id'>
-            ): Promise<void>;
-
-            /**
-             * Update an existing item record identified by user_id, library_id and zotero_key.
-             * Only 'item_metadata_hash' can be updated.
-             * @param user_id The user_id of the item.
-             * @param libraryId The library_id of the item.
-             * @param zoteroKey The zotero_key of the item.
-             * @param updates An object containing the fields to update.
-             */
-            updateItem(
-                user_id: string,
-                libraryId: number,
-                zoteroKey: string,
-                updates: Partial<Omit<import("../src/services/database").ItemRecord, 'user_id' | 'library_id' | 'zotero_key'>>
             ): Promise<void>;
 
             /**
@@ -90,23 +61,6 @@ declare namespace Zotero {
                 zoteroKey: string,
                 updates: Partial<Omit<import("../src/services/database").AttachmentRecord, 'user_id' | 'library_id' | 'zotero_key'>>
             ): Promise<void>;
-
-            /**
-             * Upsert multiple item records in a single transaction.
-             * Inserts items that don't exist, updates items where 'item_metadata_hash' has changed.
-             * @param user_id User ID for the items
-             * @param items An array of item data. Requires 'library_id', 'zotero_key', 'item_metadata_hash'.
-             */
-            upsertItemsBatch(user_id: string, items: Omit<import("../src/services/database").ItemRecord, 'user_id'>[]): Promise<void>;
-
-            /**
-             * Retrieve an item record by its user_id, library_id and zotero_key.
-             * @param user_id The user_id of the item.
-             * @param libraryId The library_id of the item.
-             * @param zoteroKey The zotero_key of the item.
-             * @returns The ItemRecord if found, otherwise null.
-             */
-            getItemByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<import("../src/services/database").ItemRecord | null>;
 
             /**
              * Retrieve an attachment record by its user_id, library_id and zotero_key.
@@ -147,14 +101,6 @@ declare namespace Zotero {
             ): Promise<void>;
 
             /**
-             * Delete an item record by user_id, library_id and zotero_key.
-             * @param user_id The user_id of the item to delete.
-             * @param libraryId The library_id of the item to delete.
-             * @param zoteroKey The zotero_key of the item to delete.
-             */
-            deleteItem(user_id: string, libraryId: number, zoteroKey: string): Promise<void>;
-
-            /**
              * Delete an attachment record by user_id, library_id and zotero_key.
              * @param user_id The user_id of the attachment to delete.
              * @param libraryId The library_id of the attachment to delete.
@@ -181,15 +127,6 @@ declare namespace Zotero {
             deleteByLibraryAndKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<void>;
 
             /**
-             * Retrieve multiple item records by their user_id, library_id and zotero_keys.
-             * @param user_id The user_id of the items.
-             * @param libraryId The library_id of the items.
-             * @param zoteroKeys Array of zotero_keys to retrieve.
-             * @returns Array of ItemRecord objects found, empty array if none found.
-             */
-            getItemsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").ItemRecord[]>;
-
-            /**
              * Retrieve multiple attachment records by their user_id, library_id and zotero_keys.
              * @param user_id The user_id of the attachments.
              * @param libraryId The library_id of the attachments.
@@ -197,24 +134,6 @@ declare namespace Zotero {
              * @returns Array of AttachmentRecord objects found, empty array if none found.
              */
             getAttachmentsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").AttachmentRecord[]>;
-
-            /**
-             * Retrieve the sync state of multiple items by their user_id, library_id and zotero_keys.
-             * @param user_id The user_id of the items.
-             * @param libraryId The library_id of the items.
-             * @param zoteroKeys Array of zotero_keys to retrieve.
-             * @returns Array of SyncState objects found, empty array if none found.
-             */
-            getItemSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").SyncState[]>;
-
-            /**
-             * Retrieve the sync state of multiple attachments by their user_id, library_id and zotero_keys.
-             * @param user_id The user_id of the attachments.
-             * @param libraryId The library_id of the attachments.
-             * @param zoteroKeys Array of zotero_keys to retrieve.
-             * @returns Array of SyncState objects found, empty array if none found.
-             */
-            getAttachmentSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<import("../src/services/database").SyncState[]>;
 
             /**
              * Get comprehensive upload statistics
@@ -465,51 +384,6 @@ declare namespace Zotero {
              * @returns The MessageModel if found, otherwise null
              */
             getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
-
-
-            // --- Library Sync State Methods ---
-
-            /**
-             * Get the sync state for a library
-             * @param user_id The user_id of the library
-             * @param library_id The library_id of the library
-             */
-            getLibrarySyncState(user_id: string, library_id: number): Promise<import("../src/services/database").LibrarySyncStateRecord | null>;
-
-            /**
-             * Insert a library sync state record
-             * @param record The library sync state record to insert
-             */
-            insertLibrarySyncState(record: import("../src/services/database").LibrarySyncStateRecord): Promise<void>;
-
-            /**
-             * Update the sync state for a library
-             * @param user_id The user_id of the library
-             * @param library_id The library_id of the library
-             * @param updates The updates to the library sync state record
-             */
-            updateLibrarySyncState(user_id: string, library_id: number, updates: Partial<import("../src/services/database").LibrarySyncStateRecord>): Promise<void>;
-
-            /**
-             * Upsert a library sync state record
-             * @param record The library sync state record to upsert
-             */
-            upsertLibrarySyncState(record: import("../src/services/database").LibrarySyncStateRecord): Promise<void>;
-
-            /**
-             * Delete a library sync state record
-             * @param user_id The user_id of the library
-             * @param library_id The library_id of the library
-             */
-            deleteLibrarySyncState(user_id: string, library_id: number): Promise<void>;
-
-            /**
-             * Get all zotero_keys from both items and attachments for a user.
-             * @param user_id The user_id to get keys for
-             * @param libraryId library_id to filter by.
-             * @returns Array of zotero_keys from both items and attachments
-             */
-            getAllZoteroKeys(user_id: string, libraryId: number): Promise<string[]>;
 
         }
 

@@ -5,32 +5,6 @@ import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
 import { getPref } from '../utils/prefs';
 
-/*
- * Backend sync state of item or attachment
- */
-export interface SyncState {
-    library_id: number;
-    zotero_key: string;
-    metadata_hash: string;
-    zotero_version: number;
-    zotero_synced: boolean;
-}
-
-/* 
- * Interface for the 'items' table row
- * 
- * Table stores the current syncing state of a zotero item.
- * Items are only stored after they have been synced
- * 
- */
-export interface ItemRecord {
-    user_id: string;
-    library_id: number;
-    zotero_key: string;
-    item_metadata_hash: string;
-    zotero_version: number;
-    zotero_synced: boolean;   // was item synced with zotero when sync with Beaver was last performed
-}
 
 /* 
  * Interface for the 'attachments' table row
@@ -43,9 +17,6 @@ export interface AttachmentRecord {
     user_id: string;
     library_id: number;
     zotero_key: string;
-    attachment_metadata_hash: string;
-    zotero_version: number;
-    zotero_synced: boolean;   // was attachment synced with zotero when sync with Beaver was last performed
 
     // File hash and upload status
     file_hash: string | null;  // processed file hash (can differ from current file hash)
@@ -68,20 +39,6 @@ export interface UploadQueueRecord {
     // Reference to representative attachment record
     library_id: number;
     zotero_key: string;
-}
-
-/*
- * Interface for the 'library_sync_state' table row
- *
- * Table stores the backend library version at the time of the last sync and the last sync date for each library.
- * The backend library version is the version of the backend library (corresponding to Zotero's library version)
- * The last sync date is the date of the last sync from this local device.
- */
-export interface LibrarySyncStateRecord {
-    user_id: string;
-    library_id: number;
-    last_synced_version: number;
-    last_sync_date_modified: string;
 }
 
 // Add a new interface for queue item input that allows optional file_hash
@@ -183,27 +140,11 @@ export class BeaverDB {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
         }
 
-        // Create database schema
-        await this.conn.queryAsync(`
-            CREATE TABLE IF NOT EXISTS items (
-                user_id                  TEXT(36) NOT NULL,
-                library_id               INTEGER NOT NULL,
-                zotero_key               TEXT NOT NULL,
-                item_metadata_hash       TEXT NOT NULL,
-                zotero_version           INTEGER NOT NULL DEFAULT 0,
-                zotero_synced            BOOLEAN NOT NULL DEFAULT FALSE,
-                PRIMARY KEY(user_id, library_id, zotero_key)
-            );
-        `);
-
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS attachments (
                 user_id                  TEXT(36) NOT NULL,
                 library_id               INTEGER NOT NULL,
                 zotero_key               TEXT NOT NULL,
-                attachment_metadata_hash TEXT NOT NULL,
-                zotero_version           INTEGER NOT NULL DEFAULT 0,
-                zotero_synced            BOOLEAN NOT NULL DEFAULT FALSE,
                 file_hash                TEXT,
                 upload_status            TEXT,
                 PRIMARY KEY(user_id, library_id, zotero_key)
@@ -253,15 +194,6 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
-            CREATE TABLE IF NOT EXISTS library_sync_state (
-                user_id                  TEXT(36) NOT NULL,
-                library_id               INTEGER NOT NULL,
-                last_synced_version      INTEGER NOT NULL,
-                last_sync_date_modified  TEXT NOT NULL,
-                PRIMARY KEY(user_id, library_id)
-            );
-        `);
 
         // DB indexes
         await this.conn.queryAsync(`
@@ -303,57 +235,6 @@ export class BeaverDB {
     }
 
     /**
-     * Insert a record into the 'items' table.
-     * @param user_id User ID for the item
-     * @param item Data for the new item record.
-     */
-    public async insertItem(user_id: string, item: Omit<ItemRecord, 'user_id'>): Promise<void> {
-        await this.conn.queryAsync(
-            `INSERT INTO items (user_id, library_id, zotero_key, item_metadata_hash, zotero_version, zotero_synced)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-                user_id,
-                item.library_id,
-                item.zotero_key,
-                item.item_metadata_hash,
-                item.zotero_version ?? 0,
-                item.zotero_synced ?? false
-            ]
-        );
-    }
-
-    /**
-     * Insert multiple records into the 'items' table in a single transaction.
-     * @param user_id User ID for the items
-     * @param items An array of item data.
-     */
-    public async insertItemsBatch(user_id: string, items: Omit<ItemRecord, 'user_id'>[]): Promise<void> {
-        if (items.length === 0) {
-            return;
-        }
-
-        const placeholders = items.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
-        const values: any[] = [];
-        items.forEach((item) => {
-            values.push(
-                user_id,
-                item.library_id,
-                item.zotero_key,
-                item.item_metadata_hash,
-                item.zotero_version ?? 0,
-                item.zotero_synced ?? false
-            );
-        });
-
-        const query = `INSERT INTO items (user_id, library_id, zotero_key, item_metadata_hash, zotero_version, zotero_synced) VALUES ${placeholders}`;
-
-        // Using executeTransaction ensures atomicity
-        await this.conn.executeTransaction(async () => {
-            await this.conn.queryAsync(query, values);
-        });
-    }
-
-    /**
      * Insert a record into the 'attachments' table.
      * @param user_id User ID for the attachment
      * @param attachment Data for the new attachment.
@@ -363,15 +244,12 @@ export class BeaverDB {
         attachment: Omit<AttachmentRecord, 'user_id'>
     ): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO attachments (user_id, library_id, zotero_key, attachment_metadata_hash, zotero_version, zotero_synced, file_hash, upload_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (user_id, library_id, zotero_key, file_hash, upload_status)
+             VALUES (?, ?, ?, ?, ?)`,
             [
                 user_id,
                 attachment.library_id,
                 attachment.zotero_key,
-                attachment.attachment_metadata_hash,
-                attachment.zotero_version,
-                attachment.zotero_synced,
                 attachment.file_hash,
                 attachment.upload_status
             ]
@@ -380,15 +258,15 @@ export class BeaverDB {
 
     /**
      * Helper to build and execute update queries safely.
-     * @param table The table to update ('items' or 'attachments').
+     * @param table The table to update ('attachments').
      * @param user_id The user_id to match.
      * @param libraryId The library_id to match.
      * @param zoteroKey The zotero_key to match.
      * @param updates An object containing field-value pairs to update.
      * @param allowedFields List of fields allowed to be updated.
      */
-    private async executeUpdate<T extends ItemRecord | AttachmentRecord>(
-        table: 'items' | 'attachments',
+    private async executeUpdate<T extends AttachmentRecord>(
+        table: 'attachments',
         user_id: string,
         libraryId: number,
         zoteroKey: string,
@@ -413,23 +291,6 @@ export class BeaverDB {
     }
 
     /**
-     * Update an existing item record identified by user_id, library_id and zotero_key.
-     * @param user_id The user_id of the item.
-     * @param libraryId The library_id of the item.
-     * @param zoteroKey The zotero_key of the item.
-     * @param updates An object containing the fields to update.
-     */
-    public async updateItem(
-        user_id: string,
-        libraryId: number,
-        zoteroKey: string,
-        updates: Partial<Omit<ItemRecord, 'user_id' | 'library_id' | 'zotero_key'>>
-    ): Promise<void> {
-        const allowedFields: (keyof ItemRecord)[] = ['item_metadata_hash', 'zotero_version', 'zotero_synced'];
-        await this.executeUpdate<ItemRecord>('items', user_id, libraryId, zoteroKey, updates, allowedFields);
-    }
-
-    /**
      * Update an existing attachment record identified by user_id, library_id and zotero_key.
      * @param user_id The user_id of the attachment.
      * @param libraryId The library_id of the attachment.
@@ -443,87 +304,10 @@ export class BeaverDB {
         updates: Partial<Omit<AttachmentRecord, 'user_id' | 'library_id' | 'zotero_key'>>
     ): Promise<void> {
         const allowedFields: (keyof AttachmentRecord)[] = [
-            'attachment_metadata_hash',
-            'zotero_version',
-            'zotero_synced',
             'file_hash',
             'upload_status'
         ];
         await this.executeUpdate<AttachmentRecord>('attachments', user_id, libraryId, zoteroKey, updates, allowedFields);
-    }
-
-    /**
-     * Upsert multiple item records in a single transaction.
-     * Inserts items that don't exist, updates items where any tracked fields have changed.
-     * @param user_id User ID for the items
-     * @param items An array of item data.
-     */
-    public async upsertItemsBatch(user_id: string, items: Omit<ItemRecord, 'user_id'>[]): Promise<void> {
-        if (items.length === 0) {
-            return;
-        }
-
-        // Single prepared statement for performance
-        const insertSQL = `
-            INSERT INTO items (
-                user_id,
-                library_id,
-                zotero_key,
-                item_metadata_hash,
-                zotero_version,
-                zotero_synced
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?
-            )
-            ON CONFLICT(user_id, library_id, zotero_key) DO UPDATE SET
-                item_metadata_hash = excluded.item_metadata_hash,
-                zotero_version = excluded.zotero_version,
-                zotero_synced = excluded.zotero_synced;
-        `;
-
-        await this.conn.executeTransaction(async () => {
-            for (const item of items) {
-                const params = [
-                    user_id,
-                    item.library_id,
-                    item.zotero_key,
-                    item.item_metadata_hash,
-                    item.zotero_version ?? 0,
-                    item.zotero_synced ?? false
-                ];
-                
-                await this.conn.queryAsync(insertSQL, params);
-            }
-        });
-    }
-
-    /**
-    * Helper method to construct ItemRecord from a database row
-    */
-    private static rowToItemRecord(row: any): ItemRecord {
-        return {
-            user_id: row.user_id,
-            library_id: row.library_id,
-            zotero_key: row.zotero_key,
-            item_metadata_hash: row.item_metadata_hash,
-            zotero_version: row.zotero_version ?? 0,
-            zotero_synced: !!row.zotero_synced,
-        };
-    }
-
-    /**
-     * Retrieve an item record by its user_id, library_id and zotero_key.
-     * @param user_id The user_id of the item.
-     * @param libraryId The library_id of the item.
-     * @param zoteroKey The zotero_key of the item.
-     * @returns The ItemRecord if found, otherwise null.
-     */
-    public async getItemByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<ItemRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM items WHERE user_id = ?1 AND library_id = ?2 AND zotero_key = ?3`,
-            [user_id, libraryId, zoteroKey]
-        );
-        return rows.length === 0 ? null : BeaverDB.rowToItemRecord(rows[0]);
     }
 
     /**
@@ -534,9 +318,6 @@ export class BeaverDB {
             user_id: row.user_id,
             library_id: row.library_id,
             zotero_key: row.zotero_key,
-            attachment_metadata_hash: row.attachment_metadata_hash,
-            zotero_version: row.zotero_version || 0,
-            zotero_synced: row.zotero_synced || false,
             file_hash: row.file_hash,
             upload_status: row.upload_status as UploadStatus,
         };
@@ -606,18 +387,12 @@ export class BeaverDB {
                 user_id,
                 library_id,
                 zotero_key,
-                attachment_metadata_hash,
-                zotero_version,
-                zotero_synced,
                 file_hash,
                 upload_status
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?
             )
             ON CONFLICT(user_id, library_id, zotero_key) DO UPDATE SET
-                attachment_metadata_hash = excluded.attachment_metadata_hash,
-                zotero_version = excluded.zotero_version,
-                zotero_synced = excluded.zotero_synced,
                 file_hash = excluded.file_hash,
                 upload_status = excluded.upload_status;
         `;
@@ -628,9 +403,6 @@ export class BeaverDB {
                     user_id,
                     attachment.library_id,
                     attachment.zotero_key,
-                    attachment.attachment_metadata_hash,
-                    attachment.zotero_version ?? 0,
-                    attachment.zotero_synced ?? false,
                     attachment.file_hash,
                     attachment.upload_status ?? null
                 ];
@@ -638,19 +410,6 @@ export class BeaverDB {
                 await this.conn.queryAsync(insertSQL, params);
             }
         });
-    }
-
-    /**
-     * Delete an item record by user_id, library_id and zotero_key.
-     * @param user_id The user_id of the item to delete.
-     * @param libraryId The library_id of the item to delete.
-     * @param zoteroKey The zotero_key of the item to delete.
-     */
-    public async deleteItem(user_id: string, libraryId: number, zoteroKey: string): Promise<void> {
-        await this.conn.queryAsync(
-            `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-            [user_id, libraryId, zoteroKey]
-        );
     }
 
     /**
@@ -667,7 +426,7 @@ export class BeaverDB {
     }
 
     /**
-     * Delete a record from either items or attachments table by user_id, library_id and zotero_key.
+     * Delete a record from attachments table by user_id, library_id and zotero_key.
      * Use this method when you don't know which table contains the record.
      * @param user_id The user_id of the record to delete.
      * @param libraryId The library_id of the record to delete.
@@ -677,11 +436,6 @@ export class BeaverDB {
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
             await this.conn.queryAsync(
-                `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-                [user_id, libraryId, zoteroKey]
-            );
-
-            await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
@@ -689,7 +443,7 @@ export class BeaverDB {
     }
 
     /**
-     * Delete multiple records from either items or attachments table by user_id, library_id and zotero_keys.
+     * Delete multiple records from attachments table by user_id, library_id and zotero_keys.
      * Use this method when you don't know which table contains the records.
      * @param user_id The user_id of the records to delete.
      * @param libraryId The library_id of the records to delete.
@@ -703,60 +457,11 @@ export class BeaverDB {
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
             const placeholders = zoteroKeys.map(() => '?').join(',');
-            
-            await this.conn.queryAsync(
-                `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
-                [user_id, libraryId, ...zoteroKeys]
-            );
-
             await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
                 [user_id, libraryId, ...zoteroKeys]
             );
         });
-    }
-
-    /**
-     * Retrieve multiple item records by their user_id, library_id and zotero_keys.
-     * @param user_id The user_id of the items.
-     * @param libraryId The library_id of the items.
-     * @param zoteroKeys Array of zotero_keys to retrieve.
-     * @returns Array of ItemRecord objects found, empty array if none found.
-     */
-    public async getItemsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<ItemRecord[]> {
-        if (zoteroKeys.length === 0) {
-            return [];
-        }
-        
-        const placeholders = zoteroKeys.map(() => '?').join(',');
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM items WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
-            [user_id, libraryId, ...zoteroKeys]
-        );
-        
-        return rows.map((row: any) => BeaverDB.rowToItemRecord(row));
-    }
-
-    /**
-     * Retrieve the sync state of multiple items by their user_id, library_id and zotero_keys.
-     * @param user_id The user_id of the items.
-     * @param libraryId The library_id of the items.
-     * @param zoteroKeys Array of zotero_keys to retrieve.
-     * @returns Array of SyncState objects found, empty array if none found.
-     */
-    public async getItemSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<SyncState[]> {
-        if (zoteroKeys.length === 0) {
-            return [];
-        }
-
-        const items = await this.getItemsByZoteroKeys(user_id, libraryId, zoteroKeys);
-        return items.map((item: ItemRecord) => ({
-            library_id: item.library_id,
-            zotero_key: item.zotero_key,
-            metadata_hash: item.item_metadata_hash,
-            zotero_version: item.zotero_version,
-            zotero_synced: item.zotero_synced
-        } as SyncState));
     }
 
     /**
@@ -778,29 +483,6 @@ export class BeaverDB {
         );
         
         return rows.map((row: any) => BeaverDB.rowToAttachmentRecord(row));
-    }
-
-    /**
-     * Retrieve the sync state of multiple attachments by their user_id, library_id and zotero_keys.
-     * @param user_id The user_id of the attachments.
-     * @param libraryId The library_id of the attachments.
-     * @param zoteroKeys Array of zotero_keys to retrieve.
-     * @returns Array of SyncState objects found, empty array if none found.
-     */
-    public async getAttachmentSyncState(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<SyncState[]> {
-        if (zoteroKeys.length === 0) {
-            return [];
-        }
-
-        const attachments = await this.getAttachmentsByZoteroKeys(user_id, libraryId, zoteroKeys);
-        return attachments.map((attachment: AttachmentRecord) => ({
-            library_id: attachment.library_id,
-            zotero_key: attachment.zotero_key,
-            metadata_hash: attachment.attachment_metadata_hash,
-            zotero_version: attachment.zotero_version,
-            zotero_synced: attachment.zotero_synced
-        } as SyncState));
-        
     }
 
     /**
@@ -1786,118 +1468,6 @@ export class BeaverDB {
         return BeaverDB.messageRecordToModel(record);
     }
 
-    /**
-     * Helper method to construct LibrarySyncStateRecord from a database row
-     */
-    private static rowToLibrarySyncStateRecord(row: any): LibrarySyncStateRecord {
-        return {
-            user_id: row.user_id,
-            library_id: row.library_id,
-            last_synced_version: row.last_synced_version,
-            last_sync_date_modified: row.last_sync_date_modified,
-        };
-    }
-
-    /**
-     * Retrieve a library sync state record by its user_id and library_id.
-     * @param user_id The user_id of the record.
-     * @param libraryId The library_id of the record.
-     * @returns The LibrarySyncStateRecord if found, otherwise null.
-     */
-    public async getLibrarySyncState(user_id: string, libraryId: number): Promise<LibrarySyncStateRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM library_sync_state WHERE user_id = ?1 AND library_id = ?2`,
-            [user_id, libraryId]
-        );
-        return rows.length === 0 ? null : BeaverDB.rowToLibrarySyncStateRecord(rows[0]);
-    }
-
-    /**
-     * Insert a record into the 'library_sync_state' table.
-     * @param record Data for the new record.
-     */
-    public async insertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
-        await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_sync_date_modified)
-             VALUES (?, ?, ?, ?)`,
-            [
-                record.user_id,
-                record.library_id,
-                record.last_synced_version,
-                record.last_sync_date_modified,
-            ]
-        );
-    }
-
-    /**
-     * Update an existing library sync state record.
-     * @param user_id The user_id of the record.
-     * @param libraryId The library_id of the record.
-     * @param updates An object containing the fields to update.
-     */
-    public async updateLibrarySyncState(
-        user_id: string,
-        libraryId: number,
-        updates: Partial<Omit<LibrarySyncStateRecord, 'user_id' | 'library_id'>>
-    ): Promise<void> {
-        const fieldsToUpdate = Object.keys(updates);
-        if (fieldsToUpdate.length === 0) {
-            return;
-        }
-
-        const setClauses = fieldsToUpdate.map(field => `${field} = ?`).join(', ');
-        const values = [...Object.values(updates), user_id, libraryId];
-
-        const query = `UPDATE library_sync_state SET ${setClauses} WHERE user_id = ? AND library_id = ?`;
-        await this.conn.queryAsync(query, values);
-    }
-
-    /**
-     * Update an existing library sync state record or insert a new one if it doesn't exist.
-     * @param record Data for the library sync state record.
-     */
-    public async upsertLibrarySyncState(record: LibrarySyncStateRecord): Promise<void> {
-        await this.conn.queryAsync(
-            `INSERT INTO library_sync_state (user_id, library_id, last_synced_version, last_sync_date_modified)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(user_id, library_id) DO UPDATE SET
-                last_synced_version = excluded.last_synced_version,
-                last_sync_date_modified = excluded.last_sync_date_modified`,
-            [
-                record.user_id,
-                record.library_id,
-                record.last_synced_version,
-                record.last_sync_date_modified,
-            ]
-        );
-    }
-
-    /**
-     * Delete a library sync state record.
-     * @param user_id The user_id of the library
-     * @param library_id The library_id of the library
-     */
-    public async deleteLibrarySyncState(user_id: string, library_id: number): Promise<void> {
-        await this.conn.queryAsync(`DELETE FROM library_sync_state WHERE user_id = ? AND library_id = ?`, [user_id, library_id]);
-    }
-
-    /**
-     * Get all zotero_keys from both items and attachments for a user.
-     * @param user_id The user_id to get keys for
-     * @param libraryId library_id to filter by.
-     * @returns Array of zotero_keys from both items and attachments
-     */
-    public async getAllZoteroKeys(user_id: string, libraryId: number): Promise<string[]> {
-        const query = `
-            SELECT zotero_key FROM items WHERE user_id = ? AND library_id = ?
-            UNION
-            SELECT zotero_key FROM attachments WHERE user_id = ? AND library_id = ?
-        `;
-        const params = [user_id, libraryId, user_id, libraryId];
-
-        const rows = await this.conn.queryAsync(query, params);
-        return rows.map((row: any) => row.zotero_key);
-    }
 }
 
 /* Example Usage:
