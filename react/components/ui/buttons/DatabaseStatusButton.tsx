@@ -56,11 +56,11 @@ const DatabaseStatusButton: React.FC = () => {
                 dotColor={iconState.color}
                 fading={iconState.fading}
                 fadeDuration={1000}
-                hover={isHovering}
+                hover={isHovering && !isSyncing}
                 {...props}
             />
         );
-    }, [iconState.color, iconState.fading, isHovering]);
+    }, [iconState.color, iconState.fading, isHovering, isSyncing]);
     
     return (
         <IconButton
