@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useAtomValue } from "jotai";
-import { syncingAtom, syncErrorAtom } from "../../../atoms/ui";
+import { syncingAtom, syncErrorAtom } from "../../../atoms/sync";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { DatabaseStatusIcon } from "../../icons/icons";

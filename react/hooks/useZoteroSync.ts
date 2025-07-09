@@ -1,9 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { useEffect, useRef } from "react";
 import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
-import { syncStatusAtom, SyncStatus } from "../atoms/ui";
+import { SyncStatus } from "../atoms/sync";
 import { fileUploader } from "../../src/services/FileUploader";
 import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from "../atoms/profile";
 import { store } from "../index";
@@ -37,7 +37,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
-    const setSyncStatus = useSetAtom(syncStatusAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
     // ref to prevent multiple registrations if dependencies change
@@ -59,7 +58,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (itemIds.length === 0) return;
         
         // Reset progress counters at the start of this operation
-        setSyncStatus('in_progress');
+        // setSyncStatus('in_progress');
         
         try {
             // Get the items from Zotero
@@ -92,7 +91,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                     libraryID,
                     libraryItems.map(item => ({ action: 'upsert', item })),
                     'incremental', 
-                    (status) => setSyncStatus(status), 
+                    (status) => {}, 
+                    // (status) => setSyncStatus(status), 
                     (processed, total) => { },
                     SYNC_BATCH_SIZE_INCREMENTAL
                 );
@@ -166,11 +166,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
 
         // Set initial status to in_progress
         logger("useZoteroSync: Setting up Zotero sync", 3);
-        setSyncStatus('in_progress');
+        // setSyncStatus('in_progress');
         
         // Status change callback
         const onStatusChange = (status: SyncStatus) => {
-            setSyncStatus(status);
+            // setSyncStatus(status);
         }
         const onProgress = (processed: number, total: number) => { }
         
@@ -255,7 +255,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 // First sync the database
                 await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL, onStatusChange, onProgress);
                 // Then set up the observer after sync completes
-                setupObserver();
+                // setupObserver();
                 // Start file uploader after sync completes
                 if (store.get(planFeaturesAtom)?.uploadFiles) {
                     await fileUploader.start();
@@ -264,7 +264,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);
                 // Still set up the observer even if initial sync fails
-                setupObserver();
+                // setupObserver();
             }
         };
         

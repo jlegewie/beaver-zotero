@@ -1,10 +1,10 @@
 import { atom } from 'jotai';
-import { SyncStatus } from './ui';
-import { syncLibraryIdsAtom } from './profile';
 
 // File uploader status - simplified to just track running and failed states
 export const isFileUploaderRunningAtom = atom<boolean>(false);
 export const isFileUploaderFailedAtom = atom<boolean>(false);
+
+export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 
 // Library sync tracking
 export interface LibrarySyncStatus {
@@ -17,6 +17,20 @@ export interface LibrarySyncStatus {
 
 // Library-specific sync status atom
 export const initialSyncStatusAtom = atom<Record<number, LibrarySyncStatus>>({});
+
+export const syncingAtom = atom(
+    (get) => {
+        const initialSyncStatus = get(initialSyncStatusAtom);
+        return Object.values(initialSyncStatus).some(status => status.status === 'in_progress');
+    }
+);
+
+export const syncErrorAtom = atom(
+    (get) => {
+        const initialSyncStatus = get(initialSyncStatusAtom);
+        return Object.values(initialSyncStatus).some(status => status.status === 'failed');
+    }
+);
 
 // Derived atom for overall library sync progress
 export const initialSyncStatusSummaryAtom = atom(
