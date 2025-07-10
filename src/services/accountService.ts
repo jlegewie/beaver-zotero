@@ -12,6 +12,7 @@ interface AuthorizationRequest {
     libraries: ZoteroLibrary[];
     require_onboarding: boolean;
     processing_tier: ProcessingTier;
+    use_zotero_sync: boolean;
 }
 
 interface ProfileRequest {
@@ -98,14 +99,15 @@ export class AccountService extends ApiService {
      * @param requireOnboarding Whether the user needs to complete onboarding
      * @returns Promise with the response message
      */
-    async authorizeAccess(requireOnboarding: boolean = true, libraries: ZoteroLibrary[], processingTier: ProcessingTier): Promise<{ message: string }> {
+    async authorizeAccess(requireOnboarding: boolean = true, libraries: ZoteroLibrary[], processingTier: ProcessingTier, syncWithZotero: boolean = false): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<{ message: string }>('/account/authorize', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
             require_onboarding: requireOnboarding,
             libraries: libraries,
-            processing_tier: processingTier
+            processing_tier: processingTier,
+            use_zotero_sync: syncWithZotero
         } as AuthorizationRequest);
     }
 

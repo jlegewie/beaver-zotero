@@ -16,7 +16,7 @@ import { isUploadCompleteAtom } from "../../atoms/files";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
-import { getZoteroUserIdentifier } from "../../../src/utils/zoteroIdentifier";
+import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroIdentifier";
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 import { useUploadQueueManager } from "../../hooks/useUploadQueueManager";
@@ -34,6 +34,9 @@ const OnboardingPage: React.FC = () => {
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
+
+    // Sync toggle state
+    const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
@@ -55,10 +58,21 @@ const OnboardingPage: React.FC = () => {
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
 
+    // Initialize sync toggle state
+    useEffect(() => {
+        const syncEnabled = isLibrarySynced(1);
+        setUseZoteroSync(syncEnabled);
+    }, []);
+
     // Handle library selection change
     const handleLibrarySelectionChange = (libraryIds: number[]) => {
         setSelectedLibraryIds(libraryIds);
         setIsLibrarySelectionValid(libraryIds.length > 0);
+    };
+
+    // Handle sync toggle change
+    const handleSyncToggleChange = (checked: boolean) => {
+        setUseZoteroSync(checked);
     };
 
     // Handle authorization
@@ -107,7 +121,7 @@ const OnboardingPage: React.FC = () => {
                 })
                 .filter(library => library !== null);
             
-            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier);
+            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync);
 
             // Update local state
             if (profileWithPlan) {
@@ -188,7 +202,7 @@ const OnboardingPage: React.FC = () => {
             className="display-flex flex-col flex-1 min-h-0 min-w-0"
         >
             {/* Scrollable content area */}
-            <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1">
+            <div id="1" className="overflow-y-auto scrollbar flex-1 p-4 mr-1">
                 {/* Top spacing */}
                 {/* <div style={{ height: '5vh' }}></div> */}
 
@@ -202,7 +216,7 @@ const OnboardingPage: React.FC = () => {
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-col gap-4">
+                    <div id="2" className="display-flex flex-col gap-4 flex-1 min-h-0">
                         <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
                         <div className="text-base font-color-secondary">
                             Select the libraries you want to sync with Beaver. By continuing, you link this Zotero account to your Beaver account and authorize 
@@ -214,6 +228,8 @@ const OnboardingPage: React.FC = () => {
                             onSelectionChange={handleLibrarySelectionChange}
                             libraryStatistics={libraryStatistics}
                             setLibraryStatistics={setLibraryStatistics}
+                            useZoteroSync={useZoteroSync}
+                            handleSyncToggleChange={handleSyncToggleChange}
                         />
                     </div>
                 )}

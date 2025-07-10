@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Icon, AlertIcon, Spinner, CSSIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom, planDisplayNameAtom } from "../../atoms/profile";
+import { planFeaturesAtom, profileBalanceAtom, planDisplayNameAtom, planNameAtom } from "../../atoms/profile";
+import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 
@@ -9,9 +10,11 @@ interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
+    useZoteroSync: boolean;
+    handleSyncToggleChange: (checked: boolean) => void;
 }
 
-const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics }) => {
+const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics, useZoteroSync, handleSyncToggleChange }) => {
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -274,7 +277,15 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                         {`File pages in selected libraries exceed the limit for the ${planDisplayName} plan. Some documents won't be searchable.`}
                     </div>
                 </div>
-            )}
+            )}      
+
+            
+                    <div className="flex-1" />
+                    <ZoteroSyncToggle 
+                        checked={useZoteroSync}
+                        onChange={handleSyncToggleChange}
+                    />
+                
             
 
             {/* Totals for selected libraries */}
