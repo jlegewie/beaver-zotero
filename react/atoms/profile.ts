@@ -84,3 +84,8 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.has_completed_onboarding || false;
 });
+
+export const syncWithZoteroAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.use_zotero_sync || false;
+});
