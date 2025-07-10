@@ -9,6 +9,7 @@ import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier,
 import { isLibrarySynced } from './zoteroIdentifier';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
+import { syncWithZoteroAtom } from '../../react/atoms/profile';
 
 /**
  * Interface for item filter function
@@ -646,6 +647,23 @@ export async function syncZoteroDatabase(
     const onStatusChange = (libraryID: number, status: SyncStatus) => {
         updateSyncStatus(libraryID, { status });
     };
+
+    // Determine sync method
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+    // Validate sync method for all libraries
+    if (syncWithZotero && (!Zotero.Sync.Runner.enabled || !Zotero.Users.getCurrentUserID())) {
+        logger(`Beaver Sync '${syncSessionId}': Zotero sync is not enabled. Failing sync...`, 2);
+        store.set(addPopupMessageAtom, {
+            type: 'warning',
+            title: 'Unable to Complete Sync with Beaver',
+            text: `Zotero sync is disabled. Please enable Zotero sync in Zotero preferences or sign into your Zotero account.`,
+            expire: true
+        });
+        libraryIds.forEach(libraryID => onStatusChange(libraryID, 'failed'));
+        return;
+    }
     
     // Sync each library
     for (const library of librariesToSync) {
@@ -655,11 +673,19 @@ export async function syncZoteroDatabase(
         try {
             logger(`Beaver Sync '${syncSessionId}': Syncing library ${libraryID} (${libraryName})`, 2);
 
-            // ----- 1. Determine sync method -----
+            // ----- 1. Validate sync method for this library -----
             const isSyncedWithZotero = isLibrarySynced(libraryID);
-            const syncMethod = isSyncedWithZotero ? 'version' : 'date_modified';
-            
-            // if(isSyncedWithZotero && library.lastSync && library.lastSync.sync_type === 'initial') {}
+            if (syncWithZotero && !isSyncedWithZotero) {
+                logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
+                onStatusChange(libraryID, 'failed');
+                store.set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Unable to Complete Sync with Beaver',
+                    text: `The library ${libraryName} is not synced with Zotero so Beaver cannot sync it.`,
+                    expire: true
+                });
+                continue;
+            }
             
             // ----- 2. Get backend sync status -----
             logger(`Beaver Sync '${syncSessionId}': (1) Get backend sync status (syncMethod: ${syncMethod})`, 3);
