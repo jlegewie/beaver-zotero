@@ -279,13 +279,16 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 </div>
             )}      
 
-            
+            {!isLoading && (
+                <>
                     <div className="flex-1" />
                     <ZoteroSyncToggle 
                         checked={useZoteroSync}
                         onChange={handleSyncToggleChange}
+                        disabled={disableSyncToggle}
                     />
-                
+                </>
+            )}
             
 
             {/* Totals for selected libraries */}

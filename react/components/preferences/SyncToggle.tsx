@@ -13,8 +13,8 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
 
     return (
         <div
-            className="display-flex flex-col rounded-md hover:bg-senary cursor-pointer"
-            onClick={handleToggle}
+            className={`display-flex flex-col rounded-md ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+            onClick={disabled ? undefined : handleToggle}
             title={disabled
                 ? "Requires Zotero account"
                 : "When enabled, Beaver will build on Zotero sync for multi-device support and improved sync. When disabled, you can only use Beaver on this device."}
