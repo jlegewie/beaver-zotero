@@ -228,6 +228,7 @@ const OnboardingPage: React.FC = () => {
                             onSelectionChange={handleLibrarySelectionChange}
                             libraryStatistics={libraryStatistics}
                             setLibraryStatistics={setLibraryStatistics}
+                            disableSyncToggle={!isLibrarySynced(1)}
                             useZoteroSync={useZoteroSync}
                             handleSyncToggleChange={handleSyncToggleChange}
                         />
