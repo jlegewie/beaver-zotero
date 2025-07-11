@@ -182,8 +182,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Create the notification observer with debouncing
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
+                    // Handle Zotero sync completion (only when syncWithZotero is true)
                     if (syncWithZotero && type === 'sync' && event === 'finish') {
-                        // Check which libraries have changed and sync them
                         const changedLibraries = updateLibraryVersionCache();
                         
                         if (changedLibraries.length > 0) {
@@ -198,13 +198,15 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         } else {
                             logger(`useZoteroSync: No library changes detected after sync`, 3);
                         }
+                        return; // Exit early for sync events
                     }
+                    
+                    // Handle item events
                     if (type === 'item') {
-                        // Record the timestamp of this event
-                        eventsRef.current.timestamp = Date.now();
+                        let shouldSetTimer = false;
                         
+                        // Handle add/modify events (only when syncWithZotero is false)
                         if (!syncWithZotero && (event === 'add' || event === 'modify')) {
-                            // Filter add events by library immediately and track changed libraries
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             items
                                 .filter(item => syncLibraryIds.includes(item.libraryID))
@@ -212,15 +214,16 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                     eventsRef.current.changedLibraries.add(item.libraryID);
                                     eventsRef.current.delete.delete(item.id);
                                 });
-                        } else if (event === 'delete') {
-                            // Collect delete events with their metadata
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Handle delete events (always processed regardless of sync mode)
+                        if (event === 'delete') {
                             ids.forEach(id => {
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
-                                    if (libraryID && key) {
-                                        if(syncLibraryIds.includes(libraryID)) {
-                                            eventsRef.current.delete.set(id, { libraryID, key });
-                                        }
+                                    if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                        eventsRef.current.delete.set(id, { libraryID, key });
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
                                     }
@@ -228,15 +231,20 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                     logger(`useZoteroSync: Missing extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
                                 }
                             });
+                            shouldSetTimer = true;
                         }
                         
-                        // Clear existing timer and set a new one
-                        if (eventsRef.current.timer !== null) {
-                            clearTimeout(eventsRef.current.timer);
+                        // Only set timer if we have events that need processing
+                        if (shouldSetTimer) {
+                            eventsRef.current.timestamp = Date.now();
+                            
+                            // Clear existing timer and set a new one
+                            if (eventsRef.current.timer !== null) {
+                                clearTimeout(eventsRef.current.timer);
+                            }
+                            
+                            eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
                         }
-                        
-                        // Set new timer to process events after debounce period
-                        eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
                     }
                 }
             // @ts-ignore Zotero.Notifier.Notify is defined
