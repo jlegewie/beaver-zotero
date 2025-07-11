@@ -79,11 +79,11 @@ export interface ItemSyncState {
     metadata_hash: string;
     zotero_version: number;
     zotero_synced: boolean;
+    date_modified: string;
 }
 
 export interface AttachmentSyncState extends ItemSyncState {
     file_hash: string;
-    upload_status: UploadStatus;
 }
 
 export interface SyncStatusComparisonResponse {
