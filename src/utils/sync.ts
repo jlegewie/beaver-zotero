@@ -619,6 +619,7 @@ export async function syncZoteroDatabase(
     libraryIds: number[],
     filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
+    syncType?: 'initial' | 'incremental' | 'consistency' | 'verification'
 ): Promise<void> {
     const syncSessionId = uuidv4();
 
@@ -763,7 +764,7 @@ export async function syncZoteroDatabase(
             
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
-            const syncType = isInitialSync ? 'initial' : 'verification';
+            if(!syncType) syncType = isInitialSync ? 'initial' : 'verification';
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
             await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, onStatusChange, onProgress, batchSize);
 

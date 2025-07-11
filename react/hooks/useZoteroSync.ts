@@ -65,7 +65,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             }
 
             logger(`useZoteroSync: Syncing ${librariesToSync.length} changed libraries: ${librariesToSync.join(', ')}`, 3);
-            await syncZoteroDatabase(librariesToSync, filterFunction, SYNC_BATCH_SIZE_INITIAL);
+            await syncZoteroDatabase(librariesToSync, filterFunction, SYNC_BATCH_SIZE_INITIAL, 'incremental');
         } catch (error: any) {
             logger(`useZoteroSync: Error syncing changed libraries: ${error.message}`, 1);
             Zotero.logError(error);
