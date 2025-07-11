@@ -3,7 +3,7 @@ import { syncZoteroDatabase, syncingItemFilter, ItemFilterFunction } from "../..
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
-import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from "../atoms/profile";
+import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom } from "../atoms/profile";
 import { store } from "../index";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
@@ -36,6 +36,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
     // ref to prevent multiple registrations if dependencies change
     const zoteroNotifierIdRef = useRef<string | null>(null);
@@ -47,6 +48,47 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         timer: null,
         timestamp: 0
     });
+
+    // ref for library version cache - maps libraryID to version
+    const libraryVersionCacheRef = useRef<Map<number, number>>(new Map());
+
+    /**
+     * Initialize the library version cache with current versions
+     */
+    const initializeLibraryVersionCache = () => {
+        libraryVersionCacheRef.current.clear();
+        
+        for (const libraryId of syncLibraryIds) {
+            const library = Zotero.Libraries.get(libraryId);
+            if (library) {
+                libraryVersionCacheRef.current.set(libraryId, library.libraryVersion);
+                logger(`useZoteroSync: Cached library ${libraryId} version: ${library.libraryVersion}`, 3);
+            }
+        }
+    };
+
+    /**
+     * Update the library version cache and return libraries that have changed
+     */
+    const updateLibraryVersionCache = (): number[] => {
+        const changedLibraries: number[] = [];
+        
+        for (const libraryId of syncLibraryIds) {
+            const library = Zotero.Libraries.get(libraryId);
+            if (library) {
+                const cachedVersion = libraryVersionCacheRef.current.get(libraryId) || 0;
+                const currentVersion = library.libraryVersion;
+                
+                if (currentVersion > cachedVersion) {
+                    changedLibraries.push(libraryId);
+                    libraryVersionCacheRef.current.set(libraryId, currentVersion);
+                    logger(`useZoteroSync: Library ${libraryId} version updated: ${cachedVersion} -> ${currentVersion}`, 3);
+                }
+            }
+        }
+        
+        return changedLibraries;
+    };
 
     /**
      * Process libraries that have changes by calling syncZoteroDatabase
@@ -140,11 +182,28 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Create the notification observer with debouncing
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
+                    if (syncWithZotero && type === 'sync' && event === 'finish') {
+                        // Check which libraries have changed and sync them
+                        const changedLibraries = updateLibraryVersionCache();
+                        
+                        if (changedLibraries.length > 0) {
+                            logger(`useZoteroSync: Detected ${changedLibraries.length} changed libraries after sync: ${changedLibraries.join(', ')}`, 3);
+                            
+                            try {
+                                await syncZoteroDatabase(changedLibraries, filterFunction, SYNC_BATCH_SIZE_INITIAL, 'incremental');
+                            } catch (error: any) {
+                                logger(`useZoteroSync: Error syncing changed libraries after Zotero sync: ${error.message}`, 1);
+                                Zotero.logError(error);
+                            }
+                        } else {
+                            logger(`useZoteroSync: No library changes detected after sync`, 3);
+                        }
+                    }
                     if (type === 'item') {
                         // Record the timestamp of this event
                         eventsRef.current.timestamp = Date.now();
                         
-                        if (event === 'add' || event === 'modify') {
+                        if (!syncWithZotero && (event === 'add' || event === 'modify')) {
                             // Filter add events by library immediately and track changed libraries
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             items
@@ -184,16 +243,24 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-sync');
+            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync'], 'beaver-sync');
         };
         
         // Initialize sync operations
         const initializeSync = async () => {
             try {
+                // Initialize the library version cache
+                initializeLibraryVersionCache();
+                
                 // First sync the database
                 await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL);
+                
+                // Update cache after initial sync
+                updateLibraryVersionCache();
+                
                 // Then set up the observer after sync completes
                 setupObserver();
+                
                 // Start file uploader after sync completes
                 if (store.get(planFeaturesAtom)?.uploadFiles) {
                     await fileUploader.start();
@@ -223,6 +290,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 eventsRef.current.timer = null;
             }
             
+            // Clear the cache
+            libraryVersionCacheRef.current.clear();
+            
             // Process any remaining events before unmounting
             if (
                 eventsRef.current.changedLibraries.size > 0 || 
@@ -231,5 +301,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 processEvents();
             }
         };
-    }, [isAuthenticated, filterFunction, debounceMs, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
+    }, [isAuthenticated, filterFunction, debounceMs, isAuthorized, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
 }
