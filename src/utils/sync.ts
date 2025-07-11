@@ -916,6 +916,12 @@ export async function performConsistencyCheck(
     
     logger(`Beaver Consistency Check '${consistencyId}': Starting consistency check for library ${libraryID} (${libraryName})`, 2);
 
+    const userId = store.get(userIdAtom);
+    if (!userId) {
+        logger(`Beaver Consistency Check '${consistencyId}': No user ID found, cannot perform consistency check.`, 1);
+        throw new Error('User not authenticated for consistency check');
+    }
+
     const result: ConsistencyCheckResult = {
         library_id: libraryID,
         total_items_checked: 0,
@@ -947,105 +953,173 @@ export async function performConsistencyCheck(
             
             logger(`Beaver Consistency Check '${consistencyId}': Page ${page + 1}: ${backendItems.length} items, ${backendAttachments.length} attachments`, 4);
 
-            for (const backendItem of backendItems) {
-                result.total_items_checked++;
-                
+            result.total_items_checked += backendItems.length;
+            result.total_attachments_checked += backendAttachments.length;
+
+            // Process items concurrently
+            const itemProcessingPromises = backendItems.map(async (backendItem) => {
                 try {
-                    // Find corresponding Zotero item
                     const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, backendItem.zotero_key);
                     if (!zoteroItem) {
-                        // TODO: Delete item from backend
-                        logger(`Beaver Consistency Check '${consistencyId}': Item ${backendItem.zotero_key} not found in local Zotero`, 4);
-                        continue;
+                        return { deleteKey: backendItem.zotero_key };
                     }
 
-                    // Calculate local hash
                     const localItemData = await extractItemData(zoteroItem);
-                    const localHash = localItemData.item_metadata_hash;
-
-                    // Compare hashes
-                    if (backendItem.metadata_hash !== localHash) {
+                    if (backendItem.metadata_hash !== localItemData.item_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendItem.zotero_version,
                             backendItem.date_modified,
                             zoteroItem.version,
                             zoteroItem.dateModified
                         );
-
-                        const discrepancy: ItemDiscrepancy = {
-                            zotero_key: backendItem.zotero_key,
-                            backend_hash: backendItem.metadata_hash,
-                            local_hash: localHash,
-                            backend_version: backendItem.zotero_version,
-                            local_version: zoteroItem.version,
-                            backend_date_modified: backendItem.date_modified,
-                            local_date_modified: zoteroItem.dateModified,
-                            should_update: shouldUpdate,
-                            reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer'
+                        return {
+                            discrepancy: {
+                                zotero_key: backendItem.zotero_key,
+                                backend_hash: backendItem.metadata_hash,
+                                local_hash: localItemData.item_metadata_hash,
+                                backend_version: backendItem.zotero_version,
+                                local_version: zoteroItem.version,
+                                backend_date_modified: backendItem.date_modified,
+                                local_date_modified: zoteroItem.dateModified,
+                                should_update: shouldUpdate,
+                                reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
+                            },
                         };
-
-                        result.item_discrepancies.push(discrepancy);
-                        
-                        logger(`Beaver Consistency Check '${consistencyId}': Item discrepancy found for ${backendItem.zotero_key}: ${discrepancy.reason}`, 2);
                     }
                 } catch (error: any) {
                     logger(`Beaver Consistency Check '${consistencyId}': Error processing item ${backendItem.zotero_key}: ${error.message}`, 1);
                     Zotero.logError(error);
                 }
-            }
+                return null;
+            });
 
-            // Process attachments on this page
-            for (const backendAttachment of backendAttachments) {
-                result.total_attachments_checked++;
-                
+            // Process attachments concurrently
+            const attachmentProcessingPromises = backendAttachments.map(async (backendAttachment) => {
                 try {
-                    // Find corresponding Zotero attachment
                     const zoteroAttachment = Zotero.Items.getByLibraryAndKey(libraryID, backendAttachment.zotero_key);
                     if (!zoteroAttachment) {
-                        logger(`Beaver Consistency Check '${consistencyId}': Attachment ${backendAttachment.zotero_key} not found in local Zotero`, 4);
-                        continue;
+                        return { deleteKey: backendAttachment.zotero_key };
                     }
 
-                    // Calculate local hash (lightweight mode - skip file hash)
                     const localAttachmentData = await extractAttachmentData(zoteroAttachment, { lightweight: true });
-                    if (!localAttachmentData) {
-                        continue; // Skip if attachment data can't be extracted
-                    }
-                    
-                    const localHash = localAttachmentData.attachment_metadata_hash;
-
-                    // Compare metadata hashes (ignore file_hash as requested)
-                    if (backendAttachment.metadata_hash !== localHash) {
+                    if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,
                             backendAttachment.date_modified,
                             zoteroAttachment.version,
                             zoteroAttachment.dateModified
                         );
-
-                        const discrepancy: AttachmentDiscrepancy = {
-                            zotero_key: backendAttachment.zotero_key,
-                            backend_hash: backendAttachment.metadata_hash,
-                            local_hash: localHash,
-                            backend_version: backendAttachment.zotero_version,
-                            local_version: zoteroAttachment.version,
-                            backend_date_modified: backendAttachment.date_modified,
-                            local_date_modified: zoteroAttachment.dateModified,
-                            should_update: shouldUpdate,
-                            reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer'
+                        return {
+                            discrepancy: {
+                                zotero_key: backendAttachment.zotero_key,
+                                backend_hash: backendAttachment.metadata_hash,
+                                local_hash: localAttachmentData.attachment_metadata_hash,
+                                backend_version: backendAttachment.zotero_version,
+                                local_version: zoteroAttachment.version,
+                                backend_date_modified: backendAttachment.date_modified,
+                                local_date_modified: zoteroAttachment.dateModified,
+                                should_update: shouldUpdate,
+                                reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
+                            },
                         };
-
-                        result.attachment_discrepancies.push(discrepancy);
-                        
-                        logger(`Beaver Consistency Check '${consistencyId}': Attachment discrepancy found for ${backendAttachment.zotero_key}: ${discrepancy.reason}`, 2);
                     }
                 } catch (error: any) {
                     logger(`Beaver Consistency Check '${consistencyId}': Error processing attachment ${backendAttachment.zotero_key}: ${error.message}`, 1);
                     Zotero.logError(error);
                 }
+                return null;
+            });
+
+            const [itemResults, attachmentResults] = await Promise.all([
+                Promise.all(itemProcessingPromises),
+                Promise.all(attachmentProcessingPromises),
+            ]);
+
+            // Collate results
+            const itemsToDelete = itemResults.map(r => r?.deleteKey).filter((k): k is string => !!k);
+            result.item_discrepancies.push(...itemResults.map(r => r?.discrepancy).filter((d): d is ItemDiscrepancy => !!d));
+            
+            const attachmentsToDelete = attachmentResults.map(r => r?.deleteKey).filter((k): k is string => !!k);
+            result.attachment_discrepancies.push(...attachmentResults.map(r => r?.discrepancy).filter((d): d is AttachmentDiscrepancy => !!d));
+
+            // Log discrepancies
+            result.item_discrepancies.forEach(d => logger(`Beaver Consistency Check '${consistencyId}': Item discrepancy found for ${d.zotero_key}: ${d.reason}`, 2));
+            result.attachment_discrepancies.forEach(d => logger(`Beaver Consistency Check '${consistencyId}': Attachment discrepancy found for ${d.zotero_key}: ${d.reason}`, 2));
+
+            // Delete items from backend that don't exist locally
+            const allKeysToDelete = [...itemsToDelete, ...attachmentsToDelete];
+            if (allKeysToDelete.length > 0) {
+                logger(`Beaver Consistency Check '${consistencyId}': ${allKeysToDelete.length} items not found locally, deleting from backend.`, 3);
+                try {
+                    await deleteItems(userId, libraryID, allKeysToDelete);
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Failed to delete items from backend: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
             }
 
-            // Check if there are more pages
+            // Send updates to backend if requested and discrepancies found
+            if (sendUpdates && (result.item_discrepancies.length > 0 || result.attachment_discrepancies.length > 0)) {
+                logger(`Beaver Consistency Check '${consistencyId}': Sending updates to backend for discrepancies`, 3);
+                
+                try {
+                    const itemsToUpdate = result.item_discrepancies
+                        .filter(d => d.should_update)
+                        .map(d => d.zotero_key);
+                    
+                    const attachmentsToUpdate = result.attachment_discrepancies
+                        .filter(d => d.should_update)
+                        .map(d => d.zotero_key);
+
+                    if (itemsToUpdate.length > 0 || attachmentsToUpdate.length > 0) {
+                        // Get the actual items to send
+                        const itemsToSync: SyncItem[] = [];
+                        
+                        // Add regular items
+                        for (const key of itemsToUpdate) {
+                            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+                            if (item && item.isRegularItem()) {
+                                itemsToSync.push({ action: 'upsert', item });
+                            }
+                        }
+                        
+                        // Add attachments
+                        for (const key of attachmentsToUpdate) {
+                            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+                            if (item && item.isAttachment()) {
+                                itemsToSync.push({ action: 'upsert', item });
+                            }
+                        }
+
+                        // Add items to delete
+                        // TODO: Add items to delete
+
+                        if (itemsToSync.length > 0) {
+                            await syncItemsToBackend(
+                                consistencyId,
+                                libraryID,
+                                itemsToSync,
+                                'consistency'
+                            );
+                            
+                            result.items_updated = itemsToUpdate.length;
+                            result.attachments_updated = attachmentsToUpdate.length;
+                        }
+                    }
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Error sending updates: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
+            }
+
+            // Log summary
+            logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
+            logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
+            logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
+            if (sendUpdates) {
+                logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
+            }
+
             hasMore = backendData.has_more;
             page++;
             
@@ -1054,68 +1128,6 @@ export async function performConsistencyCheck(
             Zotero.logError(error);
             break;
         }
-    }
-
-    // Send updates to backend if requested and discrepancies found
-    if (sendUpdates && (result.item_discrepancies.length > 0 || result.attachment_discrepancies.length > 0)) {
-        logger(`Beaver Consistency Check '${consistencyId}': Sending updates to backend for discrepancies`, 3);
-        
-        try {
-            const itemsToUpdate = result.item_discrepancies
-                .filter(d => d.should_update)
-                .map(d => d.zotero_key);
-            
-            const attachmentsToUpdate = result.attachment_discrepancies
-                .filter(d => d.should_update)
-                .map(d => d.zotero_key);
-
-            if (itemsToUpdate.length > 0 || attachmentsToUpdate.length > 0) {
-                // Get the actual items to send
-                const itemsToSync: SyncItem[] = [];
-                
-                // Add regular items
-                for (const key of itemsToUpdate) {
-                    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
-                    if (item && item.isRegularItem()) {
-                        itemsToSync.push({ action: 'upsert', item });
-                    }
-                }
-                
-                // Add attachments
-                for (const key of attachmentsToUpdate) {
-                    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
-                    if (item && item.isAttachment()) {
-                        itemsToSync.push({ action: 'upsert', item });
-                    }
-                }
-
-                // Add items to delete
-                // TODO: Add items to delete
-
-                if (itemsToSync.length > 0) {
-                    await syncItemsToBackend(
-                        consistencyId,
-                        libraryID,
-                        itemsToSync,
-                        'consistency'
-                    );
-                    
-                    result.items_updated = itemsToUpdate.length;
-                    result.attachments_updated = attachmentsToUpdate.length;
-                }
-            }
-        } catch (error: any) {
-            logger(`Beaver Consistency Check '${consistencyId}': Error sending updates: ${error.message}`, 1);
-            Zotero.logError(error);
-        }
-    }
-
-    // Log summary
-    logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
-    logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
-    logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
-    if (sendUpdates) {
-        logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
     }
 
     return result;
