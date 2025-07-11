@@ -213,28 +213,6 @@ export class SyncService extends ApiService {
         return this.get<SyncDataResponse>(`/zotero/sync/data?${params.toString()}`);
     }
 
-    /**
-     * Compares local metadata hashes with backend to identify items needing sync
-     * @param libraryId The Zotero library ID
-     * @param hashes Object containing arrays of items and attachments with their hashes
-     * @returns Promise with comparison results indicating which items need syncing
-     */
-    async compareSyncState(
-        libraryId: number, 
-        items: ItemSyncState[],
-        attachments: ItemSyncState[],
-        populateLocalDB: boolean = false
-    ): Promise<SyncStatusComparisonResponse> {
-        const payload: SyncStatusComparisonRequest = {
-            library_id: libraryId,
-            items: items,
-            attachments: attachments,
-        };
-        if (populateLocalDB) {
-            payload.populate_local_db = true;
-        }
-        return this.post<SyncStatusComparisonResponse>('/zotero/sync/compare-sync-state', payload);
-    }
 }
 
 // Export syncService
