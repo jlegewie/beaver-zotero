@@ -1,9 +1,7 @@
-import { v4 as uuidv4 } from 'uuid';
 import { useEffect, useRef } from "react";
-import { syncZoteroDatabase, syncItemsToBackend, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
+import { syncZoteroDatabase, syncingItemFilter, ItemFilterFunction } from "../../src/utils/sync";
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
-import { SyncStatus } from "../atoms/sync";
 import { fileUploader } from "../../src/services/FileUploader";
 import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from "../atoms/profile";
 import { store } from "../index";
@@ -11,14 +9,14 @@ import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
 
 const DEBOUNCE_MS = 2000;
+const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
 const SYNC_BATCH_SIZE_INITIAL = 100;
-const SYNC_BATCH_SIZE_INCREMENTAL = 200;
 
 /**
  * Interface for collected sync events
  */
 interface CollectedEvents {
-    addModify: Set<number>; // Item IDs for add/modify events
+    changedLibraries: Set<number>; // Library IDs that have changes
     delete: Map<number, { libraryID: number, key: string }>; // ID to {libraryID, key} mapping for delete events
     timer: NodeJS.Timeout | null; // Timer ID for debounce
     timestamp: number; // Last event timestamp
@@ -44,61 +42,32 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     
     // ref for collected events - using ref to persist between renders
     const eventsRef = useRef<CollectedEvents>({
-        addModify: new Set(),
+        changedLibraries: new Set(),
         delete: new Map(),
         timer: null,
         timestamp: 0
     });
 
     /**
-     * Process collected add/modify events by library
+     * Process libraries that have changes by calling syncZoteroDatabase
      */
-    const processAddModifyEvents = async () => {
-        const itemIds = Array.from(eventsRef.current.addModify);
-        if (itemIds.length === 0) return;
-        
-        // Reset progress counters at the start of this operation
-        // setSyncStatus('in_progress');
+    const processChangedLibraries = async () => {
+        const changedLibraryIds = Array.from(eventsRef.current.changedLibraries);
+        if (changedLibraryIds.length === 0) return;
         
         try {
-            // Get the items from Zotero
-            const items = await Zotero.Items.getAsync(itemIds as number[]);
+            // Filter to only sync libraries that are in syncLibraryIds
+            const librariesToSync = changedLibraryIds.filter(libraryId => syncLibraryIds.includes(libraryId));
             
-            // Filter items that match our criteria
-            const filteredItems = items.filter(filterFunction).filter(item => syncLibraryIds.includes(item.libraryID));
-            
-            if (filteredItems.length === 0) {
-                logger(`useZoteroSync: No items to sync`, 3);
+            if (librariesToSync.length === 0) {
+                logger(`useZoteroSync: No libraries to sync`, 3);
                 return;
             }
-            
-            // Group items by library ID and sync each group separately
-            const itemsByLibrary = new Map<number, Zotero.Item[]>();
-            
-            for (const item of filteredItems) {
-                const libraryID = item.libraryID;
-                if (!itemsByLibrary.has(libraryID)) {
-                    itemsByLibrary.set(libraryID, []);
-                }
-                itemsByLibrary.get(libraryID)?.push(item);
-            }
-            
-            // Sync each library's items separately
-            for (const [libraryID, libraryItems] of itemsByLibrary.entries()) {
-                logger(`useZoteroSync: Syncing ${libraryItems.length} changed items from library ${libraryID}`, 3);
-                await syncItemsToBackend(
-                    uuidv4(),
-                    libraryID,
-                    libraryItems.map(item => ({ action: 'upsert', item })),
-                    'incremental', 
-                    (status) => {}, 
-                    // (status) => setSyncStatus(status), 
-                    (processed, total) => { },
-                    SYNC_BATCH_SIZE_INCREMENTAL
-                );
-            }
+
+            logger(`useZoteroSync: Syncing ${librariesToSync.length} changed libraries: ${librariesToSync.join(', ')}`, 3);
+            await syncZoteroDatabase(librariesToSync, filterFunction, SYNC_BATCH_SIZE_INITIAL);
         } catch (error: any) {
-            logger(`useZoteroSync: Error syncing modified items: ${error.message}`, 1);
+            logger(`useZoteroSync: Error syncing changed libraries: ${error.message}`, 1);
             Zotero.logError(error);
         }
     };
@@ -143,15 +112,15 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
      * Process all collected events and reset the collection
      */
     const processEvents = async () => {
-        logger(`useZoteroSync: Processing collected events after ${debounceMs}ms of inactivity`, 3);
-        logger(`useZoteroSync: Events to process: ${eventsRef.current.addModify.size} add/modify, ${eventsRef.current.delete.size} delete`, 3);
+        logger(`useZoteroSync: Processing collected events after ${LIBRARY_SYNC_DELAY_MS}ms of inactivity`, 3);
+        logger(`useZoteroSync: Events to process: ${eventsRef.current.changedLibraries.size} changed libraries, ${eventsRef.current.delete.size} delete`, 3);
         
         // Process each type of event
-        await processAddModifyEvents();
+        await processChangedLibraries();
         await processDeleteEvents();
         
         // Reset collections
-        eventsRef.current.addModify.clear();
+        eventsRef.current.changedLibraries.clear();
         eventsRef.current.delete.clear();
         eventsRef.current.timer = null;
     };
@@ -161,12 +130,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
-        // if (!planFeatures.databaseSync) return;
         if (syncLibraryIds.length === 0) return;
 
         // Set initial status to in_progress
         logger("useZoteroSync: Setting up Zotero sync", 3);
-        // setSyncStatus('in_progress');
         
         // Function to create the observer
         const setupObserver = () => {
@@ -177,35 +144,13 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         // Record the timestamp of this event
                         eventsRef.current.timestamp = Date.now();
                         
-                        if (event === 'add') {
-                            // Filter add events by library immediately
+                        if (event === 'add' || event === 'modify') {
+                            // Filter add events by library immediately and track changed libraries
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             items
                                 .filter(item => syncLibraryIds.includes(item.libraryID))
                                 .forEach(item => {
-                                    eventsRef.current.addModify.add(item.id);
-                                    eventsRef.current.delete.delete(item.id);
-                                });
-                        } else if (event === 'modify') {
-                            const items = await Zotero.Items.getAsync(ids as number[]);
-                            // Handle items in trash
-                            items
-                                .filter(item => syncLibraryIds.includes(item.libraryID))
-                                .filter(item => item.isInTrash())
-                                // Only include items that match syncing criteria
-                                .filter(filterFunction)
-                                .filter(item => syncLibraryIds.includes(item.libraryID))
-                                // Add to delete events
-                                .forEach(item => {
-                                    eventsRef.current.delete.set(item.id, { libraryID: item.libraryID, key: item.key });
-                                    eventsRef.current.addModify.delete(item.id);
-                                });
-                            // Handle all other items
-                            items
-                                .filter(item => syncLibraryIds.includes(item.libraryID))
-                                .filter(item => !item.isInTrash())
-                                .forEach(item => {
-                                    eventsRef.current.addModify.add(item.id);
+                                    eventsRef.current.changedLibraries.add(item.libraryID);
                                     eventsRef.current.delete.delete(item.id);
                                 });
                         } else if (event === 'delete') {
@@ -216,7 +161,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                     if (libraryID && key) {
                                         if(syncLibraryIds.includes(libraryID)) {
                                             eventsRef.current.delete.set(id, { libraryID, key });
-                                            eventsRef.current.addModify.delete(id); // Ensure mutual exclusivity
                                         }
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
@@ -233,7 +177,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         }
                         
                         // Set new timer to process events after debounce period
-                        eventsRef.current.timer = setTimeout(processEvents, debounceMs);
+                        eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
                     }
                 }
             // @ts-ignore Zotero.Notifier.Notify is defined
@@ -249,7 +193,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 // First sync the database
                 await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL);
                 // Then set up the observer after sync completes
-                // setupObserver();
+                setupObserver();
                 // Start file uploader after sync completes
                 if (store.get(planFeaturesAtom)?.uploadFiles) {
                     await fileUploader.start();
@@ -258,7 +202,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);
                 // Still set up the observer even if initial sync fails
-                // setupObserver();
+                setupObserver();
             }
         };
         
@@ -281,7 +225,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Process any remaining events before unmounting
             if (
-                eventsRef.current.addModify.size > 0 || 
+                eventsRef.current.changedLibraries.size > 0 || 
                 eventsRef.current.delete.size > 0
             ) {
                 processEvents();
