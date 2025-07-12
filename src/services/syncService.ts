@@ -154,7 +154,7 @@ export class SyncService extends ApiService {
             attachments: attachments,
             deletions: deletions,
         };
-        return this.post<SyncItemsResponse>('/zotero/sync/items', payload);
+        return this.post<SyncItemsResponse>('/api/v1/sync/items', payload);
     }
 
     /**
@@ -168,7 +168,7 @@ export class SyncService extends ApiService {
             library_id: String(libraryId),
             sync_method: syncMethod,
         });        
-        return this.get<SyncStateResponse | null>(`/zotero/sync/state?${params.toString()}`);
+        return this.get<SyncStateResponse | null>(`/api/v1/sync/state?${params.toString()}`);
     }
 
     /**
@@ -178,7 +178,7 @@ export class SyncService extends ApiService {
      * @returns Promise with the deletion result
      */
     async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteZoteroDataResponse> {
-        return this.post<DeleteZoteroDataResponse>('/zotero/sync/items/delete', {
+        return this.post<DeleteZoteroDataResponse>('/api/v1/sync/items/delete', {
             library_id: libraryId,
             zotero_keys: zoteroKeys
         });
@@ -210,7 +210,7 @@ export class SyncService extends ApiService {
         if (toLibraryVersion !== null) {
             params.append('to_version', String(toLibraryVersion));
         }
-        return this.get<SyncDataResponse>(`/zotero/sync/data?${params.toString()}`);
+        return this.get<SyncDataResponse>(`/api/v1/sync/data?${params.toString()}`);
     }
 
 }
