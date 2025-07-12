@@ -69,6 +69,7 @@ export interface ZoteroCollection {
     collection_id: number;
     key: string;
     name: string;
+    version: number;
     parent_collection: string | null;
     relations: Record<string, any> | null;
 }

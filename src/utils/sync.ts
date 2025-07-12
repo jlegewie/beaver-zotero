@@ -219,6 +219,7 @@ function extractCollections(item: Zotero.Item): ZoteroCollection[] | null {
             return {
                 collection_id,
                 key: collection.key,
+                version: collection.version,
                 name: collection.name,
                 parent_collection: collection.parentCollection || null,
                 relations: collection.relations,
