@@ -150,6 +150,8 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
         parent_key: item.parentKey || null,
         attachment_url: item.getField('url'),
         link_mode: item.attachmentLinkMode,
+        tags: item.getTags().length > 0 ? item.getTags() : null,
+        collections: extractCollections(item),
         deleted: item.isInTrash(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
