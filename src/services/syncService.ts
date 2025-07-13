@@ -137,6 +137,7 @@ export class SyncService extends ApiService {
     async processItemsBatch(
         sessionId: string,
         syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
+        syncMethod: 'version' | 'date_modified',
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentData[],
@@ -146,7 +147,7 @@ export class SyncService extends ApiService {
         const payload: ItemBatchRequest = {
             session_id: sessionId,
             sync_type: syncType,
-            sync_method: 'version',
+            sync_method: syncMethod,
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
             library_id: libraryId,

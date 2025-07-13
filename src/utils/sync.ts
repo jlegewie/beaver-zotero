@@ -401,6 +401,7 @@ export async function syncItemsToBackend(
     libraryID: number,
     items: SyncItem[],
     syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
+    syncMethod: 'version' | 'date_modified',
     onStatusChange?: (libraryID: number, status: SyncStatus) => void,
     onProgress?: (libraryID: number, processed: number, total: number) => void,
     batchSize: number = 200,
@@ -494,6 +495,7 @@ export async function syncItemsToBackend(
                     batchResult = await syncService.processItemsBatch(
                         syncSessionId,
                         syncType,
+                        syncMethod,
                         libraryID,
                         batchItemsData,
                         batchAttachmentsData,
@@ -769,7 +771,7 @@ export async function syncZoteroDatabase(
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
             if(!syncType) syncType = isInitialSync ? 'initial' : 'verification';
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
-            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, onStatusChange, onProgress, batchSize);
+            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, syncMethod, onStatusChange, onProgress, batchSize);
 
             onStatusChange(libraryID, 'completed');
             
@@ -1094,6 +1096,9 @@ export async function performConsistencyCheck(
                             }
                         }
 
+                        const syncWithZotero = store.get(syncWithZoteroAtom);
+                        const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
                         // Add items to delete
                         // TODO: Add items to delete
 
@@ -1102,7 +1107,8 @@ export async function performConsistencyCheck(
                                 consistencyId,
                                 libraryID,
                                 itemsToSync,
-                                'consistency'
+                                'consistency',
+                                syncMethod
                             );
                             
                             result.items_updated = itemsToUpdate.length;
