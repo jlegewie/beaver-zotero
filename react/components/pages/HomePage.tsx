@@ -23,9 +23,6 @@ const HomePage: React.FC = () => {
     const generateResponse = useSetAtom(generateResponseAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
 
-    // Upload queue manager
-    useUploadQueueManager();
-
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
     useIndexingCompleteMessage();

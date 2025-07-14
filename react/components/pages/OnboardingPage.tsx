@@ -41,9 +41,6 @@ const OnboardingPage: React.FC = () => {
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
 
-    // Upload queue manager
-    useUploadQueueManager();
-
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const isSyncComplete = useAtomValue(isSyncCompleteAtom);
