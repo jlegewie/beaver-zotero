@@ -53,7 +53,7 @@ export const useProfileSync = () => {
             }
 
             // If the plan allows file uploads, start the file uploader
-            if (profileData.profile.plan.upload_files) {
+            if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {
                 await fileUploader.start();
             } else {
                 await fileUploader.stop();
