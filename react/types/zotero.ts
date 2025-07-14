@@ -69,6 +69,7 @@ export interface ZoteroCollection {
     collection_id: number;
     key: string;
     name: string;
+    version: number;
     parent_collection: string | null;
     relations: Record<string, any> | null;
 }
@@ -81,6 +82,12 @@ export interface BibliographicIdentifier {
     pmcid?: string;
     arXivID?: string;
     archiveID?: string;
+}
+
+export interface DeleteData extends ZoteroItemReference {
+    zotero_version: number | null;
+    zotero_synced: boolean | null;
+    date_modified: string | null;
 }
 
 export interface ItemData extends ZoteroItemBase {
@@ -103,11 +110,13 @@ export interface ItemData extends ZoteroItemBase {
     formatted_citation?: string | null;
     deleted: boolean;
     tags?: any[] | null;
-    collections?: any[] | null;
+    collections?: ZoteroCollection[] | null;
     citation_key?: string | null;
 
-    // Hash of item metadata for efficient updates
+    // Item metadata hash and zotero version
     item_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export type ItemDataHashedFields = Pick<ItemData,
@@ -137,6 +146,8 @@ export interface AttachmentData extends ZoteroItemBase {
     title?: string | null;
     attachment_url?: string | null;
     link_mode?: number | null;
+    tags?: any[] | null;
+    collections?: ZoteroCollection[] | null;
 
     // file metadata
     filename: string;
@@ -144,11 +155,13 @@ export interface AttachmentData extends ZoteroItemBase {
 
     // additional fields
     attachment_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
 }
 
 export type AttachmentDataHashedFields = Pick<AttachmentData,
-    | 'zotero_key' | 'library_id' | 'parent_key'
-    | 'attachment_url' | 'link_mode' | 'deleted' | 'title' | 'filename'
+    | 'zotero_key' | 'library_id' | 'parent_key' | 'attachment_url'
+    | 'link_mode' | 'deleted' | 'title' | 'filename' | 'tags' | 'collections'
 >;
 
 export interface AttachmentModel extends AttachmentData {

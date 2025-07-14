@@ -1,26 +1,42 @@
-import { syncService, ItemHashData } from '../services/syncService';
-import { SyncStatus } from '../../react/atoms/ui';
+import { syncService, SyncDataResponse } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
-import { initialSyncStatusAtom, LibrarySyncStatus } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, ZoteroLibrary } from '../../react/types/zotero';
+import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, DeleteData, ZoteroLibrary } from '../../react/types/zotero';
+import { isLibrarySynced } from './zoteroIdentifier';
+import { v4 as uuidv4 } from 'uuid';
+import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
+import { syncWithZoteroAtom } from '../../react/atoms/profile';
 
 /**
  * Interface for item filter function
  */
-export type ItemFilterFunction = (item: Zotero.Item) => boolean;
+export type ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => boolean;
 
 /**
  * Filter function for syncing items
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item) => {
-    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) && !item.isInTrash();
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => {
+    return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) &&
+        !item.isInTrash()
+        // (collectionId ? item.inCollection(collectionId) : true);
 };
+
+
+export function extractDeleteData(item: Zotero.Item): DeleteData {
+    return {
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        zotero_version: item.version,
+        zotero_synced: item.synced,
+        date_modified: item.dateModified
+    };
+}
 
 /**
  * Extracts relevant data from a Zotero item for syncing, including a metadata hash.
@@ -64,9 +80,12 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
     const itemData: ItemData = {
         ...hashedFields,
         // Add non-hashed fields
+        // Replace with Zotero.Date.sqlToISO8601(...)??
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
         // Add the calculated hash
+        zotero_version: item.version,
+        zotero_synced: item.synced,
         item_metadata_hash: metadataHash,
     };
 
@@ -131,6 +150,8 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
         parent_key: item.parentKey || null,
         attachment_url: item.getField('url'),
         link_mode: item.attachmentLinkMode,
+        tags: item.getTags().length > 0 ? item.getTags() : null,
+        collections: extractCollections(item),
         deleted: item.isInTrash(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
@@ -148,6 +169,8 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
+        zotero_version: item.version,
+        zotero_synced: item.synced,
     };
 
     return attachmentData;
@@ -198,6 +221,7 @@ function extractCollections(item: Zotero.Item): ZoteroCollection[] | null {
             return {
                 collection_id,
                 key: collection.key,
+                version: collection.version,
                 name: collection.name,
                 parent_collection: collection.parentCollection || null,
                 relations: collection.relations,
@@ -306,60 +330,144 @@ async function getCiteKey(item: Zotero.Item): Promise<string | null> {
     }
 }
 
+
+function createBatches<T>(
+    items: T[], 
+    batchSize: number, 
+    getDateModified: (item: T) => string
+): T[][] {
+    if (items.length === 0) return [];
+    
+    const batches: T[][] = [];
+    let currentBatch: T[] = [];
+    let currentBatchDate: string | null = null;
+    
+    for (const item of items) {
+        const itemDate = getDateModified(item);
+        
+        // If batch is empty, start new batch
+        if (currentBatch.length === 0) {
+            currentBatch.push(item);
+            currentBatchDate = itemDate;
+            continue;
+        }
+        
+        // If same date as current batch, add to current batch (even if over size)
+        if (itemDate === currentBatchDate) {
+            currentBatch.push(item);
+            continue;
+        }
+        
+        // Different date - check if we need to start new batch
+        if (currentBatch.length >= batchSize) {
+            // Current batch is full, start new one
+            batches.push(currentBatch);
+            currentBatch = [item];
+            currentBatchDate = itemDate;
+        } else {
+            // Current batch has room, add item
+            currentBatch.push(item);
+            currentBatchDate = itemDate;
+        }
+    }
+    
+    // Add final batch if not empty
+    if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+    }
+    
+    return batches;
+}
+
+interface SyncItem {
+    action: 'upsert' | 'delete';
+    item: Zotero.Item;
+}
+
 /**
  * Syncs an array of Zotero items to the backend in batches
  * 
+ * @param syncSessionId Sync session ID
  * @param libraryID Zotero library ID
- * @param items Array of Zotero items to sync
+ * @param items Array of SyncItem objects to sync (upsert or delete)
  * @param syncType Type of sync operation. (optional)
  * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
  * @param batchSize Size of item batches to process (default: 50)
- * @param useLocalHashFilter If true, filter items by local database hash (default: false)
  * @returns Total number of successfully processed items
  */
 export async function syncItemsToBackend(
+    syncSessionId: string,
     libraryID: number,
-    items: Zotero.Item[],
+    items: SyncItem[],
     syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void,
+    syncMethod: 'version' | 'date_modified',
+    onStatusChange?: (libraryID: number, status: SyncStatus) => void,
+    onProgress?: (libraryID: number, processed: number, total: number) => void,
     batchSize: number = 200,
-    useLocalHashFilter: boolean = true
 ) {
     const userId = store.get(userIdAtom);
     if (!userId) {
-        logger('Beaver Sync: No user found', 1);
-        return;
-    }
-    
-    const totalItems = items.length;
-    onStatusChange?.('in_progress');
-    
-    if (totalItems === 0) {
-        logger(`Beaver Sync: No items to process`, 3);
-        onStatusChange?.('completed');
-        if (onProgress) onProgress(0, 0);
+        logger('Beaver Sync:   No user found', 1);
         return;
     }
 
-    logger(`Beaver Sync: Processing ${totalItems} items in batches of ${batchSize}`, 3);
-    
-    let syncId = undefined;
-    let overallProcessedCount = 0;
-    let syncCompleted = false;
+    const totalItems = items.length;
+    let processedCount = 0;
     let syncFailed = false;
-    let totalItemsSentToBackend = 0;
+    const syncCompleted = false;
+    onStatusChange?.(libraryID, 'in_progress');
     
-    for (let i = 0; i < items.length; i += batchSize) {
-        const batchItems = items.slice(i, i + batchSize);
+    if (totalItems === 0) {
+        logger(`Beaver Sync '${syncSessionId}':   No items to process`, 3);
+        onStatusChange?.(libraryID, 'completed');
+        if (onProgress) onProgress(libraryID, 0, 0);
+        return;
+    }
+    
+    logger(`Beaver Sync '${syncSessionId}':   Processing ${totalItems} items in batches of ${batchSize}`, 3);
+
+    // 1. Sort items
+    items.sort((a, b) => {
+        // Primary sort: version
+        if (a.item.version !== b.item.version) {
+            return a.item.version - b.item.version;
+        }
         
-        logger(`Beaver Sync: Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(items.length/batchSize)} (${batchItems.length} items)`, 4);
+        // Secondary sort: dateModified (convert strings to timestamps)
+        const dateA = Zotero.Date.sqlToDate(a.item.dateModified, true);
+        const dateB = Zotero.Date.sqlToDate(b.item.dateModified, true);
+        return (dateA ? dateA.getTime() : 0) - (dateB ? dateB.getTime() : 0);
+    });
+
+    // 2. Create batches respecting dateModified boundaries
+    const batches = createBatches(
+        items, 
+        batchSize, 
+        (item) => item.item.dateModified
+    );
+
+    // 3. Process each batch
+    for (let i = 0; i < batches.length; i++) {
+        const batchItems = batches[i];
+
+        // Log batch info for debugging
+        const batchDateRange = {
+            first: batchItems[0].item.dateModified,
+            last: batchItems[batchItems.length - 1].item.dateModified,
+            versions: [batchItems[0].item.version, batchItems[batchItems.length - 1].item.version]
+        };
+
+        logger(`Beaver Sync '${syncSessionId}':   Batch ${i + 1}/${batches.length}: ` +
+               `${batchItems.length} items, ` +
+               `dates: ${batchDateRange.first} to ${batchDateRange.last}, ` +
+               `versions: ${batchDateRange.versions[0]} to ${batchDateRange.versions[1]}`);
         
         try {
             // ------- Transform items in this batch -------
-            const regularItems = batchItems.filter(item => item.isRegularItem());
-            const attachmentItems = batchItems.filter(item => item.isAttachment());
+            const regularItems = batchItems.filter(item => item.action === 'upsert' && item.item.isRegularItem()).map(item => item.item);
+            const attachmentItems = batchItems.filter(item => item.action === 'upsert' && item.item.isAttachment()).map(item => item.item);
+            const itemsToDelete = batchItems.filter(item => item.action === 'delete').map(item => extractDeleteData(item.item));
             
             const [batchItemsData, batchAttachmentsData] = await Promise.all([
                 Promise.all(regularItems.map(extractItemData)).then(data => 
@@ -370,196 +478,124 @@ export async function syncItemsToBackend(
                 )
             ]);
             
-            // ------- Filter items that need syncing in this batch -------
-            let itemsNeedingSync: ItemData[] = [];
-            let attachmentsNeedingSync: AttachmentData[] = [];
-            
-            if (useLocalHashFilter) {
-                // ------- Get database records for this batch -------
-                const [batchItemsDB, batchAttachmentsDB] = await Promise.all([
-                    batchItemsData.length > 0
-                        ? Zotero.Beaver.db.getItemsByZoteroKeys(userId, libraryID, batchItemsData.map(item => item.zotero_key))
-                        : Promise.resolve([]),
-                    batchAttachmentsData.length > 0
-                        ? Zotero.Beaver.db.getAttachmentsByZoteroKeys(userId, libraryID, batchAttachmentsData.map(att => att.zotero_key))
-                        : Promise.resolve([])
-                ]);
-                
-                // ------- Filter items that need syncing in this batch -------
-                const itemsDBMap = new Map(batchItemsDB.map(item => [item.zotero_key, item]));
-                const attachmentsDBMap = new Map(batchAttachmentsDB.map(att => [att.zotero_key, att]));
-
-                itemsNeedingSync = batchItemsData.filter((item) => {
-                    const itemDB = itemsDBMap.get(item.zotero_key);
-                    if (!itemDB) return true;
-                    return itemDB.item_metadata_hash !== item.item_metadata_hash;
-                });
-            
-                attachmentsNeedingSync = batchAttachmentsData.filter((att) => {
-                    const attDB = attachmentsDBMap.get(att.zotero_key);
-                    if (!attDB) return true;
-                    return attDB.attachment_metadata_hash !== att.attachment_metadata_hash;
-                });
-            } else {
-                itemsNeedingSync = batchItemsData;
-                attachmentsNeedingSync = batchAttachmentsData;
+            const totalItems = batchItemsData.length + batchAttachmentsData.length + itemsToDelete.length;
+            if (totalItems === 0) {
+                logger(`Beaver Sync '${syncSessionId}':     No items to send to backend`, 4);
+                continue;
             }
 
-            const batchNeedingSync = itemsNeedingSync.length + attachmentsNeedingSync.length;
-            const batchFiltered = (batchItemsData.length - itemsNeedingSync.length) + 
-                                  (batchAttachmentsData.length - attachmentsNeedingSync.length);
-            
-            logger(`Beaver Sync: Batch ${Math.floor(i/batchSize) + 1}: ${batchNeedingSync} items need syncing, ${batchFiltered} filtered out (no changes)`, 4);
-            
             // ------- Send to backend only if items need syncing -------
-            if (batchNeedingSync > 0) {
-                const createLog = !syncId;
-                const closeLog = i + batchSize >= items.length; // Close if this is the last batch
-                
-                let attempts = 0;
-                const maxAttempts = 1;
-                let batchResult = null;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        logger(`Beaver Sync: Sending batch to backend (${itemsNeedingSync.length} items, ${attachmentsNeedingSync.length} attachments, attempt ${attempts + 1}/${maxAttempts})`, 4);
-                        batchResult = await syncService.processItemsBatch(
-                            libraryID,
-                            itemsNeedingSync,
-                            attachmentsNeedingSync,
-                            syncType,
-                            createLog,
-                            closeLog,
-                            syncId
-                        );
-                        break; // Success, exit retry loop
-                    } catch (retryError) {
-                        attempts++;
-                        if (attempts >= maxAttempts) {
-                            throw retryError; // Rethrow if max attempts reached
-                        }
-                        
-                        // Wait before retrying (exponential backoff)
-                        const delay = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
-                        logger(`Beaver Sync: Batch processing attempt ${attempts}/${maxAttempts} failed, retrying in ${delay}ms...`, 2);
-                        await new Promise(resolve => setTimeout(resolve, delay));
+            let attempts = 0;
+            const maxAttempts = 2;
+            let batchResult = null;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    logger(`Beaver Sync '${syncSessionId}':     Sending batch to backend (${totalItems} items, attempt ${attempts + 1}/${maxAttempts})`, 4);
+                    batchResult = await syncService.processItemsBatch(
+                        syncSessionId,
+                        syncType,
+                        syncMethod,
+                        libraryID,
+                        batchItemsData,
+                        batchAttachmentsData,
+                        itemsToDelete
+                    );
+                    break; // Success, exit retry loop
+                } catch (retryError) {
+                    attempts++;
+                    if (attempts >= maxAttempts) {
+                        throw retryError; // Rethrow if max attempts reached
                     }
+                    
+                    // Wait before retrying (exponential backoff)
+                    const delay = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
+                    logger(`Beaver Sync '${syncSessionId}':     Batch processing attempt ${attempts}/${maxAttempts} failed, retrying in ${delay}ms...`, 2);
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 }
-        
-                // Process batch result (should never happen)
-                if (!batchResult || batchResult.sync_status === 'failed') {
-                    throw new Error("Failed to process batch after multiple attempts");
-                }
-                
-                // Set sync ID from batch result
-                syncId = batchResult.sync_id;
-                
-                // Update database items
-                if (batchResult.items.length > 0) {
-                    logger(`Beaver Sync: Updating local database items`, 2);
-                    const items = batchResult.items.map(item => ({
-                        library_id: item.library_id,
-                        zotero_key: item.zotero_key,
-                        item_metadata_hash: item.metadata_hash
-                    }));
-                    await Zotero.Beaver.db.upsertItemsBatch(userId, items);
-                }
+            }
+    
+            // Process batch result (should never happen)
+            if (!batchResult || batchResult.sync_status === 'failed') {
+                throw new Error("Failed to process batch after multiple attempts");
+            }
+            
+            // Update database attachments and add items to upload queue
+            if (batchResult.attachments.length > 0) {
+                // Update database attachments
+                logger(`Beaver Sync '${syncSessionId}':     Updating local database attachments`, 2);
+                const attachmentsForDB = batchResult.attachments.map(attachment => ({
+                    library_id: attachment.library_id,
+                    zotero_key: attachment.zotero_key,
+                    file_hash: attachment.file_hash,
+                    upload_status: attachment.upload_status || 'pending',
+                }));
+                await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
 
-                // Update database attachments and add items to upload queue
-                if (batchResult.attachments.length > 0) {
-                    // Update database attachments
-                    logger(`Beaver Sync: Updating local database attachments`, 2);
-                    const attachmentsForDB = batchResult.attachments.map(attachment => ({
+                // Add items to upload queue
+                const uploadQueueItems = batchResult.attachments
+                    .filter(attachment => {
+                        return attachment.upload_status === 'pending' && attachment.file_hash;
+                    })
+                    .map(attachment => ({
+                        file_hash: attachment.file_hash!,
                         library_id: attachment.library_id,
                         zotero_key: attachment.zotero_key,
-                        attachment_metadata_hash: attachment.metadata_hash,
-                        file_hash: attachment.file_hash,
-                        upload_status: attachment.upload_status || 'pending',
                     }));
-                    await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
-
-                    // Add items to upload queue
-                    // TODO: Check on file size and page count limits here! Set status to 'skipped' if not meeting limits
-                    const uploadQueueItems = batchResult.attachments
-                        .filter(attachment => {
-                            return attachment.upload_status === 'pending' && attachment.file_hash;
-                        })
-                        .map(attachment => ({
-                            file_hash: attachment.file_hash!,
-                            library_id: attachment.library_id,
-                            zotero_key: attachment.zotero_key,
-                        }));
-                    
-                    if (uploadQueueItems.length > 0) {
-                        // Deduplicate uploadQueueItems by file_hash, keeping the first occurrence
-                        const uniqueUploadQueueItemsMap = new Map();
-                        uploadQueueItems.forEach(item => {
-                            if (!uniqueUploadQueueItemsMap.has(item.file_hash)) {
-                                uniqueUploadQueueItemsMap.set(item.file_hash, item);
-                            }
-                        });
-                        const uniqueUploadQueueItems = Array.from(uniqueUploadQueueItemsMap.values());
-
-                        logger(`Beaver Sync: Adding/updating ${uniqueUploadQueueItems.length} items in upload queue (after deduplication)`, 2);
-                        await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
-
-                        // Start file uploader if there are attachments to upload (or newly added to queue)
-                        logger(`Beaver Sync: Starting file uploader`, 2);
-                        await fileUploader.start(syncType === 'initial' ? "initial" : "background");
-                    }
-                }
-
-                totalItemsSentToBackend += batchNeedingSync;
                 
-                // Track if sync was completed in this batch
-                if (closeLog && batchResult.sync_status === 'completed') {
-                    syncCompleted = true;
-                    onStatusChange?.('completed');
+                if (uploadQueueItems.length > 0) {
+                    // Deduplicate uploadQueueItems by file_hash, keeping the first occurrence
+                    const uniqueUploadQueueItemsMap = new Map();
+                    uploadQueueItems.forEach(item => {
+                        if (!uniqueUploadQueueItemsMap.has(item.file_hash)) {
+                            uniqueUploadQueueItemsMap.set(item.file_hash, item);
+                        }
+                    });
+                    const uniqueUploadQueueItems = Array.from(uniqueUploadQueueItemsMap.values());
+
+                    logger(`Beaver Sync '${syncSessionId}':     Adding/updating ${uniqueUploadQueueItems.length} items in upload queue (after deduplication)`, 2);
+                    await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
+
+                    // Start file uploader if there are attachments to upload (or newly added to queue)
+                    logger(`Beaver Sync '${syncSessionId}':     Starting file uploader`, 2);
+                    await fileUploader.start(syncType === 'initial' ? "initial" : "background");
                 }
             }
-            
+
             // Update progress for this batch
-            overallProcessedCount += batchItems.length;
-            if (onProgress) {
-                onProgress(overallProcessedCount, totalItems);
-            }
+            processedCount += batchItems.length;
+            if (onProgress) onProgress(libraryID, processedCount, totalItems);
             
         } catch (error: any) {
-            logger(`Beaver Sync: Error processing batch: ${error.message}`, 1);
+            logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${error.message}`, 1);
             Zotero.logError(error);
             syncFailed = true;
-            onStatusChange?.('failed');
+            onStatusChange?.(libraryID, 'failed');
             break;
         }
     }
-    
-    // Handle completion logic
-    if (totalItemsSentToBackend === 0 && !syncFailed) {
-        // No items needed syncing
-        logger(`Beaver Sync: All items up to date, marking as completed`, 3);
-        onStatusChange?.('completed');
-        if (onProgress) onProgress(totalItems, totalItems);
-    } else if (syncId && !syncCompleted && !syncFailed) {
-        // Complete sync if we have a syncId but didn't complete yet
-        try {
-            logger(`Beaver Sync: Completing sync ${syncId} after processing all batches`, 3);
-            await syncService.completeSync(syncId);
-            onStatusChange?.('completed');
-            if (onProgress) {
-                onProgress(totalItems, totalItems);
-            }
-        } catch (error: any) {
-            logger(`Beaver Sync: Error completing sync: ${error.message}`, 1);
-            onStatusChange?.('failed');
-        }
-    } else if (!syncId && !syncFailed && overallProcessedCount === totalItems && totalItems > 0 && totalItemsSentToBackend > 0) {
-        // All items processed successfully but no backend sync session was established
-        logger(`Beaver Sync: All ${totalItemsSentToBackend} items requiring sync were processed; no backend sync session established or required for this set, and no errors occurred. Marking as complete.`, 3);
-        onStatusChange?.('completed');
-        if (onProgress) {
-            onProgress(totalItems, totalItems);
-        }
+    if (!syncFailed) {
+        logger(`Beaver Sync '${syncSessionId}':   All ${totalItems} items requiring sync were processed; marking as complete.`, 3);
+        onStatusChange?.(libraryID, 'completed');
+        if (onProgress) onProgress(libraryID, totalItems, totalItems);
     }
+}
+
+/**
+ * Deletes items from Zotero library
+ * @param userId User ID
+ * @param libraryID Zotero library ID
+ * @param zoteroKeys Zotero keys of items to delete
+ */
+export const deleteItems = async (userId: string, libraryID: number, zoteroKeys: string[]) => {
+    logger(`Beaver Sync: Deleting ${zoteroKeys.length} items from library ${libraryID}`, 3);
+
+    // Delete items from backend
+    const response = await syncService.deleteItems(libraryID, zoteroKeys);
+
+    // Update local database
+    const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
+    if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(userId, libraryID, allKeys);
 }
 
 /**
@@ -567,8 +603,8 @@ export async function syncItemsToBackend(
  * @param libraryID Zotero library ID
  * @param updates Partial LibrarySyncStatus object containing only the fields to update
  */
-const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
-    store.set(initialSyncStatusAtom, (current) => ({
+const updateSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>) => {
+    store.set(syncStatusAtom, (current: Record<number, LibrarySyncStatus>) => ({
         ...current,
         [libraryID]: {
             ...(current[libraryID] || {}),
@@ -578,232 +614,242 @@ const updateInitialSyncStatus = (libraryID: number, updates: Partial<LibrarySync
     }));
 };
 
-/*
- * Ensures that the library sync status is completed
- * @param libraryID Zotero library ID
- */
-const markInitialSyncAsComplete = async (libraryID: number) => {
-    logger(`Beaver Sync: Marking initial sync as complete for library ${libraryID}`, 2);
-    updateInitialSyncStatus(libraryID, { status: 'completed' });
-}
-
 /**
- * Performs an initial sync of items from a Zotero library to the backend
- * 
- * @param libraryID Zotero library ID to sync
- * @param filterFunction Optional function to filter which items to sync
- * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
- * @param onProgress Optional callback for progress updates (processed, total)
- * @param batchSize Size of item batches to process (default: 50)
- * @returns Promise resolving to the sync complete response
- */
-export async function performInitialSync(
-    libraryID: number,
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 50
-): Promise<any> {
-    try {
-        const library = Zotero.Libraries.get(libraryID);
-        if (!library) {
-            logger(`Beaver Sync: Library ${libraryID} not found`, 1);
-            return;
-        }
-        const libraryName = library.name;
-        logger(`Beaver Sync: Starting initial sync for library ${libraryID} (${libraryName})`, 2);
-    
-        // 1. Get all items from the library
-        const itemsToSync = await getItemsToSync(libraryID);
-        const totalItems = itemsToSync.length;
-        logger(`Beaver Sync: Found ${totalItems} items to sync for library ${libraryID} (${libraryName})`, 3);
-
-        // 2. Update library-specific sync status atom
-        const libraryInitialStatus = {
-            libraryID,
-            libraryName,
-            itemCount: totalItems,
-            syncedCount: 0,
-            status: 'in_progress'
-        } as LibrarySyncStatus;
-        
-        if (totalItems === 0) {
-            logger(`Beaver Sync: No items to sync for library ${libraryID} (${libraryName})`, 3);
-            updateInitialSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
-            return { status: 'completed', message: 'No items to sync' };
-        }
-        
-        updateInitialSyncStatus(libraryID, libraryInitialStatus);
-
-        // Add custom progress callback that updates library-specific progress
-        const librarySpecificProgress = (processed: number, total: number) => {
-            const status = processed >= total ? 'completed' : 'in_progress';
-            updateInitialSyncStatus(libraryID, { syncedCount: processed, status });
-            
-            // Also call the original progress callback if provided
-            if (onProgress) {
-                onProgress(processed, total);
-            }
-        };
-
-        // Add custom status change callback
-        const librarySpecificStatusChange = (status: SyncStatus) => {
-            updateInitialSyncStatus(libraryID, { status });
-            if (onStatusChange) {
-                onStatusChange(status);
-            }
-        };
-
-        // Replace the syncItemsToBackend call with:
-        await syncItemsToBackend(
-            libraryID, 
-            itemsToSync, 
-            'initial', 
-            librarySpecificStatusChange, 
-            librarySpecificProgress, 
-            batchSize
-        );
-        
-    } catch (error: any) {
-        logger('Beaver Sync: Error during initial sync: ' + error.message, 1);
-        Zotero.logError(error);
-        updateInitialSyncStatus(libraryID, { status: 'failed' });
-        throw error;
-    }
-}
-
-/**
- * Performs a periodic sync of modified items from a Zotero library to the backend
- * 
- * @param libraryID Zotero library ID to sync
- * @param lastSyncDate Date of the last successful sync
- * @param filterFunction Optional function to filter which items to sync
- * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
- * @param onProgress Optional callback for progress updates (processed, total)
- * @param batchSize Size of item batches to process (default: 50)
- * @returns Promise resolving to the sync complete response
- */
-export async function performPeriodicSync(
-    libraryID: number,
-    lastSyncDate: string,
-    filterFunction: ItemFilterFunction = syncingItemFilter,
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 20
-) {
-    try {
-        const libraryName = Zotero.Libraries.getName(libraryID);
-        logger(`Beaver Sync: Starting periodic sync from ${lastSyncDate} for library ${libraryID} (${libraryName})`, 2);
-    
-        // 1. Get all items modified since last sync
-        const modifiedItems = await getModifiedItemsSince(libraryID, lastSyncDate);
-        
-        // 2. Filter items based on criteria
-        const itemsToSync = modifiedItems.filter(filterFunction);
-        const totalItems = itemsToSync.length;
-        
-        logger(`Beaver Sync: Found ${totalItems} modified items to sync since ${lastSyncDate} from library "${libraryName}"`, 3);
-        
-        if (totalItems === 0) {
-            onStatusChange?.('completed');
-            logger('Beaver Sync: No items to sync, skipping sync operation', 3);
-            return { status: 'completed', message: 'No items to sync' };
-        }
-        
-        // 3. Process items in batches
-        await syncItemsToBackend(libraryID, itemsToSync, 'verification', onStatusChange, onProgress, batchSize);
-        
-    } catch (error: any) {
-        logger('Beaver Sync: Error during periodic sync: ' + error.message, 1);
-        Zotero.logError(error);
-        throw error;
-    }
-}
-
-
-/**
- * Performs initial or periodic sync for all libraries
+ * Performs sync for all libraries
  * @param filterFunction Optional function to filter which items to sync
  * @param batchSize Size of item batches to process (default: 50)
- * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
- * @param onProgress Optional callback for progress updates (processed, total)
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
     libraryIds: number[],
     filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void
+    syncType?: 'initial' | 'incremental' | 'consistency' | 'verification'
 ): Promise<void> {
+    const syncSessionId = uuidv4();
+
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
     const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
 
     // Initialize sync status for all libraries
     for (const libraryID of libraryIds) {
-        updateInitialSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
+        updateSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
+    }
+
+    // Get user ID
+    const userId = store.get(userIdAtom);
+    if (!userId) {
+        throw new Error('No user found');
+    }
+
+    // On progress callback
+    const onProgress = (libraryID: number, processed: number, total: number) => {
+        const status = processed >= total ? 'completed' : 'in_progress';
+        updateSyncStatus(libraryID, { syncedCount: processed, status });
+    };
+
+    // On status change callback for this library
+    const onStatusChange = (libraryID: number, status: SyncStatus) => {
+        updateSyncStatus(libraryID, { status });
+    };
+
+    // Determine sync method
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+    // Validate sync method for all libraries
+    if (syncWithZotero && (!Zotero.Sync.Runner.enabled || !Zotero.Users.getCurrentUserID())) {
+        logger(`Beaver Sync '${syncSessionId}': Zotero sync is not enabled. Failing sync...`, 2);
+        store.set(addPopupMessageAtom, {
+            type: 'warning',
+            title: 'Unable to Complete Sync with Beaver',
+            text: `Zotero sync is disabled. Please enable Zotero sync in Zotero preferences or sign into your Zotero account.`,
+            expire: true
+        });
+        libraryIds.forEach(libraryID => onStatusChange(libraryID, 'failed'));
+        return;
     }
     
-    // Now perform actual syncs for each library
+    // Sync each library
     for (const library of librariesToSync) {
         const libraryID = library.id;
         const libraryName = library.name;
-        
+
         try {
-            logger(`Beaver Sync: Determining sync strategy for library ${libraryID} (${libraryName})`, 3);
-        
-            // Get the sync state for this library
-            const syncState = await syncService.getLibrarySyncState(libraryID);
-            const { last_global_sync_date, last_local_sync_date } = syncState;
+            logger(`Beaver Sync '${syncSessionId}': Syncing library ${libraryID} (${libraryName})`, 2);
 
-            logger(`Beaver Sync: Sync state for library ${libraryID} (${libraryName}): last_global_sync_date: ${last_global_sync_date}, last_local_sync_date: ${last_local_sync_date}`, 3);
-
-            // Mark initial sync as complete if no sync failed
-            if (last_global_sync_date) markInitialSyncAsComplete(libraryID);
-            
-            // SCENARIO A: True Initial Sync
-            if (!last_global_sync_date) {
-                logger(`Beaver Sync: Performing Initial Sync for library ${libraryID}.`, 2);
-                await performInitialSync(libraryID, onStatusChange, onProgress, batchSize);
-            
-            // SCENARIO B: Consistency Sync (Bootstrap new computer)
-            } else if (!last_local_sync_date) {
-                logger(`Beaver Sync: Performing Consistency Sync for library ${libraryID}.`, 2);
-                await performConsistencyCheck(
-                    libraryID,
-                    filterFunction,
-                    onStatusChange,
-                    onProgress,
-                    batchSize,
-                    true // Request population of local DB
-                );
-            
-            // SCENARIO C: Periodic Sync
-            } else {
-                logger(`Beaver Sync: Performing Periodic Sync for library ${libraryID}.`, 2);
-                await performPeriodicSync(libraryID, last_local_sync_date, filterFunction, onStatusChange, onProgress, batchSize);
+            // ----- 1. Validate sync method for this library -----
+            const isSyncedWithZotero = isLibrarySynced(libraryID);
+            if (syncWithZotero && !isSyncedWithZotero) {
+                logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
+                onStatusChange(libraryID, 'failed');
+                store.set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Unable to Complete Sync with Beaver',
+                    text: `The library ${libraryName} is not synced with Zotero so Beaver cannot sync it.`,
+                    expire: true
+                });
+                continue;
             }
+            
+            // ----- 2. Get backend sync status -----
+            logger(`Beaver Sync '${syncSessionId}': (1) Get backend sync status (syncMethod: ${syncMethod})`, 3);
+            const syncState = await syncService.getSyncState(libraryID, syncMethod);
+
+            const isInitialSync = syncState === null;
+            const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
+            const lastSyncVersion = syncState ? syncState.last_sync_version : null;
+            
+            // TODO: Transition from local to zotero sync library
+            // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
+            // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
+
+            logger(`Beaver Sync '${syncSessionId}':   Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
+
+            if(!isInitialSync && syncMethod == 'version' && lastSyncVersion == library.libraryVersion) {
+                logger(`Beaver Sync '${syncSessionId}':   Library version up to date (${lastSyncVersion})`, 3);
+                updateSyncStatus(libraryID, { status: 'completed' });
+                continue;
+            }
+        
+            // ----- 3. Items to sync and delete -----
+            logger(`Beaver Sync '${syncSessionId}': (2) Get items to sync and delete`, 3);
+            
+            let items: Zotero.Item[] = [];
+            if (isInitialSync) {
+                items = await Zotero.Items.getAll(libraryID, false, false, false);
+            } else if (lastSyncVersion !== null && syncMethod === 'version') {
+                items = await getItemsSinceVersion(libraryID, lastSyncVersion);
+            } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
+                items = await getModifiedItems(libraryID, lastSyncDate);
+            } else {
+                onStatusChange(libraryID, 'failed');
+                throw new Error(`Beaver Sync '${syncSessionId}': Invalid sync state: ${syncState}`);
+            }
+
+            // Get items to upsert: Included by filter function
+            const itemsToUpsert = items
+                .filter(filterFunction)
+                .map(item => ({
+                    action: 'upsert',
+                    item
+                } as SyncItem));
+            
+            // Get items to delete: Excluded by filter function
+            const itemsToDelete = items
+                .filter((_) => !isInitialSync) // Only delete items if not initial sync
+                .filter((item) => item.isRegularItem() || item.isPDFAttachment())
+                .filter((item) => !filterFunction(item))
+                .map(item => ({
+                    action: 'delete',
+                    item
+                } as SyncItem));
+            
+            // Update library-specific progress and status
+            const itemCount = itemsToUpsert.length + itemsToDelete.length;
+            const libraryInitialStatus = {
+                libraryID,
+                libraryName,
+                itemCount,
+                syncedCount: 0,
+                status: 'in_progress'
+            } as LibrarySyncStatus;
+
+            logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete`, 3);
+
+            if (itemCount === 0) {
+                logger(`Beaver Sync '${syncSessionId}':   Sync complete`, 3);
+                updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
+                continue;
+            }
+            updateSyncStatus(libraryID, libraryInitialStatus);
+
+            
+            
+            // ----- 4. Sync items with backend -----
+            logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
+            if(!syncType) syncType = isInitialSync ? 'initial' : 'verification';
+            const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
+            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, syncMethod, onStatusChange, onProgress, batchSize);
+
+            onStatusChange(libraryID, 'completed');
+            
         } catch (error: any) {
-            logger(`Beaver Sync Error: Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
+            logger(`Beaver Sync '${syncSessionId}': Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
             Zotero.logError(error);
-            updateInitialSyncStatus(libraryID, { status: 'failed' });
+            updateSyncStatus(libraryID, { status: 'failed' });
             // Continue with next library even if one fails
         }
     }
         
-    logger('Beaver Sync: Sync completed for all libraries', 2);
+    logger(`Beaver Sync ${syncSessionId}: Sync completed for all libraries`, 2);
 }
 
 /**
  * Gets items that have been modified since a specific date
  * @param libraryID Zotero library ID
- * @param lastSyncDate Date to check modifications since
+ * @param sinceDate Date to check modifications since
+ * @param untilDate Date to check modifications until (optional)
  * @returns Promise resolving to array of modified Zotero items
  */
-async function getModifiedItemsSince(libraryID: number, lastSyncDate: string): Promise<Zotero.Item[]> {
-    const sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
-    const ids = await Zotero.DB.columnQueryAsync(sql, [libraryID, lastSyncDate]) as number[];
+async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?: string): Promise<Zotero.Item[]> {
+    let sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
+    const params: any[] = [libraryID, sinceDate];
+    if (untilDate) {
+        sql += " AND dateModified <= ?";
+        params.push(untilDate);
+    }
+    const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
     return await Zotero.Items.getAsync(ids);
+}
+
+/**
+ * Gets items based on version number
+ * @param libraryID Zotero library ID
+ * @param sinceVersion Zotero version number to check modifications since
+ * @param toVersion Zotero version number to check modifications until (optional)
+ * @returns Promise resolving to array of Zotero items
+ */
+async function getItemsSinceVersion(libraryID: number, sinceVersion: number, toVersion?: number): Promise<Zotero.Item[]> {
+    let sql = "SELECT itemID FROM items WHERE libraryID=? AND version > ?";
+    const params: any[] = [libraryID, sinceVersion];
+    if (toVersion) {
+        sql += " AND version <= ?";
+        params.push(toVersion);
+    }
+    const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
+    return await Zotero.Items.getAsync(ids);
+}
+
+/**
+ * Get IDs of items that were deleted (moved to the trash) after the given
+ * library version.
+ */
+async function getDeletedItemIDsSinceVersion(
+    libraryID: number,
+    lastSyncLibraryVersion: number
+): Promise<number[]> {
+    const sql = `
+    SELECT i.itemID
+    FROM items i
+    JOIN deletedItems d USING (itemID)  -- only items that are in the trash
+    WHERE i.libraryID = ?
+        AND i.version  > ?              -- deleted after last sync
+    `;
+    return Zotero.DB.columnQueryAsync(sql, [libraryID, lastSyncLibraryVersion]) as Promise<number[]>;
+}
+
+/**
+ * Get items that were deleted (moved to the trash) after the given
+ * library version.
+ */
+async function getDeletedItemsSinceVersion(
+    libraryID: number,
+    lastSyncLibraryVersion: number
+): Promise<Zotero.Item[]> {
+    const ids = await getDeletedItemIDsSinceVersion(libraryID, lastSyncLibraryVersion);
+    return Zotero.Items.getAsync(ids);
 }
 
 /**
@@ -812,7 +858,7 @@ async function getModifiedItemsSince(libraryID: number, lastSyncDate: string): P
  * @param filterFunction Optional function to filter which items to sync
  * @returns Promise resolving to array of modified Zotero items
  */
-export async function getItemsToSync(
+export async function getAllItemsToSync(
     libraryID: number,
     filterFunction: ItemFilterFunction = syncingItemFilter
 ): Promise<Zotero.Item[]> {
@@ -822,170 +868,307 @@ export async function getItemsToSync(
 }
 
 /**
- * Performs a consistency check by comparing local metadata hashes with backend
- * 
+ * Discrepancy information for consistency checks
+ */
+interface ItemDiscrepancy {
+    zotero_key: string;
+    backend_hash: string;
+    local_hash: string;
+    backend_version: number;
+    local_version: number;
+    backend_date_modified: string;
+    local_date_modified: string;
+    should_update: boolean;
+    reason: string;
+}
+
+interface AttachmentDiscrepancy {
+    zotero_key: string;
+    backend_hash: string;
+    local_hash: string;
+    backend_version: number;
+    local_version: number;
+    backend_date_modified: string;
+    local_date_modified: string;
+    should_update: boolean;
+    reason: string;
+}
+
+interface ConsistencyCheckResult {
+    library_id: number;
+    total_items_checked: number;
+    total_attachments_checked: number;
+    item_discrepancies: ItemDiscrepancy[];
+    attachment_discrepancies: AttachmentDiscrepancy[];
+    items_updated: number;
+    attachments_updated: number;
+}
+
+/**
+ * Performs a consistency check by comparing local and backend metadata hashes
  * @param libraryID Zotero library ID to check
- * @param filterFunction Optional function to filter which items to sync
- * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
- * @param onProgress Optional callback for progress updates (processed, total)
- * @param batchSize Size of item batches to process (default: 50)
- * @param populateLocalDB Optional flag to populate local DB with up-to-date items
- * @returns Promise resolving to the sync complete response
+ * @param pageSize Number of items per page for pagination (default: 500)
+ * @param sendUpdates Whether to send updates to backend for discrepancies (default: true)
+ * @returns Promise resolving to consistency check results
  */
 export async function performConsistencyCheck(
     libraryID: number,
-    filterFunction: ItemFilterFunction = syncingItemFilter,
-    onStatusChange?: (status: SyncStatus) => void,
-    onProgress?: (processed: number, total: number) => void,
-    batchSize: number = 50,
-    populateLocalDB: boolean = false
-): Promise<any> {
+    pageSize: number = 500,
+    sendUpdates: boolean = true
+): Promise<ConsistencyCheckResult> {
+    const consistencyId = uuidv4();
+    const libraryName = Zotero.Libraries.getName(libraryID);
+    
+    logger(`Beaver Consistency Check '${consistencyId}': Starting consistency check for library ${libraryID} (${libraryName})`, 2);
+
     const userId = store.get(userIdAtom);
     if (!userId) {
-        throw new Error('No user found');
+        logger(`Beaver Consistency Check '${consistencyId}': No user ID found, cannot perform consistency check.`, 1);
+        throw new Error('User not authenticated for consistency check');
     }
 
-    try {
-        const libraryName = Zotero.Libraries.getName(libraryID);
-        logger(`Beaver Sync: Starting consistency check for library ${libraryID} (${libraryName})`, 2);
-        
-        onStatusChange?.('in_progress');
-        
-        // 1. Get all items from the library
-        const allItems = await getItemsToSync(libraryID, filterFunction);
-        const totalItems = allItems.length;
-        
-        logger(`Beaver Sync: Found ${totalItems} items for consistency check in library ${libraryID} (${libraryName})`, 3);
-        
-        if (totalItems === 0) {
-            onStatusChange?.('completed');
-            logger('Beaver Sync: No items to check, skipping consistency check', 3);
-            return { status: 'completed', message: 'No items to check' };
-        }
-        
-        const regularItems = allItems.filter(item => item.isRegularItem());
-        const attachmentItems = allItems.filter(item => item.isAttachment());
+    const result: ConsistencyCheckResult = {
+        library_id: libraryID,
+        total_items_checked: 0,
+        total_attachments_checked: 0,
+        item_discrepancies: [],
+        attachment_discrepancies: [],
+        items_updated: 0,
+        attachments_updated: 0
+    };
 
-        const HASH_CHUNK_SIZE = 250;
-        let processedCount = 0;
+    let page = 0;
+    let hasMore = true;
 
-        // --- 2. Process Regular Items in Chunks ---
-        const itemsToCompare: { zotero_key: string, metadata_hash: string }[] = [];
-        logger(`Beaver Sync: Hashing ${regularItems.length} items in chunks of ${HASH_CHUNK_SIZE}`, 3);
-        for (let i = 0; i < regularItems.length; i += HASH_CHUNK_SIZE) {
-            const chunk = regularItems.slice(i, i + HASH_CHUNK_SIZE);
-            const chunkData = await Promise.all(chunk.map(extractItemData));
+    // Process all pages from backend
+    while (hasMore) {
+        try {
+            logger(`Beaver Consistency Check '${consistencyId}': Processing page ${page + 1}`, 3);
             
-            itemsToCompare.push(...chunkData.map(item => ({
-                zotero_key: item.zotero_key,
-                metadata_hash: item.item_metadata_hash,
-            })));
+            // Get backend data for this page
+            const backendData: SyncDataResponse = await syncService.getSyncData(
+                libraryID,
+                null, // Get all data, not since a specific version
+                null, // Get all data, not until a specific version
+                page,
+                pageSize
+            );
 
-            processedCount += chunk.length;
-            onProgress?.(processedCount, totalItems);
-            await Zotero.Promise.delay(10); // Yield to UI thread
-        }
-
-        // --- 3. Process Attachments in Chunks ---
-        const attachmentsToCompare: ItemHashData[] = [];
-        logger(`Beaver Sync: Hashing ${attachmentItems.length} attachments in chunks of ${HASH_CHUNK_SIZE}`, 3);
-        for (let i = 0; i < attachmentItems.length; i += HASH_CHUNK_SIZE) {
-            const chunk = attachmentItems.slice(i, i + HASH_CHUNK_SIZE);
-            const chunkData = await Promise.all(chunk.map(item => extractAttachmentData(item, { lightweight: true })));
+            const { items_state: backendItems, attachments_state: backendAttachments } = backendData;
             
-            // Filter out nulls in case attachment file doesn't exist
-            const validAttachments = chunkData.filter(att => att) as AttachmentData[];
+            logger(`Beaver Consistency Check '${consistencyId}': Page ${page + 1}: ${backendItems.length} items, ${backendAttachments.length} attachments`, 4);
 
-            attachmentsToCompare.push(...validAttachments.map(att => ({
-                zotero_key: att.zotero_key,
-                metadata_hash: att.attachment_metadata_hash,
-            } as ItemHashData)));
+            result.total_items_checked += backendItems.length;
+            result.total_attachments_checked += backendAttachments.length;
 
-            processedCount += chunk.length;
-            onProgress?.(processedCount, totalItems);
-            await Zotero.Promise.delay(10); // Yield to UI thread
-        }
+            // Process items concurrently
+            const itemProcessingPromises = backendItems.map(async (backendItem) => {
+                try {
+                    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, backendItem.zotero_key);
+                    if (!zoteroItem) {
+                        return { deleteKey: backendItem.zotero_key };
+                    }
 
-        // --- 4. Send Split Hash Comparison Requests to Backend ---
-        logger(`Beaver Sync: Sending hash comparisons for ${itemsToCompare.length} items and ${attachmentsToCompare.length} attachments`, 3);
-        const [itemsComparison, attachmentsComparison] = await Promise.all([
-            syncService.compareHashes(libraryID, itemsToCompare, [], populateLocalDB),
-            syncService.compareHashes(libraryID, [], attachmentsToCompare, populateLocalDB)
-        ]);
+                    const localItemData = await extractItemData(zoteroItem);
+                    if (backendItem.metadata_hash !== localItemData.item_metadata_hash) {
+                        const shouldUpdate = shouldUpdateBackend(
+                            backendItem.zotero_version,
+                            backendItem.date_modified,
+                            zoteroItem.version,
+                            zoteroItem.dateModified
+                        );
+                        return {
+                            discrepancy: {
+                                zotero_key: backendItem.zotero_key,
+                                backend_hash: backendItem.metadata_hash,
+                                local_hash: localItemData.item_metadata_hash,
+                                backend_version: backendItem.zotero_version,
+                                local_version: zoteroItem.version,
+                                backend_date_modified: backendItem.date_modified,
+                                local_date_modified: zoteroItem.dateModified,
+                                should_update: shouldUpdate,
+                                reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
+                            },
+                        };
+                    }
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Error processing item ${backendItem.zotero_key}: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
+                return null;
+            });
 
-        // --- 5. Populate local DB with up-to-date items (if requested) ---
-        if (populateLocalDB) {
-            const upToDateItems = itemsComparison.items_up_to_date || [];
-            if (upToDateItems.length > 0) {
-                logger(`Beaver Sync: Populating local DB with ${upToDateItems.length} up-to-date items.`, 3);
-                const itemsForDB = upToDateItems.map(item => ({
-                    library_id: libraryID,
-                    zotero_key: item.zotero_key,
-                    item_metadata_hash: item.metadata_hash
-                }));
-                await Zotero.Beaver.db.upsertItemsBatch(userId, itemsForDB);
+            // Process attachments concurrently
+            const attachmentProcessingPromises = backendAttachments.map(async (backendAttachment) => {
+                try {
+                    const zoteroAttachment = Zotero.Items.getByLibraryAndKey(libraryID, backendAttachment.zotero_key);
+                    if (!zoteroAttachment) {
+                        return { deleteKey: backendAttachment.zotero_key };
+                    }
+
+                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, { lightweight: true });
+                    if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
+                        const shouldUpdate = shouldUpdateBackend(
+                            backendAttachment.zotero_version,
+                            backendAttachment.date_modified,
+                            zoteroAttachment.version,
+                            zoteroAttachment.dateModified
+                        );
+                        return {
+                            discrepancy: {
+                                zotero_key: backendAttachment.zotero_key,
+                                backend_hash: backendAttachment.metadata_hash,
+                                local_hash: localAttachmentData.attachment_metadata_hash,
+                                backend_version: backendAttachment.zotero_version,
+                                local_version: zoteroAttachment.version,
+                                backend_date_modified: backendAttachment.date_modified,
+                                local_date_modified: zoteroAttachment.dateModified,
+                                should_update: shouldUpdate,
+                                reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
+                            },
+                        };
+                    }
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Error processing attachment ${backendAttachment.zotero_key}: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
+                return null;
+            });
+
+            const [itemResults, attachmentResults] = await Promise.all([
+                Promise.all(itemProcessingPromises),
+                Promise.all(attachmentProcessingPromises),
+            ]);
+
+            // Collate results
+            const itemsToDelete = itemResults.map(r => r?.deleteKey).filter((k): k is string => !!k);
+            result.item_discrepancies.push(...itemResults.map(r => r?.discrepancy).filter((d): d is ItemDiscrepancy => !!d));
+            
+            const attachmentsToDelete = attachmentResults.map(r => r?.deleteKey).filter((k): k is string => !!k);
+            result.attachment_discrepancies.push(...attachmentResults.map(r => r?.discrepancy).filter((d): d is AttachmentDiscrepancy => !!d));
+
+            // Log discrepancies
+            result.item_discrepancies.forEach(d => logger(`Beaver Consistency Check '${consistencyId}': Item discrepancy found for ${d.zotero_key}: ${d.reason}`, 2));
+            result.attachment_discrepancies.forEach(d => logger(`Beaver Consistency Check '${consistencyId}': Attachment discrepancy found for ${d.zotero_key}: ${d.reason}`, 2));
+
+            // Delete items from backend that don't exist locally
+            const allKeysToDelete = [...itemsToDelete, ...attachmentsToDelete];
+            if (allKeysToDelete.length > 0) {
+                logger(`Beaver Consistency Check '${consistencyId}': ${allKeysToDelete.length} items not found locally, deleting from backend.`, 3);
+                try {
+                    await deleteItems(userId, libraryID, allKeysToDelete);
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Failed to delete items from backend: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
             }
 
-            const upToDateAttachments = attachmentsComparison.attachments_up_to_date || [];
-            if (upToDateAttachments.length > 0) {
-                logger(`Beaver Sync: Populating local DB with ${upToDateAttachments.length} up-to-date attachments.`, 3);
-                const attachmentsForDB = upToDateAttachments.map(attachment => ({
-                    library_id: libraryID,
-                    zotero_key: attachment.zotero_key,
-                    attachment_metadata_hash: attachment.metadata_hash,
-                    file_hash: attachment.file_hash,
-                    upload_status: attachment.upload_status,
-                }));
-                await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
+            // Send updates to backend if requested and discrepancies found
+            if (sendUpdates && (result.item_discrepancies.length > 0 || result.attachment_discrepancies.length > 0)) {
+                logger(`Beaver Consistency Check '${consistencyId}': Sending updates to backend for discrepancies`, 3);
+                
+                try {
+                    const itemsToUpdate = result.item_discrepancies
+                        .filter(d => d.should_update)
+                        .map(d => d.zotero_key);
+                    
+                    const attachmentsToUpdate = result.attachment_discrepancies
+                        .filter(d => d.should_update)
+                        .map(d => d.zotero_key);
+
+                    if (itemsToUpdate.length > 0 || attachmentsToUpdate.length > 0) {
+                        // Get the actual items to send
+                        const itemsToSync: SyncItem[] = [];
+                        
+                        // Add regular items
+                        for (const key of itemsToUpdate) {
+                            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+                            if (item && item.isRegularItem()) {
+                                itemsToSync.push({ action: 'upsert', item });
+                            }
+                        }
+                        
+                        // Add attachments
+                        for (const key of attachmentsToUpdate) {
+                            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+                            if (item && item.isAttachment()) {
+                                itemsToSync.push({ action: 'upsert', item });
+                            }
+                        }
+
+                        const syncWithZotero = store.get(syncWithZoteroAtom);
+                        const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+                        // Add items to delete
+                        // TODO: Add items to delete
+
+                        if (itemsToSync.length > 0) {
+                            await syncItemsToBackend(
+                                consistencyId,
+                                libraryID,
+                                itemsToSync,
+                                'consistency',
+                                syncMethod
+                            );
+                            
+                            result.items_updated = itemsToUpdate.length;
+                            result.attachments_updated = attachmentsToUpdate.length;
+                        }
+                    }
+                } catch (error: any) {
+                    logger(`Beaver Consistency Check '${consistencyId}': Error sending updates: ${error.message}`, 1);
+                    Zotero.logError(error);
+                }
             }
+
+            // Log summary
+            logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
+            logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
+            logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
+            if (sendUpdates) {
+                logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
+            }
+
+            hasMore = backendData.has_more;
+            page++;
+            
+        } catch (error: any) {
+            logger(`Beaver Consistency Check '${consistencyId}': Error processing page ${page + 1}: ${error.message}`, 1);
+            Zotero.logError(error);
+            break;
         }
-
-        // --- 6. Handle Deletions ---
-        const keysToDelete = [
-            ...itemsComparison.items_to_delete, 
-            ...attachmentsComparison.attachments_to_delete,
-        ];
-
-        if (keysToDelete.length > 0) {
-            logger(`Beaver Sync: Deleting ${keysToDelete.length} records from backend that are no longer in Zotero.`, 3);
-            const response = await syncService.deleteItems(libraryID, keysToDelete);
-            const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
-            if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(userId, libraryID, allKeys);
-        }
-
-        // --- 7. Handle Items Needing Sync ---
-        const keysNeedingSync = [
-            ...itemsComparison.items_needing_sync,
-            ...attachmentsComparison.attachments_needing_sync
-        ];
-        
-        logger(`Beaver Sync: Backend indicates ${keysNeedingSync.length} items need syncing.`, 3);
-
-        if (keysNeedingSync.length === 0) {
-            onStatusChange?.('completed');
-            onProgress?.(totalItems, totalItems);
-            logger('Beaver Sync: All items are up to date', 3);
-            return { status: 'completed', message: 'All items up to date' };
-        }
-        
-        const itemsNeedingSync = allItems.filter(item => keysNeedingSync.includes(item.key));
-        
-        logger(`Beaver Sync: Processing ${itemsNeedingSync.length} items that need syncing`, 3);
-        
-        return syncItemsToBackend(
-            libraryID,
-            itemsNeedingSync,
-            'consistency',
-            onStatusChange,
-            undefined,
-            batchSize,
-            false // Don't filter by local database hash
-        );
-        
-    } catch (error: any) {
-        logger('Beaver Sync: Error during consistency check: ' + error.message, 1);
-        Zotero.logError(error);
-        onStatusChange?.('failed');
-        throw error;
     }
+
+    return result;
 }
+
+/**
+ * Determines whether the backend should be updated based on version and date comparison
+ * @param backendVersion Backend version number
+ * @param backendDate Backend date modified (ISO string)
+ * @param localVersion Local version number
+ * @param localDate Local date modified (SQL datetime string)
+ * @returns true if backend should be updated
+ */
+function shouldUpdateBackend(
+    backendVersion: number,
+    backendDate: string,
+    localVersion: number,
+    localDate: string
+): boolean {
+    // Local version is newer
+    if (localVersion > backendVersion) {
+        return true;
+    }
+    
+    // Same version, check date
+    if (localVersion === backendVersion) {
+        const backendTime = new Date(backendDate).getTime();
+        const localTime = new Date(localDate + 'Z').getTime(); // Add Z for UTC
+        return localTime >= backendTime;
+    }
+    
+    // Backend version is newer
+    return false;
+}
+

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { ArrowRightIcon, Spinner, LogoutIcon } from '../icons/icons';
 import Button from '../ui/Button';
-import { profileWithPlanAtom } from '../../atoms/profile';
+import { profileWithPlanAtom, syncWithZoteroAtom } from '../../atoms/profile';
 import { logoutAtom } from '../../atoms/auth';
 import { accountService } from '../../../src/services/accountService';
 import { logger } from '../../../src/utils/logger';
@@ -11,6 +11,7 @@ import { getZoteroUserIdentifier } from '../../../src/utils/zoteroIdentifier';
 const DeviceAuthorizationPage: React.FC = () => {
     // Auth state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const logout = useSetAtom(logoutAtom);
     
     // Loading state
@@ -67,17 +68,23 @@ const DeviceAuthorizationPage: React.FC = () => {
                 {/* Header section */}
                 <div className="display-flex flex-col items-start mb-6">
                     <h1 className="text-2xl font-semibold mb-3">New Device Detected</h1>
-                    <p className="text-base font-color-secondary mb-4">
-                        You're signing in to Beaver from a new computer. To continue using Beaver on this device, 
-                        you need to authorize it to sync with your existing Beaver account.
-                    </p>
-                     <div className="p-4 rounded-md bg-senary border-popup">
-                        <div className="text-base font-semibold mb-2">Important: Keep Zotero Synced</div>
-                        <div className="text-sm font-color-secondary">
-                            Make sure you're using <strong>Zotero Sync</strong> to keep your libraries synchronized 
-                            across all your computers. This ensures Beaver has access to the same items on every device.
+                    {syncWithZotero ? (
+                        <p className="text-base font-color-secondary mb-4">
+                            You're signing in to Beaver from a new device. To continue, you'll need to authorize this device to sync with your Beaver account.
+                        </p>
+                    ) : (
+                        <p className="text-base font-color-secondary mb-4">
+                            To use Beaver from a different device, please sync your library with Zotero and enable the Preference "Sync with Zotero" in the Beaver Preferences of your existing device.
+                        </p>
+                    )}
+                    {syncWithZotero && (
+                        <div className="p-4 rounded-md bg-senary border-popup">
+                            <div className="text-base font-semibold mb-2">Important: Stay in Sync with Zotero</div>
+                            <div className="text-sm font-color-secondary">
+                                Be sure to use <strong>Zotero Sync</strong> to keep your libraries up to date across all devices. This helps Beaver synchronize your data and allows you to access the same items everywhere you work.
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Error messages */}
                     {errorMsg && (
@@ -88,29 +95,43 @@ const DeviceAuthorizationPage: React.FC = () => {
 
             {/* Fixed button area */}
             <div className="p-4 border-top-quinary">
-                <div className="display-flex flex-row items-center gap-4">
-                    {/* Logout button */}
-                    <Button
-                        variant="outline"
-                        icon={LogoutIcon}
-                        onClick={handleLogout}
-                        disabled={isAuthorizing}
-                    >
-                        Sign Out
-                    </Button>
+                {syncWithZotero ? (
+                    <div className="display-flex flex-row items-center gap-4">
+                        {/* Logout button */}
+                        <Button
+                            variant="outline"
+                            icon={LogoutIcon}
+                            onClick={handleLogout}
+                            disabled={isAuthorizing}
+                        >
+                            Sign Out
+                        </Button>
 
-                    <div className="flex-1" />
+                        <div className="flex-1" />
 
-                    {/* Authorize button */}
-                    <Button
-                        variant="solid"
-                        rightIcon={isAuthorizing ? Spinner : ArrowRightIcon}
-                        onClick={handleAuthorizeDevice}
-                        disabled={isAuthorizing}
-                    >
-                        {isAuthorizing ? 'Authorizing...' : 'Authorize Device'}
-                    </Button>
-                </div>
+                        {/* Authorize button */}
+                        <Button
+                            variant="solid"
+                            rightIcon={isAuthorizing ? Spinner : ArrowRightIcon}
+                            onClick={handleAuthorizeDevice}
+                            disabled={isAuthorizing}
+                        >
+                            {isAuthorizing ? 'Authorizing...' : 'Authorize Device'}
+                        </Button>
+                    </div>
+                ) : (
+                    <div className="display-flex flex-row items-center">
+                        <div className="flex-1" />
+                        <Button
+                            variant="solid"
+                            icon={LogoutIcon}
+                            onClick={handleLogout}
+                            disabled={isAuthorizing}
+                        >
+                            Sign Out
+                        </Button>
+                    </div>
+                )}
             </div>
         </div>
     );

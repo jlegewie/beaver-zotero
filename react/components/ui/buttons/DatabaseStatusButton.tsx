@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { useAtomValue } from "jotai";
-import { syncingAtom, syncErrorAtom } from "../../../atoms/ui";
+import { syncingAtom, syncErrorAtom } from "../../../atoms/sync";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { DatabaseStatusIcon } from "../../icons/icons";
 import { syncLibraryIdsAtom } from "../../../atoms/profile";
+import { logger } from '../../../../src/utils/logger';
 
 // Possible icon states
 type IconState = {
@@ -40,7 +41,10 @@ const DatabaseStatusButton: React.FC = () => {
         
     // Handle manual sync button click
     const handleSyncClick = () => {
-        syncZoteroDatabase(syncLibraryIds);
+        if(!isSyncing) {
+            logger(`Beaver Sync: User-initiated database sync`)
+            syncZoteroDatabase(syncLibraryIds);
+        }
     };
     
     const [isHovering, setIsHovering] = useState(false);
@@ -52,11 +56,11 @@ const DatabaseStatusButton: React.FC = () => {
                 dotColor={iconState.color}
                 fading={iconState.fading}
                 fadeDuration={1000}
-                hover={isHovering}
+                hover={isHovering && !isSyncing}
                 {...props}
             />
         );
-    }, [iconState.color, iconState.fading, isHovering]);
+    }, [iconState.color, iconState.fading, isHovering, isSyncing]);
     
     return (
         <IconButton

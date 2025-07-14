@@ -91,7 +91,7 @@ export class ApiService {
     */
     async post<T>(endpoint: string, body: any): Promise<T> {
         const headers = await this.getAuthHeaders();
-        logger(`POST: ${endpoint} ${JSON.stringify(body)}`);
+        logger(`POST: ${endpoint}`);
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             method: 'POST',
             headers,

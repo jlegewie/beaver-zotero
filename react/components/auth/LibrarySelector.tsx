@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, AlertIcon, Spinner, CSSIcon } from "../icons/icons";
+import { Icon, Spinner, CSSIcon, TickIcon, InformationCircleIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom, planDisplayNameAtom } from "../../atoms/profile";
+import { planFeaturesAtom, profileBalanceAtom, planNameAtom, planDisplayNameAtom} from "../../atoms/profile";
+import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 
@@ -9,12 +10,16 @@ interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
+    useZoteroSync: boolean;
+    handleSyncToggleChange: (checked: boolean) => void;
+    disableSyncToggle: boolean;
 }
 
-const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics }) => {
+const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics, useZoteroSync, handleSyncToggleChange, disableSyncToggle }) => {
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
+    const planName = useAtomValue(planNameAtom);
     const planDisplayName = useAtomValue(planDisplayNameAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
@@ -118,7 +123,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
     
     return (
-        <div className="display-flex flex-col gap-3">
+        <div className="display-flex flex-col flex-1 min-h-0 gap-3">
             {/* <div className="text-lg font-semibold">Step 1: Select Libraries</div> */}
 
             {/* <div className="text-base font-color-secondary">
@@ -190,90 +195,90 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                 </div>
             )}
             
-            {/* Processing tiers */}
-            {!isLoading && (
+            {/* Free Account */}
+            {!isLoading && planName === 'free' && (
                 <div className="mt-4 display-flex flex-col gap-3">
-
-                    {/* Basic Processing */}
-                    {planFeatures.processingTier === 'basic' && (
-                        <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'basic' ? "border-popup" : ''}`}>
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <span className="font-medium">Basic Processing</span>
-                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                                </span>}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
-                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
-                            </div>
+                    <div className="p-3 rounded-md bg-senary border-popup">
+                        <div className="display-flex flex-row items-center mb-1">
+                            <div className="font-medium">{planDisplayName} Account (free)</div>
+                            <div className="flex-1"/>
+                            {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
+                            {exceedsBalance && (
+                                <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                    <div className='text-sm font-medium font-color-yellow'>
+                                        Account limit exceeded
+                                    </div>
+                                    <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
+                                </div>
+                            )}
                         </div>
-                    )}
-
-                    {/* Standard Processing */}
-                    {planFeatures.processingTier === 'standard' && (
-                        <div className={`p-3 rounded-md bg-senary ${planFeatures.processingTier === 'standard' ? "border-popup" : ''}`}>
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <span className="font-medium">Standard Processing</span>
-                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                                </span>}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>}
-                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
-                            </div>
+                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                            <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
                         </div>
-                    )}
-                    {planFeatures.processingTier === 'basic' && (
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <span className="font-medium">Standard Processing</span>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Better search with semantic document understanding
-                            </div>
+                    </div>
+                    <div className="p-3 rounded-md bg-senary">
+                        <div className="display-flex flex-row justify-between items-center mb-1">
+                            <div className="font-medium">Upgrade Account</div>
+                            <Button variant="surface">Upgrade</Button>
                         </div>
-                    )}
-
-                    {/* Advanced Processing */}
-                    {planFeatures.processingTier === 'advanced' && (
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <span className="font-medium">Advanced Processing</span>
-                                {!isLoading && <span className={`text-sm font-medium ${exceedsBalance ? 'text-red-500' : 'text-green-600'}`}>
-                                    {exceedsBalance ? 'Exceeds balance' : 'Within balance'}
-                                </span>}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                {!isLoading && <span>Selected: {selectedLibraryTotals.pageCount.toLocaleString()} pages</span>} 
-                                <span>Balance: {profileBalance.pagesRemaining.toLocaleString()} pages</span>
-                            </div>
+                        <div className="text-sm font-color-secondary">
+                            Better search with semantic document understanding
                         </div>
-                    )}
-                    {planFeatures.processingTier !== 'advanced' && (
-                        /* When user has basic plan, show advanced processing with upgrade button */
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <span className="font-medium">Advanced Processing</span>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Best search with state-of-the-art document processing
-                            </div>
-                        </div>
-                    )}
+                    </div>
                 </div>
             )}
 
-            {exceedsBalance && (
-                <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
-                    <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                    <div className="display-flex flex-col gap-2">
-                        {`File pages in selected libraries exceed the limit for the ${planDisplayName} plan. Some documents won't be searchable.`}
+            {/* Core Account */}
+            {!isLoading && planName === 'core' && (
+                <div className="mt-4 display-flex flex-col gap-3">
+                    <div className="p-3 rounded-md bg-senary border-popup">
+                        <div className="display-flex flex-row items-center mb-1">
+                            <div className="font-medium">{planDisplayName} Account</div>
+                            <div className="flex-1"/>
+                            {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
+                            {exceedsBalance && (
+                                <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                    <div className='text-sm font-medium font-color-yellow'>
+                                        Account limit exceeded
+                                    </div>
+                                    <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
+                                </div>
+                            )}
+                        </div>
+                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                            <div>Better processing & semantic search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
+                        </div>
+                    </div>
+                    <div className="p-3 rounded-md bg-senary">
+                        <div className="display-flex flex-row justify-between items-center mb-1">
+                            <div className="font-medium">Upgrade Account</div>
+                            <Button variant="surface">Upgrade</Button>
+                        </div>
+                        <div className="text-sm font-color-secondary">
+                            Unlimited pages and advanced semantic search
+                        </div>
                     </div>
                 </div>
+            )}
+
+            {/* {!isLoading && exceedsBalance && (
+                <div className="font-color-red p-2 display-flex flex-row gap-3 items-start">
+                    <Icon icon={AlertIcon} className="scale-12 mt-1"/>
+                    <div className="display-flex flex-col gap-2">
+                        {`Pages in selected libraries exceed plan limits. Some documents won't be searchable.`}
+                    </div>
+                </div>
+            )} */}
+
+            {!isLoading && (
+                <>
+                    <div className="flex-1" />
+                    <ZoteroSyncToggle 
+                        checked={useZoteroSync}
+                        onChange={handleSyncToggleChange}
+                        disabled={disableSyncToggle}
+                    />
+                </>
             )}
             
 

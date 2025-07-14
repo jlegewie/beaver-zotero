@@ -22,6 +22,7 @@ import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
 // Track if auth listener has been initialized globally
 let authListenerInitialized = false;
 let authListenerCleanup: (() => void) | null = null;
+let authListenerRefCount = 0; // Reference counting
 
 export function useAuth() {
     const [session, setSession] = useAtom(sessionAtom);
@@ -110,11 +111,24 @@ export function useAuth() {
     
     
     useEffect(() => {
+        // Increment reference count
+        authListenerRefCount++;
+        logger(`auth: component mounted, ref count: ${authListenerRefCount}`);
+        
         // Skip initialization if already done by another instance
         if (authListenerInitialized && authListenerCleanup) {
             logger('auth: listener already initialized globally, skipping setup.');
             setLoading(false);
-            return () => { };
+            return () => {
+                // Decrement reference count and cleanup if needed
+                authListenerRefCount--;
+                logger(`auth: component unmounting, ref count: ${authListenerRefCount}`);
+                
+                if (authListenerRefCount <= 0 && authListenerCleanup) {
+                    logger('auth: last component unmounting, performing global cleanup.');
+                    authListenerCleanup();
+                }
+            };
         }
         
         // Mark initialization globally
@@ -168,7 +182,13 @@ export function useAuth() {
         
         // Clean up subscription when the component unmounts
         return () => {
-            logger('auth: component unmounting. Checking if global cleanup needed.');
+            authListenerRefCount--;
+            logger(`auth: component unmounting, ref count: ${authListenerRefCount}`);
+            
+            if (authListenerRefCount <= 0 && authListenerCleanup) {
+                logger('auth: last component unmounting, performing global cleanup.');
+                authListenerCleanup();
+            }
         };
     }, [handleAuthStateChange]);
     

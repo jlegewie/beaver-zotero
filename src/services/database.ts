@@ -5,36 +5,20 @@ import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
 import { getPref } from '../utils/prefs';
 
-/* 
- * Interface for the 'items' table row
- * 
- * Table stores the current syncing state of a zotero item
- * Items are only stored with a metadata hash after they have been synced
- * 
- */
-export interface ItemRecord {
-    id: string;
-    user_id: string;
-    library_id: number;
-    zotero_key: string;
-    item_metadata_hash: string;
-}
 
 /* 
  * Interface for the 'attachments' table row
  * 
- * Table stores the current state of a zotero attachment. This includes
- * the syncing state (file metadata) and upload status.
+ * Table stores the current syncing state of a zotero attachment
+ * and upload status of the attachment file.
  * 
  */
 export interface AttachmentRecord {
-    id: string;
     user_id: string;
     library_id: number;
     zotero_key: string;
-    attachment_metadata_hash: string;
 
-    // File metadata
+    // File hash and upload status
     file_hash: string | null;  // processed file hash (can differ from current file hash)
     upload_status: UploadStatus | null;
 }
@@ -147,37 +131,23 @@ export class BeaverDB {
         const previousVersion = getPref('installedVersion') || '0.1';
 
         // Delete all tables in test versions
-        if (previousVersion.startsWith('0.1')) {
-            ztoolkit.log(`Deleting all tables for plugin version ${pluginVersion}`);
+        if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS items`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS attachments`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS threads`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS messages`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
         }
-
-        // Create database schema
-        await this.conn.queryAsync(`
-            CREATE TABLE IF NOT EXISTS items (
-                id                       TEXT(36) PRIMARY KEY,
-                user_id                  TEXT(36) NOT NULL,
-                library_id               INTEGER NOT NULL,
-                zotero_key               TEXT NOT NULL,
-                item_metadata_hash       TEXT NOT NULL,
-                UNIQUE(user_id, library_id, zotero_key)
-            );
-        `);
 
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS attachments (
-                id                       TEXT(36) PRIMARY KEY,
                 user_id                  TEXT(36) NOT NULL,
                 library_id               INTEGER NOT NULL,
                 zotero_key               TEXT NOT NULL,
-                attachment_metadata_hash TEXT NOT NULL,
                 file_hash                TEXT,
                 upload_status            TEXT,
-                UNIQUE(user_id, library_id, zotero_key)
+                PRIMARY KEY(user_id, library_id, zotero_key)
             );
         `);
 
@@ -224,6 +194,7 @@ export class BeaverDB {
             );
         `);
 
+
         // DB indexes
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_messages_user_thread
@@ -264,114 +235,45 @@ export class BeaverDB {
     }
 
     /**
-     * Insert a record into the 'items' table.
-     * @param user_id User ID for the item
-     * @param item Data for the new item record. 'id' will be generated.
-     * @returns The generated 'id' of the inserted item.
-     */
-    public async insertItem(user_id: string, item: Omit<ItemRecord, 'id' | 'user_id'>): Promise<string> {
-        const id = uuidv4();
-        await this.conn.queryAsync(
-            `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash)
-             VALUES (?, ?, ?, ?, ?)`,
-            [
-                id,
-                user_id,
-                item.library_id,
-                item.zotero_key,
-                item.item_metadata_hash
-            ]
-        );
-        return id;
-    }
-
-    /**
-     * Insert multiple records into the 'items' table in a single transaction.
-     * @param user_id User ID for the items
-     * @param items An array of item data. 'id' will be generated for each.
-     * @returns An array of the generated 'id's for the inserted items.
-     */
-    public async insertItemsBatch(user_id: string, items: Omit<ItemRecord, 'id' | 'user_id'>[]): Promise<string[]> {
-        if (items.length === 0) {
-            return [];
-        }
-
-        const generatedIds: string[] = items.map(() => uuidv4());
-        const placeholders = items.map(() => '(?, ?, ?, ?, ?)').join(', ');
-        const values: any[] = [];
-        items.forEach((item, index) => {
-            values.push(
-                generatedIds[index],
-                user_id,
-                item.library_id,
-                item.zotero_key,
-                item.item_metadata_hash
-            );
-        });
-
-        const query = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash) VALUES ${placeholders}`;
-
-        // Using executeTransaction ensures atomicity
-        await this.conn.executeTransaction(async () => {
-            await this.conn.queryAsync(query, values);
-        });
-
-        return generatedIds;
-    }
-
-    /**
      * Insert a record into the 'attachments' table.
-     * Optional fields default to initial states ('pending', null).
      * @param user_id User ID for the attachment
-     * @param attachment Data for the new attachment. 'id' will be generated.
-     *                   Requires 'library_id', 'zotero_key', 'attachment_metadata_hash'.
-     * @returns The generated 'id' of the inserted attachment.
+     * @param attachment Data for the new attachment.
      */
     public async insertAttachment(
         user_id: string,
-        attachment: Pick<AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & Partial<Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>
-    ): Promise<string> {
-        const id = uuidv4();
-        const defaults: Partial<AttachmentRecord> = {
-            file_hash: null,
-            upload_status: null,
-        };
-        const finalAttachment = { ...defaults, ...attachment };
-
+        attachment: Omit<AttachmentRecord, 'user_id'>
+    ): Promise<void> {
         await this.conn.queryAsync(
-            `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO attachments (user_id, library_id, zotero_key, file_hash, upload_status)
+             VALUES (?, ?, ?, ?, ?)`,
             [
-                id,
                 user_id,
-                finalAttachment.library_id,
-                finalAttachment.zotero_key,
-                finalAttachment.attachment_metadata_hash,
-                finalAttachment.file_hash,
-                finalAttachment.upload_status
+                attachment.library_id,
+                attachment.zotero_key,
+                attachment.file_hash,
+                attachment.upload_status
             ]
         );
-        return id;
     }
 
     /**
      * Helper to build and execute update queries safely.
-     * @param table The table to update ('items' or 'attachments').
+     * @param table The table to update ('attachments').
      * @param user_id The user_id to match.
      * @param libraryId The library_id to match.
      * @param zoteroKey The zotero_key to match.
      * @param updates An object containing field-value pairs to update.
      * @param allowedFields List of fields allowed to be updated.
      */
-    private async executeUpdate<T extends object>(
-        table: 'items' | 'attachments',
+    private async executeUpdate<T extends AttachmentRecord>(
+        table: 'attachments',
         user_id: string,
         libraryId: number,
         zoteroKey: string,
-        updates: Partial<T>,
+        updates: Partial<Omit<T, 'user_id' | 'library_id' | 'zotero_key'>>,
         allowedFields: (keyof T)[]
     ): Promise<void> {
-        const fieldsToUpdate = allowedFields.filter(field => updates[field] !== undefined);
+        const fieldsToUpdate = allowedFields.filter(field => (updates as Partial<T>)[field] !== undefined);
 
         if (fieldsToUpdate.length === 0) {
             return; // Nothing to update
@@ -379,31 +281,13 @@ export class BeaverDB {
 
         const setClauses = fieldsToUpdate.map(field => `${String(field)} = ?`).join(', ');
         // Explicitly type values as any[] to allow mixing types for the query
-        const values: any[] = fieldsToUpdate.map(field => updates[field]);
+        const values: any[] = fieldsToUpdate.map(field => (updates as Partial<T>)[field]);
 
         // Add user_id, library_id and zotero_key for the WHERE clause
         values.push(user_id, libraryId, zoteroKey);
 
         const query = `UPDATE ${table} SET ${setClauses} WHERE user_id = ? AND library_id = ? AND zotero_key = ?`;
         await this.conn.queryAsync(query, values);
-    }
-
-    /**
-     * Update an existing item record identified by user_id, library_id and zotero_key.
-     * Only 'item_metadata_hash' can be updated.
-     * @param user_id The user_id of the item.
-     * @param libraryId The library_id of the item.
-     * @param zoteroKey The zotero_key of the item.
-     * @param updates An object containing the fields to update.
-     */
-    public async updateItem(
-        user_id: string,
-        libraryId: number,
-        zoteroKey: string,
-        updates: Partial<Pick<ItemRecord, 'item_metadata_hash'>>
-    ): Promise<void> {
-        const allowedFields: (keyof ItemRecord)[] = ['item_metadata_hash'];
-        await this.executeUpdate<ItemRecord>('items', user_id, libraryId, zoteroKey, updates, allowedFields);
     }
 
     /**
@@ -417,10 +301,9 @@ export class BeaverDB {
         user_id: string,
         libraryId: number,
         zoteroKey: string,
-        updates: Partial<Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key'>>
+        updates: Partial<Omit<AttachmentRecord, 'user_id' | 'library_id' | 'zotero_key'>>
     ): Promise<void> {
         const allowedFields: (keyof AttachmentRecord)[] = [
-            'attachment_metadata_hash',
             'file_hash',
             'upload_status'
         ];
@@ -428,145 +311,13 @@ export class BeaverDB {
     }
 
     /**
-     * Update an existing item record or insert a new one if it doesn't exist.
-     * @param user_id User ID for the item
-     * @param item Data for the item record. Requires 'library_id', 'zotero_key', 'item_metadata_hash'.
-     * @returns The internal 'id' of the upserted item.
-     */
-    public async upsertItem(user_id: string, item: Omit<ItemRecord, 'id' | 'user_id'>): Promise<string> {
-        const existingItem = await this.getItemByZoteroKey(user_id, item.library_id, item.zotero_key);
-        if (existingItem) {
-            // Only update if the hash is different to avoid unnecessary writes
-            if (existingItem.item_metadata_hash !== item.item_metadata_hash) {
-                 await this.updateItem(user_id, item.library_id, item.zotero_key, { item_metadata_hash: item.item_metadata_hash });
-            }
-            return existingItem.id;
-        } else {
-            const newId = await this.insertItem(user_id, item);
-            return newId;
-        }
-    }
-
-    /**
-     * Upsert multiple item records in a single transaction.
-     * Inserts items that don't exist, updates items where 'item_metadata_hash' has changed.
-     * @param user_id User ID for the items
-     * @param items An array of item data. Requires 'library_id', 'zotero_key', 'item_metadata_hash'.
-     * @returns An array of the internal 'id's corresponding to the input items (either existing or newly inserted).
-     */
-    public async upsertItemsBatch(user_id: string, items: Omit<ItemRecord, 'id' | 'user_id'>[]): Promise<string[]> {
-        if (items.length === 0) {
-            return [];
-        }
-
-        const finalIds: string[] = [];
-        const itemsToInsert: (Omit<ItemRecord, 'id' | 'user_id'> & { generatedId: string })[] = [];
-        const itemsToUpdate: { libraryId: number; zoteroKey: string; item_metadata_hash: string }[] = [];
-        const itemMap = new Map<string, Omit<ItemRecord, 'id' | 'user_id'>>(); // Key: "libraryId-zoteroKey"
-        items.forEach(item => itemMap.set(`${item.library_id}-${item.zotero_key}`, item));
-
-        // 1. Fetch existing items matching the batch
-        const keys = items.map(item => [item.library_id, item.zotero_key]);
-        // Construct IN clause placeholders: ((?,?), (?,?), ...)
-        const placeholders = keys.map(() => '(?,?)').join(',');
-        const values = [user_id, ...keys.flat()];
-        const query = `SELECT * FROM items WHERE user_id = ? AND (library_id, zotero_key) IN (VALUES ${placeholders})`;
-        const existingRows = await this.conn.queryAsync(query, values);
-        const existingItemsMap = new Map<string, ItemRecord>(); // Key: "libraryId-zoteroKey"
-        existingRows.forEach((row: any) => {
-            const record = BeaverDB.rowToItemRecord(row);
-            existingItemsMap.set(`${record.library_id}-${record.zotero_key}`, record);
-        });
-
-        // 2. Determine inserts vs updates
-        for (const item of items) {
-            const key = `${item.library_id}-${item.zotero_key}`;
-            const existing = existingItemsMap.get(key);
-            if (existing) {
-                finalIds.push(existing.id); // Use existing ID
-                if (existing.item_metadata_hash !== item.item_metadata_hash) {
-                    itemsToUpdate.push({
-                        libraryId: item.library_id,
-                        zoteroKey: item.zotero_key,
-                        item_metadata_hash: item.item_metadata_hash,
-                    });
-                }
-            } else {
-                const newId = uuidv4();
-                finalIds.push(newId); // Use newly generated ID
-                itemsToInsert.push({ ...item, generatedId: newId });
-            }
-        }
-
-        // 3. Execute within a transaction
-        await this.conn.executeTransaction(async () => {
-            // Batch Insert
-            if (itemsToInsert.length > 0) {
-                const insertPlaceholders = itemsToInsert.map(() => '(?, ?, ?, ?, ?)').join(', ');
-                const insertValues: any[] = [];
-                itemsToInsert.forEach(item => {
-                    insertValues.push(
-                        item.generatedId,
-                        user_id,
-                        item.library_id,
-                        item.zotero_key,
-                        item.item_metadata_hash
-                    );
-                });
-                const insertQuery = `INSERT INTO items (id, user_id, library_id, zotero_key, item_metadata_hash) VALUES ${insertPlaceholders}`;
-                await this.conn.queryAsync(insertQuery, insertValues);
-            }
-
-            // Updates (individually within the transaction)
-            for (const update of itemsToUpdate) {
-                 await this.conn.queryAsync(
-                     `UPDATE items SET item_metadata_hash = ? WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-                     [update.item_metadata_hash, user_id, update.libraryId, update.zoteroKey]
-                 );
-             }
-        });
-
-        return finalIds;
-    }
-
-    /**
-    * Helper method to construct ItemRecord from a database row
-    */
-    private static rowToItemRecord(row: any): ItemRecord {
-        return {
-            id: row.id,
-            user_id: row.user_id,
-            library_id: row.library_id,
-            zotero_key: row.zotero_key,
-            item_metadata_hash: row.item_metadata_hash,
-        };
-    }
-
-    /**
-     * Retrieve an item record by its user_id, library_id and zotero_key.
-     * @param user_id The user_id of the item.
-     * @param libraryId The library_id of the item.
-     * @param zoteroKey The zotero_key of the item.
-     * @returns The ItemRecord if found, otherwise null.
-     */
-    public async getItemByZoteroKey(user_id: string, libraryId: number, zoteroKey: string): Promise<ItemRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM items WHERE user_id = ?1 AND library_id = ?2 AND zotero_key = ?3`,
-            [user_id, libraryId, zoteroKey]
-        );
-        return rows.length === 0 ? null : BeaverDB.rowToItemRecord(rows[0]);
-    }
-
-    /**
     * Helper method to construct AttachmentRecord from a database row
     */
     private static rowToAttachmentRecord(row: any): AttachmentRecord {
          return {
-            id: row.id,
             user_id: row.user_id,
             library_id: row.library_id,
             zotero_key: row.zotero_key,
-            attachment_metadata_hash: row.attachment_metadata_hash,
             file_hash: row.file_hash,
             upload_status: row.upload_status as UploadStatus,
         };
@@ -620,137 +371,45 @@ export class BeaverDB {
      * Upsert multiple attachment records in a single transaction.
      * Inserts attachments that don't exist, updates attachments where fields have changed.
      * @param user_id User ID for the attachments
-     * @param attachments An array of attachment data. Requires 'library_id', 'zotero_key', 'attachment_metadata_hash'.
-     * @returns An array of the internal 'id's corresponding to the input attachments (either existing or newly inserted).
+     * @param attachments An array of attachment data.
      */
     public async upsertAttachmentsBatch(
         user_id: string, 
-        attachments: (Pick<AttachmentRecord, 'library_id' | 'zotero_key' | 'attachment_metadata_hash'> & Partial<Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>>)[]
-    ): Promise<string[]> {
+        attachments: Omit<AttachmentRecord, 'user_id'>[]
+    ): Promise<void> {
         if (attachments.length === 0) {
-            return [];
+            return;
         }
 
-        const defaults: Partial<AttachmentRecord> = {
-            file_hash: null,
-            upload_status: 'pending',
-        };
+        // Single prepared statement for performance
+        const insertSQL = `
+            INSERT INTO attachments (
+                user_id,
+                library_id,
+                zotero_key,
+                file_hash,
+                upload_status
+            ) VALUES (
+                ?, ?, ?, ?, ?
+            )
+            ON CONFLICT(user_id, library_id, zotero_key) DO UPDATE SET
+                file_hash = excluded.file_hash,
+                upload_status = excluded.upload_status;
+        `;
 
-        const finalIds: string[] = [];
-        const attachmentsToInsert: (Omit<AttachmentRecord, 'id' | 'user_id'> & { generatedId: string })[] = [];
-        const attachmentsToUpdate: { libraryId: number; zoteroKey: string; updates: Partial<Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key'>> }[] = [];
-        const attachmentMap = new Map<string, typeof attachments[0]>(); // Key: "libraryId-zoteroKey"
-        attachments.forEach(attachment => {
-            const finalAttachment = { ...defaults, ...attachment };
-            attachmentMap.set(`${finalAttachment.library_id}-${finalAttachment.zotero_key}`, finalAttachment);
-        });
-
-        // 1. Fetch existing attachments matching the batch
-        const keys = attachments.map(attachment => [attachment.library_id, attachment.zotero_key]);
-        // Construct IN clause placeholders: ((?,?), (?,?), ...)
-        const placeholders = keys.map(() => '(?,?)').join(',');
-        const values = [user_id, ...keys.flat()];
-        const query = `SELECT * FROM attachments WHERE user_id = ? AND (library_id, zotero_key) IN (VALUES ${placeholders})`;
-        const existingRows = await this.conn.queryAsync(query, values);
-        const existingAttachmentsMap = new Map<string, AttachmentRecord>(); // Key: "libraryId-zoteroKey"
-        existingRows.forEach((row: any) => {
-            const record = BeaverDB.rowToAttachmentRecord(row);
-            existingAttachmentsMap.set(`${record.library_id}-${record.zotero_key}`, record);
-        });
-
-        // 2. Determine inserts vs updates
-        for (const attachment of attachments) {
-            const finalAttachment = { ...defaults, ...attachment };
-            const key = `${finalAttachment.library_id}-${finalAttachment.zotero_key}`;
-            const existing = existingAttachmentsMap.get(key);
-            
-            if (existing) {
-                finalIds.push(existing.id); // Use existing ID
-                
-                // Check which fields need updating
-                const updates: Partial<Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key'>> = {};
-                let hasChanges = false;
-                
-                if (existing.attachment_metadata_hash !== finalAttachment.attachment_metadata_hash) {
-                    updates.attachment_metadata_hash = finalAttachment.attachment_metadata_hash;
-                    hasChanges = true;
-                }
-                
-                // Check all other fields for changes
-                const fieldsToCheck: (keyof Omit<AttachmentRecord, 'id' | 'user_id' | 'library_id' | 'zotero_key' | 'attachment_metadata_hash'>)[] = [
-                    'file_hash', 'upload_status'
+        await this.conn.executeTransaction(async () => {
+            for (const attachment of attachments) {
+                const params = [
+                    user_id,
+                    attachment.library_id,
+                    attachment.zotero_key,
+                    attachment.file_hash,
+                    attachment.upload_status ?? null
                 ];
                 
-                fieldsToCheck.forEach(field => {
-                    if (finalAttachment[field] !== undefined && existing[field] !== finalAttachment[field]) {
-                        updates[field] = finalAttachment[field] as any;
-                        hasChanges = true;
-                    }
-                });
-                
-                if (hasChanges) {
-                    attachmentsToUpdate.push({
-                        libraryId: finalAttachment.library_id,
-                        zoteroKey: finalAttachment.zotero_key,
-                        updates
-                    });
-                }
-            } else {
-                const newId = uuidv4();
-                finalIds.push(newId); // Use newly generated ID
-                attachmentsToInsert.push({ 
-                    ...finalAttachment, 
-                    generatedId: newId 
-                } as any);
-            }
-        }
-
-        // 3. Execute within a transaction
-        await this.conn.executeTransaction(async () => {
-            // Batch Insert
-            if (attachmentsToInsert.length > 0) {
-                const insertPlaceholders = attachmentsToInsert.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
-                const insertValues: any[] = [];
-                attachmentsToInsert.forEach(attachment => {
-                    insertValues.push(
-                        attachment.generatedId,
-                        user_id,
-                        attachment.library_id,
-                        attachment.zotero_key,
-                        attachment.attachment_metadata_hash,
-                        attachment.file_hash,
-                        attachment.upload_status
-                    );
-                });
-                const insertQuery = `INSERT INTO attachments (id, user_id, library_id, zotero_key, attachment_metadata_hash, file_hash, upload_status) VALUES ${insertPlaceholders}`;
-                await this.conn.queryAsync(insertQuery, insertValues);
-            }
-
-            // Updates (individually within the transaction)
-            for (const update of attachmentsToUpdate) {
-                const setClauses = Object.keys(update.updates).map(field => `${field} = ?`).join(', ');
-                const updateValues = [...Object.values(update.updates), user_id, update.libraryId, update.zoteroKey];
-                await this.conn.queryAsync(
-                    `UPDATE attachments SET ${setClauses} WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-                    updateValues
-                );
+                await this.conn.queryAsync(insertSQL, params);
             }
         });
-
-        return finalIds;
-    }
-
-    /**
-     * Delete an item record by user_id, library_id and zotero_key.
-     * @param user_id The user_id of the item to delete.
-     * @param libraryId The library_id of the item to delete.
-     * @param zoteroKey The zotero_key of the item to delete.
-     */
-    public async deleteItem(user_id: string, libraryId: number, zoteroKey: string): Promise<void> {
-        await this.conn.queryAsync(
-            `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-            [user_id, libraryId, zoteroKey]
-        );
     }
 
     /**
@@ -767,7 +426,7 @@ export class BeaverDB {
     }
 
     /**
-     * Delete a record from either items or attachments table by user_id, library_id and zotero_key.
+     * Delete a record from attachments table by user_id, library_id and zotero_key.
      * Use this method when you don't know which table contains the record.
      * @param user_id The user_id of the record to delete.
      * @param libraryId The library_id of the record to delete.
@@ -777,11 +436,6 @@ export class BeaverDB {
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
             await this.conn.queryAsync(
-                `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
-                [user_id, libraryId, zoteroKey]
-            );
-
-            await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key = ?`,
                 [user_id, libraryId, zoteroKey]
             );
@@ -789,7 +443,7 @@ export class BeaverDB {
     }
 
     /**
-     * Delete multiple records from either items or attachments table by user_id, library_id and zotero_keys.
+     * Delete multiple records from attachments table by user_id, library_id and zotero_keys.
      * Use this method when you don't know which table contains the records.
      * @param user_id The user_id of the records to delete.
      * @param libraryId The library_id of the records to delete.
@@ -803,38 +457,11 @@ export class BeaverDB {
         // Execute both delete operations in a transaction for atomicity
         await this.conn.executeTransaction(async () => {
             const placeholders = zoteroKeys.map(() => '?').join(',');
-            
-            await this.conn.queryAsync(
-                `DELETE FROM items WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
-                [user_id, libraryId, ...zoteroKeys]
-            );
-
             await this.conn.queryAsync(
                 `DELETE FROM attachments WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
                 [user_id, libraryId, ...zoteroKeys]
             );
         });
-    }
-
-    /**
-     * Retrieve multiple item records by their user_id, library_id and zotero_keys.
-     * @param user_id The user_id of the items.
-     * @param libraryId The library_id of the items.
-     * @param zoteroKeys Array of zotero_keys to retrieve.
-     * @returns Array of ItemRecord objects found, empty array if none found.
-     */
-    public async getItemsByZoteroKeys(user_id: string, libraryId: number, zoteroKeys: string[]): Promise<ItemRecord[]> {
-        if (zoteroKeys.length === 0) {
-            return [];
-        }
-        
-        const placeholders = zoteroKeys.map(() => '?').join(',');
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM items WHERE user_id = ? AND library_id = ? AND zotero_key IN (${placeholders})`,
-            [user_id, libraryId, ...zoteroKeys]
-        );
-        
-        return rows.map((row: any) => BeaverDB.rowToItemRecord(row));
     }
 
     /**
@@ -1067,19 +694,18 @@ export class BeaverDB {
      * Upsert a single record into the 'upload_queue' table.
      * If a record with the same user_id and file_hash exists, it's updated. Otherwise, a new record is inserted.
      * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
-     * For updates: queue_visibility and attempt_count are only updated if explicitly provided.
+     * For updates: queue_visibility and attempt_count are only updated if they are explicitly provided.
      * @param user_id User ID for the queue item.
      * @param item Data for the upload_queue record.
      */
-    public async upsertQueueItem(
-        user_id: string,
-        item: UploadQueueInput
-    ): Promise<void> {
-        const { file_hash, queue_visibility, attempt_count, library_id, zotero_key } = item;
+    public async upsertQueueItem(user_id: string, item: UploadQueueInput): Promise<void> {
+        const { file_hash, library_id, zotero_key } = item;
         
-        // Validate that file_hash is provided and not empty
-        if (!file_hash || file_hash.trim() === '') {
+        if (!file_hash?.trim()) {
             throw new Error('file_hash is required and cannot be empty');
+        }
+        if (!library_id || !zotero_key?.trim()) {
+            throw new Error('library_id and zotero_key are required');
         }
         
         // Build the update clauses dynamically based on what fields are provided
@@ -1089,11 +715,11 @@ export class BeaverDB {
         ];
         
         // Only update queue_visibility and attempt_count if they are explicitly provided
-        if (queue_visibility !== undefined) {
+        if (item.queue_visibility !== undefined) {
             updateClauses.push('queue_visibility = excluded.queue_visibility');
         }
         
-        if (attempt_count !== undefined) {
+        if (item.attempt_count !== undefined) {
             updateClauses.push('attempt_count = excluded.attempt_count');
         }
         
@@ -1104,8 +730,8 @@ export class BeaverDB {
             [
                 user_id, 
                 file_hash, 
-                queue_visibility ?? null,
-                attempt_count ?? null,
+                item.queue_visibility ?? null,
+                item.attempt_count ?? null,
                 library_id, 
                 zotero_key
             ]
@@ -1116,7 +742,7 @@ export class BeaverDB {
      * Upsert multiple upload_queue records in a single transaction.
      * Items without a valid file_hash will be filtered out before insertion.
      * For inserts: queue_visibility defaults to current time, attempt_count defaults to 0 if not provided.
-     * For updates: queue_visibility and attempt_count are only updated if explicitly provided.
+     * For updates: queue_visibility and attempt_count are only updated if they are explicitly provided.
      * @param user_id User ID for the queue items
      * @param items An array of queue item data.
      */
@@ -1361,7 +987,6 @@ export class BeaverDB {
             .slice(0, limit)
             .map((row: any) => BeaverDB.rowToAttachmentRecord(row))
             .map((attachment: AttachmentRecord) => ({
-                attachment_id: attachment.id,
                 library_id: attachment.library_id,
                 zotero_key: attachment.zotero_key,
                 file_hash: attachment.file_hash,
@@ -1453,7 +1078,7 @@ export class BeaverDB {
         const record: Partial<ThreadRecord> = {};
         
         if (data.id !== undefined) record.id = data.id;
-        if (data.name !== undefined) record.name = data.name || null; // Convert empty string to null
+        if (data.name !== undefined) record.name = data.name || null; // Convert empty string to null for database
         if (data.createdAt !== undefined) record.created_at = data.createdAt;
         if (data.updatedAt !== undefined) record.updated_at = data.updatedAt;
         
@@ -1842,6 +1467,7 @@ export class BeaverDB {
         const record = BeaverDB.rowToMessageRecord(rows[0]);
         return BeaverDB.messageRecordToModel(record);
     }
+
 }
 
 /* Example Usage:

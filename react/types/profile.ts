@@ -77,6 +77,7 @@ export interface SafeProfileModel {
     has_authorized_access: boolean;
     consented_at: Date;
     has_completed_onboarding: boolean;
+    use_zotero_sync: boolean;
     libraries?: ZoteroLibrary[];
     
     // Balances

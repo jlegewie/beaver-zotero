@@ -3,7 +3,7 @@ import { RepeatIcon } from "../icons/icons";
 import Tooltip from "../ui/Tooltip";
 import IconButton from "../ui/IconButton";
 import { ProgressBar } from "../status/ProgressBar";
-import { initialSyncStatusSummaryAtom, initialSyncStatusAtom, isInitialSyncCompleteAtom } from "../../atoms/sync";
+import { syncStatusSummaryAtom, syncStatusAtom, isSyncCompleteAtom } from "../../atoms/sync";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CancelIcon, CheckmarkIcon, SpinnerIcon } from "../status/icons";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
@@ -14,13 +14,13 @@ import { syncLibraryIdsAtom } from "../../atoms/profile";
 export const DatabaseSyncStatus: React.FC = () => {
 
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-    const librarySyncProgress = useAtomValue(initialSyncStatusSummaryAtom);
-    const setInitialSyncStatus = useSetAtom(initialSyncStatusAtom);
-    const isInitialSyncComplete = useAtomValue(isInitialSyncCompleteAtom);
+    const syncStatusSummary = useAtomValue(syncStatusSummaryAtom);
+    const setSyncStatus = useSetAtom(syncStatusAtom);
+    const isSyncComplete = useAtomValue(isSyncCompleteAtom);
 
     const handleSyncRetryClick = async () => {
         // Reset the sync status for all libraries for instant UI update
-        setInitialSyncStatus(currentStatus => {
+        setSyncStatus(currentStatus => {
             const newStatus: Record<number, LibrarySyncStatus> = {};
             for (const libIdStr in currentStatus) {
                 const libId = Number(libIdStr);
@@ -39,15 +39,15 @@ export const DatabaseSyncStatus: React.FC = () => {
     };
     
     const getLeftText = (): string => {
-        if (librarySyncProgress.totalItems > 0 && librarySyncProgress.syncedItems > 0) return `${librarySyncProgress.syncedItems.toLocaleString()} done`;
+        if (syncStatusSummary.totalItems > 0 && syncStatusSummary.syncedItems > 0) return `${syncStatusSummary.syncedItems.toLocaleString()} done`;
         return "";
     };
 
     const getSyncIcon = (): React.ReactNode => {
-        if (isInitialSyncComplete) return CheckmarkIcon;
-        if (librarySyncProgress.anyFailed) return CancelIcon;
-        if (librarySyncProgress.progress < 100) return SpinnerIcon;
-        if (librarySyncProgress.progress >= 100) return CheckmarkIcon;
+        if (isSyncComplete) return CheckmarkIcon;
+        if (syncStatusSummary.anyFailed) return CancelIcon;
+        if (syncStatusSummary.progress < 100) return SpinnerIcon;
+        if (syncStatusSummary.progress >= 100) return CheckmarkIcon;
         return SpinnerIcon;
     };
 
@@ -58,24 +58,24 @@ export const DatabaseSyncStatus: React.FC = () => {
             </div>
             <div className="display-flex flex-col gap-3 items-start flex-1">
                 <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                    <div className={`text-lg ${librarySyncProgress.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero Library</div>
+                    <div className={`text-lg ${syncStatusSummary.anyFailed ? 'font-color-red' : 'font-color-secondary'}`}>Syncing Zotero Library</div>
                     <div className="flex-1"/>
-                    {librarySyncProgress.anyFailed && (
+                    {syncStatusSummary.anyFailed && (
                         <Tooltip content="Retry syncing" showArrow singleLine>
                             <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
                         </Tooltip>
                     )}
                 </div>
-                {(librarySyncProgress.progress !== undefined || isInitialSyncComplete) && (
+                {(syncStatusSummary.progress !== undefined || isSyncComplete) && (
                     <div className="w-full">
-                        <ProgressBar progress={isInitialSyncComplete ? 100 : librarySyncProgress.progress} />
+                        <ProgressBar progress={isSyncComplete ? 100 : syncStatusSummary.progress} />
                         <div className="display-flex flex-row gap-4">
                             <div className="font-color-tertiary text-base">
                                 {getLeftText()}
                             </div>
                             <div className="flex-1"/>
                             <div className="font-color-tertiary text-base">
-                                {isInitialSyncComplete ? "100%" : librarySyncProgress ? librarySyncProgress.progress.toFixed(1) + "%" : ""}
+                                {isSyncComplete ? "100%" : syncStatusSummary ? syncStatusSummary.progress.toFixed(1) + "%" : ""}
                             </div>
                         </div>
                     </div>
