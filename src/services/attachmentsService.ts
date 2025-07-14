@@ -23,6 +23,13 @@ export interface UpdateUploadStatusRequest {
 }
 
 /**
+ * Request body for retrying uploads by status
+ */
+export interface RetryUploadsRequest {
+    status: "failed" | "plan_limit";
+}
+
+/**
  * Response from marking an upload as failed
  */
 export interface UpdateUploadStatusResponse {
@@ -210,11 +217,13 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Resets all failed uploads by changing their status back to pending.
-     * @returns Promise with an array of reset failed upload results
+     * Retries uploads for the current user by resetting their status back to 'pending'.
+     * @param status The status to retry ('failed' or 'plan_limit'). Defaults to 'failed'.
+     * @returns Promise with an array of FileHashReference objects for uploads that were reset.
      */
-    async resetFailedUploads(): Promise<ResetFailedResult[]> {
-        return this.post<ResetFailedResult[]>('/attachments/reset-failed-uploads', {});
+    async retryUploadsByStatus(status: "failed" | "plan_limit" = "failed"): Promise<FileHashReference[]> {
+        const request: RetryUploadsRequest = { status };
+        return this.post<FileHashReference[]>('/attachments/retry-uploads-by-status', request);
     }
 
     /**

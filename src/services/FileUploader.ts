@@ -1,9 +1,9 @@
 /**
  * FileUploader.ts
  *
- * A uploader that processes Zotero file attachments in batches using a queue. 
- * It reads pending items from the local SQLite database,
- * handles retries, and updates progress based on local queue status. 
+ * A uploader that processes Zotero file attachments in batches using a backend queue. 
+ * It reads pending items from the backend upload queue service,
+ * handles retries, and updates progress based on backend queue status. 
  */
 
 import PQueue from 'p-queue';
@@ -12,15 +12,15 @@ import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, ResetFailedResult, CompleteUploadRequest } from './attachmentsService';
-import { UploadQueueInput, UploadQueueRecord } from './database';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
+import { filesService, UploadQueueItem } from './filesService';
 
 /**
- * Manages file uploads from a frontend-managed queue of pending uploads.
+ * Manages file uploads from a backend-managed queue of pending uploads.
  */
 export class FileUploader {
     private isRunning: boolean = false;
@@ -31,13 +31,11 @@ export class FileUploader {
 
     // upload batching
     // queue reads
-    private readonly BATCH_SIZE: number = 15;
-    private readonly MAX_ATTEMPTS: number = 3;
-    private readonly VISIBILITY_TIMEOUT: number = 0.5; // 30 seconds timeout for reads
-    private readonly VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE: number = 5;  // 5 minutes timeout for retries
+    private readonly BATCH_SIZE: number = 20;
+    private readonly VISIBILITY_TIMEOUT_SECONDS: number = 300; // 5 minutes timeout for backend queue reads
 
     // completion batching
-    private completionBatch: Array<{ item: UploadQueueRecord, request: CompleteUploadRequest }> = [];
+    private completionBatch: Array<{ item: UploadQueueItem, request: CompleteUploadRequest }> = [];
     private batchTimer: NodeJS.Timeout | null = null;
     private readonly BATCH_SEND_SIZE: number = 5; // Send after 5 completions
     private readonly BATCH_SEND_TIMEOUT: number = 1500; // Send after 1.5 seconds
@@ -117,7 +115,7 @@ export class FileUploader {
     }
 
     /**
-     * Main loop that continuously reads items from local queue and processes them until
+     * Main loop that continuously reads items from backend queue and processes them until
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
@@ -146,15 +144,14 @@ export class FileUploader {
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
 
-                // Read items from local queue with visibility timeout
-                const items: UploadQueueRecord[] = await Zotero.Beaver.db.readQueueItems(
-                    user.id, 
-                    this.BATCH_SIZE, 
-                    this.MAX_ATTEMPTS,
-                    this.VISIBILITY_TIMEOUT
+                // Read items from backend queue with visibility timeout
+                const response = await filesService.readUploadQueue(
+                    this.VISIBILITY_TIMEOUT_SECONDS,
+                    this.BATCH_SIZE
                 );
+                const items = response.items;
 
-                logger(`File Uploader Queue: Read ${items.length} items from local queue`, 3);
+                logger(`File Uploader Queue: Read ${items.length} items from backend queue`, 3);
 
                 // If no items, we're done
                 if (items.length === 0) {
@@ -202,7 +199,7 @@ export class FileUploader {
      * Uploads a single file item. 
      * On success, the item is added to the completion batch; on failure, we may retry or fail permanently.
      */
-    private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
+    private async uploadFile(item: UploadQueueItem, user_id: string): Promise<void> {
         try {
             logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
 
@@ -335,7 +332,7 @@ export class FileUploader {
     /**
      * Adds a completion to the batch and manages batch sending
      */
-    private async addCompletionToBatch(item: UploadQueueRecord, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
+    private async addCompletionToBatch(item: UploadQueueItem, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
         const request: CompleteUploadRequest = {
             file_hash: item.file_hash,
             mime_type: mimeType,
@@ -407,12 +404,8 @@ export class FileUploader {
                     }
 
                     if (result.upload_completed) {
-                        // On success, update local DB
-                        await Zotero.Beaver.db.completeQueueItem(userId, batchItem.item.file_hash);
                         logger(`File Uploader: Successfully uploaded file for attachment ${batchItem.item.zotero_key} (page count: ${batchItem.request.page_count})`, 3);
                     } else {
-                        // On failure, log it. The item remains in the queue (since completeQueueItem wasn't called)
-                        // and will be retried automatically on a future run.
                         logger(`File Uploader: Backend failed to complete ${batchItem.item.zotero_key}: ${result.error}`, 1);
                     }
                 }
@@ -449,19 +442,15 @@ export class FileUploader {
     }
     
     /**
-     * Handles permanent failures by marking items as failed in the backend first, 
-     * then in the local database only if backend update succeeds
+     * Handles permanent failures by marking items as failed in the backend and removing them from the backend queue
      */
-    private async handlePermanentFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+    private async handlePermanentFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
         logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
             // First, notify backend of failure
             await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
             
-            // Only if backend call succeeds, update local state
-            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
-
             // Error message for manual retry (only show if user has completed onboarding)
             if (store.get(hasCompletedOnboardingAtom)) {
                 store.set(addOrUpdateFailedUploadMessageAtom, {
@@ -473,178 +462,55 @@ export class FileUploader {
             logger(`File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as failed: ${failError.message}`, 2);
             Zotero.logError(failError);
-            // Don't update local state or cleanup - item will be retried after visibility timeout
-            await Zotero.Beaver.db.setQueueItemTimeout(
-                user_id,
-                item.file_hash,
-                this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE
-            );
-            logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE} minutes`, 2);
             // Re-throw the error so callers know the operation failed
+            // Item will remain in backend queue for retry
             throw failError;
         }
     }
 
     /**
      * Handles plan limit failures by marking items as failed in the backend first, 
-     * then in the local database only if backend update succeeds
+     * then removing them from the backend queue
      */
-    private async handlePlanLimitFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+    private async handlePlanLimitFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
             // First, notify backend of failure
             await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
-
-            // Only if backend call succeeds, update local state
-            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash, 'plan_limit');
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as plan limit failure (will retry later): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
         }
     }
 }
 
 
 /**
- * Utility function to reset failed uploads by calling the backend and restarting the uploader
+ * Utility function to retry uploads by calling the backend and restarting the uploader
  */
-export const resetFailedUploads = async (): Promise<void> => {
+export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "failed"): Promise<void> => {
     try {
         // check authentication status
         const isAuthenticated = store.get(isAuthenticatedAtom);
         const user = store.get(userAtom);
 
         if (!isAuthenticated || !user?.id) {
-            logger('File Uploader: Cannot reset failed uploads, user not authenticated or user ID missing.', 2);
+            logger('File Uploader: Cannot retry uploads, user not authenticated or user ID missing.', 2);
             return;
         }
-        const userId = user.id;
 
-        // -------- (1) Reset failed uploads in backend --------
-        const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
-        logger(`File Uploader: Backend reset ${results.length} failed uploads.`, 3);
+        // -------- (1) Retry uploads in backend --------
+        const results: FileHashReference[] = await attachmentsService.retryUploadsByStatus(status);
+        logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
 
-        // Use results to reset failed uploads in local database
-        if (results.length > 0) {
-            const itemsToResetInDB: UploadQueueInput[] = results.map(result => ({
-                file_hash: result.file_hash,
-                library_id: result.library_id,
-                zotero_key: result.zotero_key
-                // Other fields like page_count, attempt_count will be set to default reset values
-                // by the Zotero.Beaver.db.resetUploads method.
-            }));
-
-            await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
-            logger(`File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
-        }
-
-        // -------- (2) Ensure integrity of local database --------
-        // Integrity check: there should be no failed attachments in the local database after reset
-        const failedAttachments = await Zotero.Beaver.db.getFailedAttachments(userId);
-        if (failedAttachments.length > 0) {
-            logger(`File Uploader: DB Integrity check found ${failedAttachments.length} failed attachments in local database, none expected.`, 3);
-
-            // (a) Get the status of the failed attachments from the backend
-            const results = await attachmentsService.getMultipleAttachmentsStatus(
-                failedAttachments.map(a => ({zotero_key: a.zotero_key, library_id: a.library_id} as ZoteroItemReference))
-            );
-
-            // (b) Update local database
-            for (const result of results) {
-                await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
-                    upload_status: result.upload_status ?? null,
-                });
-            }
-            
-            // (c) Enqueue pending attachments for upload if they are not already in the queue
-            const pendingAttachments = results.filter(r => r.upload_status === 'pending');
-            const queueItems: UploadQueueInput[] = pendingAttachments
-                .filter(a => a.file_hash)
-                .map(a => ({
-                    file_hash: a.file_hash!,
-                    library_id: a.library_id,
-                    zotero_key: a.zotero_key,
-                }));
-            await Zotero.Beaver.db.upsertQueueItemsBatch(userId, queueItems);
-            logger(`File Uploader: Enqueued ${pendingAttachments.length} pending attachments for upload.`, 3);
-        }
-        
-        // -------- (3) Restart the uploader --------
+        // -------- (2) Restart the uploader --------
         await fileUploader.start("manual");
 
     } catch (error: any) {
-        logger(`File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
-        // Zotero.logError is good for logging to Zotero's native error console
-        if (typeof Zotero !== 'undefined' && Zotero.logError) {
-            Zotero.logError(error);
-        } else {
-            console.error('Failed to reset failed uploads:', error); // Fallback if Zotero.logError is not available
-        }
-    }
-};
-
-
-/**
- * Utility function to retry skipped uploads.
- */
-export const retrySkippedUploads = async (): Promise<void> => {
-    try {
-        const userId = store.get(userIdAtom);
-        if (!userId) {
-            logger('retrySkippedUploads: Cannot retry skipped uploads, user not authenticated.', 2);
-            return;
-        }
-
-        // Get all attachments that are in the plan limit status
-        const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'plan_limit');
-
-        if (skippedAttachments.length === 0) {
-            logger('retrySkippedUploads: No skipped attachments to retry.', 3);
-            return;
-        }
-
-        logger(`retrySkippedUploads: Found ${skippedAttachments.length} attachments in plan limit status.`, 3);
-
-        // Create upload queue items for the skipped attachments
-        const uploadQueueItems: UploadQueueInput[] = skippedAttachments
-            .filter(a => a.file_hash)
-            .map(attachment => ({
-                file_hash: attachment.file_hash,
-                library_id: attachment.library_id,
-                zotero_key: attachment.zotero_key,
-            }));
-        
-        // Filter out attachments that are too large
-        const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
-        const results = await Promise.all(
-            uploadQueueItems.map(async item => {
-                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
-                if (!attachment || !attachment.isAttachment()) return null;
-                const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-                const fileSizeInMB = fileSize / 1024 / 1024;
-                return fileSizeInMB <= sizeLimit ? item : null;
-            })
-        );
-        const uploadQueueItemsFiltered = results.filter(item => item !== null);
-        
-        logger(`retrySkippedUploads: ${uploadQueueItemsFiltered.length} attachments to retry, ${uploadQueueItems.length - uploadQueueItemsFiltered.length} attachments filtered out.`, 3);
-        
-        // Re-queue the remaining attachments
-        if (uploadQueueItemsFiltered.length > 0) {
-            await Zotero.Beaver.db.resetUploads(userId, uploadQueueItemsFiltered);
-            logger(`retrySkippedUploads: Re-queued ${uploadQueueItemsFiltered.length} attachments for upload.`, 3);
-            // await fileUploader.start("manual");
-        }
-
-    } catch (error: any) {
-        logger(`retrySkippedUploads: Failed to retry skipped uploads: ${error.message}`, 1);
-        if (typeof Zotero !== 'undefined' && Zotero.logError) {
-            Zotero.logError(error);
-        } else {
-            console.error('retrySkippedUploads: Failed to retry skipped uploads:', error);
-        }
+        logger(`File Uploader: Failed to retry uploads: ${error.message}`, 1);
+        Zotero.logError(error);
     }
 };
 

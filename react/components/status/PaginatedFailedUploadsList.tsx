@@ -6,7 +6,7 @@ import { logger } from '../../../src/utils/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
-import { resetFailedUploads } from "../../../src/services/FileUploader";
+import { retryUploadsByStatus } from "../../../src/services/FileUploader";
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
@@ -172,7 +172,7 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
                             <IconButton
                                 variant="ghost"
                                 onClick={async () => {
-                                    await resetFailedUploads();
+                                    await retryUploadsByStatus("failed");
                                     setShowList(false);
                                 }}
                                 icon={RepeatIcon}

@@ -4,7 +4,7 @@ import { popupMessagesAtom } from '../atoms/ui';
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroItemReference } from '../types/zotero';
 import { RepeatIcon } from '../components/icons/icons';
-import { resetFailedUploads } from '../../src/services/FileUploader';
+import { retryUploadsByStatus } from '../../src/services/FileUploader';
 
 /**
  * Adds a new popup message to the list.
@@ -83,7 +83,7 @@ export const addOrUpdateFailedUploadMessageAtom = atom(
                 expire: false,
                 buttonIcon: RepeatIcon,
                 buttonOnClick: async () => {
-                    await resetFailedUploads();
+                    await retryUploadsByStatus("failed");
                 },
                 count: 1
             });
