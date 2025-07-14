@@ -131,7 +131,7 @@ export class BeaverDB {
         const previousVersion = getPref('installedVersion') || '0.1';
 
         // Delete all tables in test versions
-        if (previousVersion.startsWith('0.1')) {
+        if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS items`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS attachments`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
