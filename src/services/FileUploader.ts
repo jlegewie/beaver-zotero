@@ -11,13 +11,14 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, ResetFailedResult, CompleteUploadRequest } from './attachmentsService';
+import { attachmentsService, CompleteUploadRequest } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { filesService, UploadQueueItem } from './filesService';
+import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -452,7 +453,7 @@ export class FileUploader {
             await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
             
             // Error message for manual retry (only show if user has completed onboarding)
-            if (store.get(hasCompletedOnboardingAtom)) {
+            if (store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
                 store.set(addOrUpdateFailedUploadMessageAtom, {
                     library_id: item.library_id,
                     zotero_key: item.zotero_key
