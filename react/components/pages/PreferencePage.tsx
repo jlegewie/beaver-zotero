@@ -98,7 +98,7 @@ const PreferencePage: React.FC = () => {
         try {
             // Run consistency check for all sync libraries
             const promises = syncLibraryIds.map(libraryID => 
-                performConsistencyCheck(libraryID, syncingItemFilter, undefined, undefined, 50, false)
+                performConsistencyCheck(libraryID)
             );
             
             await Promise.all(promises);
@@ -129,6 +129,7 @@ const PreferencePage: React.FC = () => {
 
     // Helper function to get button icon and class
     const getSyncButtonProps = () => {
+        // Resync from server
         switch (verifyStatus) {
             case 'running':
                 return {
