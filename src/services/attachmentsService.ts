@@ -11,14 +11,6 @@ export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_s
 export type UploadStatus = "pending" | "completed" | "failed" | "plan_limit";
 
 /**
- * Request body for marking an upload as failed
- */
-export interface UpdateUploadStatusRequest {
-    file_hash: string | string[];
-    status: UploadStatus;
-}
-
-/**
  * Request body for retrying uploads by status
  */
 export interface RetryUploadsRequest {
@@ -30,14 +22,6 @@ export interface RetryUploadsRequest {
  */
 export interface UpdateFileRequest extends FileHashReference {
     mime_type: string;
-}
-
-/**
- * Response from marking an upload as failed
- */
-export interface UpdateUploadStatusResponse {
-    success: boolean;
-    message: string;
 }
 
 /**
@@ -179,21 +163,7 @@ export class AttachmentsService extends ApiService {
      */
     async getErrorCodeStats(type: 'text' | 'md' | 'docling'): Promise<ErrorCodeStats[]> {
         return this.get<ErrorCodeStats[]>(`/api/v1/attachments/error-code-stats/${type}`);
-    }
-
-    /**
-     * Updates the status of an upload for the given file hash.
-     * @param fileHash The hash of the file that failed to upload
-     * @param status The status to update the upload to
-     * @returns Promise with the upload failed response
-     */
-    async updateUploadStatus(fileHash: string | string[], status: UploadStatus): Promise<UpdateUploadStatusResponse> {
-        const request: UpdateUploadStatusRequest = {
-            file_hash: fileHash,
-            status: status
-        };
-        return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
-    }
+    }    
 
     /**
      * Marks an upload as completed for the given file hash.

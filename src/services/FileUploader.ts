@@ -503,7 +503,7 @@ export class FileUploader {
         
         try {
             // First, notify backend of failure
-            await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
+            await filesService.updateUploadStatus(item.file_hash, 'failed');
             
             // Error message for manual retry (only show if user has completed onboarding)
             if (store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
@@ -532,7 +532,7 @@ export class FileUploader {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
             // First, notify backend of failure
-            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
+            await filesService.updateUploadStatus(item.file_hash, 'plan_limit');
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
