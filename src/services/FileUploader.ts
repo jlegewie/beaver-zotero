@@ -196,6 +196,22 @@ export class FileUploader {
         store.set(isFileUploaderRunningAtom, false);
     }
 
+    private async uploadFileToSupabase(storagePath: string, blob: Blob): Promise<void> {
+        const { data, error } = await supabase
+            .storage
+            .from('files')
+            .upload(storagePath, blob, {
+                cacheControl: '3600',
+                upsert: true
+            });
+
+        if (error) {
+            throw new Error(`Failed to upload file to storage: ${error.message}`);
+        }
+
+        return ;
+    }
+    
     /**
      * Uploads a single file item. 
      * On success, the item is added to the completion batch; on failure, we may retry or fail permanently.
@@ -316,20 +332,7 @@ export class FileUploader {
                 uploadAttempt++;
                 try {
                     logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${storagePath} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
-                    const { data, error } = await supabase
-                        .storage
-                        .from('files')
-                        .upload(storagePath, blob, {
-                            cacheControl: '3600',
-                            upsert: true
-                        });
-
-                    if (error) {
-                        // Retry with backoff
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload error ${JSON.stringify(error)} on attempt ${uploadAttempt}, will retry`, 2);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt)); // Increasing backoff
-                        continue;
-                    }
+                    await this.uploadFileToSupabase(storagePath, blob);
                     
                     uploadSuccess = true;
                     logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}`, 3);
