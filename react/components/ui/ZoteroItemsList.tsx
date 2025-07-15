@@ -8,14 +8,19 @@ import { selectItemById } from '../../../src/utils/selectItem';
 interface ItemWithSelectionId {
     item: Zotero.Item;
     selectionItemId: number;
+    muted?: boolean;
 }
 
 interface ZoteroItemsListProps {
     messageAttachments: SourceAttachment[] | ItemMetadataAttachment[] | ZoteroItemReference[];
+    oneLine?: boolean;
+    muted?: boolean;
 }
 
 const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
-    messageAttachments
+    messageAttachments,
+    oneLine = false,
+    muted = false
 }) => {
     const [resolvedItems, setResolvedItems] = useState<ItemWithSelectionId[]>([]);
     const [hoveredItemId, setHoveredItemId] = useState<number | null>(null);
@@ -44,6 +49,8 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
         selectItemById(selectionItemId);
     };
 
+    const fontColor = muted ? 'font-color-tertiary' : 'font-color-primary';
+
     return (
         <div className="min-w-0">
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
@@ -62,14 +69,25 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                         <span className="scale-75" style={{ marginTop: '-2px' }}>
                             <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
                         </span>
-                        <div className="display-flex flex-col gap-1 min-w-0 font-color-primary">
-                            <span className="truncate text-sm font-color-primary">
-                                {getDisplayNameFromItem(item)}
-                            </span>
-                            <span className="truncate text-sm font-color-secondary min-w-0">
-                                {item.getDisplayTitle()}
-                            </span>
-                        </div>
+                        {oneLine ? (
+                            <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
+                                <div className="text-sm whitespace-nowrap">
+                                    {getDisplayNameFromItem(item)}
+                                </div>
+                                <div className="truncate text-sm">
+                                    {item.getDisplayTitle()}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className={`display-flex flex-col gap-1 min-w-0 ${fontColor}`}>
+                                <span className={`truncate text-sm ${fontColor}`}>
+                                    {getDisplayNameFromItem(item)}
+                                </span>
+                                <span className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                    {item.getDisplayTitle()}
+                                </span>
+                            </div>
+                        )}
                     </div>
                 );
             })}
