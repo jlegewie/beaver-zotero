@@ -93,21 +93,6 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
 };
 
 
-const getWarning = (type: string) => {
-  switch (type) {
-    case 'user_key_failed_unexpected':
-      return "Unexpected error with your API key.";
-    case 'user_key_rate_limit_exceeded':
-      return "Your API key hit its usage limit.";
-    case 'user_key_failed':
-      return "Your API key didn't work. Please check it's correct.";
-    case 'missing_attachments':
-      return "Unable to process some attachments";
-    default:
-      return "Unknown warning";
-  }
-};
-
 export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessage, isPlaceholder?: boolean }> = ({ messageId, warning, isPlaceholder }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const removeWarningFromMessage = useSetAtom(removeWarningFromMessageAtom);
