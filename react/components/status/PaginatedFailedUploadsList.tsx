@@ -70,9 +70,6 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
 
         setIsLoading(true);
         try {
-            // Local DB as alternative
-            // const result = await Zotero.Beaver.db.getAttachmentsByUploadStatusPaginated(userId, statuses[0], page + 1, ITEMS_PER_PAGE);
-            // API call
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByUploadStatus(
                 statuses,
                 page + 1, // API is 1-based
