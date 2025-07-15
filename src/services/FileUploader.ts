@@ -225,8 +225,41 @@ export class FileUploader {
             const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
 
             // Get the file path for the attachment
-            let filePath: string | null = null;
-            filePath = await attachment.getFilePathAsync() || null;
+            const filePath: string | null = await attachment.getFilePathAsync() || null;
+
+            // Attempt to download if file is not available locally
+            // NOTE: Disable for now because it violates user intent. Plugin shouldn't download all files for users who use "as needed" setting.
+            /* if (!filePath) {
+                const fileSyncEnabled = Zotero.Sync.Storage.Local.getEnabledForLibrary(attachment.libraryID);
+                
+                // Only try to download if:
+                // 1. File sync is enabled
+                // 2. This is NOT a linked file (linked files can't be downloaded from server)
+                if (fileSyncEnabled && attachment.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_LINKED_FILE) {
+                    logger(`File not available locally, attempting to download: ${item.zotero_key}`, 1);
+                    
+                    try {
+                        // Download the file on-demand
+                        const results = await Zotero.Sync.Runner.downloadFile(attachment);
+                        
+                        if (results && results.localChanges) {
+                            // File was downloaded successfully, get the path again
+                            filePath = await attachment.getFilePathAsync() || null;
+                            logger(`File downloaded successfully: ${item.zotero_key}`, 1);
+                        } else {
+                            logger(`File download failed: ${item.zotero_key}`, 1);
+                            await this.handlePermanentFailure(item, user_id, "File path not found");
+                            return;
+                        }
+                    } catch (downloadError: any) {
+                        logger(`File download error for ${item.zotero_key}: ${downloadError.message}`, 1);
+                        await this.handlePermanentFailure(item, user_id, "File path not found");
+                        return;
+                    }
+                }
+            }*/
+            
+            // File check: if file path is not found, we can't upload it
             if (!filePath) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
                 await this.handlePermanentFailure(item, user_id, "File path not found");
