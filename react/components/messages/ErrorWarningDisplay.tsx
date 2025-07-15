@@ -102,9 +102,9 @@ const getWarning = (type: string) => {
     case 'user_key_failed':
       return "Your API key didn't work. Please check it's correct.";
     case 'missing_attachments':
-      return "Unable to process the following attachments:";
+      return "Unable to process some attachments";
     default:
-      return "Problem with your API key.";
+      return "Unknown warning";
   }
 };
 
@@ -116,14 +116,13 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
     
     return (
         <div
-            className="display-flex flex-col gap-0 rounded-md border-quinary mb-4"
-            style={{ borderColor: 'var(--tag-yellow-tertiary)', background: 'var(--tag-yellow-quinary)'  }}
+            className="display-flex flex-col p-3 gap-3 rounded-lg mb-3 bg-senary"
         >
-            <div className="font-color-yellow p-3 display-flex flex-row gap-3 items-start">
-                <Icon icon={AlertIcon} className="scale-12 mt-1"/>
+            <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                <Icon icon={AlertIcon} className="scale-11 mt-020"/>
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <div>Warning</div>
+                    <div className="display-flex flex-row gap-2 justify-start">
+                        <div className="text-base">{getWarning(warning.type)}</div>
                         <div className="flex-1"/>
                         {showSettingsIcon &&
                             <Button variant="outline" className="scale-90" rightIcon={KeyIcon} onClick={() => {
@@ -133,7 +132,7 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
                             </Button>
                         }
                         <IconButton
-                            variant="outline"
+                            variant="ghost-secondary"
                             icon={CancelIcon}
                             className="mr-1 scale-90"
                             onClick={() => {
@@ -146,13 +145,13 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
                             }}
                         />
                     </div>
-                    <div className="text-sm">{getWarning(warning.type)}</div>
-                    <div className="display-flex flex-col -ml-1">
-                        {warning.type === 'missing_attachments' && warning.attachments && (
-                            <ZoteroItemsList messageAttachments={warning.attachments} />
-                        )}
-                    </div>
+                    {/* <div className="text-sm">{getWarning(warning.type)}</div> */}
                 </div>
+            </div>
+            <div className="display-flex flex-col -ml-15">
+                {warning.type === 'missing_attachments' && warning.attachments && (
+                    <ZoteroItemsList messageAttachments={warning.attachments} muted={true} oneLine={true}/>
+                )}
             </div>
         </div>
     );
