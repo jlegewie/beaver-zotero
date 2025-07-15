@@ -82,7 +82,7 @@ export interface SSECallbacks {
      * @param warningType Type of warning that occurred
      * @param data Additional data related to the warning
      */
-    onWarning: (messageId: string | null, warningType: string, data: any) => void;
+    onWarning: (messageId: string | null, warningType: string, message: string, data: any) => void;
 }
 
 
@@ -304,7 +304,7 @@ export class ChatService extends ApiService {
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
-            onWarning: (messageId: string | null, warningType: string, data: any) => void;
+            onWarning: (messageId: string | null, warningType: string, message: string, data: any) => void;
         }
     ): void {
         let eventName = 'message';
@@ -377,8 +377,8 @@ export class ChatService extends ApiService {
                 onError(parsedData?.messageId || null, parsedData?.type || 'server_error');
                 break;
             case 'warning':
-                if (parsedData?.type) {
-                    onWarning(parsedData?.messageId || null, parsedData?.type, parsedData?.data || null);
+                if (parsedData?.type && parsedData?.message) {
+                    onWarning(parsedData?.messageId || null, parsedData?.type, parsedData?.message, parsedData?.data || null);
                 }
                 break;
             default:

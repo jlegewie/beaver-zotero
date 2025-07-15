@@ -121,11 +121,11 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
             <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-11 mt-020"/>
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
-                    <div className="display-flex flex-row gap-2 justify-start">
-                        <div className="text-base">{getWarning(warning.type)}</div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <div className="text-base">{warning.message}</div>
                         <div className="flex-1"/>
                         {showSettingsIcon &&
-                            <Button variant="outline" className="scale-90" rightIcon={KeyIcon} onClick={() => {
+                            <Button variant="outline" className="scale-90 mt-020" rightIcon={KeyIcon} onClick={() => {
                                 setIsPreferencePageVisible(true);
                             }}>
                                 API Key
@@ -134,7 +134,7 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
                         <IconButton
                             variant="ghost-secondary"
                             icon={CancelIcon}
-                            className="mr-1 scale-90"
+                            className="mr-1 scale-90 mt-015"
                             onClick={() => {
                                 if (!isPlaceholder) {
                                     removeWarningFromMessage({ id: messageId, warningId: warning.id });                                
@@ -145,14 +145,15 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isP
                             }}
                         />
                     </div>
-                    {/* <div className="text-sm">{getWarning(warning.type)}</div> */}
                 </div>
             </div>
-            <div className="display-flex flex-col -ml-15">
-                {warning.type === 'missing_attachments' && warning.attachments && (
-                    <ZoteroItemsList messageAttachments={warning.attachments} muted={true} oneLine={true}/>
-                )}
-            </div>
+            {warning.attachments && (
+                <div className="display-flex flex-col -ml-15">
+                    {warning.type === 'missing_attachments' && warning.attachments && (
+                        <ZoteroItemsList messageAttachments={warning.attachments} muted={true} oneLine={true}/>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

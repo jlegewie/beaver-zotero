@@ -8,6 +8,7 @@ export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_ex
 export interface Warning {
     id: string;
     type: WarningType;
+    message: string;
     attachments?: ZoteroItemReference[];
 }
 

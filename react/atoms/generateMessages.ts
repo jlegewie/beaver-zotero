@@ -562,13 +562,13 @@ async function _processChatCompletionViaBackend(
                 cancellerHolder.current = null;
                 set(isCancellableAtom, false);
             },
-            onWarning: (messageId: string | null, type: string, data: any) => {
-                logger(`event 'onWarning': ${messageId} - ${type} - ${JSON.stringify(data)}`, 1);
+            onWarning: (messageId: string | null, type: string, message: string, data: any) => {
+                logger(`event 'onWarning': ${messageId} - ${type} - ${message} - ${JSON.stringify(data)}`, 1);
                 // If the message ID is not provided, use the current assistant message ID
                 const currentMessageId = messageId || get(currentAssistantMessageIdAtom);
                 if (!currentMessageId) return;
                 // Warning
-                const warning = {id: uuidv4(), type: type} as Warning;
+                const warning = {id: uuidv4(), type: type, message: message} as Warning;
                 if (data && data.attachments) {
                     warning.attachments = data.attachments as ZoteroItemReference[];
                 }
