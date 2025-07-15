@@ -19,7 +19,6 @@ import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroIdentifier";
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
-import { useUploadQueueManager } from "../../hooks/useUploadQueueManager";
 
 
 const OnboardingPage: React.FC = () => {

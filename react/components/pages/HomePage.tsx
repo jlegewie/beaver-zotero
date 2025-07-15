@@ -12,7 +12,6 @@ import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/setti
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import FileUploadStatus from "../status/FileUploadStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import { useUploadQueueManager } from "../../hooks/useUploadQueueManager";
 
 
 const HomePage: React.FC = () => {
