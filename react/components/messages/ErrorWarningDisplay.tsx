@@ -66,7 +66,7 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
         >
             <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-col flex-1 gap-2">
                     <div className="display-flex flex-row gap-4 items-center">
                         <div>Error</div>
                         <div className="flex-1"/>
