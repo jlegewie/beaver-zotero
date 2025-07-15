@@ -520,46 +520,11 @@ export async function syncItemsToBackend(
                 throw new Error("Failed to process batch after multiple attempts");
             }
             
-            // Update database attachments and add items to upload queue
-            if (batchResult.attachments.length > 0) {
-                // Update database attachments
-                logger(`Beaver Sync '${syncSessionId}':     Updating local database attachments`, 2);
-                const attachmentsForDB = batchResult.attachments.map(attachment => ({
-                    library_id: attachment.library_id,
-                    zotero_key: attachment.zotero_key,
-                    file_hash: attachment.file_hash,
-                    upload_status: attachment.upload_status || 'pending',
-                }));
-                await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
-
-                // Add items to upload queue
-                const uploadQueueItems = batchResult.attachments
-                    .filter(attachment => {
-                        return attachment.upload_status === 'pending' && attachment.file_hash;
-                    })
-                    .map(attachment => ({
-                        file_hash: attachment.file_hash!,
-                        library_id: attachment.library_id,
-                        zotero_key: attachment.zotero_key,
-                    }));
-                
-                if (uploadQueueItems.length > 0) {
-                    // Deduplicate uploadQueueItems by file_hash, keeping the first occurrence
-                    const uniqueUploadQueueItemsMap = new Map();
-                    uploadQueueItems.forEach(item => {
-                        if (!uniqueUploadQueueItemsMap.has(item.file_hash)) {
-                            uniqueUploadQueueItemsMap.set(item.file_hash, item);
-                        }
-                    });
-                    const uniqueUploadQueueItems = Array.from(uniqueUploadQueueItemsMap.values());
-
-                    logger(`Beaver Sync '${syncSessionId}':     Adding/updating ${uniqueUploadQueueItems.length} items in upload queue (after deduplication)`, 2);
-                    await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
-
-                    // Start file uploader if there are attachments to upload (or newly added to queue)
-                    logger(`Beaver Sync '${syncSessionId}':     Starting file uploader`, 2);
-                    await fileUploader.start(syncType === 'initial' ? "initial" : "background");
-                }
+            // start file uploader if there are attachments to upload
+            const countUploads = batchResult.attachments.filter(attachment => attachment.upload_status === 'pending' && attachment.file_hash).length;
+            if (countUploads > 0) {                                
+                logger(`Beaver Sync '${syncSessionId}':     ${countUploads} attachments need to be uploaded, starting file uploader`, 2);
+                await fileUploader.start(syncType === 'initial' ? "initial" : "background");
             }
 
             // Update progress for this batch
@@ -592,10 +557,6 @@ export const deleteItems = async (userId: string, libraryID: number, zoteroKeys:
 
     // Delete items from backend
     const response = await syncService.deleteItems(libraryID, zoteroKeys);
-
-    // Update local database
-    const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
-    if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(userId, libraryID, allKeys);
 }
 
 /**
