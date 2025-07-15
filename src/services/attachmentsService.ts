@@ -2,9 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
-import { UploadQueueRecord } from './database';
 import { logger } from '../utils/logger';
-import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { store } from '../../react/index';
 import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
@@ -295,25 +293,6 @@ export class AttachmentsService extends ApiService {
             logger(`updateFile: No file update required for ${zoteroKey} in library ${libraryId}`);
             return null;
         }
-
-        // Get user ID
-        const userId = store.get(userAtom)?.id;
-        if (!userId) {
-            throw new Error('User ID not found');
-        }
-
-        // Update attachment in local db
-        await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
-            file_hash: result.file_hash,
-            upload_status: 'pending'
-        });
-
-        // Queue file hash for upload
-        await Zotero.Beaver.db.upsertQueueItem(userId, {
-            file_hash: result.file_hash,
-            library_id: result.library_id,
-            zotero_key: result.zotero_key
-        });
         
         // Start upload
         await fileUploader.start("manual");
