@@ -213,9 +213,9 @@ export class FileUploader {
         return ;
     }
 
-    private async uploadFileToGCS(signedUrl: string, blob: Blob, metadata: Record<string, string>): Promise<void> {
+    private async uploadFileToGCS(signedUrl: string, blob: Blob, mimeType: string, metadata: Record<string, string>): Promise<void> {
         const headers = {
-            'Content-Type': 'application/octet-stream',
+            'Content-Type': mimeType,
         };
         
         // Add metadata as headers
@@ -342,7 +342,7 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${item.storage_path} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
                     // const storagePath = `${userId}/attachments/${item.file_hash}/original`;
                     // await this.uploadFileToSupabase(storagePath, blob);
-                    await this.uploadFileToGCS(item.signed_upload_url, blob, {
+                    await this.uploadFileToGCS(item.signed_upload_url, blob, item.mime_type, {
                         userid: userId,
                         filehash: item.file_hash,
                         libraryid: item.library_id.toString(),

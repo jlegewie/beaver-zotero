@@ -26,6 +26,13 @@ export interface RetryUploadsRequest {
 }
 
 /**
+ * Request body for updating a file
+ */
+export interface UpdateFileRequest extends FileHashReference {
+    mime_type: string;
+}
+
+/**
  * Response from marking an upload as failed
  */
 export interface UpdateUploadStatusResponse {
@@ -280,14 +287,15 @@ export class AttachmentsService extends ApiService {
      * @param fileHash The new file hash
      * @returns Promise with the update response indicating if the hash was enqueued
      */
-    async updateFile(libraryId: number, zoteroKey: string, fileHash: string): Promise<FileHashReference | null> {
+    async updateFile(libraryId: number, zoteroKey: string, fileHash: string, mimeType: string): Promise<FileHashReference | null> {
         logger(`updateFile: Updating file hash for ${zoteroKey} in library ${libraryId}`);
         // Update file hash in backend
-        const result = await this.post<FileHashReference>('/attachments/update-file', {
+        const result = await this.post<UpdateFileRequest>('/attachments/update-file', {
             library_id: libraryId,
             zotero_key: zoteroKey,
-            file_hash: fileHash
-        } as FileHashReference);
+            file_hash: fileHash,
+            mime_type: mimeType
+        } as UpdateFileRequest);
         logger(`updateFile: Result: ${JSON.stringify(result)}`);
         if (!result) {
             logger(`updateFile: No file update required for ${zoteroKey} in library ${libraryId}`);

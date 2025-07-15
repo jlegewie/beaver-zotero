@@ -4,6 +4,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 // Types that match the backend models
 export interface UploadQueueItem {
     file_hash: string;
+    mime_type: string;
     library_id: number;
     zotero_key: string;
     read_count: number;
