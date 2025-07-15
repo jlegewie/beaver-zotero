@@ -3,7 +3,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, AttachmentData, DeleteData } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
+import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 
 // Types that match the backend models
 export interface ItemBatchRequest {

@@ -16,7 +16,7 @@ import { isUploadCompleteAtom } from "../../atoms/files";
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
-import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroIdentifier";
+import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 
