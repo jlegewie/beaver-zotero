@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChatMessage, Warning } from '../../types/chat/uiTypes';
+import { ChatMessage, WarningMessage } from '../../types/chat/uiTypes';
 import { Icon, AlertIcon, KeyIcon, CancelIcon, SettingsIcon } from '../icons/icons';
 import { useSetAtom } from 'jotai';
 import Button from '../ui/Button';
@@ -108,7 +108,7 @@ const getWarning = (type: string) => {
   }
 };
 
-export const WarningDisplay: React.FC<{ messageId: string, warning: Warning, isPlaceholder?: boolean }> = ({ messageId, warning, isPlaceholder }) => {
+export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessage, isPlaceholder?: boolean }> = ({ messageId, warning, isPlaceholder }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const removeWarningFromMessage = useSetAtom(removeWarningFromMessageAtom);
     const removeMessage = useSetAtom(removeMessageAtom);

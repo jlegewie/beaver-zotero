@@ -3,9 +3,9 @@ import { ToolCall } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
 
 
-// Warning messages
+// WarningMessage messages
 export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments";
-export interface Warning {
+export interface WarningMessage {
     id: string;
     type: WarningType;
     message: string;
@@ -31,7 +31,7 @@ export interface ChatMessage {
     tool_calls?: ToolCall[];
     status: MessageStatus;
     errorType?: string;
-    warnings?: Warning[];
+    warnings?: WarningMessage[];
 }
 
 // Factory functions for creating messages

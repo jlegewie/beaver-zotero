@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatMessage, createAssistantMessage, createUserMessage, Warning } from '../types/chat/uiTypes';
+import { ChatMessage, createAssistantMessage, createUserMessage, WarningMessage } from '../types/chat/uiTypes';
 import { MessageModel, toMessageData, ToolCall, toMessageModel } from '../types/chat/apiTypes';
 import { ZoteroItemReference } from '../types/zotero';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
@@ -568,7 +568,7 @@ async function _processChatCompletionViaBackend(
                 const currentMessageId = messageId || get(currentAssistantMessageIdAtom);
                 if (!currentMessageId) return;
                 // Warning
-                const warning = {id: uuidv4(), type: type, message: message} as Warning;
+                const warning = {id: uuidv4(), type: type, message: message} as WarningMessage;
                 if (data && data.attachments) {
                     warning.attachments = data.attachments as ZoteroItemReference[];
                 }
