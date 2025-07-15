@@ -40,7 +40,7 @@ export class ThreadService extends ApiService {
      * @returns Promise with the thread data
      */
     async getThread(threadId: string): Promise<ThreadModel> {
-        return this.get<ThreadModel>(`/threads/${threadId}`);
+        return this.get<ThreadModel>(`/api/v1/threads/${threadId}`);
     }
 
     /**
@@ -52,7 +52,7 @@ export class ThreadService extends ApiService {
         threadId: string
     ): Promise<{ messages: ChatMessage[], userAttachments: MessageAttachmentWithId[], toolAttachments: MessageAttachmentWithId[] }> {
         // Get thread messages from backend
-        const messages = await this.get<MessageModel[]>(`/threads/${threadId}/messages`);
+        const messages = await this.get<MessageModel[]>(`/api/v1/threads/${threadId}/messages`);
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
@@ -79,7 +79,7 @@ export class ThreadService extends ApiService {
      * @returns Promise with the updated thread data
      */
     async renameThread(threadId: string, newName: string): Promise<ThreadModel> {
-        return this.patch<ThreadModel>(`/threads/${threadId}/rename`, { new_name: newName });
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/rename`, { new_name: newName });
     }
 
     /**
@@ -88,7 +88,7 @@ export class ThreadService extends ApiService {
      * @returns Promise that resolves when the thread is deleted
      */
     async deleteThread(threadId: string): Promise<void> {
-        return this.delete(`/threads/${threadId}`);
+        return this.delete(`/api/v1/threads/${threadId}`);
     }
 
     /**
@@ -98,7 +98,7 @@ export class ThreadService extends ApiService {
      * @returns Promise with paginated threads data
      */
     async getPaginatedThreads(limit: number = 10, after: string | null = null): Promise<PaginatedThreadsResponse> {
-        let endpoint = `/threads/paginated?limit=${limit}`;
+        let endpoint = `/api/v1/threads/paginated?limit=${limit}`;
         if (after) {
             endpoint += `&after=${after}`;
         }
@@ -113,7 +113,7 @@ export class ThreadService extends ApiService {
      */
     async createThread(name?: string): Promise<ThreadModel> {
         const payload = { name: name || null };
-        return this.post<ThreadModel>('/threads', payload);
+        return this.post<ThreadModel>('/api/v1/threads', payload);
     }
 }
 

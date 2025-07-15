@@ -148,7 +148,7 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with the file status summary data.
      */
     async getUserFilesStatus(): Promise<FileStatus> {
-        return this.get<FileStatus>('/attachments/status');
+        return this.get<FileStatus>('/api/v1/attachments/status');
     }
 
     /**
@@ -157,7 +157,7 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with an array of attachment status responses.
      */
     async getMultipleAttachmentsStatus(attachments: ZoteroItemReference[]): Promise<AttachmentStatusResponse[]> {
-        const url = `/attachments/status/batch`;
+        const url = `/api/v1/attachments/status/batch`;
         return this.post<AttachmentStatusResponse[]>(url, attachments);
     }
 
@@ -168,7 +168,7 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with the attachment status response.
      */
     async getAttachmentStatus(libraryId: number, zoteroKey: string): Promise<AttachmentStatusResponse> {
-        const url = `/attachments/status/${libraryId}/${zoteroKey}`;
+        const url = `/api/v1/attachments/status/${libraryId}/${zoteroKey}`;
         return this.get<AttachmentStatusResponse>(url);
     }
 
@@ -178,7 +178,7 @@ export class AttachmentsService extends ApiService {
      * @returns Promise resolving to an object mapping error codes to their counts.
      */
     async getErrorCodeStats(type: 'text' | 'md' | 'docling'): Promise<ErrorCodeStats[]> {
-        return this.get<ErrorCodeStats[]>(`/attachments/error-code-stats/${type}`);
+        return this.get<ErrorCodeStats[]>(`/api/v1/attachments/error-code-stats/${type}`);
     }
 
     /**
@@ -192,7 +192,7 @@ export class AttachmentsService extends ApiService {
             file_hash: fileHash,
             status: status
         };
-        return this.post<UpdateUploadStatusResponse>('/attachments/upload-status', request);
+        return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }
 
     /**
@@ -209,7 +209,7 @@ export class AttachmentsService extends ApiService {
             file_size: fileSize,
             page_count: pageCount
         };
-        return this.post<CompleteUploadResult>('/attachments/complete-upload', request);
+        return this.post<CompleteUploadResult>('/api/v1/attachments/complete-upload', request);
     }
 
     /**
@@ -218,7 +218,7 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with an array of upload completed responses
      */
     async markUploadCompletedBatch(requests: CompleteUploadRequest[]): Promise<CompleteUploadResult[]> {
-        return this.post<CompleteUploadResult[]>('/attachments/complete-upload-batch', requests);
+        return this.post<CompleteUploadResult[]>('/api/v1/attachments/complete-upload-batch', requests);
     }
 
     /**
@@ -228,7 +228,7 @@ export class AttachmentsService extends ApiService {
      */
     async retryUploadsByStatus(status: "failed" | "plan_limit" = "failed"): Promise<FileHashReference[]> {
         const request: RetryUploadsRequest = { status };
-        return this.post<FileHashReference[]>('/attachments/retry-uploads-by-status', request);
+        return this.post<FileHashReference[]>('/api/v1/attachments/retry-uploads-by-status', request);
     }
 
     /**
@@ -253,7 +253,7 @@ export class AttachmentsService extends ApiService {
         params.append('page', page.toString());
         params.append('page_size', pageSize.toString());
         
-        const url = `/attachments/by-status?${params.toString()}`;
+        const url = `/api/v1/attachments/by-status?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
     }
 
@@ -276,7 +276,7 @@ export class AttachmentsService extends ApiService {
         params.append('page', page.toString());
         params.append('page_size', pageSize.toString());
         
-        const url = `/attachments/by-upload-status?${params.toString()}`;
+        const url = `/api/v1/attachments/by-upload-status?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
     }
 
@@ -290,7 +290,7 @@ export class AttachmentsService extends ApiService {
     async updateFile(libraryId: number, zoteroKey: string, fileHash: string, mimeType: string): Promise<FileHashReference | null> {
         logger(`updateFile: Updating file hash for ${zoteroKey} in library ${libraryId}`);
         // Update file hash in backend
-        const result = await this.post<UpdateFileRequest>('/attachments/update-file', {
+        const result = await this.post<UpdateFileRequest>('/api/v1/attachments/update-file', {
             library_id: libraryId,
             zotero_key: zoteroKey,
             file_hash: fileHash,

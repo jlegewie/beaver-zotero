@@ -90,7 +90,7 @@ export class SearchService extends ApiService {
         }
         
         // Use the full endpoint path: /search/metadata
-        return this.get<ItemSearchResult[]>(`/search/metadata?${queryParams.toString()}`);
+        return this.get<ItemSearchResult[]>(`/api/v1/search/metadata?${queryParams.toString()}`);
     }
     
     /**

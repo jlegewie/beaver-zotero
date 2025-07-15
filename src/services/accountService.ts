@@ -58,7 +58,7 @@ export class AccountService extends ApiService {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         
         try {
-            return await this.post<ProfileResponse>('/account/profile', {
+            return await this.post<ProfileResponse>('/api/v1/account/profile', {
                 zotero_local_id: localUserKey,
                 zotero_user_id: userID
             } as ProfileRequest);
@@ -78,7 +78,7 @@ export class AccountService extends ApiService {
      */
     async getModelList(plan_id: string): Promise<FullModelConfig[]> {
         try {
-            const endpoint = `${this.baseUrl}/account/model-configs?plan_id=${plan_id}`;
+            const endpoint = `${this.baseUrl}/api/v1/account/model-configs?plan_id=${plan_id}`;
             const headers = await this.getAuthHeaders();
             
             const response = await Zotero.HTTP.request('GET', endpoint, {
@@ -101,7 +101,7 @@ export class AccountService extends ApiService {
      */
     async authorizeAccess(requireOnboarding: boolean = true, libraries: ZoteroLibrary[], processingTier: ProcessingTier, syncWithZotero: boolean = false): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
-        return this.post<{ message: string }>('/account/authorize', {
+        return this.post<{ message: string }>('/api/v1/account/authorize', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
             require_onboarding: requireOnboarding,
@@ -116,7 +116,7 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async authorizeDevice(userID: string, localUserKey: string): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/account/authorize-device', {
+        return this.post<{ message: string }>('/api/v1/account/authorize-device', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID
         } as AuthorizationRequest);
@@ -128,7 +128,7 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async completeOnboarding(processingTier: ProcessingTier): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/account/complete-onboarding', {
+        return this.post<{ message: string }>('/api/v1/account/complete-onboarding', {
             processing_tier: processingTier
         } as OnboardingRequest);
     }

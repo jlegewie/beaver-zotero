@@ -118,7 +118,7 @@ export class ChatService extends ApiService {
      */
     async verifyApiKey(provider: ProviderType, userApiKey: string): Promise<VerifyKeyResponse> {
         try {
-            const endpoint = `${this.baseUrl}/chat/verify-key`;
+            const endpoint = `${this.baseUrl}/api/v1/chat/verify-key`;
             const headers = await this.getAuthHeaders();
             
             const requestBody: VerifyKeyRequest = {
@@ -156,7 +156,7 @@ export class ChatService extends ApiService {
         partialContent: string
     ): Promise<void> {
         try {
-            const endpoint = `${this.baseUrl}/chat/cancel`;
+            const endpoint = `${this.baseUrl}/api/v1/chat/cancel`;
             const headers = await this.getAuthHeaders();
 
             await Zotero.HTTP.request('POST', endpoint, {
@@ -199,7 +199,7 @@ export class ChatService extends ApiService {
     ): Promise<void> {
         const { onThread, onDelta, onMessage, onToolcall, onComplete, onDone, onError, onWarning } = callbacks;
 
-        const endpoint = `${this.baseUrl}/chat/completions`;
+        const endpoint = `${this.baseUrl}/api/v1/chat/completions`;
         
         // Get authentication headers
         const headers = await this.getAuthHeaders();
