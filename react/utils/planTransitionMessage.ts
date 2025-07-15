@@ -1,5 +1,4 @@
 import { setPref } from "../../src/utils/prefs";
-import { retrySkippedUploads } from '../../src/services/FileUploader';
 import { logger } from "../../src/utils/logger";
 import { SafeProfileWithPlan } from "../types/profile";
 import { addPopupMessageAtom } from "./popupMessageUtils";

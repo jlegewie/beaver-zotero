@@ -1,9 +1,9 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, AttachmentData, DeleteData } from '../../react/types/zotero';
+import { ItemData, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
+import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 
 // Types that match the backend models
 export interface ItemBatchRequest {
@@ -14,7 +14,7 @@ export interface ItemBatchRequest {
     zotero_user_id: string | undefined;
     library_id: number;
     items: ItemData[];
-    attachments: AttachmentData[];
+    attachments: AttachmentDataWithMimeType[];
     deletions: DeleteData[];
 }
 
@@ -140,7 +140,7 @@ export class SyncService extends ApiService {
         syncMethod: 'version' | 'date_modified',
         libraryId: number,
         items: ItemData[],
-        attachments: AttachmentData[],
+        attachments: AttachmentDataWithMimeType[],
         deletions: DeleteData[],
     ): Promise<SyncItemsResponse> {
         const { userID, localUserKey } = getZoteroUserIdentifier();

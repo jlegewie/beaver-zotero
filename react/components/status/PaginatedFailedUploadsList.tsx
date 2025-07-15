@@ -6,7 +6,7 @@ import { logger } from '../../../src/utils/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
-import { resetFailedUploads } from "../../../src/services/FileUploader";
+import { retryUploadsByStatus } from "../../../src/services/FileUploader";
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
@@ -70,9 +70,6 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
 
         setIsLoading(true);
         try {
-            // Local DB as alternative
-            // const result = await Zotero.Beaver.db.getAttachmentsByUploadStatusPaginated(userId, statuses[0], page + 1, ITEMS_PER_PAGE);
-            // API call
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByUploadStatus(
                 statuses,
                 page + 1, // API is 1-based
@@ -172,7 +169,7 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
                             <IconButton
                                 variant="ghost"
                                 onClick={async () => {
-                                    await resetFailedUploads();
+                                    await retryUploadsByStatus("failed");
                                     setShowList(false);
                                 }}
                                 icon={RepeatIcon}

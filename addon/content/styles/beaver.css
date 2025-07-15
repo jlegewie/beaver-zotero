@@ -353,6 +353,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .ml-2 { margin-left: 0.5rem; }
 [id^="beaver-pane-"] .ml-3 { margin-left: 0.75rem; }
 [id^="beaver-pane-"] .ml-4 { margin-left: 1rem; }
+[id^="beaver-pane-"] .mt-010 { margin-top: 0.1rem; }
 [id^="beaver-pane-"] .mt-015 { margin-top: 0.15rem; }
 [id^="beaver-pane-"] .mt-020 { margin-top: 0.20rem; }
 [id^="beaver-pane-"] .mt-1 { margin-top: 0.25rem; }
@@ -376,6 +377,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .-ml-020 { margin-left: -0.20rem; }
 [id^="beaver-pane-"] .-ml-05 { margin-left: -0.125rem; }
 [id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
+[id^="beaver-pane-"] .-ml-15 { margin-left: -0.375rem; }
 [id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
 [id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
 [id^="beaver-pane-"] .-mr-010 { margin-right: -0.10rem; }

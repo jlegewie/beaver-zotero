@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { SafeProfileWithPlan, ProcessingTier } from '../../react/types/profile';
-import { getZoteroUserIdentifier } from '../utils/zoteroIdentifier';
+import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { FullModelConfig } from '../../react/atoms/models';
 import { ZoteroLibrary } from '../../react/types/zotero';

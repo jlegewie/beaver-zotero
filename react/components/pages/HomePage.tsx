@@ -12,7 +12,6 @@ import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/setti
 import FileProcessingStatus from "../status/FileProcessingStatus";
 import FileUploadStatus from "../status/FileUploadStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import { useUploadQueueManager } from "../../hooks/useUploadQueueManager";
 
 
 const HomePage: React.FC = () => {
@@ -22,9 +21,6 @@ const HomePage: React.FC = () => {
     const currentSources = useAtomValue(currentSourcesAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-
-    // Upload queue manager
-    useUploadQueueManager();
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();

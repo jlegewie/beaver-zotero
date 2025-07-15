@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { fileUploader, retrySkippedUploads } from '../../src/services/FileUploader';
+import { fileUploader } from '../../src/services/FileUploader';
 import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
@@ -53,8 +53,7 @@ export const useProfileSync = () => {
             }
 
             // If the plan allows file uploads, start the file uploader
-            if (profileData.profile.plan.upload_files) {
-                await retrySkippedUploads();
+            if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {
                 await fileUploader.start();
             } else {
                 await fileUploader.stop();

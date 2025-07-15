@@ -7,6 +7,7 @@ import { store } from '../index';
 import { userAtom } from '../atoms/auth';
 import { planFeaturesAtom, syncLibraryIdsAtom } from '../atoms/profile';
 import attachmentStatusManager from '../../src/services/attachmentStatusManager';
+import { getMimeType } from '../../src/utils/zoteroUtils';
 
 // Define the structure or interface for your status data
 interface BeaverStatusInfo {
@@ -113,7 +114,8 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     // buttonIcon: 'chrome://zotero/skin/tick.png'
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        const mimeType = await getMimeType(attachmentItem);
+                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash, mimeType);
                         await fileUploader.start("manual");
                     }
                 };
@@ -128,7 +130,8 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                     buttonIcon: 'chrome://zotero/skin/20/universal/sync.svg',
                     buttonDisabled: !hashChanged,
                     onClick: async () => {
-                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash);
+                        const mimeType = await getMimeType(attachmentItem);
+                        await attachmentsService.updateFile(attachmentItem.libraryID, attachmentItem.key, currentHash, mimeType);
                         await fileUploader.start("manual");
                     }
                 };

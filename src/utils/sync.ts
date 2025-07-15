@@ -5,8 +5,8 @@ import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, DeleteData, ZoteroLibrary } from '../../react/types/zotero';
-import { isLibrarySynced } from './zoteroIdentifier';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { getMimeType, isLibrarySynced } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -137,7 +137,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
  * @returns Promise resolving to AttachmentData object for syncing
  */
-async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentData | null> {
+async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
 
     // 1. File: Confirm that the item is an attachment and that the file exists
     if (!item.isAttachment() || !(await item.fileExists())) return null;
@@ -161,10 +161,11 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
     const metadataHash = await calculateObjectHash(hashedFields);
 
     // 4. AttachmentData: Construct final AttachmentData object
-    const attachmentData: AttachmentData = {
+    const attachmentData: AttachmentDataWithMimeType = {
         ...hashedFields,
         // Add non-hashed fields
         file_hash: file_hash,
+        mime_type: await getMimeType(item),
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // Add the calculated hash
@@ -474,7 +475,7 @@ export async function syncItemsToBackend(
                     data.filter((item) => item !== null) as ItemData[]
                 ),
                 Promise.all(attachmentItems.map((item) => extractAttachmentData(item))).then(data => 
-                    data.filter((att) => att !== null) as AttachmentData[]
+                    data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
             
@@ -520,46 +521,11 @@ export async function syncItemsToBackend(
                 throw new Error("Failed to process batch after multiple attempts");
             }
             
-            // Update database attachments and add items to upload queue
-            if (batchResult.attachments.length > 0) {
-                // Update database attachments
-                logger(`Beaver Sync '${syncSessionId}':     Updating local database attachments`, 2);
-                const attachmentsForDB = batchResult.attachments.map(attachment => ({
-                    library_id: attachment.library_id,
-                    zotero_key: attachment.zotero_key,
-                    file_hash: attachment.file_hash,
-                    upload_status: attachment.upload_status || 'pending',
-                }));
-                await Zotero.Beaver.db.upsertAttachmentsBatch(userId, attachmentsForDB);
-
-                // Add items to upload queue
-                const uploadQueueItems = batchResult.attachments
-                    .filter(attachment => {
-                        return attachment.upload_status === 'pending' && attachment.file_hash;
-                    })
-                    .map(attachment => ({
-                        file_hash: attachment.file_hash!,
-                        library_id: attachment.library_id,
-                        zotero_key: attachment.zotero_key,
-                    }));
-                
-                if (uploadQueueItems.length > 0) {
-                    // Deduplicate uploadQueueItems by file_hash, keeping the first occurrence
-                    const uniqueUploadQueueItemsMap = new Map();
-                    uploadQueueItems.forEach(item => {
-                        if (!uniqueUploadQueueItemsMap.has(item.file_hash)) {
-                            uniqueUploadQueueItemsMap.set(item.file_hash, item);
-                        }
-                    });
-                    const uniqueUploadQueueItems = Array.from(uniqueUploadQueueItemsMap.values());
-
-                    logger(`Beaver Sync '${syncSessionId}':     Adding/updating ${uniqueUploadQueueItems.length} items in upload queue (after deduplication)`, 2);
-                    await Zotero.Beaver.db.upsertQueueItemsBatch(userId, uniqueUploadQueueItems);
-
-                    // Start file uploader if there are attachments to upload (or newly added to queue)
-                    logger(`Beaver Sync '${syncSessionId}':     Starting file uploader`, 2);
-                    await fileUploader.start(syncType === 'initial' ? "initial" : "background");
-                }
+            // start file uploader if there are attachments to upload
+            const countUploads = batchResult.attachments.filter(attachment => attachment.upload_status === 'pending' && attachment.file_hash).length;
+            if (countUploads > 0) {                                
+                logger(`Beaver Sync '${syncSessionId}':     ${countUploads} attachments need to be uploaded, starting file uploader`, 2);
+                await fileUploader.start(syncType === 'initial' ? "initial" : "background");
             }
 
             // Update progress for this batch
@@ -592,10 +558,6 @@ export const deleteItems = async (userId: string, libraryID: number, zoteroKeys:
 
     // Delete items from backend
     const response = await syncService.deleteItems(libraryID, zoteroKeys);
-
-    // Update local database
-    const allKeys = [...response.items.map(a => a.zotero_key), ...response.attachments.map(a => a.zotero_key)];
-    if(allKeys.length > 0) await Zotero.Beaver.db.deleteByLibraryAndKeys(userId, libraryID, allKeys);
 }
 
 /**

@@ -2,11 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
-import { UploadQueueRecord } from './database';
 import { logger } from '../utils/logger';
-import { getPDFPageCount } from '../../react/utils/pdfUtils';
-import { store } from '../../react/index';
-import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
 
 // processing_status from backend
@@ -23,6 +19,20 @@ export interface UpdateUploadStatusRequest {
 }
 
 /**
+ * Request body for retrying uploads by status
+ */
+export interface RetryUploadsRequest {
+    status: "failed" | "plan_limit";
+}
+
+/**
+ * Request body for updating a file
+ */
+export interface UpdateFileRequest extends FileHashReference {
+    mime_type: string;
+}
+
+/**
  * Response from marking an upload as failed
  */
 export interface UpdateUploadStatusResponse {
@@ -34,6 +44,7 @@ export interface UpdateUploadStatusResponse {
  * Request body for marking an upload as completed
  */
 export interface CompleteUploadRequest {
+    storage_path: string;
     file_hash: string;
     mime_type: string;
     file_size: number;
@@ -190,8 +201,9 @@ export class AttachmentsService extends ApiService {
      * @param pageCount The number of pages in the file
      * @returns Promise with the upload completed response
      */
-    async markUploadCompleted(fileHash: string, mimeType: string, fileSize: number, pageCount: number | null): Promise<CompleteUploadResult> {
+    async markUploadCompleted(storagePath: string, fileHash: string, mimeType: string, fileSize: number, pageCount: number | null): Promise<CompleteUploadResult> {
         const request: CompleteUploadRequest = {
+            storage_path: storagePath,
             file_hash: fileHash,
             mime_type: mimeType,
             file_size: fileSize,
@@ -210,11 +222,13 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Resets all failed uploads by changing their status back to pending.
-     * @returns Promise with an array of reset failed upload results
+     * Retries uploads for the current user by resetting their status back to 'pending'.
+     * @param status The status to retry ('failed' or 'plan_limit'). Defaults to 'failed'.
+     * @returns Promise with an array of FileHashReference objects for uploads that were reset.
      */
-    async resetFailedUploads(): Promise<ResetFailedResult[]> {
-        return this.post<ResetFailedResult[]>('/attachments/reset-failed-uploads', {});
+    async retryUploadsByStatus(status: "failed" | "plan_limit" = "failed"): Promise<FileHashReference[]> {
+        const request: RetryUploadsRequest = { status };
+        return this.post<FileHashReference[]>('/attachments/retry-uploads-by-status', request);
     }
 
     /**
@@ -273,38 +287,20 @@ export class AttachmentsService extends ApiService {
      * @param fileHash The new file hash
      * @returns Promise with the update response indicating if the hash was enqueued
      */
-    async updateFile(libraryId: number, zoteroKey: string, fileHash: string): Promise<FileHashReference | null> {
+    async updateFile(libraryId: number, zoteroKey: string, fileHash: string, mimeType: string): Promise<FileHashReference | null> {
         logger(`updateFile: Updating file hash for ${zoteroKey} in library ${libraryId}`);
         // Update file hash in backend
-        const result = await this.post<FileHashReference>('/attachments/update-file', {
+        const result = await this.post<UpdateFileRequest>('/attachments/update-file', {
             library_id: libraryId,
             zotero_key: zoteroKey,
-            file_hash: fileHash
-        } as FileHashReference);
+            file_hash: fileHash,
+            mime_type: mimeType
+        } as UpdateFileRequest);
         logger(`updateFile: Result: ${JSON.stringify(result)}`);
         if (!result) {
             logger(`updateFile: No file update required for ${zoteroKey} in library ${libraryId}`);
             return null;
         }
-
-        // Get user ID
-        const userId = store.get(userAtom)?.id;
-        if (!userId) {
-            throw new Error('User ID not found');
-        }
-
-        // Update attachment in local db
-        await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
-            file_hash: result.file_hash,
-            upload_status: 'pending'
-        });
-
-        // Queue file hash for upload
-        await Zotero.Beaver.db.upsertQueueItem(userId, {
-            file_hash: result.file_hash,
-            library_id: result.library_id,
-            zotero_key: result.zotero_key
-        });
         
         // Start upload
         await fileUploader.start("manual");

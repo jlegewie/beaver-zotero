@@ -159,6 +159,10 @@ export interface AttachmentData extends ZoteroItemBase {
     zotero_synced: boolean;
 }
 
+export interface AttachmentDataWithMimeType extends AttachmentData {
+    mime_type: string;
+}
+
 export type AttachmentDataHashedFields = Pick<AttachmentData,
     | 'zotero_key' | 'library_id' | 'parent_key' | 'attachment_url'
     | 'link_mode' | 'deleted' | 'title' | 'filename' | 'tags' | 'collections'

@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
-import { getZoteroUserIdentifier } from "../../src/utils/zoteroIdentifier";
+import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);

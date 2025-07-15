@@ -6,7 +6,7 @@ import { profileWithPlanAtom, syncWithZoteroAtom } from '../../atoms/profile';
 import { logoutAtom } from '../../atoms/auth';
 import { accountService } from '../../../src/services/accountService';
 import { logger } from '../../../src/utils/logger';
-import { getZoteroUserIdentifier } from '../../../src/utils/zoteroIdentifier';
+import { getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
 
 const DeviceAuthorizationPage: React.FC = () => {
     // Auth state

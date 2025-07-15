@@ -1,9 +1,9 @@
 /**
  * FileUploader.ts
  *
- * A uploader that processes Zotero file attachments in batches using a queue. 
- * It reads pending items from the local SQLite database,
- * handles retries, and updates progress based on local queue status. 
+ * A uploader that processes Zotero file attachments in batches using a backend queue. 
+ * It reads pending items from the backend upload queue service,
+ * handles retries, and updates progress based on backend queue status. 
  */
 
 import PQueue from 'p-queue';
@@ -11,16 +11,18 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, ResetFailedResult, CompleteUploadRequest } from './attachmentsService';
-import { UploadQueueInput, UploadQueueRecord } from './database';
+import { attachmentsService, CompleteUploadRequest } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
+import { filesService, UploadQueueItem } from './filesService';
+import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
+import { getMimeType } from '../utils/zoteroUtils';
 
 /**
- * Manages file uploads from a frontend-managed queue of pending uploads.
+ * Manages file uploads from a backend-managed queue of pending uploads.
  */
 export class FileUploader {
     private isRunning: boolean = false;
@@ -31,13 +33,11 @@ export class FileUploader {
 
     // upload batching
     // queue reads
-    private readonly BATCH_SIZE: number = 15;
-    private readonly MAX_ATTEMPTS: number = 3;
-    private readonly VISIBILITY_TIMEOUT: number = 0.5; // 30 seconds timeout for reads
-    private readonly VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE: number = 5;  // 5 minutes timeout for retries
+    private readonly BATCH_SIZE: number = 20;
+    private readonly VISIBILITY_TIMEOUT_SECONDS: number = 300; // 5 minutes timeout for backend queue reads
 
     // completion batching
-    private completionBatch: Array<{ item: UploadQueueRecord, request: CompleteUploadRequest }> = [];
+    private completionBatch: Array<{ item: UploadQueueItem, request: CompleteUploadRequest }> = [];
     private batchTimer: NodeJS.Timeout | null = null;
     private readonly BATCH_SEND_SIZE: number = 5; // Send after 5 completions
     private readonly BATCH_SEND_TIMEOUT: number = 1500; // Send after 1.5 seconds
@@ -117,7 +117,7 @@ export class FileUploader {
     }
 
     /**
-     * Main loop that continuously reads items from local queue and processes them until
+     * Main loop that continuously reads items from backend queue and processes them until
      * no more items remain or the uploader is stopped.
      */
     private async runQueue(): Promise<void> {
@@ -146,15 +146,14 @@ export class FileUploader {
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
 
-                // Read items from local queue with visibility timeout
-                const items: UploadQueueRecord[] = await Zotero.Beaver.db.readQueueItems(
-                    user.id, 
-                    this.BATCH_SIZE, 
-                    this.MAX_ATTEMPTS,
-                    this.VISIBILITY_TIMEOUT
+                // Read items from backend queue with visibility timeout
+                const response = await filesService.readUploadQueue(
+                    this.VISIBILITY_TIMEOUT_SECONDS,
+                    this.BATCH_SIZE
                 );
+                const items = response.items;
 
-                logger(`File Uploader Queue: Read ${items.length} items from local queue`, 3);
+                logger(`File Uploader Queue: Read ${items.length} items from backend queue`, 3);
 
                 // If no items, we're done
                 if (items.length === 0) {
@@ -198,11 +197,50 @@ export class FileUploader {
         store.set(isFileUploaderRunningAtom, false);
     }
 
+    private async uploadFileToSupabase(storagePath: string, blob: Blob): Promise<void> {
+        const { data, error } = await supabase
+            .storage
+            .from('files')
+            .upload(storagePath, blob, {
+                cacheControl: '3600',
+                upsert: true
+            });
+
+        if (error) {
+            throw new Error(`Failed to upload file to storage: ${error.message}`);
+        }
+
+        return ;
+    }
+
+    private async uploadFileToGCS(signedUrl: string, blob: Blob, mimeType: string, metadata: Record<string, string>): Promise<void> {
+        const headers = {
+            'Content-Type': mimeType,
+        };
+        
+        // Add metadata as headers
+        Object.entries(metadata).forEach(([key, value]) => {
+            headers[`x-goog-meta-${key}` as keyof typeof headers] = value;
+        });
+        
+        const response = await fetch(signedUrl, {
+            method: 'PUT',
+            body: blob,
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to upload file to storage: ${response.statusText}`);
+        }
+        
+        return ;
+    }
+    
     /**
      * Uploads a single file item. 
      * On success, the item is added to the completion batch; on failure, we may retry or fail permanently.
      */
-    private async uploadFile(item: UploadQueueRecord, user_id: string): Promise<void> {
+    private async uploadFile(item: UploadQueueItem, user_id: string): Promise<void> {
         try {
             logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
 
@@ -221,19 +259,52 @@ export class FileUploader {
                 return;
             }
 
-            // File metadata
-            let mimeType = attachment.attachmentContentType;
-            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
-            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-
             // Get the file path for the attachment
-            let filePath: string | null = null;
-            filePath = await attachment.getFilePathAsync() || null;
+            const filePath: string | null = await attachment.getFilePathAsync() || null;
+
+            // Attempt to download if file is not available locally
+            // NOTE: Disable for now because it violates user intent. Plugin shouldn't download all files for users who use "as needed" setting.
+            /* if (!filePath) {
+                const fileSyncEnabled = Zotero.Sync.Storage.Local.getEnabledForLibrary(attachment.libraryID);
+                
+                // Only try to download if:
+                // 1. File sync is enabled
+                // 2. This is NOT a linked file (linked files can't be downloaded from server)
+                if (fileSyncEnabled && attachment.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_LINKED_FILE) {
+                    logger(`File not available locally, attempting to download: ${item.zotero_key}`, 1);
+                    
+                    try {
+                        // Download the file on-demand
+                        const results = await Zotero.Sync.Runner.downloadFile(attachment);
+                        
+                        if (results && results.localChanges) {
+                            // File was downloaded successfully, get the path again
+                            filePath = await attachment.getFilePathAsync() || null;
+                            logger(`File downloaded successfully: ${item.zotero_key}`, 1);
+                        } else {
+                            logger(`File download failed: ${item.zotero_key}`, 1);
+                            await this.handlePermanentFailure(item, user_id, "File path not found");
+                            return;
+                        }
+                    } catch (downloadError: any) {
+                        logger(`File download error for ${item.zotero_key}: ${downloadError.message}`, 1);
+                        await this.handlePermanentFailure(item, user_id, "File path not found");
+                        return;
+                    }
+                }
+            }*/
+            
+            // File check: if file path is not found, we can't upload it
             if (!filePath) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
                 await this.handlePermanentFailure(item, user_id, "File path not found");
                 return;
             }
+
+            // File metadata
+            const mimeType = await getMimeType(attachment, filePath);
+            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
 
             // File size limit
             const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
@@ -243,21 +314,6 @@ export class FileUploader {
                 logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
                 await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
                 return;
-            }
-
-            // Validate/correct MIME type by checking actual file if needed
-            if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
-                try {
-                    const detectedMimeType = await Zotero.MIME.getMIMETypeFromFile(filePath);
-                    if (detectedMimeType) {
-                        mimeType = detectedMimeType;
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Corrected MIME type from '${attachment.attachmentContentType}' to '${mimeType}'`, 2);
-                    }
-                } catch (error) {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Failed to detect MIME type, using stored type`, 2);
-                    // Fall back to stored type or default
-                    mimeType = attachment.attachmentContentType || 'application/octet-stream';
-                }
             }
 
             // Read file content
@@ -278,27 +334,21 @@ export class FileUploader {
             let uploadSuccess = false;
             let uploadAttempt = 0;
             const maxUploadAttempts = 3;
-            const storagePath = `${userId}/attachments/${item.file_hash}/original`;
 
             // First retry loop: Storage upload
             while (!uploadSuccess && uploadAttempt < maxUploadAttempts) {
                 uploadAttempt++;
                 try {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${storagePath} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
-                    const { data, error } = await supabase
-                        .storage
-                        .from('files')
-                        .upload(storagePath, blob, {
-                            cacheControl: '3600',
-                            upsert: true
-                        });
-
-                    if (error) {
-                        // Retry with backoff
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload error ${JSON.stringify(error)} on attempt ${uploadAttempt}, will retry`, 2);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt)); // Increasing backoff
-                        continue;
-                    }
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${item.storage_path} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
+                    // const storagePath = `${userId}/attachments/${item.file_hash}/original`;
+                    // await this.uploadFileToSupabase(storagePath, blob);
+                    await this.uploadFileToGCS(item.signed_upload_url, blob, item.mime_type, {
+                        userid: userId,
+                        filehash: item.file_hash,
+                        libraryid: item.library_id.toString(),
+                        zoterokey: item.zotero_key
+                    });
+                    
                     
                     uploadSuccess = true;
                     logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}`, 3);
@@ -335,8 +385,9 @@ export class FileUploader {
     /**
      * Adds a completion to the batch and manages batch sending
      */
-    private async addCompletionToBatch(item: UploadQueueRecord, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
+    private async addCompletionToBatch(item: UploadQueueItem, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
         const request: CompleteUploadRequest = {
+            storage_path: item.storage_path,
             file_hash: item.file_hash,
             mime_type: mimeType,
             file_size: fileSize,
@@ -407,12 +458,8 @@ export class FileUploader {
                     }
 
                     if (result.upload_completed) {
-                        // On success, update local DB
-                        await Zotero.Beaver.db.completeQueueItem(userId, batchItem.item.file_hash);
                         logger(`File Uploader: Successfully uploaded file for attachment ${batchItem.item.zotero_key} (page count: ${batchItem.request.page_count})`, 3);
                     } else {
-                        // On failure, log it. The item remains in the queue (since completeQueueItem wasn't called)
-                        // and will be retried automatically on a future run.
                         logger(`File Uploader: Backend failed to complete ${batchItem.item.zotero_key}: ${result.error}`, 1);
                     }
                 }
@@ -449,21 +496,17 @@ export class FileUploader {
     }
     
     /**
-     * Handles permanent failures by marking items as failed in the backend first, 
-     * then in the local database only if backend update succeeds
+     * Handles permanent failures by marking items as failed in the backend and removing them from the backend queue
      */
-    private async handlePermanentFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+    private async handlePermanentFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
         logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
             // First, notify backend of failure
             await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
             
-            // Only if backend call succeeds, update local state
-            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash);
-
             // Error message for manual retry (only show if user has completed onboarding)
-            if (store.get(hasCompletedOnboardingAtom)) {
+            if (store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
                 store.set(addOrUpdateFailedUploadMessageAtom, {
                     library_id: item.library_id,
                     zotero_key: item.zotero_key
@@ -473,178 +516,55 @@ export class FileUploader {
             logger(`File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as failed (will retry later): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as failed: ${failError.message}`, 2);
             Zotero.logError(failError);
-            // Don't update local state or cleanup - item will be retried after visibility timeout
-            await Zotero.Beaver.db.setQueueItemTimeout(
-                user_id,
-                item.file_hash,
-                this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE
-            );
-            logger(`File Uploader: Upload failed for ${item.zotero_key}, will retry after ${this.VISIBILITY_TIMEOUT_REMOTE_DB_FAILURE} minutes`, 2);
             // Re-throw the error so callers know the operation failed
+            // Item will remain in backend queue for retry
             throw failError;
         }
     }
 
     /**
      * Handles plan limit failures by marking items as failed in the backend first, 
-     * then in the local database only if backend update succeeds
+     * then removing them from the backend queue
      */
-    private async handlePlanLimitFailure(item: UploadQueueRecord, user_id: string, reason: string): Promise<void> {
+    private async handlePlanLimitFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
             // First, notify backend of failure
             await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
-
-            // Only if backend call succeeds, update local state
-            await Zotero.Beaver.db.failQueueItem(user_id, item.file_hash, 'plan_limit');
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as plan limit failure (will retry later): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
         }
     }
 }
 
 
 /**
- * Utility function to reset failed uploads by calling the backend and restarting the uploader
+ * Utility function to retry uploads by calling the backend and restarting the uploader
  */
-export const resetFailedUploads = async (): Promise<void> => {
+export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "failed"): Promise<void> => {
     try {
         // check authentication status
         const isAuthenticated = store.get(isAuthenticatedAtom);
         const user = store.get(userAtom);
 
         if (!isAuthenticated || !user?.id) {
-            logger('File Uploader: Cannot reset failed uploads, user not authenticated or user ID missing.', 2);
+            logger('File Uploader: Cannot retry uploads, user not authenticated or user ID missing.', 2);
             return;
         }
-        const userId = user.id;
 
-        // -------- (1) Reset failed uploads in backend --------
-        const results: ResetFailedResult[] = await attachmentsService.resetFailedUploads();
-        logger(`File Uploader: Backend reset ${results.length} failed uploads.`, 3);
+        // -------- (1) Retry uploads in backend --------
+        const results: FileHashReference[] = await attachmentsService.retryUploadsByStatus(status);
+        logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
 
-        // Use results to reset failed uploads in local database
-        if (results.length > 0) {
-            const itemsToResetInDB: UploadQueueInput[] = results.map(result => ({
-                file_hash: result.file_hash,
-                library_id: result.library_id,
-                zotero_key: result.zotero_key
-                // Other fields like page_count, attempt_count will be set to default reset values
-                // by the Zotero.Beaver.db.resetUploads method.
-            }));
-
-            await Zotero.Beaver.db.resetUploads(userId, itemsToResetInDB);
-            logger(`File Uploader: Local DB updated for ${itemsToResetInDB.length} reset uploads.`, 3);
-        }
-
-        // -------- (2) Ensure integrity of local database --------
-        // Integrity check: there should be no failed attachments in the local database after reset
-        const failedAttachments = await Zotero.Beaver.db.getFailedAttachments(userId);
-        if (failedAttachments.length > 0) {
-            logger(`File Uploader: DB Integrity check found ${failedAttachments.length} failed attachments in local database, none expected.`, 3);
-
-            // (a) Get the status of the failed attachments from the backend
-            const results = await attachmentsService.getMultipleAttachmentsStatus(
-                failedAttachments.map(a => ({zotero_key: a.zotero_key, library_id: a.library_id} as ZoteroItemReference))
-            );
-
-            // (b) Update local database
-            for (const result of results) {
-                await Zotero.Beaver.db.updateAttachment(userId, result.library_id, result.zotero_key, {
-                    upload_status: result.upload_status ?? null,
-                });
-            }
-            
-            // (c) Enqueue pending attachments for upload if they are not already in the queue
-            const pendingAttachments = results.filter(r => r.upload_status === 'pending');
-            const queueItems: UploadQueueInput[] = pendingAttachments
-                .filter(a => a.file_hash)
-                .map(a => ({
-                    file_hash: a.file_hash!,
-                    library_id: a.library_id,
-                    zotero_key: a.zotero_key,
-                }));
-            await Zotero.Beaver.db.upsertQueueItemsBatch(userId, queueItems);
-            logger(`File Uploader: Enqueued ${pendingAttachments.length} pending attachments for upload.`, 3);
-        }
-        
-        // -------- (3) Restart the uploader --------
+        // -------- (2) Restart the uploader --------
         await fileUploader.start("manual");
 
     } catch (error: any) {
-        logger(`File Uploader: Failed to reset failed uploads: ${error.message}`, 1);
-        // Zotero.logError is good for logging to Zotero's native error console
-        if (typeof Zotero !== 'undefined' && Zotero.logError) {
-            Zotero.logError(error);
-        } else {
-            console.error('Failed to reset failed uploads:', error); // Fallback if Zotero.logError is not available
-        }
-    }
-};
-
-
-/**
- * Utility function to retry skipped uploads.
- */
-export const retrySkippedUploads = async (): Promise<void> => {
-    try {
-        const userId = store.get(userIdAtom);
-        if (!userId) {
-            logger('retrySkippedUploads: Cannot retry skipped uploads, user not authenticated.', 2);
-            return;
-        }
-
-        // Get all attachments that are in the plan limit status
-        const skippedAttachments = await Zotero.Beaver.db.getAttachmentsByUploadStatus(userId, 'plan_limit');
-
-        if (skippedAttachments.length === 0) {
-            logger('retrySkippedUploads: No skipped attachments to retry.', 3);
-            return;
-        }
-
-        logger(`retrySkippedUploads: Found ${skippedAttachments.length} attachments in plan limit status.`, 3);
-
-        // Create upload queue items for the skipped attachments
-        const uploadQueueItems: UploadQueueInput[] = skippedAttachments
-            .filter(a => a.file_hash)
-            .map(attachment => ({
-                file_hash: attachment.file_hash,
-                library_id: attachment.library_id,
-                zotero_key: attachment.zotero_key,
-            }));
-        
-        // Filter out attachments that are too large
-        const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
-        const results = await Promise.all(
-            uploadQueueItems.map(async item => {
-                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
-                if (!attachment || !attachment.isAttachment()) return null;
-                const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-                const fileSizeInMB = fileSize / 1024 / 1024;
-                return fileSizeInMB <= sizeLimit ? item : null;
-            })
-        );
-        const uploadQueueItemsFiltered = results.filter(item => item !== null);
-        
-        logger(`retrySkippedUploads: ${uploadQueueItemsFiltered.length} attachments to retry, ${uploadQueueItems.length - uploadQueueItemsFiltered.length} attachments filtered out.`, 3);
-        
-        // Re-queue the remaining attachments
-        if (uploadQueueItemsFiltered.length > 0) {
-            await Zotero.Beaver.db.resetUploads(userId, uploadQueueItemsFiltered);
-            logger(`retrySkippedUploads: Re-queued ${uploadQueueItemsFiltered.length} attachments for upload.`, 3);
-            // await fileUploader.start("manual");
-        }
-
-    } catch (error: any) {
-        logger(`retrySkippedUploads: Failed to retry skipped uploads: ${error.message}`, 1);
-        if (typeof Zotero !== 'undefined' && Zotero.logError) {
-            Zotero.logError(error);
-        } else {
-            console.error('retrySkippedUploads: Failed to retry skipped uploads:', error);
-        }
+        logger(`File Uploader: Failed to retry uploads: ${error.message}`, 1);
+        Zotero.logError(error);
     }
 };
 
