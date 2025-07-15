@@ -8,6 +8,7 @@ export interface UploadQueueItem {
     zotero_key: string;
     read_count: number;
     enqueued_at: string; // ISO date string
+    storage_path: string;
     signed_upload_url: string;
 }
 
