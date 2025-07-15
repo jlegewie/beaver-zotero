@@ -211,6 +211,29 @@ export class FileUploader {
 
         return ;
     }
+
+    private async uploadFileToGCS(signedUrl: string, blob: Blob, metadata: Record<string, string>): Promise<void> {
+        const headers = {
+            'Content-Type': 'application/octet-stream',
+        };
+        
+        // Add metadata as headers
+        Object.entries(metadata).forEach(([key, value]) => {
+            headers[`x-goog-meta-${key}` as keyof typeof headers] = value;
+        });
+        
+        const response = await fetch(signedUrl, {
+            method: 'PUT',
+            body: blob,
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to upload file to storage: ${response.statusText}`);
+        }
+        
+        return ;
+    }
     
     /**
      * Uploads a single file item. 
@@ -325,14 +348,21 @@ export class FileUploader {
             let uploadSuccess = false;
             let uploadAttempt = 0;
             const maxUploadAttempts = 3;
-            const storagePath = `${userId}/attachments/${item.file_hash}/original`;
 
             // First retry loop: Storage upload
             while (!uploadSuccess && uploadAttempt < maxUploadAttempts) {
                 uploadAttempt++;
                 try {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${storagePath} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
-                    await this.uploadFileToSupabase(storagePath, blob);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${item.storage_path} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
+                    // const storagePath = `${userId}/attachments/${item.file_hash}/original`;
+                    // await this.uploadFileToSupabase(storagePath, blob);
+                    await this.uploadFileToGCS(item.signed_upload_url, blob, {
+                        userid: userId,
+                        filehash: item.file_hash,
+                        libraryid: item.library_id.toString(),
+                        zoterokey: item.zotero_key
+                    });
+                    
                     
                     uploadSuccess = true;
                     logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}`, 3);
@@ -371,6 +401,7 @@ export class FileUploader {
      */
     private async addCompletionToBatch(item: UploadQueueItem, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
         const request: CompleteUploadRequest = {
+            storage_path: item.storage_path,
             file_hash: item.file_hash,
             mime_type: mimeType,
             file_size: fileSize,

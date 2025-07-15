@@ -3,8 +3,6 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
 import { logger } from '../utils/logger';
-import { store } from '../../react/index';
-import { userAtom } from '../../react/atoms/auth';
 import { fileUploader } from './FileUploader';
 
 // processing_status from backend
@@ -39,6 +37,7 @@ export interface UpdateUploadStatusResponse {
  * Request body for marking an upload as completed
  */
 export interface CompleteUploadRequest {
+    storage_path: string;
     file_hash: string;
     mime_type: string;
     file_size: number;
@@ -195,8 +194,9 @@ export class AttachmentsService extends ApiService {
      * @param pageCount The number of pages in the file
      * @returns Promise with the upload completed response
      */
-    async markUploadCompleted(fileHash: string, mimeType: string, fileSize: number, pageCount: number | null): Promise<CompleteUploadResult> {
+    async markUploadCompleted(storagePath: string, fileHash: string, mimeType: string, fileSize: number, pageCount: number | null): Promise<CompleteUploadResult> {
         const request: CompleteUploadRequest = {
+            storage_path: storagePath,
             file_hash: fileHash,
             mime_type: mimeType,
             file_size: fileSize,
