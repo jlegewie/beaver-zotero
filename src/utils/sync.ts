@@ -5,8 +5,8 @@ import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, AttachmentData, DeleteData, ZoteroLibrary } from '../../react/types/zotero';
-import { isLibrarySynced } from './zoteroUtils';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { getMimeType, isLibrarySynced } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -137,7 +137,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
  * @returns Promise resolving to AttachmentData object for syncing
  */
-async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentData | null> {
+async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
 
     // 1. File: Confirm that the item is an attachment and that the file exists
     if (!item.isAttachment() || !(await item.fileExists())) return null;
@@ -161,10 +161,11 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
     const metadataHash = await calculateObjectHash(hashedFields);
 
     // 4. AttachmentData: Construct final AttachmentData object
-    const attachmentData: AttachmentData = {
+    const attachmentData: AttachmentDataWithMimeType = {
         ...hashedFields,
         // Add non-hashed fields
         file_hash: file_hash,
+        mime_type: await getMimeType(item),
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
         date_modified: new Date(item.dateModified + 'Z').toISOString(),
         // Add the calculated hash
@@ -474,7 +475,7 @@ export async function syncItemsToBackend(
                     data.filter((item) => item !== null) as ItemData[]
                 ),
                 Promise.all(attachmentItems.map((item) => extractAttachmentData(item))).then(data => 
-                    data.filter((att) => att !== null) as AttachmentData[]
+                    data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
             
