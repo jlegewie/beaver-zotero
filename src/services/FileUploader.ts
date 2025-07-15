@@ -19,6 +19,7 @@ import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { filesService, UploadQueueItem } from './filesService';
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
+import { getMimeType } from '../utils/zoteroUtils';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -258,11 +259,6 @@ export class FileUploader {
                 return;
             }
 
-            // File metadata
-            let mimeType = attachment.attachmentContentType;
-            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
-            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-
             // Get the file path for the attachment
             const filePath: string | null = await attachment.getFilePathAsync() || null;
 
@@ -305,6 +301,11 @@ export class FileUploader {
                 return;
             }
 
+            // File metadata
+            const mimeType = await getMimeType(attachment, filePath);
+            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+
             // File size limit
             const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
             const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
@@ -313,21 +314,6 @@ export class FileUploader {
                 logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
                 await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
                 return;
-            }
-
-            // Validate/correct MIME type by checking actual file if needed
-            if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
-                try {
-                    const detectedMimeType = await Zotero.MIME.getMIMETypeFromFile(filePath);
-                    if (detectedMimeType) {
-                        mimeType = detectedMimeType;
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Corrected MIME type from '${attachment.attachmentContentType}' to '${mimeType}'`, 2);
-                    }
-                } catch (error) {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Failed to detect MIME type, using stored type`, 2);
-                    // Fall back to stored type or default
-                    mimeType = attachment.attachmentContentType || 'application/octet-stream';
-                }
             }
 
             // Read file content
