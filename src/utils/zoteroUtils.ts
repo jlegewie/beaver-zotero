@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+
 export function getZoteroUserIdentifier(): { userID: string | undefined, localUserKey: string } {
     // First try to get the Zotero account user ID
     const userID = Zotero.Users.getCurrentUserID();
@@ -69,4 +71,26 @@ function isLibrarySkipped(library: Zotero.Library): boolean {
         Zotero.logError(e as Error);
         return false;
     }
+}
+
+export async function getMimeType(attachment: Zotero.Item, filePath?: string): Promise<string> {
+    if (!attachment.isAttachment()) return '';
+    let mimeType = attachment.attachmentContentType;
+
+    // Validate/correct MIME type by checking actual file if needed
+    if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
+        try {
+            if (!filePath) filePath = await attachment.getFilePathAsync() || undefined;
+            if (!filePath) return mimeType;
+            const detectedMimeType = await Zotero.MIME.getMIMETypeFromFile(filePath);
+            if (detectedMimeType) mimeType = detectedMimeType;
+        } catch (error) {
+            logger(`getMimeType: Failed to detect MIME type for ${attachment.key}, using stored type`, 2);
+            // Fall back to stored type or default
+            mimeType = attachment.attachmentContentType || 'application/octet-stream';
+            return mimeType;
+        }
+    }
+
+    return mimeType;
 }
