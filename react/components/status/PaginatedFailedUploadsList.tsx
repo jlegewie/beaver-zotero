@@ -76,6 +76,8 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
                 ITEMS_PER_PAGE
             );
 
+            logger(`PaginatedFailedUploadsList: ${result.items.length} items found for page ${page + 1}`, 3);
+
             const newItems = await Promise.all(result.items.map(async (item) => {
                 const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
                 const errorCode = await getErrorMessage(attachment);
@@ -88,7 +90,15 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
                 } as FailedFileReference;
             }));
 
-            setAttachments(prevItems => (page === 0 ? newItems : [...prevItems, ...newItems]));
+            setAttachments(prevItems => {
+                const combinedItems = [...(prevItems || []), ...newItems];
+                const uniqueItems = combinedItems.filter((item, index, arr) => 
+                    arr.findIndex(other => 
+                        other.library_id === item.library_id && other.zotero_key === item.zotero_key
+                    ) === index
+                );
+                return uniqueItems;
+            });
             setHasMore(result.has_more);
             setCurrentPage(page);
         } catch (error) {
