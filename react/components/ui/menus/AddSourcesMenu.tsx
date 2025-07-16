@@ -9,7 +9,7 @@ import { currentSourcesAtom, inputAttachmentCountAtom } from '../../../atoms/inp
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { InputSource } from '../../../types/sources';
 import { getPref, setPref } from '../../../../src/utils/prefs';
-import { getRecentAsync } from '../../../utils/zotero';
+import { getRecentAsync } from '../../../../src/utils/zoteroUtils';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { planFeaturesAtom } from '../../../atoms/profile';
