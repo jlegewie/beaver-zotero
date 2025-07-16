@@ -756,6 +756,7 @@ export async function syncZoteroDatabase(
  * @returns Promise resolving to array of modified Zotero items
  */
 async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?: string): Promise<Zotero.Item[]> {
+    // Updated item ids
     let sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
     const params: any[] = [libraryID, sinceDate];
     if (untilDate) {
@@ -763,7 +764,20 @@ async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?
         params.push(untilDate);
     }
     const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
-    return await Zotero.Items.getAsync(ids);
+
+    // Deleted item ids
+    let sqlDeleted = "SELECT di.itemID FROM deletedItems di WHERE di.dateDeleted > ?";
+    const paramsDeleted: any[] = [sinceDate];
+    if (untilDate) {
+        sqlDeleted += " AND di.dateModified <= ?";
+        paramsDeleted.push(untilDate);
+    }
+    const idsDeleted = await Zotero.DB.columnQueryAsync(sqlDeleted, paramsDeleted) as number[];
+    
+    // Return items
+    const uniqueIds = [...new Set([...ids, ...idsDeleted])];
+    const items = await Zotero.Items.getAsync(uniqueIds);
+    return items.filter(item => item.libraryID === libraryID);
 }
 
 /**
