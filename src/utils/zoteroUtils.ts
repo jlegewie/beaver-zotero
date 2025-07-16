@@ -1,5 +1,17 @@
 import { logger } from "./logger";
 
+/**
+ * Get the clientDateModified for an item
+ * @param item Zotero item or item ID
+ * @returns clientDateModified as string
+ */
+export async function getClientDateModified(item: Zotero.Item | number): Promise<string> {
+    const itemId = typeof item === 'number' ? item : item.id;
+    const sql = "SELECT clientDateModified FROM items WHERE itemID = ?";
+    return await Zotero.DB.valueQueryAsync(sql, [itemId]) as string;
+}
+
+
 export function getZoteroUserIdentifier(): { userID: string | undefined, localUserKey: string } {
     // First try to get the Zotero account user ID
     const userID = Zotero.Users.getCurrentUserID();
