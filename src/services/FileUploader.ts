@@ -11,13 +11,12 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, CompleteUploadRequest } from './attachmentsService';
+import { attachmentsService, UploadQueueItem, CompleteUploadRequest } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
-import { filesService, UploadQueueItem } from './filesService';
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
 import { getMimeType } from '../utils/zoteroUtils';
 
@@ -147,7 +146,7 @@ export class FileUploader {
                 }
 
                 // Read items from backend queue with visibility timeout
-                const response = await filesService.readUploadQueue(
+                const response = await attachmentsService.readUploadQueue(
                     this.VISIBILITY_TIMEOUT_SECONDS,
                     this.BATCH_SIZE
                 );
@@ -503,7 +502,7 @@ export class FileUploader {
         
         try {
             // First, notify backend of failure
-            await filesService.updateUploadStatus(item.file_hash, 'failed');
+            await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
             
             // Error message for manual retry (only show if user has completed onboarding)
             if (store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
@@ -532,7 +531,7 @@ export class FileUploader {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
             // First, notify backend of failure
-            await filesService.updateUploadStatus(item.file_hash, 'plan_limit');
+            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
