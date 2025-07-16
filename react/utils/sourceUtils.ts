@@ -232,10 +232,10 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!hasFile) return {valid: false, error: "File does not exist"};
 
         // (c) Confirm upload status
-        const userId = store.get(userIdAtom) || '';
-        const attachment = await Zotero.Beaver.db.getAttachmentByZoteroKey(userId, item.libraryID, item.key);
-        if (!attachment) return {valid: false, error: "Attachment not found"};
-        if (attachment.upload_status !== 'completed') return {valid: false, error: "Attachment not uploaded"};
+        // const userId = store.get(userIdAtom) || '';
+        // const attachment = await Zotero.Beaver.db.getAttachmentByZoteroKey(userId, item.libraryID, item.key);
+        // if (!attachment) return {valid: false, error: "Attachment not found"};
+        // if (attachment.upload_status !== 'completed') return {valid: false, error: "Attachment not uploaded"};
 
         return {valid: true};
     }
