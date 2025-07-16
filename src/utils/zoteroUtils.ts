@@ -22,6 +22,29 @@ export async function getClientDateModifiedAsISOString(item: Zotero.Item | numbe
 }
 
 /**
+ * Get the clientDateModified for multiple items in a batch operation.
+ * @param items Array of Zotero items or item IDs
+ * @returns Map of itemID to clientDateModified string
+ */
+export async function getClientDateModifiedBatch(
+    items: (Zotero.Item | number)[]
+): Promise<Map<number, string>> {
+    const itemIds = items.map(item => typeof item === 'number' ? item : item.id);
+    if (itemIds.length === 0) return new Map();
+
+    const placeholders = itemIds.map(() => '?').join(', ');
+    const sql = `SELECT itemID, clientDateModified FROM items WHERE itemID IN (${placeholders})`;
+    const rows = await Zotero.DB.queryAsync(sql, itemIds);
+
+    const result = new Map<number, string>();
+    for (const row of rows || []) {
+        result.set(row.itemID, row.clientDateModified);
+    }
+
+    return result;
+}
+
+/**
  * Get recently added or modified items in a library
  * @param {Integer} libraryID - The library to get items from
 *
