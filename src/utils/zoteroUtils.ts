@@ -11,6 +11,11 @@ export async function getClientDateModified(item: Zotero.Item | number): Promise
     return await Zotero.DB.valueQueryAsync(sql, [itemId]) as string;
 }
 
+export async function getClientDateModifiedAsISOString(item: Zotero.Item | number): Promise<string> {
+    const clientDateModified = await getClientDateModified(item);
+    return new Date(clientDateModified + 'Z').toISOString()
+}
+
 /**
  * Get recently added or modified items in a library
  * @param {Integer} libraryID - The library to get items from
