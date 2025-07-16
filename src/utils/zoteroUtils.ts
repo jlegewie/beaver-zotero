@@ -24,7 +24,7 @@ export async function getClientDateModifiedAsISOString(item: Zotero.Item | numbe
 /**
  * Get the clientDateModified for multiple items in a batch operation.
  * @param items Array of Zotero items or item IDs
- * @returns Map of itemID to clientDateModified string
+ * @returns Map of itemID to clientDateModified string in ISO format
  */
 export async function getClientDateModifiedBatch(
     items: (Zotero.Item | number)[]
@@ -38,7 +38,11 @@ export async function getClientDateModifiedBatch(
 
     const result = new Map<number, string>();
     for (const row of rows || []) {
-        result.set(row.itemID, row.clientDateModified);
+        // The value from DB is a SQL datetime string (UTC)
+        // Convert to ISO string. Append 'Z' to treat it as UTC.
+        if (row.clientDateModified) {
+            result.set(row.itemID, new Date(row.clientDateModified + 'Z').toISOString());
+        }
     }
 
     return result;
