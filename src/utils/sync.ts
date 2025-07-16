@@ -958,11 +958,12 @@ export async function performConsistencyCheck(
 
                     const localItemData = await extractItemData(zoteroItem, undefined);
                     if (backendItem.metadata_hash !== localItemData.item_metadata_hash) {
+                        const localDateModified = await getClientDateModifiedAsISOString(zoteroItem);
                         const shouldUpdate = shouldUpdateBackend(
                             backendItem.zotero_version,
                             backendItem.date_modified,
                             zoteroItem.version,
-                            await getClientDateModified(zoteroItem)
+                            localDateModified
                         );
                         return {
                             discrepancy: {
@@ -972,7 +973,7 @@ export async function performConsistencyCheck(
                                 backend_version: backendItem.zotero_version,
                                 local_version: zoteroItem.version,
                                 backend_date_modified: backendItem.date_modified,
-                                local_date_modified: await getClientDateModified(zoteroItem),
+                                local_date_modified: localDateModified,
                                 should_update: shouldUpdate,
                                 reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
                             },
@@ -988,18 +989,19 @@ export async function performConsistencyCheck(
             // Process attachments concurrently
             const attachmentProcessingPromises = backendAttachments.map(async (backendAttachment) => {
                 try {
-                    const zoteroAttachment = Zotero.Items.getByLibraryAndKey(libraryID, backendAttachment.zotero_key);
+                    const zoteroAttachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, backendAttachment.zotero_key);
                     if (!zoteroAttachment) {
                         return { deleteKey: backendAttachment.zotero_key };
                     }
 
                     const localAttachmentData = await extractAttachmentData(zoteroAttachment, undefined, { lightweight: true });
                     if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
+                        const localDateModified = await getClientDateModifiedAsISOString(zoteroAttachment);
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,
                             backendAttachment.date_modified,
                             zoteroAttachment.version,
-                            await getClientDateModified(zoteroAttachment)
+                            localDateModified
                         );
                         return {
                             discrepancy: {
@@ -1009,7 +1011,7 @@ export async function performConsistencyCheck(
                                 backend_version: backendAttachment.zotero_version,
                                 local_version: zoteroAttachment.version,
                                 backend_date_modified: backendAttachment.date_modified,
-                                local_date_modified: await getClientDateModified(zoteroAttachment),
+                                local_date_modified: localDateModified,
                                 should_update: shouldUpdate,
                                 reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
                             },
@@ -1151,7 +1153,7 @@ function shouldUpdateBackend(
     // Same version, check date
     if (localVersion === backendVersion) {
         const backendTime = new Date(backendDate).getTime();
-        const localTime = new Date(localDate + 'Z').getTime(); // Add Z for UTC
+        const localTime = new Date(localDate).getTime();
         return localTime >= backendTime;
     }
     
