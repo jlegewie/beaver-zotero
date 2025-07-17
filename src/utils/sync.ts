@@ -1139,14 +1139,6 @@ export async function performConsistencyCheck(
                 }
             }
 
-            // Log summary
-            logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
-            logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
-            logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
-            if (sendUpdates) {
-                logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
-            }
-
             hasMore = backendData.has_more;
             page++;
             
