@@ -690,6 +690,31 @@ export async function syncZoteroDatabase(
                 });
                 continue;
             }
+
+            // ----- 2. Check local sync logs to confirm whether the library is up to date -----
+            let syncLog: SyncLogsRecord | null = null;
+            if (syncMethod === 'version') {
+                syncLog = await Zotero.Beaver.db.getSyncLogWithHighestVersion(userId, libraryID);
+            } else if (syncMethod === 'date_modified') {
+                syncLog = await Zotero.Beaver.db.getSyncLogWithMostRecentDate(userId, libraryID);
+            }
+
+            if (syncLog) {
+                const { itemsToUpsert, itemsToDelete } = await getItemsToSync(
+                    libraryID,
+                    false,
+                    syncMethod,
+                    syncLog.library_date_modified,
+                    syncLog.library_version,
+                    filterFunction
+                );
+
+                if (itemsToUpsert.length === 0 && itemsToDelete.length === 0) {
+                    logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is up to date based on local sync log`, 3);
+                    updateSyncStatus(libraryID, { status: 'completed' });
+                    continue;
+                }
+            }
             
             // ----- 2. Get backend sync status -----
             logger(`Beaver Sync '${syncSessionId}': (1) Get backend sync status (syncMethod: ${syncMethod})`, 3);
@@ -714,35 +739,14 @@ export async function syncZoteroDatabase(
             // ----- 3. Items to sync and delete -----
             logger(`Beaver Sync '${syncSessionId}': (2) Get items to sync and delete`, 3);
             
-            let items: Zotero.Item[] = [];
-            if (isInitialSync) {
-                items = await Zotero.Items.getAll(libraryID, false, false, false);
-            } else if (lastSyncVersion !== null && syncMethod === 'version') {
-                items = await getItemsSinceVersion(libraryID, lastSyncVersion);
-            } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
-                items = await getModifiedItems(libraryID, lastSyncDate);
-            } else {
-                onStatusChange(libraryID, 'failed');
-                throw new Error(`Beaver Sync '${syncSessionId}': Invalid sync state: ${syncState}`);
-            }
-
-            // Get items to upsert: Included by filter function
-            const itemsToUpsert = items
-                .filter(filterFunction)
-                .map(item => ({
-                    action: 'upsert',
-                    item
-                } as SyncItem));
-            
-            // Get items to delete: Excluded by filter function
-            const itemsToDelete = items
-                .filter((_) => !isInitialSync) // Only delete items if not initial sync
-                .filter((item) => item.isRegularItem() || item.isPDFAttachment())
-                .filter((item) => !filterFunction(item))
-                .map(item => ({
-                    action: 'delete',
-                    item
-                } as SyncItem));
+            const { itemsToUpsert, itemsToDelete } = await getItemsToSync(
+                libraryID,
+                isInitialSync,
+                syncMethod,
+                lastSyncDate,
+                lastSyncVersion,
+                filterFunction
+            );
             
             // Update library-specific progress and status
             const itemCount = itemsToUpsert.length + itemsToDelete.length;
@@ -816,6 +820,52 @@ async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?
     // const items = await Zotero.Items.getAsync(uniqueIds);
     // return items.filter(item => item.libraryID === libraryID);
 }
+
+async function getItemsToSync(
+    libraryID: number,
+    isInitialSync: boolean,
+    syncMethod: SyncMethod,
+    lastSyncDate: string | null,
+    lastSyncVersion: number | null,
+    filterFunction: ItemFilterFunction
+): Promise<{ itemsToUpsert: SyncItem[], itemsToDelete: SyncItem[] }> {
+
+    // Get items
+    let items: Zotero.Item[] = [];
+    if (isInitialSync) {
+        items = await Zotero.Items.getAll(libraryID, false, false, false);
+    } else if (lastSyncVersion !== null && syncMethod === 'version') {
+        items = await getItemsSinceVersion(libraryID, lastSyncVersion);
+    } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
+        items = await getModifiedItems(libraryID, lastSyncDate);
+    } else {
+        throw new Error(`Beaver Sync: Invalid sync state: ${syncMethod} ${lastSyncDate} ${lastSyncVersion}`);
+    }
+    
+    // Get items to upsert: Included by filter function
+    const itemsToUpsert = items
+        .filter(filterFunction)
+        .map(item => ({
+            action: 'upsert',
+            item
+        } as SyncItem));
+    
+    // Get items to delete: Excluded by filter function
+    const itemsToDelete = items
+        .filter((_) => !isInitialSync) // Only delete items if not initial sync
+        .filter((item) => item.isRegularItem() || item.isPDFAttachment())
+        .filter((item) => !filterFunction(item))
+        .map(item => ({
+            action: 'delete',
+            item
+        } as SyncItem));
+
+    return {
+        itemsToUpsert,
+        itemsToDelete
+    };
+}
+
 
 /**
  * Gets items based on version number
