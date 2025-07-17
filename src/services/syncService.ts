@@ -40,10 +40,11 @@ export interface AttachmentResult {
 }
 
 export interface SyncItemsResponse {
-    sync_id: string;
-    sync_status: "in_progress" | "completed" | "failed";
-    items: ItemResult[];
-    attachments: AttachmentResult[];
+    session_id: string;
+    total_upserts: number;
+    total_deletions: number;
+    library_version: number;
+    library_date_modified: string;
 }
 
 export interface ItemDeleteRequest {
@@ -137,6 +138,8 @@ export class SyncService extends ApiService {
      */
     async processItemsBatch(
         sessionId: string,
+        zoteroUserId: string | undefined,
+        localUserKey: string,
         syncType: SyncType,
         syncMethod: SyncMethod,
         libraryId: number,
@@ -144,13 +147,12 @@ export class SyncService extends ApiService {
         attachments: AttachmentDataWithMimeType[],
         deletions: DeleteData[],
     ): Promise<SyncItemsResponse> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
         const payload: ItemBatchRequest = {
             session_id: sessionId,
             sync_type: syncType,
             sync_method: syncMethod,
             zotero_local_id: localUserKey,
-            zotero_user_id: userID,
+            zotero_user_id: zoteroUserId,
             library_id: libraryId,
             items: items,
             attachments: attachments,
