@@ -5,12 +5,15 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck, syncingItemFilter } from "../../../src/utils/sync";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
+import ZoteroSyncToggle from "../preferences/SyncToggle";
+import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
+import { accountService } from "../../../src/services/accountService";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -30,6 +33,16 @@ const PreferencePage: React.FC = () => {
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
     const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+
+    // --- Sync Toggle State ---
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
+    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
+    const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
+
+    // Update local state when atom changes
+    React.useEffect(() => {
+        setLocalSyncToggle(syncWithZotero);
+    }, [syncWithZotero]);
 
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -157,6 +170,33 @@ const PreferencePage: React.FC = () => {
         });
     }, [saveCustomPromptsToPrefs]);
 
+    // --- Sync Toggle Change Handler ---
+    const handleSyncToggleChange = useCallback(async (checked: boolean) => {
+        const action = checked ? 'enable' : 'disable';
+        const message = checked 
+            ? 'Are you sure you want to enable syncing with Zotero? This will build on Zotero sync for multi-device support and improved sync.'
+            : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device.';
+        
+        if (confirm(message)) {
+            try {
+                logger(`User confirmed to ${action} Zotero sync. New value: ${checked}`);
+                await accountService.updateZoteroSyncPreference(checked);
+
+                setProfileWithPlan((prev) => {
+                    if (!prev) return null;
+                    return { ...prev, use_zotero_sync: checked };
+                });
+                setLocalSyncToggle(checked);
+                logger('Successfully updated Zotero sync preference.');
+            } catch (error) {
+                logger(`Failed to update Zotero sync preference: ${error}`, 1);
+                Zotero.logError(error as Error);
+                // Revert the toggle on error
+                setLocalSyncToggle(!checked);
+            }
+        }
+    }, [setProfileWithPlan]);
+
     // Helper function to get sync button props
     const getSyncButtonProps = () => {
         switch (syncStatus) {
@@ -279,6 +319,15 @@ const PreferencePage: React.FC = () => {
                     >
                         {verifyButtonProps.text}
                     </Button>
+                </div>
+
+                {/* Sync with Zotero Toggle */}
+                <div className="mt-2">
+                    <ZoteroSyncToggle 
+                        checked={localSyncToggle}
+                        onChange={handleSyncToggleChange}
+                        disabled={!isLibrarySynced(1)}
+                    />
                 </div>
             </div>
             
