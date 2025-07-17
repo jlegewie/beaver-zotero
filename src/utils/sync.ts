@@ -890,6 +890,7 @@ interface ConsistencyCheckResult {
     attachment_discrepancies: AttachmentDiscrepancy[];
     items_updated: number;
     attachments_updated: number;
+    items_and_attachments_added: number;
 }
 
 /**
@@ -922,13 +923,24 @@ export async function performConsistencyCheck(
         item_discrepancies: [],
         attachment_discrepancies: [],
         items_updated: 0,
-        attachments_updated: 0
+        attachments_updated: 0,
+        items_and_attachments_added: 0,
     };
 
-    let page = 0;
-    let hasMore = true;
+    // Get all local items before processing backend data
+    logger(`Beaver Consistency Check '${consistencyId}': Getting all local items to track new additions`, 3);
+    const allLocalItems = await getAllItemsToSync(libraryID);
+    const localItemKeys = new Set<string>();
+    
+    for (const item of allLocalItems) {
+        localItemKeys.add(item.key);
+    }
+
+    logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} local items`, 3);
 
     // Process all pages from backend
+    let page = 0;
+    let hasMore = true;
     while (hasMore) {
         try {
             logger(`Beaver Consistency Check '${consistencyId}': Processing page ${page + 1}`, 3);
@@ -948,6 +960,10 @@ export async function performConsistencyCheck(
 
             result.total_items_checked += backendItems.length;
             result.total_attachments_checked += backendAttachments.length;
+
+            // Remove processed keys from local set
+            backendItems.forEach(item => localItemKeys.delete(item.zotero_key));
+            backendAttachments.forEach(attachment => localItemKeys.delete(attachment.zotero_key));
 
             // Get zotero items and clientDateModified for all items
             const zoteroItemsPromises = backendItems.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
@@ -1139,6 +1155,37 @@ export async function performConsistencyCheck(
             Zotero.logError(error);
             break;
         }
+    }
+
+    // After processing all backend data, sync remaining local items
+    if (sendUpdates && localItemKeys.size > 0) {
+        logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} new items to add`, 3);
+
+        const zoteroItems = await Promise.all(Array.from(localItemKeys).map((key) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key)));
+        const newItemsToSync: SyncItem[] = zoteroItems.filter(syncingItemFilter).map((item) => ({ action: 'upsert', item } as SyncItem));
+
+        if (newItemsToSync.length > 0) {
+            try {
+                const syncWithZotero = store.get(syncWithZoteroAtom);
+                const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+                await syncItemsToBackend(consistencyId, libraryID, newItemsToSync, 'consistency', syncMethod);
+                
+                result.items_and_attachments_added = newItemsToSync.length;
+            } catch (error: any) {
+                logger(`Beaver Consistency Check '${consistencyId}': Error adding new items: ${error.message}`, 1);
+                Zotero.logError(error);
+            }
+        }
+    }
+
+    // Final logging of results
+    logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
+    logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
+    logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
+    if (sendUpdates) {
+        logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
+        logger(`Beaver Consistency Check '${consistencyId}': Added ${result.items_and_attachments_added} items and attachments`, 3);
     }
 
     return result;
