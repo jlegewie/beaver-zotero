@@ -20,6 +20,7 @@ export const errorMapping = {
     // Plan limits
     "plan_limit_unsupported_file": "File Type not supported",
     "plan_limit_max_pages": "Too many pages",
+    "plan_limit_max_pages_ocr": "Too many pages for OCR",
     "plan_limit_insufficient_balance": "Insufficient balance",
     "plan_limit_file_size": "File too large",
     
@@ -28,6 +29,7 @@ export const errorMapping = {
     "no_text_layer": "File requires OCR",
     "insufficient_text": "Insufficient text",
     "file_missing": "File missing",
+    "ocr_failed": "OCR failed",
     "download_failed": "Unexpected error",
     "preprocessing_failed": "Unexpected error",
     "conversion_failed": "Unexpected error",
