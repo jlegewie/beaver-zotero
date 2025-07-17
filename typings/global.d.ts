@@ -150,6 +150,46 @@ declare namespace Zotero {
              */
             getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
 
+            // --- Sync Logs Methods ---
+
+            /**
+             * Insert a new sync log record.
+             * @param syncLog The sync log data to insert (without id, which will be generated)
+             * @returns The complete SyncLogsRecord with generated id
+             */
+            insertSyncLog(syncLog: Omit<import("../src/services/database").SyncLogsRecord, 'id' | 'timestamp'>): Promise<import("../src/services/database").SyncLogsRecord>;
+
+            /**
+             * Get sync log record for library_id and user_id with the highest library_version.
+             * @param user_id The user_id to filter by
+             * @param library_id The library_id to filter by
+             * @returns The SyncLogsRecord with highest library_version, or null if not found
+             */
+            getSyncLogWithHighestVersion(user_id: string, library_id: number): Promise<import("../src/services/database").SyncLogsRecord | null>;
+
+            /**
+             * Get sync log record for library_id and user_id with the most recent library_date_modified.
+             * @param user_id The user_id to filter by
+             * @param library_id The library_id to filter by
+             * @returns The SyncLogsRecord with most recent library_date_modified, or null if not found
+             */
+            getSyncLogWithMostRecentDate(user_id: string, library_id: number): Promise<import("../src/services/database").SyncLogsRecord | null>;
+
+            /**
+             * Get all sync log records for specific library_id and user_id.
+             * @param user_id The user_id to filter by
+             * @param library_id The library_id to filter by
+             * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
+             * @param orderDirection Optional order direction ('ASC' or 'DESC')
+             * @returns Array of SyncLogsRecord objects
+             */
+            getAllSyncLogsForLibrary(
+                user_id: string, 
+                library_id: number,
+                orderBy?: 'timestamp' | 'library_version' | 'library_date_modified',
+                orderDirection?: 'ASC' | 'DESC'
+            ): Promise<import("../src/services/database").SyncLogsRecord[]>;
+
         }
 
         /**

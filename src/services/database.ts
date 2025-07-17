@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { MessageModel } from '../../react/types/chat/apiTypes';
 import { ThreadData } from '../../react/types/chat/uiTypes';
 import { getPref } from '../utils/prefs';
+import { SyncMethod, SyncType } from '../../react/atoms/sync';
 
 
 /* 
@@ -52,6 +53,27 @@ export interface MessageRecord {
     error: string | null;
 }
 
+/* 
+ * Interface for the 'sync_logs' table row
+ *
+ * Table stores the sync logs for each sync session.
+ */
+export interface SyncLogsRecord {
+    id: string; // Primary key
+    session_id: string;
+    user_id: string;
+    sync_type: SyncType;
+    method: SyncMethod;
+    zotero_local_id: string;
+    zotero_user_id: string;
+    library_id: number;
+    total_upserts: number;
+    total_deletions: number;
+    library_version: number;
+    library_date_modified: string;
+    timestamp: string;
+}
+
 /**
  * Manages the beaver SQLite database using Zotero's DBConnection.
  */
@@ -83,6 +105,7 @@ export class BeaverDB {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS threads`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS messages`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS sync_logs`);
         }
 
         await this.conn.queryAsync(`
@@ -115,6 +138,24 @@ export class BeaverDB {
             );
         `);
 
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS sync_logs (
+                id                       TEXT(36) PRIMARY KEY,
+                session_id               TEXT(36) NOT NULL,
+                user_id                  TEXT(36) NOT NULL,
+                sync_type                TEXT NOT NULL,
+                method                   TEXT NOT NULL,
+                zotero_local_id          TEXT NOT NULL,
+                zotero_user_id           TEXT NOT NULL,
+                library_id               INTEGER NOT NULL,
+                total_upserts            INTEGER NOT NULL DEFAULT 0,
+                total_deletions          INTEGER NOT NULL DEFAULT 0,
+                library_version          INTEGER NOT NULL,
+                library_date_modified    TEXT NOT NULL,
+                timestamp                TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `);
+
 
         // DB indexes
         await this.conn.queryAsync(`
@@ -130,6 +171,26 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_messages_user_thread_created
             ON messages(user_id, thread_id, created_at);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library
+            ON sync_logs(user_id, library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library_version
+            ON sync_logs(user_id, library_id, library_version DESC);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library_date
+            ON sync_logs(user_id, library_id, library_date_modified DESC);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_sync_logs_session
+            ON sync_logs(session_id);
         `);
     }
 
@@ -216,6 +277,27 @@ export class BeaverDB {
             created_at: record.created_at,
             metadata: record.metadata ? JSON.parse(record.metadata) : undefined,
             error: record.error || undefined,
+        };
+    }
+
+    /**
+     * Helper method to construct SyncLogsRecord from a database row
+     */
+    private static rowToSyncLogsRecord(row: any): SyncLogsRecord {
+        return {
+            id: row.id,
+            session_id: row.session_id,
+            user_id: row.user_id,
+            sync_type: row.sync_type as SyncType,
+            method: row.method as SyncMethod,
+            zotero_local_id: row.zotero_local_id,
+            zotero_user_id: row.zotero_user_id,
+            library_id: row.library_id,
+            total_upserts: row.total_upserts,
+            total_deletions: row.total_deletions,
+            library_version: row.library_version,
+            library_date_modified: row.library_date_modified,
+            timestamp: row.timestamp,
         };
     }
 
@@ -560,6 +642,123 @@ export class BeaverDB {
         }
         const record = BeaverDB.rowToMessageRecord(rows[0]);
         return BeaverDB.messageRecordToModel(record);
+    }
+
+    // --- Sync Logs Methods ---
+
+    /**
+     * Insert a new sync log record.
+     * @param syncLog The sync log data to insert (without id, which will be generated)
+     * @returns The complete SyncLogsRecord with generated id
+     */
+    public async insertSyncLog(syncLog: Omit<SyncLogsRecord, 'id' | 'timestamp'>): Promise<SyncLogsRecord> {
+        const id = uuidv4();
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        await this.conn.queryAsync(
+            `INSERT INTO sync_logs (id, session_id, user_id, sync_type, method, zotero_local_id, zotero_user_id, library_id, total_upserts, total_deletions, library_version, library_date_modified, timestamp) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                id,
+                syncLog.session_id,
+                syncLog.user_id,
+                syncLog.sync_type,
+                syncLog.method,
+                syncLog.zotero_local_id,
+                syncLog.zotero_user_id,
+                syncLog.library_id,
+                syncLog.total_upserts,
+                syncLog.total_deletions,
+                syncLog.library_version,
+                syncLog.library_date_modified,
+                now
+            ]
+        );
+        
+        return {
+            id,
+            ...syncLog,
+            timestamp: now,
+        };
+    }
+
+    /**
+     * Get sync log record for library_id and user_id with the highest library_version.
+     * @param user_id The user_id to filter by
+     * @param library_id The library_id to filter by
+     * @returns The SyncLogsRecord with highest library_version, or null if not found
+     */
+    public async getSyncLogWithHighestVersion(user_id: string, library_id: number): Promise<SyncLogsRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM sync_logs 
+             WHERE user_id = ? AND library_id = ? 
+             ORDER BY library_version DESC 
+             LIMIT 1`,
+            [user_id, library_id]
+        );
+        
+        if (rows.length === 0) {
+            return null;
+        }
+        
+        return BeaverDB.rowToSyncLogsRecord(rows[0]);
+    }
+
+    /**
+     * Get sync log record for library_id and user_id with the most recent library_date_modified.
+     * @param user_id The user_id to filter by
+     * @param library_id The library_id to filter by
+     * @returns The SyncLogsRecord with most recent library_date_modified, or null if not found
+     */
+    public async getSyncLogWithMostRecentDate(user_id: string, library_id: number): Promise<SyncLogsRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM sync_logs 
+             WHERE user_id = ? AND library_id = ? 
+             ORDER BY library_date_modified DESC 
+             LIMIT 1`,
+            [user_id, library_id]
+        );
+        
+        if (rows.length === 0) {
+            return null;
+        }
+        
+        return BeaverDB.rowToSyncLogsRecord(rows[0]);
+    }
+
+    /**
+     * Get all sync log records for specific library_id and user_id.
+     * @param user_id The user_id to filter by
+     * @param library_id The library_id to filter by
+     * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
+     * @param orderDirection Optional order direction ('ASC' or 'DESC')
+     * @returns Array of SyncLogsRecord objects
+     */
+    public async getAllSyncLogsForLibrary(
+        user_id: string, 
+        library_id: number,
+        orderBy: 'timestamp' | 'library_version' | 'library_date_modified' = 'timestamp',
+        orderDirection: 'ASC' | 'DESC' = 'DESC'
+    ): Promise<SyncLogsRecord[]> {
+        const validOrderBy = ['timestamp', 'library_version', 'library_date_modified'];
+        const validDirection = ['ASC', 'DESC'];
+        
+        if (!validOrderBy.includes(orderBy)) {
+            throw new Error(`Invalid orderBy field: ${orderBy}`);
+        }
+        
+        if (!validDirection.includes(orderDirection)) {
+            throw new Error(`Invalid order direction: ${orderDirection}`);
+        }
+        
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM sync_logs 
+             WHERE user_id = ? AND library_id = ? 
+             ORDER BY ${orderBy} ${orderDirection}`,
+            [user_id, library_id]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToSyncLogsRecord(row));
     }
 
 }
