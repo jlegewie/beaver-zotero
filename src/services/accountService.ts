@@ -30,6 +30,10 @@ interface OnboardingRequest {
     processing_tier: ProcessingTier;
 }
 
+interface ZoteroSyncRequest {
+    use_zotero_sync: boolean;
+}
+
 /**
  * Account-specific API service that extends the base API service
  */
@@ -117,6 +121,7 @@ export class AccountService extends ApiService {
      */
     async authorizeDevice(userID: string, localUserKey: string): Promise<{ message: string }> {
         return this.post<{ message: string }>('/api/v1/account/authorize-device', {
+            
             zotero_local_id: localUserKey,
             zotero_user_id: userID
         } as AuthorizationRequest);
@@ -131,6 +136,17 @@ export class AccountService extends ApiService {
         return this.post<{ message: string }>('/api/v1/account/complete-onboarding', {
             processing_tier: processingTier
         } as OnboardingRequest);
+    }
+
+    /**
+     * Updates the user's Zotero sync preference
+     * @param useZoteroSync Whether to use Zotero sync
+     * @returns Promise with the response message
+     */
+    async updateZoteroSyncPreference(useZoteroSync: boolean): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/update-zotero-sync-preference', {
+            use_zotero_sync: useZoteroSync
+        } as ZoteroSyncRequest);
     }
 }
 
