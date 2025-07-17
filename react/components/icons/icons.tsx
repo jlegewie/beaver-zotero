@@ -1,3 +1,5 @@
+import DatabaseIcon from './DatabaseIcon';
+
 export { default as Icon } from './Icon';
 export { default as CancelIcon } from './CancelIcon';
 export { CSSItemTypeIcon, CSSIcon } from './zotero';
@@ -46,3 +48,4 @@ export { default as CircleIcon } from './CircleIcon';
 export { default as CircleStatusIcon } from './CircleStatusIcon';
 export { default as DeleteIcon } from './DeleteIcon';
 export { default as PuzzleIcon } from './PuzzleIcon';
+export { default as DatabaseIcon } from './DatabaseIcon';
