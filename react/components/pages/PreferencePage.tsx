@@ -8,7 +8,7 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
-import { performConsistencyCheck, syncingItemFilter } from "../../../src/utils/sync";
+import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
