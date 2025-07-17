@@ -10,6 +10,7 @@ import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModif
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
+import { SyncMethod } from '../../react/atoms/sync';
 
 /**
  * Interface for item filter function
@@ -403,7 +404,7 @@ export async function syncItemsToBackend(
     libraryID: number,
     items: SyncItem[],
     syncType: SyncType,
-    syncMethod: 'version' | 'date_modified',
+    syncMethod: SyncMethod,
     onStatusChange?: (libraryID: number, status: SyncStatus) => void,
     onProgress?: (libraryID: number, processed: number, total: number) => void,
     batchSize: number = 200,

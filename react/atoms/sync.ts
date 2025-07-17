@@ -6,6 +6,7 @@ export const isFileUploaderFailedAtom = atom<boolean>(false);
 
 export type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
+export type SyncMethod = 'version' | 'date_modified';
 
 // Library sync tracking
 export interface LibrarySyncStatus {

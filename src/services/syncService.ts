@@ -4,13 +4,13 @@ import { UploadStatus } from './attachmentsService';
 import { ItemData, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
-import { SyncType } from '../../react/atoms/sync';
+import { SyncMethod, SyncType } from '../../react/atoms/sync';
 
 // Types that match the backend models
 export interface ItemBatchRequest {
     session_id: string; // UUID
     sync_type: SyncType;
-    sync_method: 'version' | 'date_modified';
+    sync_method: SyncMethod;
     zotero_local_id: string;
     zotero_user_id: string | undefined;
     library_id: number;
@@ -99,7 +99,7 @@ export interface SyncStatusComparisonResponse {
 }
 
 export interface SyncStateResponse {
-    last_sync_method: 'version' | 'date_modified';
+    last_sync_method: SyncMethod;
     last_sync_version: number;
     last_sync_date_modified: string;
     last_sync_timestamp: string;
@@ -138,7 +138,7 @@ export class SyncService extends ApiService {
     async processItemsBatch(
         sessionId: string,
         syncType: SyncType,
-        syncMethod: 'version' | 'date_modified',
+        syncMethod: SyncMethod,
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentDataWithMimeType[],
@@ -165,7 +165,7 @@ export class SyncService extends ApiService {
      * @param lastSyncZoteroVersion The last synced Zotero version (null for initial sync)
      * @returns Promise with the sync state response
      */
-    async getSyncState(libraryId: number, syncMethod: 'version' | 'date_modified'): Promise<SyncStateResponse | null> {
+    async getSyncState(libraryId: number, syncMethod: SyncMethod): Promise<SyncStateResponse | null> {
         const params = new URLSearchParams({
             library_id: String(libraryId),
             sync_method: syncMethod,
