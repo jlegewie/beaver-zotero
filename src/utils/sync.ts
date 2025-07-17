@@ -6,11 +6,12 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
+import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch, getZoteroUserIdentifier } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
+import { SyncLogsRecord } from '../services/database';
 
 /**
  * Interface for item filter function
@@ -505,8 +506,13 @@ export async function syncItemsToBackend(
             while (attempts < maxAttempts) {
                 try {
                     logger(`Beaver Sync '${syncSessionId}':     Sending batch to backend (${totalItems} items, attempt ${attempts + 1}/${maxAttempts})`, 4);
+                    const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
+
+                    // Upsert items and attachments
                     batchResult = await syncService.processItemsBatch(
                         syncSessionId,
+                        zoteroUserId,
+                        localUserKey,
                         syncType,
                         syncMethod,
                         libraryID,
@@ -514,7 +520,24 @@ export async function syncItemsToBackend(
                         batchAttachmentsData,
                         itemsToDelete
                     );
-                    break; // Success, exit retry loop
+
+                    // Insert sync log into local database
+                    await Zotero.Beaver.db.insertSyncLog({
+                        session_id: syncSessionId,
+                        sync_type: syncType,
+                        method: syncMethod,
+                        zotero_local_id: localUserKey,
+                        zotero_user_id: zoteroUserId,
+                        library_id: libraryID,
+                        total_upserts: batchResult.total_upserts,
+                        total_deletions: batchResult.total_deletions,
+                        library_version: batchResult.library_version,
+                        library_date_modified: batchResult.library_date_modified,
+                        user_id: userId,
+                    } as SyncLogsRecord);
+
+                    // Success, exit retry loop
+                    break;
                 } catch (retryError) {
                     attempts++;
                     if (attempts >= maxAttempts) {
