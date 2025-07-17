@@ -32,8 +32,15 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
 
                 <div className="display-flex flex-col gap-1">
                     <div className="display-flex flex-col gap-2 items-start">
-                        <div className="font-color-primary text-base">
-                            Sync with Zotero
+                        <div className="display-flex flex-row gap-4 items-center">
+                            <div className="font-color-primary text-base">
+                                Sync with Zotero
+                            </div>
+                            {!disabled && (
+                                <div className="font-color-secondary scale-90 px-15 py-05 text-sm rounded-md bg-quinary border-quinary">
+                                    Recommended
+                                </div>
+                            )}
                         </div>
                         <div className="font-color-secondary text-sm">
                             Build on Zotero sync for multi-device support and improved sync.
