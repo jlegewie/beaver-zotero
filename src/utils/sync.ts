@@ -606,8 +606,8 @@ export async function syncZoteroDatabase(
     const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
 
     // Initialize sync status for all libraries
-    for (const libraryID of libraryIds) {
-        updateSyncStatus(libraryID, { status: 'in_progress', libraryName: Zotero.Libraries.getName(libraryID) });
+    for (const library of libraries) {
+        updateSyncStatus(library.id, { status: 'in_progress', libraryName: library.name });
     }
 
     // Get user ID
@@ -906,7 +906,8 @@ export async function performConsistencyCheck(
     sendUpdates: boolean = true
 ): Promise<ConsistencyCheckResult> {
     const consistencyId = uuidv4();
-    const libraryName = Zotero.Libraries.getName(libraryID);
+    const library = Zotero.Libraries.get(libraryID);
+    const libraryName = library ? library.name : 'Unknown';
     
     logger(`Beaver Consistency Check '${consistencyId}': Starting consistency check for library ${libraryID} (${libraryName})`, 2);
 
