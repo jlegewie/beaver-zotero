@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from "../../atoms/profile";
@@ -31,7 +31,8 @@ const PreferencePage: React.FC = () => {
     const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
-    // --- Sync Verification State ---
+    // --- Sync and Verify Status States ---
+    const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
 
     // Helper function to save custom prompts array to preferences
@@ -88,6 +89,35 @@ const PreferencePage: React.FC = () => {
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
 
+    // --- Sync Handler ---
+    const handleSync = useCallback(async () => {
+        if (syncStatus === 'running') return;
+        
+        setSyncStatus('running');
+        logger('handleSync: Starting full sync');
+        
+        try {
+            // Import the sync function
+            const { syncZoteroDatabase, syncingItemFilter } = await import('../../../src/utils/sync');
+            
+            // Run full sync for all sync libraries
+            await syncZoteroDatabase(syncLibraryIds, syncingItemFilter);
+            
+            logger('Full sync completed successfully');
+            setSyncStatus('completed');
+            
+            // Reset to idle after 2 seconds
+            setTimeout(() => {
+                setSyncStatus('idle');
+            }, 2000);
+            
+        } catch (error: any) {
+            logger(`Full sync failed: ${error.message}`, 1);
+            Zotero.logError(error);
+            setSyncStatus('idle');
+        }
+    }, [syncLibraryIds, syncStatus]);
+
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
         if (verifyStatus === 'running') return;
@@ -127,13 +157,39 @@ const PreferencePage: React.FC = () => {
         });
     }, [saveCustomPromptsToPrefs]);
 
-    // Helper function to get button icon and class
+    // Helper function to get sync button props
     const getSyncButtonProps = () => {
-        // Resync from server
-        switch (verifyStatus) {
+        switch (syncStatus) {
             case 'running':
                 return {
                     icon: SyncIcon,
+                    iconClassName: 'animate-spin',
+                    disabled: true,
+                    text: 'Syncing...'
+                };
+            case 'completed':
+                return {
+                    icon: TickIcon,
+                    iconClassName: '',
+                    disabled: true,
+                    text: 'Synced'
+                };
+            default:
+                return {
+                    icon: SyncIcon,
+                    iconClassName: '',
+                    disabled: false,
+                    text: 'Sync'
+                };
+        }
+    };
+
+    // Helper function to get verify button props
+    const getVerifyButtonProps = () => {
+        switch (verifyStatus) {
+            case 'running':
+                return {
+                    icon: DatabaseIcon,
                     iconClassName: 'animate-spin',
                     disabled: true,
                     text: 'Verifying...'
@@ -147,15 +203,16 @@ const PreferencePage: React.FC = () => {
                 };
             default:
                 return {
-                    icon: SyncIcon,
+                    icon: DatabaseIcon,
                     iconClassName: '',
                     disabled: false,
-                    text: 'Verify'
+                    text: 'Verify Data'
                 };
         }
     };
 
     const syncButtonProps = getSyncButtonProps();
+    const verifyButtonProps = getVerifyButtonProps();
 
     return (
         <div
@@ -181,18 +238,6 @@ const PreferencePage: React.FC = () => {
                         <div className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
-                        <div className="font-color-secondary">Sync Status:</div>
-                        <Button 
-                            variant="outline" 
-                            icon={syncButtonProps.icon}
-                            iconClassName={syncButtonProps.iconClassName}
-                            onClick={handleVerifySync}
-                            disabled={syncButtonProps.disabled}
-                        >
-                            {syncButtonProps.text}
-                        </Button>
-                    </div>
-                    <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button variant="outline" disabled={true} icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
@@ -204,8 +249,40 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* --- Library Syncing Section --- */}
-            {/* <SectionHeader>Library Syncing</SectionHeader>
-            <LibrarySelection /> */}
+            <SectionHeader>Beaver Syncing</SectionHeader>
+
+            {/* <div className="text-sm font-color-secondary mb-3">
+                Beaver syncs your library, uploads your PDFs, and indexes your files for search.
+            </div> */}
+
+            <div className="display-flex flex-col gap-3">
+                <div className="display-flex flex-row items-center gap-3">
+                    <div className="font-color-secondary">Sync Status:</div>
+                    <div className="font-color-secondary">Last synced on XXXX</div>
+                </div>
+                <div className="display-flex flex-row items-center gap-4">
+                    <Button 
+                        variant="outline" 
+                        icon={syncButtonProps.icon}
+                        iconClassName={syncButtonProps.iconClassName}
+                        onClick={handleSync}
+                        disabled={syncButtonProps.disabled}
+                    >
+                        {syncButtonProps.text}
+                    </Button>
+                    <Button 
+                        variant="outline" 
+                        icon={verifyButtonProps.icon}
+                        iconClassName={verifyButtonProps.iconClassName}
+                        onClick={handleVerifySync}
+                        disabled={verifyButtonProps.disabled}
+                    >
+                        {verifyButtonProps.text}
+                    </Button>
+                </div>
+            </div>
+            
+            {/* <LibrarySelection /> */}
 
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
