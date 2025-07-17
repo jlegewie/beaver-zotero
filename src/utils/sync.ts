@@ -536,6 +536,8 @@ export async function syncItemsToBackend(
                         user_id: userId,
                     } as SyncLogsRecord);
 
+                    logger(`Beaver Sync '${syncSessionId}':     Batch result: ${JSON.stringify(batchResult)}`, 4);
+
                     // Success, exit retry loop
                     break;
                 } catch (retryError) {
@@ -552,14 +554,13 @@ export async function syncItemsToBackend(
             }
     
             // Process batch result (should never happen)
-            if (!batchResult || batchResult.sync_status === 'failed') {
+            if (!batchResult) {
                 throw new Error("Failed to process batch after multiple attempts");
             }
             
             // start file uploader if there are attachments to upload
-            const countUploads = batchResult.attachments.filter(attachment => attachment.upload_status === 'pending' && attachment.file_hash).length;
-            if (countUploads > 0) {                                
-                logger(`Beaver Sync '${syncSessionId}':     ${countUploads} attachments need to be uploaded, starting file uploader`, 2);
+            if (batchResult.pending_uploads > 0) {                                
+                logger(`Beaver Sync '${syncSessionId}':     ${batchResult.pending_uploads} attachments need to be uploaded, starting file uploader`, 2);
                 await fileUploader.start(syncType === 'initial' ? "initial" : "background");
             }
 

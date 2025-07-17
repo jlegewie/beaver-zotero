@@ -43,6 +43,7 @@ export interface SyncItemsResponse {
     session_id: string;
     total_upserts: number;
     total_deletions: number;
+    pending_uploads: number;
     library_version: number;
     library_date_modified: string;
 }
