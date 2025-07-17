@@ -4,6 +4,7 @@ import { atom } from 'jotai';
 export const isFileUploaderRunningAtom = atom<boolean>(false);
 export const isFileUploaderFailedAtom = atom<boolean>(false);
 
+export type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
 
 // Library sync tracking

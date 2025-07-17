@@ -4,11 +4,12 @@ import { UploadStatus } from './attachmentsService';
 import { ItemData, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
+import { SyncType } from '../../react/atoms/sync';
 
 // Types that match the backend models
 export interface ItemBatchRequest {
     session_id: string; // UUID
-    sync_type: 'initial' | 'incremental' | 'consistency' | 'verification';
+    sync_type: SyncType;
     sync_method: 'version' | 'date_modified';
     zotero_local_id: string;
     zotero_user_id: string | undefined;
@@ -136,7 +137,7 @@ export class SyncService extends ApiService {
      */
     async processItemsBatch(
         sessionId: string,
-        syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
+        syncType: SyncType,
         syncMethod: 'version' | 'date_modified',
         libraryId: number,
         items: ItemData[],

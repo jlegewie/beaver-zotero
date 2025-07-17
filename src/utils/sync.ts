@@ -4,7 +4,7 @@ import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
-import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
+import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
 import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
@@ -402,7 +402,7 @@ export async function syncItemsToBackend(
     syncSessionId: string,
     libraryID: number,
     items: SyncItem[],
-    syncType: 'initial' | 'incremental' | 'consistency' | 'verification',
+    syncType: SyncType,
     syncMethod: 'version' | 'date_modified',
     onStatusChange?: (libraryID: number, status: SyncStatus) => void,
     onProgress?: (libraryID: number, processed: number, total: number) => void,
@@ -597,7 +597,7 @@ export async function syncZoteroDatabase(
     libraryIds: number[],
     filterFunction: ItemFilterFunction = syncingItemFilter,
     batchSize: number = 50,
-    syncType?: 'initial' | 'incremental' | 'consistency' | 'verification'
+    syncType?: SyncType
 ): Promise<void> {
     const syncSessionId = uuidv4();
 
