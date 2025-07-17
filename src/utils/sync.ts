@@ -14,14 +14,15 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 /**
  * Interface for item filter function
  */
-export type ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => boolean;
+export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
 
 /**
  * Filter function for syncing items
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => {
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
+    if (!item) return false;
     return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) &&
         !item.isInTrash()
         // (collectionId ? item.inCollection(collectionId) : true);
@@ -950,13 +951,14 @@ export async function performConsistencyCheck(
 
             // Get zotero items and clientDateModified for all items
             const zoteroItemsPromises = backendItems.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
-            const zoteroItems = (await Promise.all(zoteroItemsPromises)).filter(Boolean) as Zotero.Item[];
+            const zoteroItems = (await Promise.all(zoteroItemsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroItemsMap = new Map(zoteroItems.map(item => [item.key, item]));
             const clientDateModifiedMap = await getClientDateModifiedBatch(zoteroItems);
 
             // Process items concurrently
             const itemProcessingPromises = backendItems.map(async (backendItem) => {
                 try {
-                    const zoteroItem = zoteroItems.find((item: Zotero.Item) => item && item.key === backendItem.zotero_key);
+                    const zoteroItem = zoteroItemsMap.get(backendItem.zotero_key);
                     if (!zoteroItem) {
                         return { deleteKey: backendItem.zotero_key };
                     }
@@ -993,13 +995,14 @@ export async function performConsistencyCheck(
 
             // Get zotero items and clientDateModified for all attachments
             const zoteroAttachmentsPromises = backendAttachments.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
-            const zoteroAttachments = (await Promise.all(zoteroAttachmentsPromises)).filter(Boolean) as Zotero.Item[];
+            const zoteroAttachments = (await Promise.all(zoteroAttachmentsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroAttachmentsMap = new Map(zoteroAttachments.map(item => [item.key, item]));
             const clientDateModifiedMapAttachments = await getClientDateModifiedBatch(zoteroAttachments);
 
             // Process attachments concurrently
             const attachmentProcessingPromises = backendAttachments.map(async (backendAttachment) => {
                 try {
-                    const zoteroAttachment = zoteroAttachments.find((item: Zotero.Item) => item.key === backendAttachment.zotero_key);
+                    const zoteroAttachment = zoteroAttachmentsMap.get(backendAttachment.zotero_key);
                     if (!zoteroAttachment) {
                         return { deleteKey: backendAttachment.zotero_key };
                     }
