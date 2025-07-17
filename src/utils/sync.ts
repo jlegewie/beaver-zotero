@@ -6,7 +6,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced } from './zoteroUtils';
+import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -14,27 +14,28 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 /**
  * Interface for item filter function
  */
-export type ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => boolean;
+export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
 
 /**
  * Filter function for syncing items
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item, collectionId?: number) => {
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
+    if (!item) return false;
     return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) &&
         !item.isInTrash()
         // (collectionId ? item.inCollection(collectionId) : true);
 };
 
 
-export function extractDeleteData(item: Zotero.Item): DeleteData {
+export async function extractDeleteData(item: Zotero.Item): Promise<DeleteData> {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
         zotero_version: item.version,
         zotero_synced: item.synced,
-        date_modified: item.dateModified
+        date_modified: await getClientDateModified(item)
     };
 }
 
@@ -43,7 +44,7 @@ export function extractDeleteData(item: Zotero.Item): DeleteData {
  * @param item Zotero item
  * @returns Promise resolving to ItemData object for syncing
  */
-async function extractItemData(item: Zotero.Item): Promise<ItemData> {
+async function extractItemData(item: Zotero.Item, clientDateModified: string | undefined): Promise<ItemData> {
 
     // ------- 1. Get full item data -------
     // @ts-ignore - Returns of item.toJSON are not typed correctly
@@ -82,7 +83,7 @@ async function extractItemData(item: Zotero.Item): Promise<ItemData> {
         // Add non-hashed fields
         // Replace with Zotero.Date.sqlToISO8601(...)??
         date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
-        date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
+        date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
         // Add the calculated hash
         zotero_version: item.version,
         zotero_synced: item.synced,
@@ -137,7 +138,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
  * @returns Promise resolving to AttachmentData object for syncing
  */
-async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
+async function extractAttachmentData(item: Zotero.Item, clientDateModified: string | undefined, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
 
     // 1. File: Confirm that the item is an attachment and that the file exists
     if (!item.isAttachment() || !(await item.fileExists())) return null;
@@ -167,7 +168,7 @@ async function extractAttachmentData(item: Zotero.Item, options?: { lightweight?
         file_hash: file_hash,
         mime_type: await getMimeType(item),
         date_added: new Date(item.dateAdded + 'Z').toISOString(),
-        date_modified: new Date(item.dateModified + 'Z').toISOString(),
+        date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
         zotero_version: item.version,
@@ -428,6 +429,14 @@ export async function syncItemsToBackend(
     
     logger(`Beaver Sync '${syncSessionId}':   Processing ${totalItems} items in batches of ${batchSize}`, 3);
 
+    // Get clientDateModified for all items
+    const clientDateModifiedMap = await getClientDateModifiedBatch(items.map(item => item.item));
+    // Error handling and logging for batch operation
+    const missingEntries = items.filter(item => !clientDateModifiedMap.has(item.item.id));
+    if (missingEntries.length > 0) {
+        logger(`Beaver Sync '${syncSessionId}': Warning: ${missingEntries.length} items missing clientDateModified, using fallback`, 2);
+    }
+    
     // 1. Sort items
     items.sort((a, b) => {
         // Primary sort: version
@@ -435,17 +444,19 @@ export async function syncItemsToBackend(
             return a.item.version - b.item.version;
         }
         
-        // Secondary sort: dateModified (convert strings to timestamps)
-        const dateA = Zotero.Date.sqlToDate(a.item.dateModified, true);
-        const dateB = Zotero.Date.sqlToDate(b.item.dateModified, true);
-        return (dateA ? dateA.getTime() : 0) - (dateB ? dateB.getTime() : 0);
+        // Secondary sort: clientDateModified (convert ISO strings to timestamps)
+        const dateAStr = clientDateModifiedMap.get(a.item.id);
+        const dateBStr = clientDateModifiedMap.get(b.item.id);
+        const dateA = dateAStr ? new Date(dateAStr).getTime() : 0;
+        const dateB = dateBStr ? new Date(dateBStr).getTime() : 0;
+        return dateA - dateB;
     });
 
-    // 2. Create batches respecting dateModified boundaries
+    // 2. Create batches respecting clientDateModifiedMap boundaries
     const batches = createBatches(
         items, 
         batchSize, 
-        (item) => item.item.dateModified
+        (item) => clientDateModifiedMap.get(item.item.id) || item.item.dateModified
     );
 
     // 3. Process each batch
@@ -454,8 +465,8 @@ export async function syncItemsToBackend(
 
         // Log batch info for debugging
         const batchDateRange = {
-            first: batchItems[0].item.dateModified,
-            last: batchItems[batchItems.length - 1].item.dateModified,
+            first: clientDateModifiedMap.get(batchItems[0].item.id),
+            last: clientDateModifiedMap.get(batchItems[batchItems.length - 1].item.id),
             versions: [batchItems[0].item.version, batchItems[batchItems.length - 1].item.version]
         };
 
@@ -468,13 +479,13 @@ export async function syncItemsToBackend(
             // ------- Transform items in this batch -------
             const regularItems = batchItems.filter(item => item.action === 'upsert' && item.item.isRegularItem()).map(item => item.item);
             const attachmentItems = batchItems.filter(item => item.action === 'upsert' && item.item.isAttachment()).map(item => item.item);
-            const itemsToDelete = batchItems.filter(item => item.action === 'delete').map(item => extractDeleteData(item.item));
+            const itemsToDelete = await Promise.all(batchItems.filter(item => item.action === 'delete').map(item => extractDeleteData(item.item)));
             
             const [batchItemsData, batchAttachmentsData] = await Promise.all([
-                Promise.all(regularItems.map(extractItemData)).then(data => 
+                Promise.all(regularItems.map((item) => extractItemData(item, clientDateModifiedMap.get(item.id)))).then(data => 
                     data.filter((item) => item !== null) as ItemData[]
                 ),
-                Promise.all(attachmentItems.map((item) => extractAttachmentData(item))).then(data => 
+                Promise.all(attachmentItems.map((item) => extractAttachmentData(item, clientDateModifiedMap.get(item.id)))).then(data => 
                     data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
@@ -757,27 +768,28 @@ export async function syncZoteroDatabase(
  */
 async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?: string): Promise<Zotero.Item[]> {
     // Updated item ids
-    let sql = "SELECT itemID FROM items WHERE libraryID=? AND dateModified > ?";
+    let sql = "SELECT itemID FROM items WHERE libraryID=? AND clientDateModified > ?";
     const params: any[] = [libraryID, sinceDate];
     if (untilDate) {
-        sql += " AND dateModified <= ?";
+        sql += " AND clientDateModified <= ?";
         params.push(untilDate);
     }
     const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
+    return await Zotero.Items.getAsync(ids);
 
     // Deleted item ids
-    let sqlDeleted = "SELECT di.itemID FROM deletedItems di WHERE di.dateDeleted > ?";
-    const paramsDeleted: any[] = [sinceDate];
-    if (untilDate) {
-        sqlDeleted += " AND di.dateModified <= ?";
-        paramsDeleted.push(untilDate);
-    }
-    const idsDeleted = await Zotero.DB.columnQueryAsync(sqlDeleted, paramsDeleted) as number[];
+    // let sqlDeleted = "SELECT di.itemID FROM deletedItems di WHERE di.dateDeleted > ?";
+    // const paramsDeleted: any[] = [sinceDate];
+    // if (untilDate) {
+    //     sqlDeleted += " AND di.dateModified <= ?";
+    //     paramsDeleted.push(untilDate);
+    // }
+    // const idsDeleted = await Zotero.DB.columnQueryAsync(sqlDeleted, paramsDeleted) as number[];
     
     // Return items
-    const uniqueIds = [...new Set([...ids, ...idsDeleted])];
-    const items = await Zotero.Items.getAsync(uniqueIds);
-    return items.filter(item => item.libraryID === libraryID);
+    // const uniqueIds = [...new Set([...ids, ...idsDeleted])];
+    // const items = await Zotero.Items.getAsync(uniqueIds);
+    // return items.filter(item => item.libraryID === libraryID);
 }
 
 /**
@@ -878,6 +890,7 @@ interface ConsistencyCheckResult {
     attachment_discrepancies: AttachmentDiscrepancy[];
     items_updated: number;
     attachments_updated: number;
+    items_and_attachments_added: number;
 }
 
 /**
@@ -910,13 +923,24 @@ export async function performConsistencyCheck(
         item_discrepancies: [],
         attachment_discrepancies: [],
         items_updated: 0,
-        attachments_updated: 0
+        attachments_updated: 0,
+        items_and_attachments_added: 0,
     };
 
-    let page = 0;
-    let hasMore = true;
+    // Get all local items before processing backend data
+    logger(`Beaver Consistency Check '${consistencyId}': Getting all local items to track new additions`, 3);
+    const allLocalItems = await getAllItemsToSync(libraryID);
+    const localItemKeys = new Set<string>();
+    
+    for (const item of allLocalItems) {
+        localItemKeys.add(item.key);
+    }
+
+    logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} local items`, 3);
 
     // Process all pages from backend
+    let page = 0;
+    let hasMore = true;
     while (hasMore) {
         try {
             logger(`Beaver Consistency Check '${consistencyId}': Processing page ${page + 1}`, 3);
@@ -937,21 +961,32 @@ export async function performConsistencyCheck(
             result.total_items_checked += backendItems.length;
             result.total_attachments_checked += backendAttachments.length;
 
+            // Remove processed keys from local set
+            backendItems.forEach(item => localItemKeys.delete(item.zotero_key));
+            backendAttachments.forEach(attachment => localItemKeys.delete(attachment.zotero_key));
+
+            // Get zotero items and clientDateModified for all items
+            const zoteroItemsPromises = backendItems.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
+            const zoteroItems = (await Promise.all(zoteroItemsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroItemsMap = new Map(zoteroItems.map(item => [item.key, item]));
+            const clientDateModifiedMap = await getClientDateModifiedBatch(zoteroItems);
+
             // Process items concurrently
             const itemProcessingPromises = backendItems.map(async (backendItem) => {
                 try {
-                    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, backendItem.zotero_key);
+                    const zoteroItem = zoteroItemsMap.get(backendItem.zotero_key);
                     if (!zoteroItem) {
                         return { deleteKey: backendItem.zotero_key };
                     }
 
-                    const localItemData = await extractItemData(zoteroItem);
+                    const localDateModified = clientDateModifiedMap.get(zoteroItem.id) || await getClientDateModifiedAsISOString(zoteroItem);
+                    const localItemData = await extractItemData(zoteroItem, localDateModified);
                     if (backendItem.metadata_hash !== localItemData.item_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendItem.zotero_version,
                             backendItem.date_modified,
                             zoteroItem.version,
-                            zoteroItem.dateModified
+                            localDateModified
                         );
                         return {
                             discrepancy: {
@@ -961,7 +996,7 @@ export async function performConsistencyCheck(
                                 backend_version: backendItem.zotero_version,
                                 local_version: zoteroItem.version,
                                 backend_date_modified: backendItem.date_modified,
-                                local_date_modified: zoteroItem.dateModified,
+                                local_date_modified: localDateModified,
                                 should_update: shouldUpdate,
                                 reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
                             },
@@ -974,21 +1009,28 @@ export async function performConsistencyCheck(
                 return null;
             });
 
+            // Get zotero items and clientDateModified for all attachments
+            const zoteroAttachmentsPromises = backendAttachments.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
+            const zoteroAttachments = (await Promise.all(zoteroAttachmentsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroAttachmentsMap = new Map(zoteroAttachments.map(item => [item.key, item]));
+            const clientDateModifiedMapAttachments = await getClientDateModifiedBatch(zoteroAttachments);
+
             // Process attachments concurrently
             const attachmentProcessingPromises = backendAttachments.map(async (backendAttachment) => {
                 try {
-                    const zoteroAttachment = Zotero.Items.getByLibraryAndKey(libraryID, backendAttachment.zotero_key);
+                    const zoteroAttachment = zoteroAttachmentsMap.get(backendAttachment.zotero_key);
                     if (!zoteroAttachment) {
                         return { deleteKey: backendAttachment.zotero_key };
                     }
 
-                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, { lightweight: true });
+                    const localDateModified = clientDateModifiedMapAttachments.get(zoteroAttachment.id) || await getClientDateModifiedAsISOString(zoteroAttachment);
+                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { lightweight: true });
                     if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,
                             backendAttachment.date_modified,
                             zoteroAttachment.version,
-                            zoteroAttachment.dateModified
+                            localDateModified
                         );
                         return {
                             discrepancy: {
@@ -998,7 +1040,7 @@ export async function performConsistencyCheck(
                                 backend_version: backendAttachment.zotero_version,
                                 local_version: zoteroAttachment.version,
                                 backend_date_modified: backendAttachment.date_modified,
-                                local_date_modified: zoteroAttachment.dateModified,
+                                local_date_modified: localDateModified,
                                 should_update: shouldUpdate,
                                 reason: shouldUpdate ? 'local version is newer or equal with newer date' : 'backend version is newer',
                             },
@@ -1097,14 +1139,6 @@ export async function performConsistencyCheck(
                 }
             }
 
-            // Log summary
-            logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
-            logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
-            logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
-            if (sendUpdates) {
-                logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
-            }
-
             hasMore = backendData.has_more;
             page++;
             
@@ -1113,6 +1147,37 @@ export async function performConsistencyCheck(
             Zotero.logError(error);
             break;
         }
+    }
+
+    // After processing all backend data, sync remaining local items
+    if (sendUpdates && localItemKeys.size > 0) {
+        logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} new items to add`, 3);
+
+        const zoteroItems = await Promise.all(Array.from(localItemKeys).map((key) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key)));
+        const newItemsToSync: SyncItem[] = zoteroItems.filter(syncingItemFilter).map((item) => ({ action: 'upsert', item } as SyncItem));
+
+        if (newItemsToSync.length > 0) {
+            try {
+                const syncWithZotero = store.get(syncWithZoteroAtom);
+                const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+                await syncItemsToBackend(consistencyId, libraryID, newItemsToSync, 'consistency', syncMethod);
+                
+                result.items_and_attachments_added = newItemsToSync.length;
+            } catch (error: any) {
+                logger(`Beaver Consistency Check '${consistencyId}': Error adding new items: ${error.message}`, 1);
+                Zotero.logError(error);
+            }
+        }
+    }
+
+    // Final logging of results
+    logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
+    logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
+    logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
+    if (sendUpdates) {
+        logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
+        logger(`Beaver Consistency Check '${consistencyId}': Added ${result.items_and_attachments_added} items and attachments`, 3);
     }
 
     return result;
@@ -1140,7 +1205,7 @@ function shouldUpdateBackend(
     // Same version, check date
     if (localVersion === backendVersion) {
         const backendTime = new Date(backendDate).getTime();
-        const localTime = new Date(localDate + 'Z').getTime(); // Add Z for UTC
+        const localTime = new Date(localDate).getTime();
         return localTime >= backendTime;
     }
     
