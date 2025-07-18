@@ -727,7 +727,7 @@ export async function syncZoteroDatabase(
                 );
 
                 if (itemsToUpsert.length === 0 && itemsToDelete.length === 0) {
-                    logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is up to date based on local sync log`, 3);
+                    logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is up to date based on local sync log. (${syncMethod}: ${syncLog.library_date_modified}, ${syncLog.library_version})`, 3);
                     updateSyncStatus(libraryID, { status: 'completed' });
                     continue;
                 }
