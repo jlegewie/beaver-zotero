@@ -876,6 +876,7 @@ async function getItemsToSync(
         items = await getItemsSinceVersion(libraryID, lastSyncVersion);
         // collections = await getCollectionsSinceVersion(libraryID, lastSyncVersion);
     } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
+        lastSyncDate = Zotero.Date.isISODate(lastSyncDate) ? Zotero.Date.isoToSQL(lastSyncDate) : lastSyncDate;
         items = await getModifiedItems(libraryID, lastSyncDate);
         // collections = await getModifiedCollections(libraryID, lastSyncDate);
     } else {
