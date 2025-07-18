@@ -515,6 +515,8 @@ export async function syncItemsToBackend(
             }
 
             // ------- Send to backend only if items need syncing -------
+            const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
+
             let attempts = 0;
             const maxAttempts = 2;
             let batchResult = null;
@@ -522,7 +524,6 @@ export async function syncItemsToBackend(
             while (attempts < maxAttempts) {
                 try {
                     logger(`Beaver Sync '${syncSessionId}':     Sending batch to backend (${totalItems} items, attempt ${attempts + 1}/${maxAttempts})`, 4);
-                    const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
 
                     // Upsert items and attachments
                     batchResult = await syncService.processItemsBatch(
@@ -543,7 +544,7 @@ export async function syncItemsToBackend(
                         sync_type: syncType,
                         method: syncMethod,
                         zotero_local_id: localUserKey,
-                        zotero_user_id: zoteroUserId,
+                        zotero_user_id: zoteroUserId || null,
                         library_id: libraryID,
                         total_upserts: batchResult.total_upserts,
                         total_deletions: batchResult.total_deletions,
