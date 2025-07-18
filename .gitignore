@@ -13,6 +13,7 @@ yarn.lock
 build
 logs
 .cursorrules
+.cursor/*
 archive
 
 # compiled files
