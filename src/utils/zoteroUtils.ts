@@ -22,6 +22,27 @@ export async function getClientDateModifiedAsISOString(item: Zotero.Item | numbe
 }
 
 /**
+ * Get the clientDateModified for a collection
+ * @param collection Zotero collection or collection ID
+ * @returns clientDateModified as string
+ */
+export async function getCollectionClientDateModified(collection: Zotero.Collection | number): Promise<string> {
+    const collectionId = typeof collection === 'number' ? collection : collection.id;
+    const sql = "SELECT clientDateModified FROM collections WHERE collectionID = ?";
+    return await Zotero.DB.valueQueryAsync(sql, [collectionId]) as string;
+}
+
+/**
+ * Get the clientDateModified for a collection as ISO string
+ * @param collection Zotero collection or collection ID
+ * @returns clientDateModified as ISO string
+ */
+export async function getCollectionClientDateModifiedAsISOString(collection: Zotero.Collection | number): Promise<string> {
+    const clientDateModified = await getCollectionClientDateModified(collection);
+    return new Date(clientDateModified + 'Z').toISOString()
+}
+
+/**
  * Get the clientDateModified for multiple items in a batch operation.
  * @param items Array of Zotero items or item IDs
  * @returns Map of itemID to clientDateModified string in ISO format

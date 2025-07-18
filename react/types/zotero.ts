@@ -65,11 +65,10 @@ export interface ZoteroCreator {
     is_primary: boolean;
 }
 
-export interface ZoteroCollection {
-    collection_id: number;
-    key: string;
+export interface ZoteroCollection extends ZoteroItemReference {
     name: string;
     version: number;
+    date_modified: string;
     parent_collection: string | null;
     relations: Record<string, any> | null;
 }

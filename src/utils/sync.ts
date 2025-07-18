@@ -6,7 +6,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/index";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch, getZoteroUserIdentifier } from './zoteroUtils';
+import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -217,20 +217,26 @@ function extractCreators(item: Zotero.Item): ZoteroCreator[] | null {
     return creators.length > 0 ? creators : null;
 }
 
-
-function extractCollections(item: Zotero.Item): ZoteroCollection[] | null {
-    const collections = item.getCollections().
-        map(collection_id => {
+/**
+ * Extracts collections from a Zotero item
+ * @param item Zotero item
+ * @returns Array of collections
+ */
+async function extractCollections(item: Zotero.Item): Promise<ZoteroCollection[] | null> {
+    const collectionPromises = item.getCollections()
+        .map(async (collection_id) => {
             const collection = Zotero.Collections.get(collection_id).toJSON();
             return {
-                collection_id,
-                key: collection.key,
-                version: collection.version,
+                library_id: item.libraryID,
+                zotero_key: collection.key,
                 name: collection.name,
+                version: collection.version,
+                date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
                 parent_collection: collection.parentCollection || null,
-                relations: collection.relations,
+                relations: Object.keys(collection.relations).length > 0 ? collection.relations : null,
             } as ZoteroCollection;
         })
+    const collections = await Promise.all(collectionPromises);
 
     return collections.length > 0 ? collections : null;
 }
