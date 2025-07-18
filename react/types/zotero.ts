@@ -110,7 +110,7 @@ export interface ItemData extends ZoteroItemBase {
     formatted_citation?: string | null;
     deleted: boolean;
     tags?: any[] | null;
-    collections?: ZoteroCollection[] | null;
+    collections?: string[] | null;
     citation_key?: string | null;
 
     // Item metadata hash and zotero version
@@ -147,7 +147,7 @@ export interface AttachmentData extends ZoteroItemBase {
     attachment_url?: string | null;
     link_mode?: number | null;
     tags?: any[] | null;
-    collections?: ZoteroCollection[] | null;
+    collections?: string[] | null;
 
     // file metadata
     filename: string;

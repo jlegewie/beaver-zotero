@@ -72,7 +72,7 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
         formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         deleted: item.isInTrash(),
         tags: item.getTags().length > 0 ? item.getTags() : null,
-        collections: extractCollections(item),
+        collections: extractCollectionKeys(item),
         citation_key: await getCiteKey(item),
     };
 
@@ -154,7 +154,7 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
         attachment_url: item.getField('url'),
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
-        collections: extractCollections(item),
+        collections: extractCollectionKeys(item),
         deleted: item.isInTrash(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
@@ -233,6 +233,16 @@ function extractCollections(item: Zotero.Item): ZoteroCollection[] | null {
         })
 
     return collections.length > 0 ? collections : null;
+}
+
+/**
+ * Extracts collection keys from a Zotero item
+ * @param item Zotero item
+ * @returns Array of collection keys
+ */
+function extractCollectionKeys(item: Zotero.Item): string[] | null {
+    const collectionKeys = item.getCollections().map(id => Zotero.Collections.get(id).key);
+    return collectionKeys.length > 0 ? collectionKeys : null;
 }
 
 
