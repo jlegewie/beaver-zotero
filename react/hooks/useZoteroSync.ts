@@ -287,6 +287,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         // Cleanup function
         return () => {
             logger("useZoteroSync: Cleaning up Zotero sync", 3);
+            
+            // Unregister observer
             if (zoteroNotifierIdRef.current) {
                 Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
                 zoteroNotifierIdRef.current = null;
@@ -301,13 +303,22 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Clear the cache
             libraryVersionCacheRef.current.clear();
             
-            // Process any remaining events before unmounting
-            if (
+            // Process remaining events asynchronously (fire-and-forget)
+            // but clear the collections synchronously to prevent further accumulation
+            const hasRemainingEvents = 
                 eventsRef.current.changedLibraries.size > 0 || 
-                eventsRef.current.delete.size > 0
-            ) {
-                processEvents();
+                eventsRef.current.delete.size > 0;
+            
+            if (hasRemainingEvents) {
+                // Process events in background without blocking cleanup
+                processEvents().catch(error => {
+                    logger(`useZoteroSync: Error processing remaining events during cleanup: ${error.message}`, 1);
+                });
             }
+            
+            // Clear collections immediately to prevent further accumulation
+            eventsRef.current.changedLibraries.clear();
+            eventsRef.current.delete.clear();
         };
     }, [isAuthenticated, filterFunction, debounceMs, isAuthorized, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
 }
