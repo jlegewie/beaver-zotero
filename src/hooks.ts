@@ -234,6 +234,20 @@ async function onShutdown(): Promise<void> {
             ztoolkit.log("UIManager instance not found during shutdown.");
         }
 
+        // Ensure all React roots are unmounted
+        Zotero.getMainWindows().forEach(win => {
+            try {
+                BeaverUIFactory.removeChatPanel(win);
+                ztoolkit.log("React panels removed for window:", win.location.href);
+            } catch (err) {
+                ztoolkit.log("Error removing chat panel during shutdown:", err);
+            }
+        });
+
+        // Clean up any remaining Zotero notifier observers using addon storage
+        ztoolkit.log("Active observers before cleanup:", addon.getActiveZoteroObservers());
+        addon.cleanupAllZoteroObservers();
+
 	} catch (error) {
 		ztoolkit.log("Error during shutdown:", error);
 	}

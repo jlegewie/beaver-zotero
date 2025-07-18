@@ -179,6 +179,18 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         
         // Function to create the observer
         const setupObserver = () => {
+            // Unregister any existing observer first
+            if (zoteroNotifierIdRef.current) {
+                try {
+                    Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                    Zotero.Beaver.unregisterZoteroObserver(zoteroNotifierIdRef.current);
+                    logger(`useZoteroSync: Unregistered existing observer: ${zoteroNotifierIdRef.current}`, 3);
+                } catch (err) {
+                    logger(`useZoteroSync: Error unregistering existing observer: ${err}`, 2);
+                }
+                zoteroNotifierIdRef.current = null;
+            }
+
             // Create the notification observer with debouncing
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
@@ -251,7 +263,13 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync'], 'beaver-sync');
+            const observerId = Zotero.Notifier.registerObserver(observer, ['item', 'sync'], 'beaver-sync');
+            zoteroNotifierIdRef.current = observerId;
+            
+            // Track in addon instance for cleanup
+            Zotero.Beaver.registerZoteroObserver(observerId);
+            
+            logger(`useZoteroSync: Registered new observer: ${observerId}`, 3);
         };
         
         // Initialize sync operations
@@ -290,7 +308,13 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Unregister observer
             if (zoteroNotifierIdRef.current) {
-                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                try {
+                    Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                    Zotero.Beaver.unregisterZoteroObserver(zoteroNotifierIdRef.current);
+                    logger(`useZoteroSync: Successfully unregistered observer: ${zoteroNotifierIdRef.current}`, 3);
+                } catch (err) {
+                    logger(`useZoteroSync: Error unregistering observer: ${err}`, 2);
+                }
                 zoteroNotifierIdRef.current = null;
             }
             

@@ -245,6 +245,21 @@ declare namespace Zotero {
              */
             dispose(): void;
         }
+
+        /**
+         * Register a Zotero notifier observer for tracking
+         */
+        const registerZoteroObserver: (observerId: string) => void;
+
+        /**
+         * Unregister a Zotero notifier observer from tracking      
+         */
+        const unregisterZoteroObserver: (observerId: string) => void;
+
+        /**
+         * Get all active Zotero notifier observers
+         */
+        const getActiveZoteroObservers: () => string[];
     }
 
     interface Item {
