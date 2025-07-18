@@ -13,10 +13,6 @@ interface BeaverWindow extends Window {
         renderGlobalInitializer: (container: Element) => any;
         unmountFromElement: (container: Element) => boolean;
     };
-    renderAiSidebar?: (container: Element, location: string) => any; // Returns root
-    renderGlobalInitializer?: (container: Element) => any; // Returns root
-    unmountFromElement?: (container: Element) => boolean; // New unmount function
-    __beaverEventBus?: any;
 }
 
 export class BeaverUIFactory {
@@ -70,11 +66,14 @@ export class BeaverUIFactory {
         win.document.documentElement.appendChild(script);
 
         script.onload = () => {
-            // After the bundle loads, BeaverReact is attached to the window.
-            if (win.BeaverReact) {
-                win.renderAiSidebar = win.BeaverReact.renderAiSidebar;
-                win.renderGlobalInitializer = win.BeaverReact.renderGlobalInitializer;
-                win.unmountFromElement = win.BeaverReact.unmountFromElement;
+            if (win.BeaverReact && 
+                typeof win.BeaverReact.renderAiSidebar === 'function' &&
+                typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
+                typeof win.BeaverReact.unmountFromElement === 'function') {
+                
+                // All functions verified, proceed with mounting
+            } else {
+                ztoolkit.log("Error: BeaverReact bundle did not load correctly");
             }
 
             // Initialize React UI
@@ -94,8 +93,8 @@ export class BeaverUIFactory {
                 globalInitializerRoot.style.display = "none";
                 win.document.documentElement.appendChild(globalInitializerRoot);
                 
-                if (typeof win.renderGlobalInitializer === 'function') {
-                    const root = win.renderGlobalInitializer(globalInitializerRoot);
+                if (typeof win.BeaverReact?.renderGlobalInitializer === 'function') {
+                    const root = win.BeaverReact.renderGlobalInitializer(globalInitializerRoot);
                     if (root) roots.add(root);
                 } else {
                     ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
@@ -106,12 +105,12 @@ export class BeaverUIFactory {
             const libraryRootEl = win.document.getElementById("beaver-react-root-library");
             const readerRootEl = win.document.getElementById("beaver-react-root-reader");
             
-            if (libraryRootEl && typeof win.renderAiSidebar === 'function') {
-                const root = win.renderAiSidebar(libraryRootEl, "library");
+            if (libraryRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
+                const root = win.BeaverReact.renderAiSidebar(libraryRootEl, "library");
                 if (root) roots.add(root);
             }
-            if (readerRootEl && typeof win.renderAiSidebar === 'function') {
-                const root = win.renderAiSidebar(readerRootEl, "reader");
+            if (readerRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
+                const root = win.BeaverReact.renderAiSidebar(readerRootEl, "reader");
                 if (root) roots.add(root);
             }
         };
