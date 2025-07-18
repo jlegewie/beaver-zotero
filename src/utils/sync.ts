@@ -679,7 +679,8 @@ export async function syncZoteroDatabase(
             type: 'warning',
             title: 'Unable to Complete Sync with Beaver',
             text: `Zotero sync is disabled. Please enable Zotero sync in Zotero preferences or sign into your Zotero account.`,
-            expire: true
+            expire: true,
+            duration: 10000
         });
         libraryIds.forEach(libraryID => onStatusChange(libraryID, 'failed'));
         return;
