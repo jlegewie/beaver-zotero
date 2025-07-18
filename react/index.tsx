@@ -39,17 +39,31 @@ const GlobalContextInitializer = () => {
     return null; // This component does not render any UI
 };
 
+// Store root references for proper cleanup
+const rootsMap = new Map<HTMLElement, any>();
+
 /**
  * Renders the GlobalContextInitializer into a dedicated DOM element.
  * This should be called once per window.
  */
 export function renderGlobalInitializer(domElement: HTMLElement) {
+    // Clean up any existing root first
+    const existingRoot = rootsMap.get(domElement);
+    if (existingRoot) {
+        existingRoot.unmount();
+        rootsMap.delete(domElement);
+    }
+
     const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
+    
     root.render(
         <Provider store={store}>
             <GlobalContextInitializer />
         </Provider>
     );
+    
+    return root;
 }
 
 const App = ({ location }: { location: 'library' | 'reader' }) => {
@@ -60,7 +74,15 @@ const App = ({ location }: { location: 'library' | 'reader' }) => {
 };
 
 export function renderAiSidebar(domElement: HTMLElement, location: 'library' | 'reader') {
+    // Clean up any existing root first
+    const existingRoot = rootsMap.get(domElement);
+    if (existingRoot) {
+        existingRoot.unmount();
+        rootsMap.delete(domElement);
+    }
+
     const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
 
     // Render the component
     root.render(
@@ -68,6 +90,21 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
             <App location={location} />
         </Provider>
     );
+    
+    return root;
+}
+
+/**
+ * Unmount a React root from a DOM element
+ */
+export function unmountFromElement(domElement: HTMLElement) {
+    const root = rootsMap.get(domElement);
+    if (root) {
+        root.unmount();
+        rootsMap.delete(domElement);
+        return true;
+    }
+    return false;
 }
 
 export default renderAiSidebar;

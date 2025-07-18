@@ -8,18 +8,15 @@ import { getPref } from "../utils/prefs";
 const keyboardManager = new KeyboardManager();
 
 interface BeaverWindow extends Window {
-    ReactDOM?: {
-        unmountComponentAtNode: (container: Element) => boolean;
-    };
-    renderAiSidebar?: (container: Element, location: string) => void;
-    renderGlobalInitializer?: (container: Element) => void;
+    renderAiSidebar?: (container: Element, location: string) => any; // Returns root
+    renderGlobalInitializer?: (container: Element) => any; // Returns root
+    unmountFromElement?: (container: Element) => boolean; // New unmount function
     __beaverEventBus?: any;
-    // Unmount functions if not using ReactDOM directly?
-    // unmountBeaverAiSidebar?: (container: Element) => void;
-    // unmountGlobalInitializer?: (container: Element) => void;
 }
 
 export class BeaverUIFactory {
+    // Store root references per window
+    private static windowRoots = new WeakMap<Window, Set<any>>();
 
     static registerChatPanel(win: BeaverWindow) {
         // Remove existing panel if present
@@ -71,16 +68,23 @@ export class BeaverUIFactory {
             // Initialize React UI
             initializeReactUI(win);
             
+            // Initialize roots tracking for this window
+            if (!this.windowRoots.has(win)) {
+                this.windowRoots.set(win, new Set());
+            }
+            const roots = this.windowRoots.get(win)!;
+            
             // Create and render global initializer once
             let globalInitializerRoot = win.document.getElementById("beaver-global-initializer-root");
             if (!globalInitializerRoot) {
                 globalInitializerRoot = win.document.createElement("div");
                 globalInitializerRoot.id = "beaver-global-initializer-root";
-                globalInitializerRoot.style.display = "none"; // It's not a visible component
+                globalInitializerRoot.style.display = "none";
                 win.document.documentElement.appendChild(globalInitializerRoot);
                 
                 if (typeof win.renderGlobalInitializer === 'function') {
-                    win.renderGlobalInitializer(globalInitializerRoot);
+                    const root = win.renderGlobalInitializer(globalInitializerRoot);
+                    if (root) roots.add(root);
                 } else {
                     ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
                 }
@@ -91,10 +95,12 @@ export class BeaverUIFactory {
             const readerRootEl = win.document.getElementById("beaver-react-root-reader");
             
             if (libraryRootEl && typeof win.renderAiSidebar === 'function') {
-                win.renderAiSidebar(libraryRootEl, "library");
+                const root = win.renderAiSidebar(libraryRootEl, "library");
+                if (root) roots.add(root);
             }
             if (readerRootEl && typeof win.renderAiSidebar === 'function') {
-                win.renderAiSidebar(readerRootEl, "reader");
+                const root = win.renderAiSidebar(readerRootEl, "reader");
+                if (root) roots.add(root);
             }
         };
     }
@@ -128,38 +134,57 @@ export class BeaverUIFactory {
     static removeChatPanel(win: BeaverWindow) {
         ztoolkit.log("[Beaver] BeaverUIFactory.removeChatPanel called.");
 
-        // Unmount React components
-        if (win.ReactDOM && typeof win.ReactDOM.unmountComponentAtNode === 'function') {
-            const reactRootIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
-            reactRootIds.forEach(id => {
+        // Unmount React components using the correct API
+        if (typeof win.unmountFromElement === 'function') {
+            const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
+            elementIds.forEach(id => {
                 const element = win.document.getElementById(id);
-                if (element && win.ReactDOM) {
+                if (element) {
                     try {
-                        win.ReactDOM.unmountComponentAtNode(element);
-                        ztoolkit.log(`[Beaver] Unmounted React component from #${id}`);
+                        const unmounted = win.unmountFromElement!(element);
+                        if (unmounted) {
+                            ztoolkit.log(`[Beaver] Unmounted React component from #${id}`);
+                        } else {
+                            ztoolkit.log(`[Beaver] No React root found for #${id}`);
+                        }
                     } catch (e: any) {
                         ztoolkit.log(`[Beaver] Error unmounting React component from #${id}: ${e.message}`);
                     }
                 }
             });
         } else {
-            ztoolkit.log("[Beaver] ReactDOM.unmountComponentAtNode not available on window object during cleanup.");
+            // Fallback: unmount all roots for this window
+            const roots = this.windowRoots.get(win);
+            if (roots) {
+                roots.forEach(root => {
+                    try {
+                        root.unmount();
+                        ztoolkit.log("[Beaver] Unmounted React root using fallback method");
+                    } catch (e: any) {
+                        ztoolkit.log(`[Beaver] Error unmounting React root: ${e.message}`);
+                    }
+                });
+                roots.clear();
+            }
+            ztoolkit.log("[Beaver] unmountFromElement function not available on window object during cleanup.");
         }
 
+        // Clean up roots tracking
+        this.windowRoots.delete(win);
+
+        // Remove DOM elements
         const elementIds = [
             "beaver-pane-library", 
             "beaver-pane-reader", 
             "zotero-beaver-tb-chat-toggle", 
             "beaver-tb-separator",
-            "beaver-global-initializer-root" // This is the div container for the global initializer
+            "beaver-global-initializer-root"
         ];
         elementIds.forEach(id => {
             const element = win.document.getElementById(id);
             if (element) {
                 element.remove();
                 ztoolkit.log(`[Beaver] Removed element #${id}`);
-            } else {
-                ztoolkit.log(`[Beaver] Element #${id} not found for removal.`);
             }
         });
 
@@ -168,8 +193,6 @@ export class BeaverUIFactory {
         if (scriptTag) {
             scriptTag.remove();
             ztoolkit.log("[Beaver] Removed React bundle script tag.");
-        } else {
-            ztoolkit.log("[Beaver] React bundle script tag not found for removal.");
         }
     }
 
