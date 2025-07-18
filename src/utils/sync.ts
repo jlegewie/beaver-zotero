@@ -867,12 +867,16 @@ async function getItemsToSync(
 
     // Get items
     let items: Zotero.Item[] = [];
+    // let collections: Zotero.Collection[] = [];
     if (isInitialSync) {
         items = await Zotero.Items.getAll(libraryID, false, false, false);
+        // collections = await getAllCollections(libraryID);
     } else if (lastSyncVersion !== null && syncMethod === 'version') {
         items = await getItemsSinceVersion(libraryID, lastSyncVersion);
+        // collections = await getCollectionsSinceVersion(libraryID, lastSyncVersion);
     } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
         items = await getModifiedItems(libraryID, lastSyncDate);
+        // collections = await getModifiedCollections(libraryID, lastSyncDate);
     } else {
         throw new Error(`Beaver Sync: Invalid sync state: ${syncMethod} ${lastSyncDate} ${lastSyncVersion}`);
     }
@@ -981,4 +985,15 @@ export async function getAllItemsToSync(
     const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
     const itemsToSync = allItems.filter(filterFunction);
     return itemsToSync;
+}
+
+/**
+ * Gets all collections in a library
+ * @param libraryID Zotero library ID
+ * @returns Promise resolving to array of Zotero collections
+ */
+async function getAllCollections(libraryID: number): Promise<Zotero.Collection[]> {
+    return (await Zotero.Collections.getAllIDs(libraryID))
+        .map(id => Zotero.Collections.get(id))
+        .filter(c => c.libraryID === libraryID && !c.deleted);
 }
