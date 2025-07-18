@@ -34,7 +34,7 @@ const GlobalContextInitializer = () => {
     useToggleSidebar();
 
     // Handle attachment status info row
-    useAttachmentStatusInfoRow();
+    // useAttachmentStatusInfoRow();
 
     return null; // This component does not render any UI
 };
