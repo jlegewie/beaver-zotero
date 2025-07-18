@@ -106,5 +106,3 @@ export function unmountFromElement(domElement: HTMLElement) {
     }
     return false;
 }
-
-export default renderAiSidebar;

@@ -35,6 +35,7 @@ export default (env, argv) => {
         output: {
             path: path.resolve(__dirname, 'addon', 'content'),
             filename: 'reactBundle.js',
+            library: 'BeaverReact',
             libraryTarget: 'umd',
             globalObject: 'this',
             umdNamedDefine: true

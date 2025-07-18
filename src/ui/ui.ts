@@ -8,6 +8,11 @@ import { getPref } from "../utils/prefs";
 const keyboardManager = new KeyboardManager();
 
 interface BeaverWindow extends Window {
+    BeaverReact?: {
+        renderAiSidebar: (container: Element, location: string) => any;
+        renderGlobalInitializer: (container: Element) => any;
+        unmountFromElement: (container: Element) => boolean;
+    };
     renderAiSidebar?: (container: Element, location: string) => any; // Returns root
     renderGlobalInitializer?: (container: Element) => any; // Returns root
     unmountFromElement?: (container: Element) => boolean; // New unmount function
@@ -65,6 +70,13 @@ export class BeaverUIFactory {
         win.document.documentElement.appendChild(script);
 
         script.onload = () => {
+            // After the bundle loads, BeaverReact is attached to the window.
+            if (win.BeaverReact) {
+                win.renderAiSidebar = win.BeaverReact.renderAiSidebar;
+                win.renderGlobalInitializer = win.BeaverReact.renderGlobalInitializer;
+                win.unmountFromElement = win.BeaverReact.unmountFromElement;
+            }
+
             // Initialize React UI
             initializeReactUI(win);
             
@@ -135,13 +147,13 @@ export class BeaverUIFactory {
         ztoolkit.log("[Beaver] BeaverUIFactory.removeChatPanel called.");
 
         // Unmount React components using the correct API
-        if (typeof win.unmountFromElement === 'function') {
+        if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
             const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
             elementIds.forEach(id => {
                 const element = win.document.getElementById(id);
                 if (element) {
                     try {
-                        const unmounted = win.unmountFromElement!(element);
+                        const unmounted = win.BeaverReact!.unmountFromElement(element);
                         if (unmounted) {
                             ztoolkit.log(`[Beaver] Unmounted React component from #${id}`);
                         } else {
