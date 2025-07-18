@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
@@ -229,7 +229,7 @@ const PreferencePage: React.FC = () => {
         switch (verifyStatus) {
             case 'running':
                 return {
-                    icon: DatabaseIcon,
+                    icon: Spinner,
                     iconClassName: 'animate-spin',
                     disabled: true,
                     text: 'Verifying...'
