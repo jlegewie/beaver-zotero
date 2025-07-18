@@ -82,7 +82,7 @@ export class BeaverUIFactory {
                 if (typeof win.renderGlobalInitializer === 'function') {
                     win.renderGlobalInitializer(globalInitializerRoot);
                 } else {
-                    Zotero.debug("Beaver Error: renderGlobalInitializer function not found on window object.");
+                    ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
                 }
             }
             
@@ -126,7 +126,7 @@ export class BeaverUIFactory {
     }
 
     static removeChatPanel(win: BeaverWindow) {
-        Zotero.debug("[Beaver] BeaverUIFactory.removeChatPanel called.");
+        ztoolkit.log("[Beaver] BeaverUIFactory.removeChatPanel called.");
 
         // Unmount React components
         if (win.ReactDOM && typeof win.ReactDOM.unmountComponentAtNode === 'function') {
@@ -136,14 +136,14 @@ export class BeaverUIFactory {
                 if (element && win.ReactDOM) {
                     try {
                         win.ReactDOM.unmountComponentAtNode(element);
-                        Zotero.debug(`[Beaver] Unmounted React component from #${id}`);
+                        ztoolkit.log(`[Beaver] Unmounted React component from #${id}`);
                     } catch (e: any) {
-                        Zotero.debug(`[Beaver] Error unmounting React component from #${id}: ${e.message}`);
+                        ztoolkit.log(`[Beaver] Error unmounting React component from #${id}: ${e.message}`);
                     }
                 }
             });
         } else {
-            Zotero.debug("[Beaver] ReactDOM.unmountComponentAtNode not available on window object during cleanup.");
+            ztoolkit.log("[Beaver] ReactDOM.unmountComponentAtNode not available on window object during cleanup.");
         }
 
         const elementIds = [
@@ -157,9 +157,9 @@ export class BeaverUIFactory {
             const element = win.document.getElementById(id);
             if (element) {
                 element.remove();
-                Zotero.debug(`[Beaver] Removed element #${id}`);
+                ztoolkit.log(`[Beaver] Removed element #${id}`);
             } else {
-                Zotero.debug(`[Beaver] Element #${id} not found for removal.`);
+                ztoolkit.log(`[Beaver] Element #${id} not found for removal.`);
             }
         });
 
@@ -167,9 +167,9 @@ export class BeaverUIFactory {
         const scriptTag = win.document.querySelector('script[src="chrome://beaver/content/reactBundle.js"]');
         if (scriptTag) {
             scriptTag.remove();
-            Zotero.debug("[Beaver] Removed React bundle script tag.");
+            ztoolkit.log("[Beaver] Removed React bundle script tag.");
         } else {
-            Zotero.debug("[Beaver] React bundle script tag not found for removal.");
+            ztoolkit.log("[Beaver] React bundle script tag not found for removal.");
         }
     }
 
