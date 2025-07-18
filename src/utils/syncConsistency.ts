@@ -301,10 +301,11 @@ export async function performConsistencyCheck(
 
     // After processing all backend data, sync remaining local items
     if (sendUpdates && localItemKeys.size > 0) {
-        logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} new items to add`, 3);
-
+        // TODO: This includes attachments with missing files. They are excluded from the actual sync but counted here.
         const zoteroItems = await Promise.all(Array.from(localItemKeys).map((key) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key)));
         const newItemsToSync: SyncItem[] = zoteroItems.filter(syncingItemFilter).map((item) => ({ action: 'upsert', item } as SyncItem));
+
+        logger(`Beaver Consistency Check '${consistencyId}': Found ${newItemsToSync.length} new items to add`, 3);
 
         if (newItemsToSync.length > 0) {
             try {
