@@ -4,9 +4,10 @@ interface ZoteroSyncToggleProps {
     checked: boolean;
     onChange: (checked: boolean) => void;
     disabled?: boolean;
+    error?: boolean;
 }
 
-const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, disabled }) => {
+const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, disabled, error }) => {
     const handleToggle = () => {
         onChange(!checked);
     };
@@ -36,9 +37,18 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
                             <div className="font-color-primary text-base">
                                 Sync with Zotero
                             </div>
-                            {!disabled && (
-                                <div className="font-color-secondary scale-90 px-15 py-05 text-sm rounded-md bg-quinary border-quinary">
+                            {!disabled && !error && (
+                                <div className="font-color-secondary scale-90 px-15 py-05 mt-020 text-sm rounded-md bg-quinary border-quinary">
                                     Recommended
+                                </div>
+                            )}
+                            {error && (
+                                <div
+                                    className="scale-90 px-15 py-05 mt-020 text-sm rounded-md bg-quinary border-error"
+                                    style={{ color: 'var(--tag-red-secondary)', borderColor: 'var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+                                    title="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
+                                >
+                                    Error
                                 </div>
                             )}
                         </div>

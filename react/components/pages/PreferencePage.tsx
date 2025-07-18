@@ -326,7 +326,8 @@ const PreferencePage: React.FC = () => {
                     <ZoteroSyncToggle 
                         checked={localSyncToggle}
                         onChange={handleSyncToggleChange}
-                        disabled={!isLibrarySynced(1)}
+                        disabled={!isLibrarySynced(1) && !syncWithZotero}
+                        error={!isLibrarySynced(1) && syncWithZotero}
                     />
                 </div>
             </div>
