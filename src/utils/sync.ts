@@ -837,6 +837,25 @@ async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?
     // return items.filter(item => item.libraryID === libraryID);
 }
 
+/**
+ * Gets collections that have been modified since a specific date
+ * @param libraryID Zotero library ID
+ * @param sinceDate Date to check modifications since
+ * @param untilDate Date to check modifications until (optional)
+ * @returns Promise resolving to array of modified Zotero items
+ */
+async function getModifiedCollections(libraryID: number, sinceDate: string, untilDate?: string): Promise<Zotero.Collection[]> {
+    // Updated item ids
+    let sql = "SELECT collectionID FROM collections WHERE libraryID=? AND clientDateModified > ?";
+    const params: any[] = [libraryID, sinceDate];
+    if (untilDate) {
+        sql += " AND clientDateModified <= ?";
+        params.push(untilDate);
+    }
+    const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
+    return await Zotero.Collections.getAsync(ids);
+}
+
 async function getItemsToSync(
     libraryID: number,
     isInitialSync: boolean,
@@ -917,6 +936,24 @@ async function getDeletedItemIDsSinceVersion(
         AND i.version  > ?              -- deleted after last sync
     `;
     return Zotero.DB.columnQueryAsync(sql, [libraryID, lastSyncLibraryVersion]) as Promise<number[]>;
+}
+
+/**
+ * Gets items based on version number
+ * @param libraryID Zotero library ID
+ * @param sinceVersion Zotero version number to check modifications since
+ * @param toVersion Zotero version number to check modifications until (optional)
+ * @returns Promise resolving to array of Zotero items
+ */
+async function getCollectionsSinceVersion(libraryID: number, sinceVersion: number, toVersion?: number): Promise<Zotero.Collection[]> {
+    let sql = "SELECT collectionID FROM collections WHERE libraryID=? AND version > ?";
+    const params: any[] = [libraryID, sinceVersion];
+    if (toVersion) {
+        sql += " AND version <= ?";
+        params.push(toVersion);
+    }
+    const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
+    return await Zotero.Collections.getAsync(ids);
 }
 
 /**
