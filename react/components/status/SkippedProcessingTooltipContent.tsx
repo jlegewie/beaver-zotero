@@ -21,7 +21,7 @@ export const SkippedProcessingTooltipContent: React.FC = () => {
 
     return (
         <div className="display-flex flex-col gap-1">
-            <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Plan limits</div>
+            <div className="text-base font-color-secondary mb-1 whitespace-nowrap">Reasons</div>
             {isLoading &&
                 <div className="text-base font-color-secondary mb-1 items-center display-flex flex-row">
                     <div className="mt-1"><Spinner size={14}/></div>
