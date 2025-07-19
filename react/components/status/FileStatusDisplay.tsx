@@ -65,10 +65,10 @@ const FileStatusDisplay: React.FC = () => {
         if (activeFiles > 0) {
             textParts.push(`${activeFiles.toLocaleString()} in progress`);
         }
-        
-        // if (fileStats.queuedProcessingCount > 0) {
-        //     textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
-        // }
+
+        if (textParts.length === 0 && fileStats.queuedProcessingCount > 0) {
+            textParts.push(`${fileStats.queuedProcessingCount.toLocaleString()} queued`);
+        }
         
         if (textParts.length === 0) {
             if (totalFiles === 0) return "No files";
