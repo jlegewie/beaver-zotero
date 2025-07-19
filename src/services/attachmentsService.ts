@@ -128,11 +128,13 @@ export interface ReadUploadQueueResponse {
 /**
  * Request body for marking an upload as failed
  */
+export type PlanLimitErrorCode = "plan_limit_unsupported_file" | "plan_limit_max_pages" | "plan_limit_file_size";
 export interface UpdateUploadStatusRequest {
     file_hash: string | string[];
     status: UploadStatus;
     update_processing_status: boolean;
     processing_tier?: ProcessingTier;
+    error_code?: PlanLimitErrorCode;
 }
 
 /**
@@ -353,13 +355,15 @@ export class AttachmentsService extends ApiService {
         fileHash: string | string[],
         status: UploadStatus,
         updateProcessingStatus: boolean = false,
-        processingTier?: ProcessingTier
+        processingTier?: ProcessingTier,
+        errorCode?: PlanLimitErrorCode
     ): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
             file_hash: fileHash,
             status: status,
             update_processing_status: updateProcessingStatus,
-            processing_tier: processingTier
+            processing_tier: processingTier,
+            error_code: errorCode
         };
         return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }
