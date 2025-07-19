@@ -231,6 +231,26 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
+     * Marks a temporary upload as completed for the given file hash.
+     * @param storagePath The storage path of the completed file
+     * @param fileHash The hash of the file that was completed
+     * @param mimeType The MIME type of the file
+     * @param fileSize The size of the file in bytes
+     * @param pageCount The number of pages in the file
+     * @returns Promise with the upload completed response
+     */
+    async markTemporaryUploadCompleted(storagePath: string, fileHash: string, mimeType: string, fileSize: number, pageCount: number | null): Promise<CompleteUploadResult> {
+        const request: CompleteUploadRequest = {
+            storage_path: storagePath,
+            file_hash: fileHash,
+            mime_type: mimeType,
+            file_size: fileSize,
+            page_count: pageCount
+        };
+        return this.post<CompleteUploadResult>('/api/v1/attachments/complete-temporary-upload', request);
+    }
+
+    /**
      * Marks multiple uploads as completed in a batch operation.
      * @param requests Array of complete upload requests
      * @returns Promise with an array of upload completed responses
