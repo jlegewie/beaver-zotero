@@ -52,7 +52,7 @@ export const DatabaseSyncStatus: React.FC = () => {
     };
 
     return (
-        <div className="display-flex flex-row gap-4 p-3 border-popup rounded-md bg-quinary">
+        <div className="display-flex flex-row gap-4 p-3 rounded-md bg-quinary">
             <div className="mt-1">
                 {getSyncIcon()}
             </div>
