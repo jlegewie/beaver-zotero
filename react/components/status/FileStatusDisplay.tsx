@@ -1,30 +1,22 @@
 import React from "react";
-import { AlertIcon, InformationCircleIcon } from "../icons/icons";
 import { useAtomValue } from "jotai";
-import { CheckmarkIcon, SpinnerIcon } from "./icons";
+import { CheckmarkIcon, SpinnerIcon, AlertIcon as AlertIconIcon } from "./icons";
+import { AlertIcon, InformationCircleIcon } from "../icons/icons";
 import { ProgressBar } from "./ProgressBar";
 import { fileStatusSummaryAtom } from "../../atoms/files";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
 import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
+import { ConnectionStatus } from "../../hooks/useFileStatus";
 
-const FileStatusDisplay: React.FC = () => {
+interface FileStatusDisplayProps {
+    connectionStatus: ConnectionStatus;
+}
+
+const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus }) => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
-
-    if (!fileStats || !fileStats.fileStatusAvailable) {
-        return (
-            <div className="display-flex flex-col gap-4 p-3 border-popup rounded-md bg-quinary min-w-0">
-                <div className="display-flex flex-row gap-4">
-                    <div className="mt-1">{SpinnerIcon}</div>
-                    <div className="display-flex flex-col gap-3 items-start flex-1">
-                        <div className="font-color-secondary text-lg">File Status</div>
-                        <div className="font-color-tertiary text-base">Initializing...</div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+    if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
 
     // Calculate overall statistics
     const totalFiles = fileStats.totalFiles;
@@ -50,6 +42,8 @@ const FileStatusDisplay: React.FC = () => {
     
     // Determine icon
     const getStatusIcon = (): React.ReactNode => {
+        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return SpinnerIcon;
+        if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return AlertIconIcon;
         if (isComplete) return CheckmarkIcon;
         return SpinnerIcon;
     };
@@ -78,6 +72,12 @@ const FileStatusDisplay: React.FC = () => {
         return textParts.join(", ");
     };
 
+    const getTitle = (): string => {
+        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return "Connecting...";
+        if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return "Unable to connect...";
+        return "File Status";
+    };
+
     return (
         <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">
             <div className="display-flex flex-row gap-4">
@@ -87,17 +87,17 @@ const FileStatusDisplay: React.FC = () => {
                 <div className="display-flex flex-col gap-3 items-start flex-1">
                     {/* Title */}
                     <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                        <div className="font-color-secondary text-lg">
-                            File Indexing
+                        <div className={`${connectionStatus === 'connected' ? 'font-color-secondary' : 'font-color-tertiary'} text-lg`}>
+                            {getTitle()}
                         </div>
                         <div className="flex-1"/>
                         <div className="font-color-tertiary text-base">
-                            {totalFiles.toLocaleString()} Files
+                            {connectionStatus === 'connected' && `${totalFiles.toLocaleString()} Files`}
                         </div>
                     </div>
 
                     {/* Progress bar and text */}
-                    {totalFiles > 0 && (
+                    {totalFiles > 0 && connectionStatus === 'connected' && (
                         <div className="w-full">
                             <ProgressBar progress={overallProgress} />
                             <div className="display-flex flex-row gap-4">
@@ -121,7 +121,7 @@ const FileStatusDisplay: React.FC = () => {
             </div>
 
             {/* Failed uploads */}
-            {fileStats.uploadFailedCount > 0 && (
+            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && (
                 <PaginatedFailedUploadsList
                     statuses={["failed"]}
                     count={fileStats.uploadFailedCount}
@@ -134,7 +134,7 @@ const FileStatusDisplay: React.FC = () => {
             )}
 
             {/* Failed processing */}
-            {fileStats.failedProcessingCount > 0 && (
+            {connectionStatus === 'connected' && fileStats.failedProcessingCount > 0 && (
                 <PaginatedFailedProcessingList
                     statuses={["failed_user", "failed_system"]}
                     count={fileStats.failedProcessingCount}
@@ -147,7 +147,7 @@ const FileStatusDisplay: React.FC = () => {
             )}
 
             {/* Skipped files (combined from upload and processing) */}
-            {fileStats.planLimitProcessingCount > 0 && (
+            {connectionStatus === 'connected' && fileStats.planLimitProcessingCount > 0 && (
                 <PaginatedFailedProcessingList
                     statuses={["plan_limit"]}
                     count={fileStats.planLimitProcessingCount}
