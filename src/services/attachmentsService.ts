@@ -115,7 +115,7 @@ export interface ValidationResponse {
     file_exists: boolean;
     processed: boolean;
     signed_upload_url?: string;
-    file_hash?: string;
+    upload_metadata?: Record<string, string>;
 }
 
 // Types that match the backend models
