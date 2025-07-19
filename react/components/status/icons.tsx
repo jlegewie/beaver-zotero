@@ -3,6 +3,7 @@ import { CheckmarkCircleIcon, CancelCircleIcon, Icon, Spinner, ThreeIcon, OneIco
 
 
 export const CancelIcon = <Icon icon={CancelCircleIcon} className="font-color-red scale-14" />;
+export const CheckmarkIconGrey = <Icon icon={CheckmarkCircleIcon} className="font-color-secondary scale-14" />;
 export const CheckmarkIcon = <Icon icon={CheckmarkCircleIcon} className="font-color-green scale-14" />;
 export const StepOneIcon = <Icon icon={OneIcon} className="font-color-secondary scale-14" />;
 export const StepTwoIcon = <Icon icon={TwoIcon} className="font-color-secondary scale-14" />;

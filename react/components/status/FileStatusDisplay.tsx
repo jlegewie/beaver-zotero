@@ -1,6 +1,6 @@
 import React from "react";
 import { useAtomValue } from "jotai";
-import { CheckmarkIcon, SpinnerIcon, AlertIcon as AlertIconIcon } from "./icons";
+import { CheckmarkIcon, SpinnerIcon, CheckmarkIconGrey, AlertIcon as AlertIconIcon } from "./icons";
 import { AlertIcon, InformationCircleIcon } from "../icons/icons";
 import { ProgressBar } from "./ProgressBar";
 import { fileStatusSummaryAtom } from "../../atoms/files";
@@ -44,6 +44,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const getStatusIcon = (): React.ReactNode => {
         if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return SpinnerIcon;
         if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return AlertIconIcon;
+        if(totalFiles === 0) return CheckmarkIconGrey;
         if (isComplete) return CheckmarkIcon;
         return SpinnerIcon;
     };
@@ -75,7 +76,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const getTitle = (): string => {
         if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return "Connecting...";
         if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return "Unable to connect...";
-        return "File Status";
+        if (totalFiles === 0) return "No files to process";
+        return "File Processing";
     };
 
     return (
