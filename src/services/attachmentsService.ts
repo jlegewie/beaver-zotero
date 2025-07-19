@@ -115,6 +115,7 @@ export interface ValidationResponse {
     file_exists: boolean;
     processed: boolean;
     signed_upload_url?: string;
+    storage_path?: string;
     upload_metadata?: Record<string, string>;
 }
 
