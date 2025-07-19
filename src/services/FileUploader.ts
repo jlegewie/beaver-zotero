@@ -384,6 +384,110 @@ export class FileUploader {
     }
 
     /**
+     * Uploads a temporary file to a provided URL and marks it as completed via the temporary upload endpoint.
+     * This is separate from the queue-based upload system and is designed for temporary file uploads.
+     * 
+     * @param filePath Absolute path to the file to upload
+     * @param uploadUrl Signed upload URL to upload the file to
+     * @param storagePath Storage path where the file will be stored
+     * @param fileHash Hash of the file being uploaded
+     * @param mimeType MIME type of the file
+     * @param uploadMetadata Optional metadata to include in the upload headers
+     * @returns Promise that resolves when upload and completion are finished
+     */
+    public async uploadTemporaryFile(
+        filePath: string,
+        uploadUrl: string,
+        storagePath: string,
+        fileHash: string,
+        mimeType: string,
+        uploadMetadata?: Record<string, string>
+    ): Promise<void> {
+        logger(`File Uploader Temporary: Starting temporary upload for ${filePath}`, 3);
+
+        // Check authentication
+        const userId = store.get(userIdAtom);
+        if (!userId) {
+            throw new Error('No user ID found');
+        }
+
+        // Read file content
+        let fileArrayBuffer: Uint8Array;
+        let fileSize: number;
+        try {
+            fileArrayBuffer = await IOUtils.read(filePath);
+            fileSize = fileArrayBuffer.length;
+        } catch (readError: any) {
+            logger(`File Uploader Temporary: Error reading file ${filePath}`, 1);
+            throw new Error(`Error reading file: ${readError.message}`);
+        }
+
+        // Get page count for PDFs
+        let pageCount: number | null = null;
+        if (mimeType === 'application/pdf') {
+            try {
+                // We need a Zotero item to get page count, so this is optional for temporary uploads
+                pageCount = null; // Could be enhanced later if needed
+            } catch (error) {
+                logger(`File Uploader Temporary: Could not get page count for PDF`, 3);
+            }
+        }
+
+        // Create blob from file content
+        const blob = new Blob([fileArrayBuffer], { type: mimeType });
+
+        // Upload with retry logic
+        let uploadSuccess = false;
+        let uploadAttempt = 0;
+        const maxUploadAttempts = 3;
+
+        while (!uploadSuccess && uploadAttempt < maxUploadAttempts) {
+            uploadAttempt++;
+            try {
+                logger(`File Uploader Temporary: Uploading file (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
+                
+                await this.uploadFileToGCS(uploadUrl, blob, mimeType, uploadMetadata || {});
+                
+                uploadSuccess = true;
+                logger(`File Uploader Temporary: Upload successful on attempt ${uploadAttempt}`, 3);
+
+            } catch (uploadError: any) {
+                logger(`File Uploader Temporary: Upload error on attempt ${uploadAttempt}: ${uploadError.message}`, 2);
+                
+                if (uploadAttempt < maxUploadAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt));
+                }
+            }
+        }
+
+        if (!uploadSuccess) {
+            throw new Error(`Failed to upload file after ${maxUploadAttempts} attempts`);
+        }
+
+        // Mark as completed via temporary upload endpoint
+        try {
+            const result = await attachmentsService.markTemporaryUploadCompleted(
+                storagePath,
+                fileHash,
+                mimeType,
+                fileSize,
+                pageCount
+            );
+            
+            if (!result.upload_completed) {
+                throw new Error(`Backend failed to mark temporary upload as completed: ${result.error}`);
+            }
+            
+            logger(`File Uploader Temporary: Successfully marked temporary upload as completed`, 3);
+        } catch (completionError: any) {
+            logger(`File Uploader Temporary: Failed to mark temporary upload as completed: ${completionError.message}`, 1);
+            throw new Error(`Upload succeeded but completion failed: ${completionError.message}`);
+        }
+
+        logger(`File Uploader Temporary: Temporary upload completed successfully`, 3);
+    }
+
+    /**
      * Adds a completion to the batch and manages batch sending
      */
     private async addCompletionToBatch(item: UploadQueueItem, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
