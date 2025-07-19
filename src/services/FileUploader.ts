@@ -11,7 +11,7 @@ import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, UploadQueueItem, CompleteUploadRequest } from './attachmentsService';
+import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
@@ -313,7 +313,7 @@ export class FileUploader {
             logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
             if (fileSizeInMB > sizeLimit) {
                 logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-                await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier);
+                await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier, "plan_limit_file_size");
                 return;
             }
 
@@ -529,10 +529,10 @@ export class FileUploader {
      * Handles plan limit failures by marking items as failed in the backend first, 
      * then removing them from the backend queue
      */
-    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, processingTier: ProcessingTier): Promise<void> {
+    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, processingTier: ProcessingTier, errorCode: PlanLimitErrorCode): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
-            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit', true, processingTier);
+            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit', true, processingTier, errorCode);
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
