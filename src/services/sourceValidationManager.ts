@@ -12,8 +12,9 @@ import { userIdAtom } from '../../react/atoms/auth';
  * Types of source validation
  */
 export enum SourceValidationType {
-    LIGHTWEIGHT = 'lightweight',  // file_exists OR processed passes
-    FULL = 'full'                 // requires upload if missing
+    LOCAL_ONLY = 'local_only',          // only local validation
+    PROCESSED_FILE = 'processed_file',  // processed file suffices (file_exists OR processed passes)
+    FULL_FILE = 'full_file',            // requires full file (upload if missing)
 }
 
 /**
@@ -44,7 +45,6 @@ interface ValidationCacheEntry {
  */
 export interface SourceValidationOptions {
     validationType: SourceValidationType;
-    enableUpload?: boolean;
     forceRefresh?: boolean;
 }
 
@@ -156,7 +156,7 @@ class SourceValidationManager {
         validationType: SourceValidationType,
         fileHash: string
     ): Promise<{ backendResponse: ValidationResponse; shouldUpload: boolean }> {
-        const requestUrl = validationType === SourceValidationType.FULL;
+        const requestUrl = validationType === SourceValidationType.FULL_FILE;
         
         try {
             const backendResponse = await attachmentsService.validateAttachment(
@@ -168,8 +168,8 @@ class SourceValidationManager {
 
             let shouldUpload = false;
             
-            if (validationType === SourceValidationType.LIGHTWEIGHT) {
-                // For lightweight validation, we pass if file exists OR is processed
+            if (validationType === SourceValidationType.PROCESSED_FILE) {
+                // For processed file validation, we pass if file exists OR is processed
                 // No upload required
             } else {
                 // For full validation, we need the file to exist
@@ -226,7 +226,8 @@ class SourceValidationManager {
      * Main validation method
      */
     async validateSource(source: InputSource, options: SourceValidationOptions): Promise<SourceValidationResult> {
-        const { validationType, enableUpload = true, forceRefresh = false } = options;
+        const { validationType, forceRefresh = false } = options;
+        const enableUpload = validationType === SourceValidationType.FULL_FILE;
         const cacheKey = this.getCacheKey(source, validationType);
 
         // Clean cache periodically
@@ -307,20 +308,21 @@ class SourceValidationManager {
         };
 
         try {
-            // Step 1: Local validation
+            // ------ Step 1: Local validation ------
             logger(`SourceValidationManager: Starting local validation for ${source.itemKey}`, 4);
             const localValidation = await this.performLocalValidation(source);
             
-            if (!localValidation.isValid) {
+            // Return if local validation is invalid or validation type is local only
+            if (!localValidation.isValid || validationType === SourceValidationType.LOCAL_ONLY) {
                 return {
                     ...baseResult,
-                    isValid: false,
+                    isValid: localValidation.isValid,
                     reason: localValidation.reason,
                     isValidating: false
                 };
             }
 
-            // Step 2: Backend validation (only for attachments)
+            // ------ Step 2: Backend validation (only for attachments) ------
             const item = getZoteroItem(source);
             if (!item || !item.isAttachment()) {
                 // Non-attachments that pass local validation are considered valid
@@ -342,7 +344,7 @@ class SourceValidationManager {
                 return {
                     ...baseResult,
                     isValid: false,
-                    reason: 'Unable to get file hash',
+                    reason: 'Unable to get file details',
                     isValidating: false
                 };
             }
@@ -356,14 +358,14 @@ class SourceValidationManager {
             let reason: string | undefined;
             let requiresUpload = false;
 
-            if (validationType === SourceValidationType.LIGHTWEIGHT) {
-                // Lightweight: pass if file exists OR is processed
+            if (validationType === SourceValidationType.PROCESSED_FILE) {
+                // Processed file: pass if file exists OR is processed
                 isValid = backendResponse.file_exists || backendResponse.processed;
                 if (!isValid) {
                     reason = 'File not available and not processed';
                 }
             } else {
-                // Full: require file to exist
+                // Require file: require file to exist
                 isValid = backendResponse.file_exists;
                 requiresUpload = shouldUpload;
                 if (!isValid && !requiresUpload) {
@@ -373,7 +375,7 @@ class SourceValidationManager {
                 }
             }
 
-            // Step 3: Upload if needed and enabled
+            // ------ Step 3: Upload if needed and enabled ------
             let uploaded = false;
             if (requiresUpload && enableUpload && backendResponse.signed_upload_url && backendResponse.storage_path) {
                 try {
@@ -414,11 +416,11 @@ class SourceValidationManager {
      * Invalidate cache for a specific source
      */
     invalidateSource(source: InputSource): void {
-        const lightweightKey = this.getCacheKey(source, SourceValidationType.LIGHTWEIGHT);
-        const fullKey = this.getCacheKey(source, SourceValidationType.FULL);
+        const processedFileKey = this.getCacheKey(source, SourceValidationType.PROCESSED_FILE);
+        const requireFileKey = this.getCacheKey(source, SourceValidationType.FULL_FILE);
         
-        this.validationCache.delete(lightweightKey);
-        this.validationCache.delete(fullKey);
+        this.validationCache.delete(processedFileKey);
+        this.validationCache.delete(requireFileKey);
         
         logger(`SourceValidationManager: Invalidated cache for ${source.itemKey}`, 4);
     }

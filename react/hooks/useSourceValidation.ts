@@ -16,8 +16,6 @@ import { logger } from '../../src/utils/logger';
 export interface UseSourceValidationOptions {
     source: InputSource;
     validationType?: SourceValidationType;
-    enabled?: boolean;
-    enableUpload?: boolean;
     forceRefresh?: boolean;
 }
 
@@ -26,9 +24,7 @@ export interface UseSourceValidationOptions {
  */
 export function useSourceValidation({
     source,
-    validationType = SourceValidationType.LIGHTWEIGHT,
-    enabled = true,
-    enableUpload = true,
+    validationType = SourceValidationType.PROCESSED_FILE,
     forceRefresh = false
 }: UseSourceValidationOptions): SourceValidationResult & {
     refresh: () => void;
@@ -44,12 +40,14 @@ export function useSourceValidation({
 
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
 
-    // Create validation function
+    // Validation function
     const validateSource = useCallback(async (force = false) => {
-        if (!enabled || !isAuthenticated) {
+
+        // If not authenticated, assume invalid and return
+        if (!isAuthenticated) {
             setValidationResult(prev => ({
                 ...prev,
-                isValid: true, // Assume valid if not authenticated
+                isValid: false,
                 isValidating: false,
                 backendChecked: false
             }));
@@ -59,9 +57,12 @@ export function useSourceValidation({
         try {
             setValidationResult(prev => ({ ...prev, isValidating: true }));
 
+            // sleep for 2 seconds (testing)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Backend validation (with cache)
             const options: SourceValidationOptions = {
                 validationType,
-                enableUpload,
                 forceRefresh: force
             };
 
@@ -77,7 +78,7 @@ export function useSourceValidation({
                 isValidating: false
             }));
         }
-    }, [source, validationType, enabled, enableUpload, forceRefresh, isAuthenticated]);
+    }, [source, validationType, forceRefresh, isAuthenticated]);
 
     // Run validation when dependencies change
     useEffect(() => {
