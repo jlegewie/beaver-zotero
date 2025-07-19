@@ -11,14 +11,13 @@ import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
-import FileUploadStatus from "../status/FileUploadStatus";
 import { isUploadCompleteAtom } from "../../atoms/files";
-import FileProcessingStatus from "../status/FileProcessingStatus";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
+import FileStatusDisplay from "../status/FileStatusDisplay";
 
 
 const OnboardingPage: React.FC = () => {
@@ -247,21 +246,7 @@ const OnboardingPage: React.FC = () => {
                                     <div>No connection. Please reconnect to continue with the onboarding process.</div>
                                 </div>
                             )}
-                            {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
-                                <div className="p-2 font-color-tertiary display-flex flex-row gap-3 items-start">
-                                    <Spinner size={14} className="mt-015"/>
-                                    <div>Connecting...</div>
-                                </div>
-                            )}
-                            {connectionStatus === 'connected' && (
-                                <>
-                                    {/* Uploading files */}
-                                    <FileUploadStatus/>
-
-                                    {/* File Processing */}
-                                    <FileProcessingStatus />
-                                </>
-                            )}
+                            <FileStatusDisplay connectionStatus={connectionStatus}/>
                         </div>
 
                     </div>
