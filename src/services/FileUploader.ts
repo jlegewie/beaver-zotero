@@ -19,6 +19,7 @@ import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
 import { getMimeType } from '../utils/zoteroUtils';
+import { ProcessingTier } from '../../react/types/profile';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -307,11 +308,12 @@ export class FileUploader {
 
             // File size limit
             const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
-            const sizeLimit = store.get(planFeaturesAtom).uploadFileSizeLimit;
+            const planFeatures = store.get(planFeaturesAtom);
+            const sizeLimit = planFeatures.uploadFileSizeLimit;
             logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
             if (fileSizeInMB > sizeLimit) {
                 logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-                await this.handlePlanLimitFailure(item, user_id, `File size exceeds ${sizeLimit}MB`);
+                await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier);
                 return;
             }
 
@@ -527,11 +529,10 @@ export class FileUploader {
      * Handles plan limit failures by marking items as failed in the backend first, 
      * then removing them from the backend queue
      */
-    private async handlePlanLimitFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
+    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, processingTier: ProcessingTier): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
-            // First, notify backend of failure
-            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit');
+            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit', true, processingTier);
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);

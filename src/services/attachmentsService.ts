@@ -4,6 +4,7 @@ import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero
 import { FileStatus } from '../../react/types/fileStatus';
 import { logger } from '../utils/logger';
 import { fileUploader } from './FileUploader';
+import { ProcessingTier } from '../../react/types/profile';
 
 // processing_status from backend
 export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
@@ -130,6 +131,8 @@ export interface ReadUploadQueueResponse {
 export interface UpdateUploadStatusRequest {
     file_hash: string | string[];
     status: UploadStatus;
+    update_processing_status: boolean;
+    processing_tier?: ProcessingTier;
 }
 
 /**
@@ -346,10 +349,17 @@ export class AttachmentsService extends ApiService {
      * @param status The status to update the upload to
      * @returns Promise with the upload failed response
      */
-    async updateUploadStatus(fileHash: string | string[], status: UploadStatus): Promise<UpdateUploadStatusResponse> {
+    async updateUploadStatus(
+        fileHash: string | string[],
+        status: UploadStatus,
+        updateProcessingStatus: boolean = false,
+        processingTier?: ProcessingTier
+    ): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
             file_hash: fileHash,
-            status: status
+            status: status,
+            update_processing_status: updateProcessingStatus,
+            processing_tier: processingTier
         };
         return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }
