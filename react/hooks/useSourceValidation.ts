@@ -57,9 +57,6 @@ export function useSourceValidation({
         try {
             setValidationResult(prev => ({ ...prev, isValidating: true }));
 
-            // sleep for 2 seconds (testing)
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
             // Backend validation (with cache)
             const options: SourceValidationOptions = {
                 validationType,
