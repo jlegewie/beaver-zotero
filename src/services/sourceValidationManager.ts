@@ -15,6 +15,7 @@ export enum SourceValidationType {
     LOCAL_ONLY = 'local_only',          // only local validation
     PROCESSED_FILE = 'processed_file',  // processed file suffices (file_exists OR processed passes)
     FULL_FILE = 'full_file',            // requires full file (upload if missing)
+    CACHED = 'cached',                  // use any available cached result (FULL_FILE > PROCESSED_FILE > LOCAL_ONLY), fallback to LOCAL_ONLY
 }
 
 /**
@@ -215,10 +216,68 @@ class SourceValidationManager {
     }
 
     /**
+     * Check for cached results in priority order for CACHED validation type
+     */
+    private async checkCachedResultsInPriority(source: InputSource): Promise<SourceValidationResult | null> {
+        // Priority order: FULL_FILE -> PROCESSED_FILE -> LOCAL_ONLY
+        const priorityOrder = [
+            SourceValidationType.FULL_FILE,
+            SourceValidationType.PROCESSED_FILE,
+            SourceValidationType.LOCAL_ONLY
+        ];
+
+        // Get current file hash for cache validation
+        let currentFileHash: string | undefined;
+        try {
+            const item = getZoteroItem(source);
+            if (item && item.isAttachment()) {
+                currentFileHash = await item.attachmentHash;
+            }
+        } catch (error) {
+            // Ignore hash errors for cache validation
+        }
+
+        for (const validationType of priorityOrder) {
+            const cacheKey = this.getCacheKey(source, validationType);
+            const cachedEntry = this.validationCache.get(cacheKey);
+            
+            if (cachedEntry && this.isCacheValid(cachedEntry, currentFileHash)) {
+                logger(`SourceValidationManager: Found cached result for ${source.itemKey} with type ${validationType}`, 4);
+                // Return the cached result but with the CACHED validation type
+                return {
+                    ...cachedEntry.result,
+                    validationType: SourceValidationType.CACHED
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Main validation method
      */
     async validateSource(source: InputSource, options: SourceValidationOptions): Promise<SourceValidationResult> {
         const { validationType, forceRefresh = false } = options;
+        
+        // Handle CACHED validation type
+        if (validationType === SourceValidationType.CACHED && !forceRefresh) {
+            this.cleanCache();
+            
+            // Check for cached results in priority order
+            const cachedResult = await this.checkCachedResultsInPriority(source);
+            if (cachedResult) {
+                return cachedResult;
+            }
+            
+            // No cached results found, fall back to LOCAL_ONLY validation
+            logger(`SourceValidationManager: No cached results found for ${source.itemKey}, falling back to LOCAL_ONLY`, 4);
+            return this.validateSource(source, { 
+                validationType: SourceValidationType.LOCAL_ONLY,
+                forceRefresh: false 
+            });
+        }
+
         const enableUpload = validationType === SourceValidationType.FULL_FILE;
         const cacheKey = this.getCacheKey(source, validationType);
 
