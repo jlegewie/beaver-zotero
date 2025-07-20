@@ -44,7 +44,7 @@ export function renderToMarkdown(
 ) : string {
 
     // Array of cited items
-    const citedItems: Zotero.Item[] = [];    
+    const citedItems: Zotero.Item[] = [];
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
