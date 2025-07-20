@@ -51,6 +51,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         //     return processed + "\n```";
         // }
         
+        // Clean up backticks around complete citations
+        processed = processed.replace(/`(<citation[^>]*\/>)`/g, '$1');
+
         // Filter out other partial tags
         const partialTagPatterns = [
             /<citation[^>]*$/,                // Partial citation tag

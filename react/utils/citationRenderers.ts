@@ -44,7 +44,10 @@ export function renderToMarkdown(
 ) : string {
 
     // Array of cited items
-    const citedItems: Zotero.Item[] = [];    
+    const citedItems: Zotero.Item[] = [];
+
+    // Clean up backticks around complete citations
+    text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
