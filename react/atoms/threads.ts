@@ -98,9 +98,11 @@ export const newThreadAtom = atom(
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
         // Update sources from Zotero selection or reader
-        if (isLibraryTab) {
+        const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
+        if (isLibraryTab && addSelectedItemsOnNewThread) {
             set(updateSourcesFromZoteroSelectionAtom);
-        } else {
+        }
+        if (!isLibraryTab) {
             set(updateReaderAttachmentAtom);
         }
         set(userScrolledAtom, false);

@@ -19,7 +19,10 @@ const LibrarySidebarContent = () => {
         const resetCurrentSources = useSetAtom(resetCurrentSourcesAtom);
         const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
         resetCurrentSources();
-        updateSourcesFromZoteroSelection(true);
+        const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
+        if (addSelectedItemsOnOpen) {
+            updateSourcesFromZoteroSelection(true);
+        }
     }
 
     // Watch for pane collapse
