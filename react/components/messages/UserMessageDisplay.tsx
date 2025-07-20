@@ -10,7 +10,7 @@ import { InputSource } from '../../types/sources';
 import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
 import { AnnotationButton } from '../input/AnnotationButton';
-import { MessageAttachmentWithId } from '../../types/attachments/uiTypes';
+import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -53,6 +53,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                                     key={index}
                                     source={source}
                                     canEdit={false}
+                                    validationType={SourceValidationType.LOCAL_ONLY}
                                 />
                             )
                         ))}
