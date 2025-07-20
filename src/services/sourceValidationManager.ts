@@ -187,7 +187,7 @@ class SourceValidationManager {
     /**
      * Upload file using temporary upload
      */
-    private async uploadFile(source: InputSource, uploadUrl: string, storagePath: string, fileHash: string): Promise<void> {
+    private async uploadFile(source: InputSource, uploadUrl: string, storagePath: string, uploadMetadata: Record<string, string>): Promise<void> {
         const item = getZoteroItem(source);
         if (!item || !item.isAttachment()) {
             throw new Error('Cannot upload non-attachment item');
@@ -199,14 +199,6 @@ class SourceValidationManager {
         }
 
         const mimeType = await getMimeType(item, filePath);
-        
-        // Prepare upload metadata
-        const uploadMetadata = {
-            userid: store.get(userIdAtom) || '',
-            filehash: fileHash,
-            libraryid: source.libraryID.toString(),
-            zoterokey: source.itemKey
-        };
 
         logger(`SourceValidationManager: Uploading file for ${source.itemKey}`, 3);
         
@@ -214,7 +206,7 @@ class SourceValidationManager {
             filePath,
             uploadUrl,
             storagePath,
-            fileHash,
+            uploadMetadata.filehash,
             mimeType,
             uploadMetadata
         );
@@ -325,6 +317,7 @@ class SourceValidationManager {
             // ------ Step 2: Backend validation (only for attachments) ------
             const item = getZoteroItem(source);
             if (!item || !item.isAttachment()) {
+                // TODO: ERROR HERE???? THIS PASSES REGULAR ITEMS WITHOUT CALLING BACKEND. IS THAT CORRECT? SHOULD WE VALIDATE ALL SELECTED ITEM ATTACHMENTS???
                 // Non-attachments that pass local validation are considered valid
                 return {
                     ...baseResult,
@@ -362,16 +355,16 @@ class SourceValidationManager {
                 // Processed file: pass if file exists OR is processed
                 isValid = backendResponse.file_exists || backendResponse.processed;
                 if (!isValid) {
-                    reason = 'File not available and not processed';
+                    reason = 'File not available';
                 }
             } else {
                 // Require file: require file to exist
                 isValid = backendResponse.file_exists;
                 requiresUpload = shouldUpload;
                 if (!isValid && !requiresUpload) {
-                    reason = 'File not available and no upload URL provided';
+                    reason = 'File upload failed';
                 } else if (!isValid && requiresUpload) {
-                    reason = 'File not available, upload required';
+                    reason = 'File upload failed';
                 }
             }
 
@@ -380,13 +373,13 @@ class SourceValidationManager {
             if (requiresUpload && enableUpload && backendResponse.signed_upload_url && backendResponse.storage_path) {
                 try {
                     logger(`SourceValidationManager: Starting file upload for ${source.itemKey}`, 3);
-                    await this.uploadFile(source, backendResponse.signed_upload_url, backendResponse.storage_path, fileHash);
+                    await this.uploadFile(source, backendResponse.signed_upload_url, backendResponse.storage_path, backendResponse.upload_metadata || {});
                     uploaded = true;
                     isValid = true;
                     reason = undefined;
                 } catch (uploadError: any) {
                     logger(`SourceValidationManager: Upload failed for ${source.itemKey}: ${uploadError.message}`, 1);
-                    reason = `Upload failed: ${uploadError.message}`;
+                    reason = 'File upload failed';
                 }
             }
 
