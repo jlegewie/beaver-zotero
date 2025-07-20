@@ -11,6 +11,8 @@ pref("showIndexingCompleteMessage", false);
 pref("keyboardShortcut", "l");
 pref("updateSourcesFromZoteroSelection", false);
 pref("statefulChat", true);
+pref("addSelectedItemsOnOpen", true);
+pref("addSelectedItemsOnNewThread", true);
 
 // AI settings
 pref("maxAttachments", 8);

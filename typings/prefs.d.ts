@@ -15,6 +15,8 @@ declare namespace _ZoteroTypes {
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
       "statefulChat": boolean;
+      "addSelectedItemsOnOpen": boolean;
+      "addSelectedItemsOnNewThread": boolean;
       "maxAttachments": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
