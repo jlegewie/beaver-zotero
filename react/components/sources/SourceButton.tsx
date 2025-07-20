@@ -81,7 +81,8 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         }, [source])
 
         // Remove the source
-        const handleRemove = () => {
+        const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
+            e.stopPropagation();
             cancelTimers(); // Cancel preview timers before removing
             setActivePreview(null); // Explicitly close any active preview
             removeSource(source);
