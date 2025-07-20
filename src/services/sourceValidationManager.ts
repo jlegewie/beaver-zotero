@@ -317,7 +317,7 @@ class SourceValidationManager {
             // ------ Step 2: Backend validation (only for attachments) ------
             const item = getZoteroItem(source);
             if (!item || !item.isAttachment()) {
-                // TODO: ERROR HERE???? THIS PASSES REGULAR ITEMS WITHOUT CALLING BACKEND. IS THAT CORRECT? SHOULD WE VALIDATE ALL SELECTED ITEM ATTACHMENTS???
+                // TODO: This sets regular items to valid WITHOUT checking the attachments! Validate all attachments!?
                 // Non-attachments that pass local validation are considered valid
                 return {
                     ...baseResult,
