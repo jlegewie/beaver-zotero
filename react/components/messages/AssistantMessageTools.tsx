@@ -56,6 +56,8 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
             if(toolCall.function.name === 'search_references_by_topic') return SearchIcon;
             if(toolCall.function.name === 'get_fulltext_content') return numResults ? ViewIcon : AlertIcon;
             if(toolCall.function.name === 'search_metadata') return SearchIcon;
+            if(toolCall.function.name === 'search_references_by_metadata') return SearchIcon;
+            if(toolCall.function.name === 'view_page_images') return ViewIcon;
             return SearchIcon;
         }
         return SearchIcon;
