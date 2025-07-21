@@ -181,5 +181,5 @@ export const fileStatusSummaryAtom = atom<FileStatusSummary>(
 
 export const isUploadCompleteAtom = atom<boolean>((get) => {
     const fileStatusSummary = get(fileStatusSummaryAtom);
-    return fileStatusSummary.uploadProgress >= 100;
+    return fileStatusSummary.uploadProgress >= 99;
 });
