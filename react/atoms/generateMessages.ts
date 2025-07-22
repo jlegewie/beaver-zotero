@@ -38,6 +38,7 @@ import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { updateAttachmentCitationsAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { userIdAtom } from './auth';
+import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -65,7 +66,8 @@ function flattenSources(
 }
 
 /**
- * Validates sources and removes invalid ones.
+ * Validates sources using the validation manager and removes invalid ones.
+ * Uses cached validation results when available to avoid redundant backend calls.
  * 
  * @param sources - Array of InputSource objects to be validated
  * @returns Array of valid sources sorted by timestamp
@@ -73,14 +75,40 @@ function flattenSources(
 async function validateSources(
     sources: InputSource[]
 ): Promise<InputSource[]> {
-    const validations = await Promise.all(sources.map(async (s) => {
-        const res = await isSourceValid(s);
-        return { source: s, isValid: res.valid };
+    logger(`validateSources: Validating ${sources.length} sources before sending message`, 3);
+    
+    const validations = await Promise.all(sources.map(async (source) => {
+        try {
+            // Use cached validation to check if source is usable
+            const result = await sourceValidationManager.validateSource(source, {
+                validationType: SourceValidationType.CACHED,
+                forceRefresh: false
+            });
+
+            // If still validating, we'll consider it valid to avoid delays
+            const isValid = result.isValid || result.isValidating;
+            
+            if (!isValid && result.reason) {
+                logger(`validateSources: Source ${source.itemKey} is invalid: ${result.reason}`, 2);
+            }
+            
+            return { source, isValid };
+        } catch (error: any) {
+            logger(`validateSources: Error validating source ${source.itemKey}: ${error.message}`, 1);
+            // Fall back to local validation if manager fails
+            const fallbackResult = await isSourceValid(source);
+            return { source, isValid: fallbackResult.valid };
+        }
     }));
 
     const validSources = validations
         .filter(v => v.isValid)
         .map(v => v.source);
+
+    const invalidCount = sources.length - validSources.length;
+    if (invalidCount > 0) {
+        logger(`validateSources: Filtered out ${invalidCount} invalid sources`, 2);
+    }
 
     return validSources.sort((a, b) => a.timestamp - b.timestamp);
 }

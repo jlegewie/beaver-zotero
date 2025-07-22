@@ -6,6 +6,7 @@ import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { AnnotationButton } from '../input/AnnotationButton';
+import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -58,6 +59,7 @@ const MessageAttachmentDisplay = ({
             {currentReaderAttachment && (
                 <SourceButton
                     source={currentReaderAttachment}
+                    validationType={SourceValidationType.FULL_FILE}
                 />
             )}
 
