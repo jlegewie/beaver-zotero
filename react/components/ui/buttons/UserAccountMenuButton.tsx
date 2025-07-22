@@ -4,8 +4,8 @@ import { MenuItem } from '../menu/ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon } from '../../icons/icons';
 import { isPreferencePageVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useAuth } from '../../../hooks/useAuth';
 import { hasCompletedOnboardingAtom } from '../../../atoms/profile';
+import { logoutAtom } from '../../../atoms/auth';
 
 interface UserAccountMenuButtonProps {
     className?: string;
@@ -21,7 +21,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
 }) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
-    const { signOut } = useAuth();
+    const logout = useSetAtom(logoutAtom);
 
     // Create menu items from threads
     const menuItems: MenuItem[] = [
@@ -40,7 +40,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         {
             label: "Logout",
             onClick: async () => {
-                await signOut();
+                logout();
             },
             icon: LogoutIcon,
         }
