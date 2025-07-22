@@ -52,7 +52,7 @@ class UIManager {
             (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
             
             // Force reader to use our width
-            Zotero.Reader.setSidebarWidth(this.sidebarWidth);
+            // Zotero.Reader.setSidebarWidth(this.sidebarWidth);
         }
     }
 
@@ -153,7 +153,7 @@ class UIManager {
                 (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
                 (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
                 // Force Zotero to use our fixed width
-                Zotero.Reader.setSidebarWidth(this.sidebarWidth);
+                // Zotero.Reader.setSidebarWidth(this.sidebarWidth);
             }
         } else {
             // Restore collapse state
