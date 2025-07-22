@@ -10,6 +10,11 @@ export const isLibraryTabAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
 export const showFileStatusDetailsAtom = atom(false);
 
+// Error Report Dialog
+export const isErrorReportDialogVisibleAtom = atom(false);
+export const errorReportTextAtom = atom('');
+export const isErrorReportSendingAtom = atom(false);
+
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 
