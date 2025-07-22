@@ -6,7 +6,6 @@ import { getMimeType } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/index';
 import { planFeaturesAtom } from '../../react/atoms/profile';
-import { userIdAtom } from '../../react/atoms/auth';
 
 /**
  * Types of source validation
@@ -57,7 +56,7 @@ class SourceValidationManager {
     private pendingValidations = new Map<string, Promise<SourceValidationResult>>();
     
     // Cache settings
-    private readonly CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+    private readonly CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
     private readonly MAX_CACHE_SIZE = 1000;
 
     /**
