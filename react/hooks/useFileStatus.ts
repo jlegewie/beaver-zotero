@@ -131,8 +131,8 @@ export const useFileStatus = (): FileStatusConnection => {
         try {
             // Clean up existing channel
             if (channelRef.current) {
-                await channelRef.current.unsubscribe();
-                supabase.realtime.removeChannel(channelRef.current);
+                // await channelRef.current.unsubscribe();
+                await supabase.realtime.removeChannel(channelRef.current);
                 channelRef.current = null;
             }
 
@@ -292,8 +292,8 @@ export const useFileStatus = (): FileStatusConnection => {
         if (channelRef.current) {
             logger(`useFileStatus: Cleaning up connection for user ${userIdRef.current}`, 1);
             
-            await channelRef.current.unsubscribe();
-            supabase.realtime.removeChannel(channelRef.current);
+            // await channelRef.current.unsubscribe();
+            await supabase.realtime.removeChannel(channelRef.current);
             channelRef.current = null;
             userIdRef.current = null;
             
