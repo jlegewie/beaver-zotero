@@ -1,8 +1,8 @@
 import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon } from '../../icons/icons';
-import { isPreferencePageVisibleAtom } from '../../../atoms/ui';
+import { SettingsIcon, UserIcon, LogoutIcon, BugIcon } from '../../icons/icons';
+import { isPreferencePageVisibleAtom, isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasCompletedOnboardingAtom } from '../../../atoms/profile';
 import { logoutAtom } from '../../../atoms/auth';
@@ -21,6 +21,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
 }) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
 
     // Create menu items from threads
@@ -36,6 +37,12 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             onClick: () => console.log('manage account'),
             icon: UserIcon,
             disabled: true,
+        },
+        {
+            label: "Report Error",
+            onClick: () => setErrorReportDialogVisible(true),
+            icon: BugIcon,
+            disabled: false,
         },
         {
             label: "Logout",

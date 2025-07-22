@@ -16,6 +16,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
+import ErrorReportDialog from './ErrorReportDialog';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
@@ -48,9 +49,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Login page */}
     if (!isAuthenticated || !isProfileLoaded) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <LoginPage emailInputRef={loginEmailRef} />
+                <ErrorReportDialog />
             </div>
         );
     }
@@ -58,9 +60,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Onboarding page */}
     if(!hasAuthorizedAccess || !hasCompletedOnboarding) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <OnboardingPage />
+                <ErrorReportDialog />
             </div>
         );
     }
@@ -68,9 +71,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Device authorization page */}
     if (!isDeviceAuthorized) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <DeviceAuthorizationPage />
+                <ErrorReportDialog />
             </div>
         );
     }
@@ -78,16 +82,17 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Preference page */}
     if (isPreferencePageVisible) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header settingsPage={true}/>
                 <PreferencePage />
+                <ErrorReportDialog />
             </div>
         );
     }
 
     {/* Main page */}
     return (
-        <div className="bg-sidepane h-full display-flex flex-col min-w-0">
+        <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
             
             {/* Header */}
             <Header />
@@ -113,6 +118,9 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                     <InputArea inputRef={inputRef} />
                 </DragDropWrapper>
             </div>
+
+            {/* Error Report Dialog */}
+            <ErrorReportDialog />
         </div>
     );
 };
