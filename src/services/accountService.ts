@@ -34,6 +34,13 @@ interface ZoteroSyncRequest {
     use_zotero_sync: boolean;
 }
 
+interface ErrorReportRequest {
+    message: string;
+    jotai_atoms?: Record<string, any>;
+    preferences?: Record<string, any>;
+    local_db_state?: Record<string, any>;
+}
+
 /**
  * Account-specific API service that extends the base API service
  */
@@ -147,6 +154,28 @@ export class AccountService extends ApiService {
         return this.post<{ message: string }>('/api/v1/account/update-zotero-sync-preference', {
             use_zotero_sync: useZoteroSync
         } as ZoteroSyncRequest);
+    }
+
+    /**
+     * Reports an error with optional context information
+     * @param message The error message to report
+     * @param jotaiAtoms Optional Jotai atoms state for debugging
+     * @param preferences Optional preferences for debugging
+     * @param localDbState Optional local database state for debugging
+     * @returns Promise with the response message
+     */
+    async reportError(
+        message: string,
+        jotaiAtoms?: Record<string, any>,
+        preferences?: Record<string, any>,
+        localDbState?: Record<string, any>
+    ): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/report-error', {
+            message,
+            jotai_atoms: jotaiAtoms,
+            preferences,
+            local_db_state: localDbState
+        } as ErrorReportRequest);
     }
 }
 
