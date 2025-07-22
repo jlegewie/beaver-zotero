@@ -49,3 +49,4 @@ export { default as CircleStatusIcon } from './CircleStatusIcon';
 export { default as DeleteIcon } from './DeleteIcon';
 export { default as PuzzleIcon } from './PuzzleIcon';
 export { default as DatabaseIcon } from './DatabaseIcon';
+export { default as BugIcon } from './BugIcon';
