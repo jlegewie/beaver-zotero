@@ -24,10 +24,27 @@ let authListenerInitialized = false;
 let authListenerCleanup: (() => void) | null = null;
 let authListenerRefCount = 0; // Reference counting
 
+// Helper function to compare session content instead of object reference
+function hasSessionChanged(oldSession: Session | null, newSession: Session | null): boolean {
+    // Both null/undefined
+    if (!oldSession && !newSession) return false;
+    
+    // One is null, other isn't
+    if (!oldSession || !newSession) return true;
+    
+    // Compare meaningful session properties
+    return (
+        oldSession.access_token !== newSession.access_token ||
+        oldSession.user?.id !== newSession.user?.id ||
+        oldSession.expires_at !== newSession.expires_at
+    );
+}
+
 export function useAuth() {
     const [session, setSession] = useAtom(sessionAtom);
     const [user, setUser] = useAtom(userAtom);
     const [loading, setLoading] = useState(true);
+    
     // useRef for current atom values to avoid re-rendering
     const sessionRef = useRef(session);
     const userRef = useRef(user);
@@ -53,62 +70,48 @@ export function useAuth() {
         const currentUserId = currentUser?.id ?? null;
         
         // --- Determine if Session Atom should be updated ---
-        // Update session if:
-        // - It's the initial load or sign out/in from null state
-        // - Token was refreshed, user updated, password recovery, MFA verified
-        // - The session object reference *actually* changes (covers most cases including token changes)
         const shouldUpdateSession =
-        event === 'INITIAL_SESSION' ||
-        event === 'SIGNED_OUT' ||
-        event === 'TOKEN_REFRESHED' ||
-        event === 'USER_UPDATED' ||
-        event === 'PASSWORD_RECOVERY' ||
-        event === 'MFA_CHALLENGE_VERIFIED' ||
-        (event === 'SIGNED_IN' && currentSession === null) || // Actual sign-in from logged out state
-        (newSession !== currentSession); // Catch-all for session object changes
+            event === 'INITIAL_SESSION' ||
+            event === 'SIGNED_OUT' ||
+            event === 'TOKEN_REFRESHED' ||
+            event === 'USER_UPDATED' ||
+            event === 'PASSWORD_RECOVERY' ||
+            event === 'MFA_CHALLENGE_VERIFIED' ||
+            (event === 'SIGNED_IN' && currentSession === null) || // Actual sign-in from logged out state
+            hasSessionChanged(currentSession, newSession); // Compare session content, not object reference
         
         if (shouldUpdateSession) {
-            logger(`auth: condition 'shouldUpdateSession' met for ${event}. Updating session atom.`);
+            logger(`auth: updating session atom for ${event}`);
             setSession(newSession);
         } else {
-            logger(`auth: condition 'shouldUpdateSession' NOT met for ${event}. Skipping session atom update.`);
+            logger(`auth: skipping session update for ${event} - no meaningful changes`);
         }
         
-        
         // --- Determine if User Atom should be updated ---
-        // Update user if:
-        // - User logs out (SIGNED_OUT)
-        // - User data is explicitly updated (USER_UPDATED)
-        // - A new user logs in (different ID or login from null state)
-        // - Initial load with a user
         const shouldUpdateUser =
-        event === 'SIGNED_OUT' ||
-        event === 'USER_UPDATED' ||
-        (newSession?.user && newUserId !== currentUserId) || // User ID changed or logged in from null
-        (event === 'INITIAL_SESSION' && newSession?.user); // Initial load with a user
+            event === 'SIGNED_OUT' ||
+            event === 'USER_UPDATED' ||
+            (newUserId && newUserId !== currentUserId) || // User ID changed or logged in from null
+            (event === 'INITIAL_SESSION' && newSession?.user); // Initial load with a user
         
         if (shouldUpdateUser) {
-            logger(`auth: condition 'shouldUpdateUser' met for ${event}. Updating user atom.`);
+            logger(`auth: updating user atom for ${event}`);
             if (newSession?.user) {
                 const { id, email, last_sign_in_at } = newSession.user;
-                // Avoid unnecessary updates if key data hasn't changed
                 const newAuthUser: AuthUser = { id, email, last_sign_in_at };
-                if (newAuthUser.id !== currentUser?.id || newAuthUser.email !== currentUser?.email/* || newAuthUser.last_sign_in_at !== currentUser?.last_sign_in_at */) {
-                    logger(`auth: user data changed for ${event}. Setting new user state.`);
+                // Only update if user data actually changed
+                if (newAuthUser.id !== currentUser?.id || newAuthUser.email !== currentUser?.email) {
                     setUser(newAuthUser);
                 } else {
-                    logger(`auth: user data seems unchanged for ${event}. Skipping user atom update.`);
+                    logger(`auth: user data unchanged for ${event}, skipping update`);
                 }
             } else {
-                logger(`auth: setting user atom to null for ${event}.`);
                 setUser(null);
             }
         } else {
-            logger(`auth: condition 'shouldUpdateUser' NOT met for ${event}. Skipping user atom update.`);
+            logger(`auth: skipping user update for ${event}`);
         }
-        
     }, [setSession, setUser]);
-    
     
     useEffect(() => {
         // Increment reference count
@@ -120,7 +123,6 @@ export function useAuth() {
             logger('auth: listener already initialized globally, skipping setup.');
             setLoading(false);
             return () => {
-                // Decrement reference count and cleanup if needed
                 authListenerRefCount--;
                 logger(`auth: component unmounting, ref count: ${authListenerRefCount}`);
                 
@@ -135,31 +137,9 @@ export function useAuth() {
         authListenerInitialized = true;
         logger('auth: initializing listener...');
         
-        // Initialize auth session
-        const initAuth = async () => {
-            setLoading(true);
-            try {
-                // Use getSession for initial state, but rely on onAuthStateChange for INITIAL_SESSION event
-                const { data, error } = await supabase.auth.getSession();
-                
-                if (error) {
-                    logger(`auth: getSession error during init: ${error.message}`);
-                } else {
-                    logger(`auth: getSession success during init ${data.session ? ' (session found)' : ' (no session)'}`);
-                    // Initial state might be set here briefly, but INITIAL_SESSION event will refine it
-                    sessionRef.current = data.session;
-                    userRef.current = data.session?.user ? { id: data.session.user.id, email: data.session.user.email, last_sign_in_at: data.session.user.last_sign_in_at } : null;
-                }
-                
-            } catch (error) {
-                logger(`auth: unexpected error during initAuth: ${error}`);
-            }
-        };
-        
         // Set up auth state change listener
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event, session) => {
-                // Use the stable handler
                 handleAuthStateChange(event, session);
                 // Set loading to false after the first event (INITIAL_SESSION) is processed
                 if (event === 'INITIAL_SESSION') {
@@ -173,12 +153,9 @@ export function useAuth() {
         authListenerCleanup = () => {
             logger(`auth: global unsubscribing from auth state changes`);
             subscription.unsubscribe();
-            authListenerInitialized = false; // Reset global flag
+            authListenerInitialized = false;
             authListenerCleanup = null;
         };
-        
-        // Initialize auth
-        initAuth();
         
         // Clean up subscription when the component unmounts
         return () => {
