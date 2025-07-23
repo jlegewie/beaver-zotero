@@ -648,7 +648,7 @@ export async function syncZoteroDatabase(
     const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
 
     // Initialize sync status for all libraries
-    for (const library of libraries) {
+    for (const library of librariesToSync) {
         updateSyncStatus(library.id, { status: 'in_progress', libraryName: library.name });
     }
 
