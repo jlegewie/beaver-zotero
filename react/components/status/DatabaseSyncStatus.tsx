@@ -44,10 +44,8 @@ export const DatabaseSyncStatus: React.FC = () => {
     };
 
     const getSyncIcon = (): React.ReactNode => {
-        if (isSyncComplete) return CheckmarkIcon;
         if (syncStatusSummary.anyFailed) return CancelIcon;
-        if (syncStatusSummary.progress < 100) return SpinnerIcon;
-        if (syncStatusSummary.progress >= 100) return CheckmarkIcon;
+        if (isSyncComplete) return CheckmarkIcon;
         return SpinnerIcon;
     };
 

@@ -51,7 +51,7 @@ export const syncStatusSummaryAtom = atom(
         const totalItems = libraryIds.reduce((sum, id) => sum + (syncStatus[id].itemCount || 0), 0);
         const syncedItems = libraryIds.reduce((sum, id) => sum + (syncStatus[id].syncedCount || 0), 0);
         const progress = totalItems > 0 ? Math.min(Math.round((syncedItems / totalItems) * 1000) / 10, 100) : 0;
-        const completed = libraryIds.every(id => syncStatus[id].status === 'completed') || progress >= 100;
+        const completed = libraryIds.length > 0 && libraryIds.every(id => syncStatus[id].status === 'completed');
         const anyFailed = libraryIds.some(id => syncStatus[id].status === 'failed');
 
         return {
