@@ -82,11 +82,12 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
 
     // Upload status
     const uploadPendingCount = fileStatus?.upload_pending || 0;
+    const uploadNotUploadedCount = fileStatus?.upload_not_uploaded || 0;
     const uploadCompletedCount = fileStatus?.upload_completed || 0;
     const uploadFailedCount = fileStatus?.upload_failed || 0;
     const uploadPlanLimitCount = fileStatus?.upload_plan_limit || 0;
     const uploadProgress = fileStatus && totalFiles > 0 
-        ? Math.round(((uploadCompletedCount + uploadFailedCount + uploadPlanLimitCount) / totalFiles) * 1000) / 10
+        ? Math.round(((uploadNotUploadedCount + uploadCompletedCount + uploadFailedCount + uploadPlanLimitCount) / totalFiles) * 1000) / 10
         : 0;
 
     // Processing status based on plan features
@@ -148,6 +149,7 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
         planLimitCount,
 
         // Upload status
+        uploadNotUploadedCount,
         uploadPendingCount,
         uploadCompletedCount,
         uploadFailedCount,

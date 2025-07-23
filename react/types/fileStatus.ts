@@ -10,6 +10,7 @@ export interface FileStatus {
     total_files: number;
 
     // Upload status
+    upload_not_uploaded: number;
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
@@ -57,6 +58,7 @@ export interface FileStatusSummary {
     planLimitCount: number,
 
     // Upload status
+    uploadNotUploadedCount: number,
     uploadPendingCount: number,
     uploadCompletedCount: number,
     uploadFailedCount: number,
