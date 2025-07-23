@@ -1,6 +1,6 @@
 import { attachmentCitationsAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
-import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForPlanLimitFilesAtom, fileStatusSummaryAtom, isUploadCompleteAtom } from "../atoms/files"
+import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForPlanLimitFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { currentMessageContentAtom, currentSourcesAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom, readerTextSelectionAtom, removedItemKeysCache } from "../atoms/input"
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
@@ -27,7 +27,7 @@ export const atomRegistry = {
     aggregatedErrorMessagesForFailedFiles: aggregatedErrorMessagesForFailedFilesAtom,
     aggregatedErrorMessagesForPlanLimitFiles: aggregatedErrorMessagesForPlanLimitFilesAtom,
     fileStatusSummary: fileStatusSummaryAtom,
-    isUploadComplete: isUploadCompleteAtom,
+    isUploadProcessed: isUploadProcessedAtom,
 
     // Input
     currentMessageContent: currentMessageContentAtom,

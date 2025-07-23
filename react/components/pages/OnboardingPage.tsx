@@ -11,7 +11,7 @@ import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
-import { isUploadCompleteAtom } from "../../atoms/files";
+import { isUploadProcessedAtom } from "../../atoms/files";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
@@ -27,7 +27,7 @@ const OnboardingPage: React.FC = () => {
     
     // Onboarding state
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
-    const isUploadComplete = useAtomValue(isUploadCompleteAtom);
+    const isUploadProcessed = useAtomValue(isUploadProcessedAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
@@ -183,11 +183,11 @@ const OnboardingPage: React.FC = () => {
     const getFooterMessage = () => {
         if (!isSyncComplete) {
             return "Waiting for initial syncing process to complete.";
-        } else if (!isUploadComplete) {
-            return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining)`;
-        } else if (isUploadComplete && fileStatusSummary && fileStatusSummary.uploadFailedCount > 0) {
+        } else if (!isUploadProcessed) {
+            return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
+        } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
-        } else if (isUploadComplete && fileStatusSummary && fileStatusSummary.uploadFailedCount === 0 && fileStatusSummary.progress < 100) {
+        } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount === 0 && fileStatusSummary.progress < 100) {
             return "File processing incomplete. Expect slower response times & limited search."
         }
         return "";
@@ -287,7 +287,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadComplete || !isSyncComplete || isCompletingOnboarding}
+                            disabled={!isUploadProcessed || !isSyncComplete || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete

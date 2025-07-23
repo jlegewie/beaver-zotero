@@ -181,7 +181,7 @@ export const fileStatusSummaryAtom = atom<FileStatusSummary>(
     }
 );
 
-export const isUploadCompleteAtom = atom<boolean>((get) => {
+export const isUploadProcessedAtom = atom<boolean>((get) => {
     const fileStatusSummary = get(fileStatusSummaryAtom);
-    return fileStatusSummary.uploadProgress >= 99;
+    return fileStatusSummary.uploadPendingCount === 0 && fileStatusSummary.fileStatusAvailable;
 });
