@@ -181,12 +181,14 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getFooterMessage = () => {
-        if (!isUploadComplete || !isSyncComplete) {
-            return "Please wait for the file uploads to complete.";
-        } else if (fileStatusSummary && fileStatusSummary.uploadFailedCount > 0) {
+        if (!isSyncComplete) {
+            return "Waiting for initial syncing process to complete.";
+        } else if (!isUploadComplete) {
+            return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining)`;
+        } else if (isUploadComplete && fileStatusSummary && fileStatusSummary.uploadFailedCount > 0) {
             return "Failed to upload some files. Please retry to use them with Beaver."
         } else if (isUploadComplete && fileStatusSummary && fileStatusSummary.uploadFailedCount === 0 && fileStatusSummary.progress < 100) {
-            return "Processing incomplete. Expect slower response times & limited search."
+            return "File processing incomplete. Expect slower response times & limited search."
         }
         return "";
     };
