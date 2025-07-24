@@ -5,7 +5,7 @@ import { currentMessageContentAtom, currentSourcesAtom, currentReaderAttachmentA
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, isSyncCompleteAtom } from "../atoms/sync"
-import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom } from "../atoms/threads"
+import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../index"
 
@@ -36,7 +36,7 @@ export const atomRegistry = {
     currentReaderAttachmentKey: currentReaderAttachmentKeyAtom,
     inputAttachmentCount: inputAttachmentCountAtom,
     readerTextSelection: readerTextSelectionAtom,
-    removedItemKeysCache: removedItemKeysCache,
+    // removedItemKeysCache: removedItemKeysCache,
 
     // Models
     supportedModels: supportedModelsAtom,
@@ -70,6 +70,9 @@ export const atomRegistry = {
     isCancellable: isCancellableAtom,
     isCancelling: isCancellingAtom,
     recentThreads: recentThreadsAtom,
+    threadMessages: threadMessagesAtom,
+    currentThreadId: currentThreadIdAtom,
+    currentAssistantMessageId: currentAssistantMessageIdAtom,
 
     // UI
     isSidebarVisible: isSidebarVisibleAtom,
