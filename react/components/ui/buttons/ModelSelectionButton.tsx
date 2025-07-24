@@ -158,10 +158,10 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         <div className="display-flex items-center gap-1">
             {(selectedModel?.reasoning_model || false) && <Icon icon={BrainIcon} />}
             {getButtonLabel()}
-            <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
+            {/* <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
                 <Icon icon={AiMagicIcon} />
                 <span>Agent</span>
-            </div>
+            </div> */}
             <Icon icon={ArrowDownIcon} className="scale-11 -ml-1" />
         </div>
     );
