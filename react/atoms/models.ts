@@ -104,7 +104,7 @@ export const validateSelectedModelAtom = atom(
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
 
         // Check if the selected model is still valid with current API keys
-        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
+        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id && m.access_id === selectedModel.access_id);
 
         // If not valid, revert to default or first available model
         if (!isModelAvailable) {
