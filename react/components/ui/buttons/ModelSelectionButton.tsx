@@ -21,21 +21,26 @@ const ModelMenuItemContent: React.FC<{
     isSelected: boolean;
 }> = ({ model, isSelected }) => {
     return (
-        <span className="display-flex items-center gap-2 min-w-0">
-            <span className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+        <div className="display-flex flex-row items-center gap-2 min-w-0">
+            <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                 {model.name}
-            </span>
+            </div>
             {model.reasoning_model
                 ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
                 : undefined
             }
-            {model.is_agent &&
-                <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
-                    <Icon icon={AiMagicIcon} />
-                    <span className="text-xs">Agent</span>
+            {model.use_app_key &&
+                <div className="text-xs font-color-quarternary items-center">
+                    <div className="text-xs">{model.credit_cost}x cost</div>
                 </div>
             }
-        </span>
+            {/* {model.is_agent &&
+                <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
+                    <Icon icon={AiMagicIcon} />
+                    <div className="text-xs">Agent</div>
+                </div>
+            } */}
+        </div>
     );
 };
 
@@ -69,7 +74,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             onClick: () => {},
         });
 
-        included_models.forEach((model) => {
+        included_models.sort((a, b) => Number(b.is_default) - Number(a.is_default)).forEach((model) => {
             items.push({
                 label: model.name,
                 onClick: () => {
@@ -79,7 +84,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel !== null && selectedModel.id === model.id}
+                        isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
                     />
                 )
             });
@@ -102,7 +107,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.id === model.id}
+                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
                         />
                     )
                 });
@@ -111,7 +116,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
         if (byok_models_agent.length > 0) {
             items.push({
-                label: 'Your API Keys: Agents',
+                label: 'Your API Keys',
                 isGroupHeader: true,
                 onClick: () => {},
             });
@@ -126,7 +131,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.id === model.id}
+                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
                         />
                     )
                 });

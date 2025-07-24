@@ -37,6 +37,7 @@ export interface ModelConfig {
 }
 
 export interface FullModelConfig extends ModelConfig {
+    access_id: string;
     use_app_key: boolean;
     credit_cost: number;
     is_default: boolean;

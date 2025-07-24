@@ -482,6 +482,7 @@ async function _processChatCompletionViaBackend(
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
         model_id: model.id,
+        access_id: model.access_id,
         frontend_version: Zotero.Beaver.pluginVersion || ''
     } as ChatCompletionRequestBody;
 
