@@ -98,6 +98,10 @@ const ErrorReportDialog: React.FC = () => {
                 preferences
                 // localDbState can be added later if needed
             );
+
+            // Local logging
+            console.log('Jotai state:', jotaiState);
+            console.log('Preferences:', preferences);
             
             // Close dialog after successful send
             setIsVisible(false);
