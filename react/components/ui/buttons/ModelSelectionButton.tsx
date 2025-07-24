@@ -31,7 +31,7 @@ const ModelMenuItemContent: React.FC<{
             }
             {model.use_app_key &&
                 <div className="text-xs font-color-quarternary items-center">
-                    <div className="text-xs">{model.credit_cost}x cost</div>
+                    <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost}x credits` : 'Unlimited'}</div>
                 </div>
             }
             {/* {model.is_agent &&
