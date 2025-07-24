@@ -107,7 +107,7 @@ export function organizeSourcesByRegularItems(attachments: MessageAttachmentWith
         
         // 2. Add standalone attachments or annotations (no parent)
         if(!zoteroItem.parentItem || zoteroItem.isAnnotation()) {
-            acc.push(createSourceFromAttachmentOrNote(zoteroItem));
+            acc.push(createSourceFromAttachmentOrNoteOrAnnotation(zoteroItem));
             return acc;
         }
 
@@ -133,20 +133,25 @@ export function organizeSourcesByRegularItems(attachments: MessageAttachmentWith
     }, [] as InputSource[]);
 }
 
-export function createSourceFromAttachmentOrNote(
+export function createSourceFromAttachmentOrNoteOrAnnotation(
     item: Zotero.Item,
     pinned: boolean = false
 ): InputSource {
     if (item.isRegularItem()) {
         throw new Error("Cannot call createSourceFromAttachment on a regular item");
     }
+    let type: InputSource["type"] = "attachment";
+    if (item.isAnnotation()) type = "annotation";
+    if (item.isNote()) type = "note";
+    if (item.isRegularItem()) type = "regularItem";
+
     return {
         id: uuidv4(),
         libraryID: item.libraryID,
         itemKey: item.key,
         pinned: pinned,
         timestamp: Date.now(),
-        type: item.isNote() ? "note" : "attachment",
+        type: type,
         parentKey: item.parentKey || null,
         childItemKeys: [],
     };

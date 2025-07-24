@@ -23,7 +23,7 @@ import {
     streamReasoningToMessageAtom,
 } from './threads';
 import { InputSource } from '../types/sources';
-import { createSourceFromAttachmentOrNote, getChildItems, isSourceValid } from '../utils/sourceUtils';
+import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
@@ -53,7 +53,7 @@ function flattenSources(
     const sourcesFromRegularItems = inputSources
         .filter((s) => s.type === "regularItem")
         .flatMap((s) => getChildItems(s).map((item) => {
-            const source = createSourceFromAttachmentOrNote(item);
+            const source = createSourceFromAttachmentOrNoteOrAnnotation(item);
             return {...source, timestamp: s.timestamp};
         })) as InputSource[];
     
