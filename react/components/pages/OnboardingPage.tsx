@@ -205,7 +205,10 @@ const OnboardingPage: React.FC = () => {
 
                 {/* Header section - always shown */}
                 <div className="display-flex flex-col items-start mb-3">
-                    <h1 className="text-2xl font-semibold">Welcome to Beaver 🦫</h1>
+                    <div className="display-flex flex-row gap-2 items-end">
+                        <img src="chrome://beaver/content/icons/beaver.png" style={{ width: '4rem', height: '4rem' }} />
+                        <div className="text-2xl font-semibold mb-2">Welcome to Beaver</div>
+                    </div>
                     <p className="text-base font-color-secondary -mt-1">
                         Beaver syncs your library, uploads your PDFs, and indexes your files for search. This process typically takes 20–60 minutes.
                     </p>
