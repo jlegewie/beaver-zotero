@@ -4,7 +4,6 @@ import { useAtomValue } from 'jotai'
 import { isProfileLoadedAtom, isProfileInvalidAtom } from '../../atoms/profile'
 import { OTPVerification } from './OTPVerification'
 import { sendOTP, verifyOTP, getOTPErrorMessage } from './otp'
-import Button from '../ui/Button'
 import { getPref, setPref } from '../../../src/utils/prefs'
 
 type AuthMethod = 'initial' | 'code' | 'password'
@@ -183,19 +182,18 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     setStep('method-selection')
     setError(null)
     setPassword('')
+    setPref("authMethod", "initial")
   }
 
   // Show loading while waiting for profile
   if (isWaitingForProfile) {
     return (
-      <div className="display-flex flex-col items-center gap-2 p-4">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+      <div className="text-center webapp-space-y-3">
+        <div className="webapp-spinner webapp-mx-auto"></div>
         <p className="text-sm font-color-secondary">Setting up your account...</p>
       </div>
     )
   }
-
-  // Forgot password just redirects to webapp - no form needed in plugin
 
   // Render OTP verification
   if (step === 'otp' && authMethod === 'code') {
@@ -216,13 +214,16 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
   // Render main login form
   return (
-    <div className="display-flex flex-col gap-5 w-full my-2">
+    <div className="webapp-space-y-6">
       {/* Initial login form with email and method selection */}
       {authMethod === 'initial' && (
-        <>
-          <div className="display-flex flex-col gap-2">
-            <div className="display-flex flex-row items-center justify-between">
-              <label htmlFor="email" className="text-sm font-medium">
+        <form onSubmit={(e) => {
+          e.preventDefault()
+          handleSendEmailCode()
+        }} className="webapp-space-y-6">
+          <div>
+            <div className="display-flex flex-row items-center justify-between mb-2">
+              <label htmlFor="email" className="block text-sm font-medium font-color-primary">
                 Email address
               </label>
               {error && (
@@ -233,8 +234,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                 </span>
               )}
             </div>
-            
-            
             <input
               id="email"
               type="email"
@@ -245,40 +244,54 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                 setErrorMsg(null)
               }}
               required
-              className="border-quinary rounded-md -ml-05 p-2 bg-quaternary focus:border-tertiary transition outline-none"
-              placeholder="your.email@example.com"
+              className="webapp-input"
+              placeholder="Enter your email"
               ref={emailInputRef}
             />
           </div>
 
-          <div className="display-flex flex-col gap-2">
-            <Button
-              onClick={handleSendEmailCode}
-              variant="solid"
-              className="ml-05"
-              loading={isLoading}
-              disabled={email === "" || isLoading}
+          <div className="webapp-space-y-3 display-flex flex-col items-center">
+            <button
+              type="submit"
+              disabled={!email || isLoading}
+              className="webapp-btn webapp-btn-primary"
             >
+              {isLoading && <div className="webapp-spinner"></div>}
               {isLoading ? 'Sending...' : 'Send code to email'}
-            </Button>
-            
-            <Button
-              onClick={() => setAuthMethod('password')}
-              variant="outline"
-              className="ml-05"
-              disabled={isLoading}
-            >
-              Use password
-            </Button>
+            </button>
+            <div className="text-center webapp-space-y-3">
+                <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMethod('password')
+                      setError(null)
+                      setErrorMsg(null)
+                      setPref("authMethod", "password")
+                    }}
+                    disabled={isLoading}
+                    className="webapp-link-muted text-sm"
+                >
+                    Use password
+                </button>
+              </div>
           </div>
-        </>
+        </form>
       )}
 
       {/* Password authentication */}
       {authMethod === 'password' && (
-        <form onSubmit={handlePasswordSubmit} className="display-flex flex-col gap-5">
-          <div className="display-flex flex-col gap-2">
-            <label htmlFor="email-password" className="text-sm font-medium">Email address</label>
+        <div className="webapp-space-y-5">
+          <div>
+            <div className="display-flex flex-row items-center justify-between mb-2">
+              <label htmlFor="email-password" className="block text-sm font-medium font-color-primary">
+                Email address
+              </label>
+              {error && (
+                <span className='text-xs font-color-red'>
+                  {error}
+                </span>
+              )}
+            </div>
             <input
               id="email-password"
               type="email"
@@ -289,62 +302,60 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                 setErrorMsg(null)
               }}
               required
-              className="border-quinary rounded-md -ml-05 p-2 bg-quaternary focus:border-tertiary transition outline-none"
-              placeholder="your.email@example.com"
+              className="webapp-input"
+              placeholder="Enter your email"
             />
           </div>
-          
-          <div className="display-flex flex-col gap-2">
-            <div className="display-flex flex-row gap-2 flex-1">
-              <label htmlFor="password" className="text-sm font-medium">Password</label>
-              <div className="flex-1" />
-              <div className="text-sm font-color-tertiary">
-                <span
-                  onClick={handleForgotPassword}
-                  className="font-color-tertiary hover:font-color-primary transition cursor-pointer"
-                  style={{textDecoration: 'none'}}
-                  onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                  onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
-                >
-                  Forgot password?
-                </span>
-              </div>
+
+          <form onSubmit={handlePasswordSubmit} className="webapp-space-y-6">
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium font-color-primary mb-2">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="webapp-input"
+                placeholder="Enter your password"
+                autoFocus
+              />
             </div>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="border-quinary rounded-md -ml-05 p-2 bg-quaternary transition outline-none"
-              placeholder="••••••••"
-              autoFocus
-            />
-          </div>
-          
-          <div className="display-flex flex-col gap-2">
-            <Button
+            
+            <button
               type="submit"
               onClick={() => setPref("authMethod", "password")}
-              variant="solid"
-              className="ml-05"
-              loading={isLoading}
-              disabled={email === "" || password === "" || isLoading}
-            >
-              {isLoading ? 'Signing in...' : 'Sign in'}
-            </Button>
-            
-            <Button
-              type="button"
-              onClick={resetToInitial}
-              variant="outline"
-              className="ml-05"
               disabled={isLoading}
+              className="webapp-btn webapp-btn-primary"
             >
-              Sign in with email code
-            </Button>
-          </div>
-        </form>
+              {isLoading && <div className="webapp-spinner"></div>}
+              {isLoading ? 'Signing in...' : 'Sign in'}
+            </button>
+            
+            <div className="text-center webapp-space-y-3">
+              <button
+                type="button"
+                onClick={resetToInitial}
+                disabled={isLoading}
+                className="webapp-link-muted text-sm"
+              >
+                Sign in with email code
+              </button>
+              <div>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={isLoading}
+                  className="webapp-link-muted text-sm"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   )

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { validateOTPCode } from './otp'
 import { createOTPInputHandlers } from './otp-ui'
-import Button from '../ui/Button'
 import { setPref } from '../../../src/utils/prefs'
 
 export interface OTPVerificationProps {
@@ -84,22 +83,22 @@ export function OTPVerification({
   const defaultDescription = `We sent a 6-digit code to ${email}`
 
   return (
-    <div className="display-flex flex-col gap-5 w-full my-2">
-      <div className="display-flex flex-col gap-2 text-center">
-        <h2 className="text-lg font-semibold">
-          {title}
-        </h2>
-        <p className="text-sm font-color-secondary">
-          {description || defaultDescription}
-        </p>
-      </div>
+    <div className="webapp-max-w-md">
+      <h1 className="webapp-text-2xl webapp-font-bold mb-4 font-color-primary">
+        {title}
+      </h1>
+      <p className="font-color-secondary mb-8">
+        {description || defaultDescription}
+      </p>
       
-      <div className="display-flex flex-col gap-4">
-        <div className="display-flex flex-col gap-2">
-          <label className="text-sm font-medium">
-            Verification code
-          </label>
-          <div className="display-flex flex-row">
+      <div className="webapp-space-y-6">
+        <div>
+          <div className="display-flex justify-between items-center mb-3">
+            <label className="text-sm font-medium font-color-primary">
+              Verification code
+            </label>
+          </div>
+          <div className="display-flex gap-2">
             {[0, 1, 2, 3, 4, 5].map((index) => (
               <input
                 key={index}
@@ -111,69 +110,46 @@ export function OTPVerification({
                 onKeyDown={(e) => handleOTPKeyDown(index, e)}
                 onPaste={(e) => handleOTPPaste(index, e)}
                 disabled={isLoading}
-                className="text-center border-popup rounded-md bg-quaternary focus:border-tertiary transition outline-none text-base font-medium disabled:opacity-50"
-                style={{
-                  width: '2rem',
-                  height: '2rem'
-                }}
+                className="webapp-otp-input"
               />
             ))}
           </div>
-          {error && <p className="text-red-800 text-sm text-center">{error}</p>}
+          <p className="font-color-red text-sm mt-1">{error || '\u00A0'}</p>
         </div>
         
-        <Button
+        <button
           onClick={handleVerify}
           disabled={!validateOTPCode(otpCode) || isLoading}
-          variant="solid"
-          className="ml-05"
-          loading={isLoading}
+          className="webapp-btn webapp-btn-primary"
         >
+          {isLoading && <div className="webapp-spinner"></div>}
           {isLoading ? 'Verifying...' : 'Verify Email'}
-        </Button>
+        </button>
         
-        <div className="display-flex flex-col gap-2 text-center">
-          <span
+        <div className="text-center webapp-space-y-3">
+          <button
             onClick={onResend}
-            className={`text-sm cursor-pointer font-color-tertiary hover:font-color-primary transition ${
-              resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            style={{
-              pointerEvents: resendCountdown > 0 || isLoading ? 'none' : 'auto',
-              textDecoration: 'none'
-            }}
-            onMouseEnter={(e) => {
-              if (resendCountdown === 0 && !isLoading) {
-                e.currentTarget.style.textDecoration = 'underline'
-              }
-            }}
-            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+            disabled={resendCountdown > 0 || isLoading}
+            className={`webapp-link text-sm ${resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            style={{ pointerEvents: resendCountdown > 0 || isLoading ? 'none' : 'auto' }}
           >
             {resendCountdown > 0 
               ? `Resend code in ${resendCountdown}s` 
               : 'Resend code'
             }
-          </span>
+          </button>
           
           {onChangeEmail && (
-            <span
-              onClick={onChangeEmail}
-              className={`text-sm cursor-pointer font-color-tertiary hover:font-color-primary transition ${
-                isLoading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-              style={{
-                pointerEvents: isLoading ? 'none' : 'auto',
-                textDecoration: 'none'
-              }}
-              onMouseEnter={(e) => {
-                if (!isLoading) {
-                  e.currentTarget.style.textDecoration = 'underline'
-                }
-              }}
-              onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
-            >
-              Wrong email? Change it
-            </span>
+            <div>
+              <button
+                onClick={onChangeEmail}
+                disabled={isLoading}
+                className={`webapp-link-muted text-sm ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
+              >
+                Wrong email? Change it
+              </button>
+            </div>
           )}
         </div>
       </div>

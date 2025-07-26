@@ -11,43 +11,39 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
     return (
         <div 
             id="login-page"
-            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 p-4"
+            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 py-4 px-4"
         >
-            <div style={{ height: '5vh' }}></div>
-            <div className="display-flex flex-col justify-center max-w-md mx-auto w-full">
+            <div style={{ height: '1rem' }}></div>
+            <div className="webapp-max-w-md webapp-mx-auto w-full">
                 {/* Header section */}
-                <div className="display-flex flex-col items-start mb-4">
-                    <div className="display-flex flex-row gap-2 items-end">
-                        <img src="chrome://beaver/content/icons/beaver.png" className="w-8 h-8" />
-                        {/* <h1 className="text-2xl font-semibold">Welcome to Beaver</h1> */}
-                    </div>
-                    {/* <p className="text-base font-color-secondary -mt-2">Your AI plugin for Zotero.</p> */}
+                <div className="mb-8 text-center">
+                    <h1 className="webapp-text-3xl webapp-font-bold font-color-primary mb-2">Welcome back</h1>
+                    <p className="font-color-secondary">Sign in to your Beaver account</p>
                 </div>
                 
-                {/* Form container with subtle background */}
-                <div className="w-90 rounded-lg border-quinary p-4 bg-quaternary">
+                {/* Form container */}
+                <div className="webapp-space-y-6">
                     <SignInForm setErrorMsg={setErrorMsg} emailInputRef={emailInputRef} />
-                    
                 </div>
+                
                 {/* Additional links */}
-                <div className="display-flex flex-col gap-2 mt-4 text-sm">
-                    {/* <a href="#" className="font-color-tertiary hover:font-color-primary transition">Forgot password?</a> */}
-                    <div className="display-flex gap-1">
-                        <span className="font-color-tertiary">Don't have an account?</span>
+                <div className="mt-8 text-center">
+                    <p className="font-color-secondary">
+                        Don&apos;t have an account?{' '}
                         <span
                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}
-                            className="font-color-secondary hover:font-color-primary transition"
-                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                            className="webapp-link font-medium"
                         >
-                            Sign up
+                            Get started
                         </span>
-                    </div>
+                    </p>
                 </div>
 
-                {errorMsg && (
-                    <p className="text-sm font-color-red text-center">{errorMsg}</p>
-                )}
+                {/* {errorMsg && (
+                    <div className="mt-8">
+                        <p className="text-sm font-color-red text-center">{errorMsg}</p>
+                    </div>
+                )} */}
             </div>
         </div>
     );

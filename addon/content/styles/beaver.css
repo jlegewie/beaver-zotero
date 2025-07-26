@@ -25,6 +25,20 @@
     --tag-red-quarternary: #ff66661f;
     --tag-red-quinary: #ff66660f;
     --tag-red-senary: #ff666608;
+
+    /* Webapp color scheme */
+    --webapp-background: #F5F0ED;
+    --webapp-foreground: #111729;
+    --webapp-primary: #111729;
+    --webapp-primary-foreground: #F5F0ED;
+    --webapp-secondary: #FFF;
+    --webapp-secondary-foreground: #111729;
+    --webapp-accent: #FFD700;
+    --webapp-muted: #F5F0ED;
+    --webapp-muted-foreground: #6B7280;
+    --webapp-border: #E8DDD6;
+    --webapp-input: #FFFFFF;
+    --webapp-ring: #111729;
 }
 
 /* Toolbar Button */
@@ -274,6 +288,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .fixed { position: fixed; }
 [id^="beaver-pane-"] .truncate { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 [id^="beaver-pane-"] .text-left { text-align: left; }
+[id^="beaver-pane-"] .text-center { text-align: center; }
+[id^="beaver-pane-"] .text-right { text-align: right; }
 [id^="beaver-pane-"] .align-self-start { align-self: flex-start; }
 
 [id^="beaver-pane-"] .absolute { position: absolute; }
@@ -342,6 +358,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .mb-2 { margin-bottom: 0.5rem; }
 [id^="beaver-pane-"] .mb-3 { margin-bottom: 0.75rem; }
 [id^="beaver-pane-"] .mb-4 { margin-bottom: 1rem; }
+[id^="beaver-pane-"] .mb-6 { margin-bottom: 1.5rem; }
+[id^="beaver-pane-"] .mb-8 { margin-bottom: 2rem; }
 [id^="beaver-pane-"] .mr-015 { margin-right: 0.15rem; }
 [id^="beaver-pane-"] .mr-1 { margin-right: 0.25rem; }
 [id^="beaver-pane-"] .mr-2 { margin-right: 0.5rem; }
@@ -399,6 +417,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .text-lg { font-size: 1.125rem; }
 [id^="beaver-pane-"] .text-xl { font-size: 1.25rem; }
 [id^="beaver-pane-"] .text-2xl { font-size: 1.5rem; }
+[id^="beaver-pane-"] .text-underline { text-decoration: underline; }
 [id^="beaver-pane-"] .font-medium { font-weight: 500; }
 [id^="beaver-pane-"] .font-semibold { font-weight: 600; }
 [id^="beaver-pane-"] .font-bold { font-weight: 700; }
@@ -1412,4 +1431,189 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .beaver-flash-text-failed {
     /* Use !important to override base color during animation */
     color: var(--tag-red) !important; 
+}
+
+/* Webapp button styles for login forms - using existing theme colors */
+[id^="beaver-pane-"] .webapp-btn {
+    padding: 1.3em;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    transition: all 300ms ease-in-out;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* align-self: center; */
+    gap: 0.5rem;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Primary button variant (Send code to email / Sign in) */
+[id^="beaver-pane-"] .webapp-btn-primary {
+    /* background-color: var(--accent-blue); */
+    background-color: var(--fill-primary);
+    color: var(--material-sidepane);
+    border-color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .webapp-btn-primary:hover:not(:disabled) {
+    filter: opacity(0.9);
+}
+
+[id^="beaver-pane-"] .webapp-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+}
+
+/* Secondary button variant (Use password / Sign in with email code) */
+[id^="beaver-pane-"] .webapp-btn-secondary {
+    background-color: var(--fill-quarternary);
+    color: var(--fill-secondary);
+    border-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .webapp-btn-secondary:hover:not(:disabled) {
+    background-color: var(--fill-tertiary);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .webapp-btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Input styles for login forms */
+[id^="beaver-pane-"] .webapp-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 0.5rem;
+    background-color: var(--material-mix-quarternary);
+    color: var(--fill-primary);
+    font-size: 0.875rem;
+    transition: border-color 0.2s ease-in-out;
+    outline: none;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+[id^="beaver-pane-"] .webapp-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .webapp-input:focus {
+    border-color: var(--fill-tertiary);
+    outline: none;
+}
+
+/* Typography styles for login forms */
+[id^="beaver-pane-"] .webapp-text-3xl {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+}
+
+[id^="beaver-pane-"] .webapp-text-2xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+}
+
+[id^="beaver-pane-"] .webapp-text-lg {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+}
+
+[id^="beaver-pane-"] .webapp-font-bold {
+    font-weight: 700;
+}
+
+/* Layout utilities for login forms */
+[id^="beaver-pane-"] .webapp-space-y-6 > * + * {
+    margin-top: 1.5rem;
+}
+
+[id^="beaver-pane-"] .webapp-space-y-5 > * + * {
+    margin-top: 1.25rem;
+}
+
+[id^="beaver-pane-"] .webapp-space-y-3 > * + * {
+    margin-top: 0.75rem;
+}
+
+[id^="beaver-pane-"] .webapp-space-y-2 > * + * {
+    margin-top: 0.5rem;
+}
+
+[id^="beaver-pane-"] .webapp-max-w-md {
+    max-width: 28rem;
+}
+
+[id^="beaver-pane-"] .webapp-mx-auto {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* OTP input styles */
+[id^="beaver-pane-"] .webapp-otp-input {
+    width: 3rem;
+    height: 3rem;
+    text-align: center;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 0.5rem;
+    background-color: var(--material-mix-quarternary);
+    color: var(--fill-primary);
+    font-size: 1.125rem;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.2s ease-in-out;
+    box-sizing: border-box;
+}
+
+[id^="beaver-pane-"] .webapp-otp-input:focus {
+    border-color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .webapp-otp-input:disabled {
+    opacity: 0.5;
+}
+
+/* Spinner for loading states */
+[id^="beaver-pane-"] .webapp-spinner {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Link styles */
+[id^="beaver-pane-"] .webapp-link {
+    color: var(--accent-blue);
+    text-decoration: none;
+    cursor: pointer;
+    border: 0px solid transparent;
+    box-shadow: none;
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .webapp-link:hover {
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .webapp-link-muted {
+    color: var(--fill-secondary);
+    text-decoration: none;
+    cursor: pointer;
+    border: 0px solid transparent;
+    box-shadow: none;
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .webapp-link-muted:hover {
+    color: var(--fill-primary);
+    text-decoration: underline;
 }
