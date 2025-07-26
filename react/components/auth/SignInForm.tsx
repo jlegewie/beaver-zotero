@@ -20,7 +20,10 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [authMethod, setAuthMethod] = useState<AuthMethod>('initial')
+  const [authMethod, setAuthMethod] = useState<AuthMethod>(() => {
+    const storedAuthMethod = getPref("authMethod");
+    return (storedAuthMethod === 'password' || storedAuthMethod === 'code') ? storedAuthMethod : 'initial';
+  })
   const [step, setStep] = useState<LoginStep>('method-selection')
   const [resendCountdown, setResendCountdown] = useState(0)
   const [isWaitingForProfile, setIsWaitingForProfile] = useState(false)
