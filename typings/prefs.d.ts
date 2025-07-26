@@ -12,6 +12,7 @@ declare namespace _ZoteroTypes {
       "currentPlanId": string;
       "installedVersion": string;
       "showIndexingCompleteMessage": boolean;
+      "authMethod": string;
       "keyboardShortcut": string;
       "updateSourcesFromZoteroSelection": boolean;
       "statefulChat": boolean;
