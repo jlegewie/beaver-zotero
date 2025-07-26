@@ -16,7 +16,8 @@ const loadEnv = (mode) => {
         return {
             SUPABASE_URL: process.env.SUPABASE_URL,
             SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-            API_BASE_URL: process.env.API_BASE_URL
+            API_BASE_URL: process.env.API_BASE_URL,
+            WEBAPP_BASE_URL: process.env.WEBAPP_BASE_URL
         };
     }
 
@@ -66,7 +67,8 @@ export default (env, argv) => {
                 'process.env.NODE_ENV': JSON.stringify(mode),
                 'process.env.SUPABASE_URL': JSON.stringify(envVars.SUPABASE_URL),
                 'process.env.SUPABASE_ANON_KEY': JSON.stringify(envVars.SUPABASE_ANON_KEY),
-                'process.env.API_BASE_URL': JSON.stringify(envVars.API_BASE_URL)
+                'process.env.API_BASE_URL': JSON.stringify(envVars.API_BASE_URL),
+                'process.env.WEBAPP_BASE_URL': JSON.stringify(envVars.WEBAPP_BASE_URL)
             })
         ]
     };

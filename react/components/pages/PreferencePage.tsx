@@ -282,7 +282,7 @@ const PreferencePage: React.FC = () => {
                             variant="outline"
                             disabled={true}
                             icon={UserIcon}
-                            onClick= {() => Zotero.launchURL('https://www.beaverapp.ai/login')}
+                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
                         >
                             Manage Account
                         </Button>

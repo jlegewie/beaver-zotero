@@ -34,7 +34,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         },
         {
             label: "Manage account",
-            onClick: () => Zotero.launchURL('https://www.beaverapp.ai/login'),
+            onClick: () => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login'),
             icon: UserIcon,
             disabled: false,
         },
