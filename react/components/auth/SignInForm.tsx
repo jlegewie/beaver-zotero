@@ -218,7 +218,20 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       {authMethod === 'initial' && (
         <>
           <div className="display-flex flex-col gap-2">
-            <label htmlFor="email" className="text-sm font-medium">Email</label>
+            <div className="display-flex flex-row items-center justify-between">
+              <label htmlFor="email" className="text-sm font-medium">
+                Email address
+              </label>
+              {error && (
+                <span className='text-xs font-color-red'>
+                  {error == 'Signups not allowed for otp'
+                    ? <span>Invalid email address</span>
+                    : error}
+                </span>
+              )}
+            </div>
+            
+            
             <input
               id="email"
               type="email"
@@ -262,7 +275,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       {authMethod === 'password' && (
         <form onSubmit={handlePasswordSubmit} className="display-flex flex-col gap-5">
           <div className="display-flex flex-col gap-2">
-            <label htmlFor="email-password" className="text-sm font-medium">Email</label>
+            <label htmlFor="email-password" className="text-sm font-medium">Email address</label>
             <input
               id="email-password"
               type="email"
