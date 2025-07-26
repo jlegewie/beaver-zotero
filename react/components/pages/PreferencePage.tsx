@@ -278,7 +278,14 @@ const PreferencePage: React.FC = () => {
                         <div className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
-                        <Button variant="outline" disabled={true} icon={UserIcon} onClick={() => Zotero.getActiveZoteroPane().loadURI('https://beaver.org/account')}>Manage Account</Button> {/* Example: Open web page */}
+                        <Button
+                            variant="outline"
+                            disabled={true}
+                            icon={UserIcon}
+                            onClick= {() => Zotero.launchURL('https://www.beaverapp.ai/login')}
+                        >
+                            Manage Account
+                        </Button>
                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
                 </div>
