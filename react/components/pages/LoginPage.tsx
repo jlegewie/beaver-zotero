@@ -34,15 +34,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
                     {/* <a href="#" className="font-color-tertiary hover:font-color-primary transition">Forgot password?</a> */}
                     <div className="display-flex gap-1">
                         <span className="font-color-tertiary">Don't have an account?</span>
-                        <a
-                            href="#"
+                        <span
+                            onClick={() => Zotero.launchURL('https://www.beaverapp.ai/join')}
                             className="font-color-secondary hover:font-color-primary transition"
-                            style={{textDecoration: 'none'}}
                             onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
                             onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
                         >
                             Sign up
-                        </a>
+                        </span>
                     </div>
                 </div>
 
