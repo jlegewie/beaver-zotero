@@ -17,9 +17,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
             <div className="webapp-max-w-md webapp-mx-auto w-full">
                 {/* Header section */}
                 <div className="mb-8 text-center">
-                    <img src="chrome://beaver/content/icons/beaver.png" style={{ width: '5rem', height: '5rem' }} />
-                    <div className="webapp-text-3xl webapp-font-bold font-color-primary mb-2">Welcome back</div>
-                    <p className="font-color-secondary">Sign in to your Beaver account</p>
+                    <img src="chrome://beaver/content/icons/beaver.png" style={{ width: '4.5rem', height: '4.5rem' }} />
+                    <div className="webapp-text-3xl webapp-font-bold font-color-primary mb-2">Beaver</div>
+                    <div className="font-color-secondary">Sign in to your account</div>
                 </div>
                 
                 {/* Form container */}
