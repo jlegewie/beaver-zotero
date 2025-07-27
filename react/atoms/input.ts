@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { InputSource } from "../types/sources";
 import { createSourceFromItem } from "../utils/sourceUtils";
-import { threadAttachmentCountAtom, userAttachmentKeysAtom } from "./threads";
+import { threadAttachmentCountWithoutAnnotationsAtom, userAttachmentKeysAtom } from "./threads";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from "../../src/utils/logger";
@@ -122,11 +122,12 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         ].sort((a, b) => a.timestamp - b.timestamp);
 
         // Enforce limit on number of attachments
-        const userAttachmentCount = get(threadAttachmentCountAtom);
+        const userAttachmentCount = get(threadAttachmentCountWithoutAnnotationsAtom);
         const maxUserAttachments = get(planFeaturesAtom).maxUserAttachments;
         const availableAttachments = maxUserAttachments - userAttachmentCount;
 
-        const newSourcesFiltered = newSources.slice(0, availableAttachments);
+        const newSourcesAnnotations = newSources.filter((s) => s.type === "annotation");
+        const newSourcesFiltered = newSources.filter((s) => s.type != "annotation").slice(0, availableAttachments);
         if (newSourcesFiltered.length < newSources.length) {
             set(addPopupMessageAtom, {
                 type: 'warning',
@@ -138,7 +139,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         // Update state: merge and sort by timestamp
         set(
             currentSourcesAtom,
-            newSourcesFiltered
+            [...newSourcesFiltered, ...newSourcesAnnotations]
         );
     }
 );

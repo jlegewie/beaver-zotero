@@ -33,6 +33,11 @@ export const threadAttachmentCountAtom = atom<number>((get) => {
     return [...new Set(userAttachmentKeys)].length;
 });
 
+export const threadAttachmentCountWithoutAnnotationsAtom = atom<number>((get) => {    
+    const keys = get(userAttachmentsAtom).filter((a) => a.type != "annotation").map((a) => a.zotero_key);
+    return [...new Set(keys)].length;
+});
+
 
 // True after a chat request is sent and before the first assistant response arrives.
 // Used to show a spinner during initial LLM response loading.
