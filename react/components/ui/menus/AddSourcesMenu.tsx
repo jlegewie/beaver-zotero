@@ -288,7 +288,7 @@ const AddSourcesMenu: React.FC<{
         // Delay the onClose call to ensure focus happens after menu is fully closed
         setTimeout(() => {
             onClose();
-        }, 0);
+        }, 5);
     }
 
     const handleButtonClick = (e: React.MouseEvent) => {
