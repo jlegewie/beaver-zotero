@@ -14,9 +14,20 @@ interface AuthorizeLibraryAccessProps {
     useZoteroSync: boolean;
     handleSyncToggleChange: (checked: boolean) => void;
     disableSyncToggle: boolean;
+    consentToShare: boolean;
+    handleConsentChange: (checked: boolean) => void;
 }
 
-const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics, useZoteroSync, handleSyncToggleChange, disableSyncToggle }) => {
+const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
+    onSelectionChange,
+    libraryStatistics,
+    setLibraryStatistics,
+    useZoteroSync,
+    handleSyncToggleChange,
+    disableSyncToggle,
+    consentToShare,
+    handleConsentChange
+}) => {
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -310,8 +321,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
                             disabled={disableSyncToggle}
                         />
                         <ConsentToggle
-                            checked={false}
-                            onChange={() => {}}
+                            checked={consentToShare}
+                            onChange={handleConsentChange}
                         />
                     </div>
                 )}

@@ -35,6 +35,7 @@ const OnboardingPage: React.FC = () => {
 
     // Sync toggle state
     const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
+    const [consentToShare, setConsentToShare] = useState<boolean>(false);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
@@ -68,6 +69,10 @@ const OnboardingPage: React.FC = () => {
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
         setUseZoteroSync(checked);
+    };
+
+    const handleConsentChange = (checked: boolean) => {
+        setConsentToShare(checked);
     };
 
     // Handle authorization
@@ -116,7 +121,7 @@ const OnboardingPage: React.FC = () => {
                 })
                 .filter(library => library !== null);
             
-            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync);
+            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync, consentToShare);
 
             // Update local state
             if (profileWithPlan) {
@@ -225,6 +230,8 @@ const OnboardingPage: React.FC = () => {
                         disableSyncToggle={!isLibrarySynced(1)}
                         useZoteroSync={useZoteroSync}
                         handleSyncToggleChange={handleSyncToggleChange}
+                        consentToShare={consentToShare}
+                        handleConsentChange={handleConsentChange}
                     />
                 )}
 
