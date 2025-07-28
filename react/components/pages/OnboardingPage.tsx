@@ -262,15 +262,32 @@ const OnboardingPage: React.FC = () => {
             <div className="p-4 border-top-quinary">
                 {/* Library selection button */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-row">
+                    <div className="display-flex flex-row items-center">
+                        <div className="font-color-secondary text-sm">
+                            {`By continuing, you agree to our `}
+                            <a 
+                                className="text-link cursor-pointer" 
+                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
+                            >
+                                Terms of Service
+                            </a>
+                            {` and `}
+                            <a 
+                                className="text-link cursor-pointer" 
+                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
+                            >
+                                Privacy Policy
+                            </a>.
+                        </div>
                         <div className="flex-1" />
                         <Button
                             variant="solid"
+                            className="fit-content"
                             rightIcon={isAuthorizing ? Spinner : ArrowRightIcon}
                             onClick={handleAuthorize}
                             disabled={!isLibrarySelectionValid || isAuthorizing}
                         >
-                            Authorize & Continue
+                            Continue
                         </Button>
                     </div>
                 )}
