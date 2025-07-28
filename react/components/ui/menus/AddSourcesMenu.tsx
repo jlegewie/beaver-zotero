@@ -15,6 +15,7 @@ import { logger } from '../../../../src/utils/logger';
 import { planFeaturesAtom } from '../../../atoms/profile';
 import { threadAttachmentCountAtom } from '../../../atoms/threads';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { isAppKeyModelAtom } from '../../../atoms/models';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -339,13 +340,15 @@ const AddSourcesMenu: React.FC<{
             
             if (!exists) {
                 // Check attachment limit before adding
-                const availableAttachments = planFeatures.maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);
+                const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
+                const maxUserAttachments = isAppKeyModel ? planFeatures.maxUserAttachments : getPref("maxAttachments");
+                const availableAttachments = maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);
                 
                 if (availableAttachments <= 0) {
                     setPopupMessage({
                         type: 'warning',
                         title: 'Attachment Limit Exceeded',
-                        text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                        text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
                         expire: true
                     });
                     return;

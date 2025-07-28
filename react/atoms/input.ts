@@ -8,6 +8,7 @@ import { logger } from "../../src/utils/logger";
 import { getPref } from "../../src/utils/prefs";
 import { planFeaturesAtom } from "./profile";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
+import { isAppKeyModelAtom } from "./models";
 
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
@@ -123,7 +124,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
 
         // Enforce limit on number of attachments
         const userAttachmentCount = get(threadAttachmentCountWithoutAnnotationsAtom);
-        const maxUserAttachments = get(planFeaturesAtom).maxUserAttachments;
+        const maxUserAttachments = get(isAppKeyModelAtom) ? get(planFeaturesAtom).maxUserAttachments : getPref("maxAttachments");
         const availableAttachments = maxUserAttachments - userAttachmentCount;
 
         const newSourcesAnnotations = newSources.filter((s) => s.type === "annotation");
@@ -134,7 +135,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
             set(addPopupMessageAtom, {
                 type: 'warning',
                 title: 'Attachment Limit Exceeded',
-                text: `Maximum of ${get(planFeaturesAtom).maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                text: `Maximum of ${get(planFeaturesAtom).maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
                 expire: true
             });
         }

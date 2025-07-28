@@ -11,6 +11,8 @@ import { threadAttachmentCountAtom, userAttachmentKeysAtom } from '../../atoms/t
 import { planFeaturesAtom } from '../../atoms/profile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
+import { getPref } from '../../../src/utils/prefs';
+import { isAppKeyModelAtom } from '../../atoms/models';
 
 interface SourcePreviewRegularItemProps {
     source: InputSource;
@@ -26,6 +28,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     const userAttachmentKeys = useAtomValue(userAttachmentKeysAtom);
     const setPopupMessage = useSetAtom(addPopupMessageAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
+    const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
 
@@ -64,7 +67,8 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
     }, [source]);
 
     const handleToggleItem = (itemKey: string) => {
-        const availableAttachments = planFeatures.maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);        
+        const maxUserAttachments = isAppKeyModel ? planFeatures.maxUserAttachments : getPref("maxAttachments");
+        const availableAttachments = maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);        
         const currentChildItemKeys = source.childItemKeys || [];
         const isCurrentlySelected = currentChildItemKeys.includes(itemKey);
 
@@ -72,7 +76,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
             setPopupMessage({
                 type: 'warning',
                 title: 'Attachment Limit Exceeded',
-                text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove some attachments to add more.`,
+                text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
                 expire: true
             });
             return;
