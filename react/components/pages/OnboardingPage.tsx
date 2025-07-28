@@ -199,7 +199,7 @@ const OnboardingPage: React.FC = () => {
             className="display-flex flex-col flex-1 min-h-0 min-w-0"
         >
             {/* Scrollable content area */}
-            <div id="1" className="overflow-y-auto scrollbar flex-1 p-4 mr-1">
+            <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Top spacing */}
                 {/* <div style={{ height: '5vh' }}></div> */}
 
@@ -218,7 +218,7 @@ const OnboardingPage: React.FC = () => {
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
-                    <div id="2" className="display-flex flex-col gap-4 flex-1 min-h-0">
+                    <div className="display-flex flex-col gap-4 flex-1 min-h-0">
                         <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
                         <div className="text-base font-color-secondary">
                             Select the libraries you want to sync with Beaver.
