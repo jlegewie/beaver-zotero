@@ -197,6 +197,16 @@ const OnboardingPage: React.FC = () => {
         }
         return "";
     };
+
+    const getHeaderMessage = () => {
+        if (!hasAuthorizedAccess) {
+            // Step 1: Library Selection & Authorization
+            return "Beaver syncs your Zotero libraries, uploads your PDFs and attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link this Zotero account to your Beaver account.";
+        } else {
+            // Step 2: Syncing Process
+            return "We're now syncing your Zotero library and processing your files. This usually takes 20-60 minutes, depending on your library size and server load.\n\nYou can safely close Beaver and return later - just make sure Zotero stays open so syncing can continue in the background.";
+        }
+    };
     
     return (
         <div 
@@ -205,19 +215,14 @@ const OnboardingPage: React.FC = () => {
         >
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
-                {/* Top spacing */}
-                {/* <div style={{ height: '5vh' }}></div> */}
-
                 {/* Header section - always shown */}
                 <div className="display-flex flex-col items-start mb-3">
                     <div className="display-flex flex-row gap-2 items-end">
                         <img src="chrome://beaver/content/icons/beaver.png" style={{ width: '4rem', height: '4rem' }} />
                         <div className="text-2xl font-semibold mb-2">Welcome to Beaver</div>
                     </div>
-                    <p className="text-base font-color-secondary">
-                        Beaver syncs your Zotero libraries, uploads your PDFs and attachments, and indexes them for search and AI features.
-                        This takes 20-60 minutes.
-                        By continuing, you confirm you're authorized to upload these files and link this Zotero account to your Beaver account.
+                    <p className="text-base font-color-secondary" style={{ whiteSpace: 'pre-line' }}>
+                        {getHeaderMessage()}
                     </p>
                 </div>
 
