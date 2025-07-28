@@ -31,8 +31,10 @@ interface OnboardingRequest {
     processing_tier: ProcessingTier;
 }
 
-interface ZoteroSyncRequest {
-    use_zotero_sync: boolean;
+
+interface PreferenceRequest {
+    preference: "consent_to_share" | "use_zotero_sync";
+    value: boolean;
 }
 
 interface ErrorReportRequest {
@@ -153,15 +155,18 @@ export class AccountService extends ApiService {
         } as OnboardingRequest);
     }
 
+
     /**
-     * Updates the user's Zotero sync preference
-     * @param useZoteroSync Whether to use Zotero sync
+     * Updates the user's preference
+     * @param preference The preference to update
+     * @param value The value to set for the preference
      * @returns Promise with the response message
      */
-    async updateZoteroSyncPreference(useZoteroSync: boolean): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/api/v1/account/update-zotero-sync-preference', {
-            use_zotero_sync: useZoteroSync
-        } as ZoteroSyncRequest);
+    async updatePreference(preference: PreferenceRequest["preference"], value: PreferenceRequest["value"]): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/update-preference', {
+            preference,
+            value
+        } as PreferenceRequest);
     }
 
     /**

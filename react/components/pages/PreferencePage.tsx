@@ -180,7 +180,7 @@ const PreferencePage: React.FC = () => {
         if (confirm(message)) {
             try {
                 logger(`User confirmed to ${action} Zotero sync. New value: ${checked}`);
-                await accountService.updateZoteroSyncPreference(checked);
+                await accountService.updatePreference('use_zotero_sync', checked);
 
                 setProfileWithPlan((prev) => {
                     if (!prev) return null;
