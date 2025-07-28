@@ -127,8 +127,10 @@ export const updateSourcesFromZoteroItemsAtom = atom(
         const availableAttachments = maxUserAttachments - userAttachmentCount;
 
         const newSourcesAnnotations = newSources.filter((s) => s.type === "annotation");
-        const newSourcesFiltered = newSources.filter((s) => s.type != "annotation").slice(0, availableAttachments);
-        if (newSourcesFiltered.length < newSources.length) {
+        const newSourcesNonAnnotations = newSources.filter((s) => s.type !== "annotation");
+        const newSourcesFiltered = newSourcesNonAnnotations.slice(0, availableAttachments);
+
+        if (newSourcesFiltered.length < newSourcesNonAnnotations.length) {
             set(addPopupMessageAtom, {
                 type: 'warning',
                 title: 'Attachment Limit Exceeded',
