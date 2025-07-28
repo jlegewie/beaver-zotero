@@ -124,182 +124,183 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
     
     return (
-        <div className="display-flex flex-col flex-1 min-h-0 gap-3">
-            {/* <div className="text-lg font-semibold">Step 1: Select Libraries</div> */}
+        <div className="display-flex flex-col gap-4 flex-1 min-h-0">
+            <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
+            <div className="text-base font-color-secondary">
+                Select the libraries you want to sync with Beaver.
+            </div>
+            <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
-            {/* <div className="text-base font-color-secondary">
-                Select the libraries you want to sync. Beaver will sync your Zotero library, upload your PDFs, and index your files for search. This process can take 60 minutes or more.
-            </div> */}
-            
-            {/* Library list */}
-            <div className="display-flex flex-col gap-2">
-                {libraries.map((library) => {
-                    // Find detailed statistics for this library if available
-                    const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
-                    const isSelected = selectedLibraryIds.includes(library.id);
-                    
-                    return (
-                        <div 
-                            key={library.id}
-                            className="display-flex flex-col gap-2 p-2 rounded-md hover:bg-senary cursor-pointer"
-                            onClick={() => handleLibraryToggle(library.id)}
-                        >
-                            <div className="display-flex flex-row gap-2 items-start">
+                {/* Library list */}
+                <div className="display-flex flex-col gap-2">
+                    {libraries.map((library) => {
+                        // Find detailed statistics for this library if available
+                        const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
+                        const isSelected = selectedLibraryIds.includes(library.id);
+                        
+                        return (
+                            <div 
+                                key={library.id}
+                                className="display-flex flex-col gap-2 p-2 rounded-md hover:bg-senary cursor-pointer"
+                                onClick={() => handleLibraryToggle(library.id)}
+                            >
+                                <div className="display-flex flex-row gap-2 items-start">
 
-                                <input
-                                    type="checkbox" 
-                                    className="mr-1 scale-90"
-                                    checked={isSelected}
-                                    onChange={() => handleLibraryToggle(library.id)}
-                                    onClick={handleCheckboxClick}
-                                />
+                                    <input
+                                        type="checkbox" 
+                                        className="mr-1 scale-90"
+                                        checked={isSelected}
+                                        onChange={() => handleLibraryToggle(library.id)}
+                                        onClick={handleCheckboxClick}
+                                    />
 
-                                <div className="display-flex flex-col gap-3">
-                                    <div className="display-flex flex-row gap-3 items-center">
-                                        <CSSIcon name="library" className="icon-16" />
-                                        <div className="font-color-primary text-base">
-                                            {library.name}
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Statistics or loading spinner */}
-                                    <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
-                                        {isLoading ? (
-                                            <div className="display-flex flex-row gap-2 items-start">
-                                                <Spinner className="mt-015" size={14} />
-                                                <div className="display-flex flex-col gap-1">
-                                                    <div className="font-color-secondary text-sm">
-                                                        Loading library statistics...
-                                                    </div> 
-                                                </div>
+                                    <div className="display-flex flex-col gap-3">
+                                        <div className="display-flex flex-row gap-3 items-center">
+                                            <CSSIcon name="library" className="icon-16" />
+                                            <div className="font-color-primary text-base">
+                                                {library.name}
                                             </div>
-                                        ) : statistics ? (
-                                            <>
-                                                {statistics.itemCount.toLocaleString()} items,{' '}
-                                                {statistics.attachmentCount.toLocaleString()} attachments,{' '}
-                                                {statistics.pageCount.toLocaleString()} pages
-                                            </>
-                                        ) : (
-                                            "No statistics available"
-                                        )}
+                                        </div>
+                                        
+                                        {/* Statistics or loading spinner */}
+                                        <div className="display-flex flex-row gap-3 font-color-secondary text-sm ml-05">
+                                            {isLoading ? (
+                                                <div className="display-flex flex-row gap-2 items-start">
+                                                    <Spinner className="mt-015" size={14} />
+                                                    <div className="display-flex flex-col gap-1">
+                                                        <div className="font-color-secondary text-sm">
+                                                            Loading library statistics...
+                                                        </div> 
+                                                    </div>
+                                                </div>
+                                            ) : statistics ? (
+                                                <>
+                                                    {statistics.itemCount.toLocaleString()} items,{' '}
+                                                    {statistics.attachmentCount.toLocaleString()} attachments,{' '}
+                                                    {statistics.pageCount.toLocaleString()} pages
+                                                </>
+                                            ) : (
+                                                "No statistics available"
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                        );
+                    })}
+                </div>
+
+                {isLoading && (
+                    <div className="font-color-tertiary text-sm">
+                        Loading library statistics may take a few minutes...
+                    </div>
+                )}
+                
+                {/* Free Account */}
+                {!isLoading && planName === 'free' && (
+                    <div className="mt-4 display-flex flex-col gap-3">
+                        <div className="p-3 rounded-md bg-senary border-popup">
+                            <div className="display-flex flex-row items-center mb-1">
+                                <div className="font-medium">{planDisplayName} Account (free)</div>
+                                <div className="flex-1"/>
+                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
+                                {exceedsBalance && (
+                                    <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                        <div className='text-sm font-medium font-color-yellow'>
+                                            Account limit exceeded
+                                        </div>
+                                        <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
+                            </div>
                         </div>
-                    );
-                })}
+                        <div className="p-3 rounded-md bg-senary">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <div className="font-medium">Upgrade Account</div>
+                                <Button variant="surface">Upgrade</Button>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Better search with semantic document understanding
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Core Account */}
+                {!isLoading && planName === 'core' && (
+                    <div className="mt-4 display-flex flex-col gap-3">
+                        <div className="p-3 rounded-md bg-senary border-popup">
+                            <div className="display-flex flex-row items-center mb-1">
+                                <div className="font-medium">{planDisplayName} Account</div>
+                                <div className="flex-1"/>
+                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
+                                {exceedsBalance && (
+                                    <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                        <div className='text-sm font-medium font-color-yellow'>
+                                            Account limit exceeded
+                                        </div>
+                                        <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                <div>Better processing & semantic search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
+                            </div>
+                        </div>
+                        <div className="p-3 rounded-md bg-senary">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <div className="font-medium">Upgrade Account</div>
+                                <Button variant="surface">Upgrade</Button>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Unlimited pages and advanced semantic search
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* {!isLoading && exceedsBalance && (
+                    <div className="font-color-red p-2 display-flex flex-row gap-3 items-start">
+                        <Icon icon={AlertIcon} className="scale-12 mt-1"/>
+                        <div className="display-flex flex-col gap-2">
+                            {`Pages in selected libraries exceed plan limits. Some documents won't be searchable.`}
+                        </div>
+                    </div>
+                )} */}
+                <div className="flex-1" />
+                {!isLoading && (
+                    <div className="display-flex flex-col gap-3">
+                        <div className="h-1 border-top-quinary" />
+                        <ZoteroSyncToggle 
+                            checked={useZoteroSync}
+                            onChange={handleSyncToggleChange}
+                            disabled={disableSyncToggle}
+                        />
+                        <ConsentToggle
+                            checked={false}
+                            onChange={() => {}}
+                        />
+                    </div>
+                )}
+                
+
+                {/* Totals for selected libraries */}
+                {/* {libraryStatistics.length > 0 && (
+                    <div className="display-flex flex-col gap-1 mt-2 p-3 border-t border-quinary">
+                        <div className="font-medium font-color-primary">Selected Libraries Total:</div>
+                        <div className="display-flex flex-row gap-4 font-color-secondary text-sm">
+                            {selectedLibraryTotals.itemCount} items,{' '}
+                            {selectedLibraryTotals.attachmentCount} attachments,{' '}
+                            {selectedLibraryTotals.pageCount} pages
+                        </div>
+                    </div>
+                )} */}
+
+                
             </div>
-
-            {isLoading && (
-                <div className="font-color-tertiary text-sm">
-                    Loading library statistics may take a few minutes...
-                </div>
-            )}
-            
-            {/* Free Account */}
-            {!isLoading && planName === 'free' && (
-                <div className="mt-4 display-flex flex-col gap-3">
-                    <div className="p-3 rounded-md bg-senary border-popup">
-                        <div className="display-flex flex-row items-center mb-1">
-                            <div className="font-medium">{planDisplayName} Account (free)</div>
-                            <div className="flex-1"/>
-                            {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                            {exceedsBalance && (
-                                <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                    <div className='text-sm font-medium font-color-yellow'>
-                                        Account limit exceeded
-                                    </div>
-                                    <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
-                                </div>
-                            )}
-                        </div>
-                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                            <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                        </div>
-                    </div>
-                    <div className="p-3 rounded-md bg-senary">
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <div className="font-medium">Upgrade Account</div>
-                            <Button variant="surface">Upgrade</Button>
-                        </div>
-                        <div className="text-sm font-color-secondary">
-                            Better search with semantic document understanding
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Core Account */}
-            {!isLoading && planName === 'core' && (
-                <div className="mt-4 display-flex flex-col gap-3">
-                    <div className="p-3 rounded-md bg-senary border-popup">
-                        <div className="display-flex flex-row items-center mb-1">
-                            <div className="font-medium">{planDisplayName} Account</div>
-                            <div className="flex-1"/>
-                            {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                            {exceedsBalance && (
-                                <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                    <div className='text-sm font-medium font-color-yellow'>
-                                        Account limit exceeded
-                                    </div>
-                                    <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
-                                </div>
-                            )}
-                        </div>
-                        <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                            <div>Better processing & semantic search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                        </div>
-                    </div>
-                    <div className="p-3 rounded-md bg-senary">
-                        <div className="display-flex flex-row justify-between items-center mb-1">
-                            <div className="font-medium">Upgrade Account</div>
-                            <Button variant="surface">Upgrade</Button>
-                        </div>
-                        <div className="text-sm font-color-secondary">
-                            Unlimited pages and advanced semantic search
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* {!isLoading && exceedsBalance && (
-                <div className="font-color-red p-2 display-flex flex-row gap-3 items-start">
-                    <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                    <div className="display-flex flex-col gap-2">
-                        {`Pages in selected libraries exceed plan limits. Some documents won't be searchable.`}
-                    </div>
-                </div>
-            )} */}
-            <div className="flex-1" />
-            {!isLoading && (
-                <div className="display-flex flex-col gap-3">
-                    <div className="h-1 border-top-quinary" />
-                    <ZoteroSyncToggle 
-                        checked={useZoteroSync}
-                        onChange={handleSyncToggleChange}
-                        disabled={disableSyncToggle}
-                    />
-                    <ConsentToggle
-                        checked={false}
-                        onChange={() => {}}
-                    />
-                </div>
-            )}
-            
-
-            {/* Totals for selected libraries */}
-            {/* {libraryStatistics.length > 0 && (
-                <div className="display-flex flex-col gap-1 mt-2 p-3 border-t border-quinary">
-                    <div className="font-medium font-color-primary">Selected Libraries Total:</div>
-                    <div className="display-flex flex-row gap-4 font-color-secondary text-sm">
-                        {selectedLibraryTotals.itemCount} items,{' '}
-                        {selectedLibraryTotals.attachmentCount} attachments,{' '}
-                        {selectedLibraryTotals.pageCount} pages
-                    </div>
-                </div>
-            )} */}
-
-            
         </div>
     );
 };

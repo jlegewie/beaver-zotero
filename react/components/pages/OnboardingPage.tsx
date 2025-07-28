@@ -218,22 +218,14 @@ const OnboardingPage: React.FC = () => {
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-col gap-4 flex-1 min-h-0">
-                        <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
-                        <div className="text-base font-color-secondary">
-                            Select the libraries you want to sync with Beaver.
-                        </div>
-                        
-                        {/* Library Selector Component */}
-                        <LibrarySelector
-                            onSelectionChange={handleLibrarySelectionChange}
-                            libraryStatistics={libraryStatistics}
-                            setLibraryStatistics={setLibraryStatistics}
-                            disableSyncToggle={!isLibrarySynced(1)}
-                            useZoteroSync={useZoteroSync}
-                            handleSyncToggleChange={handleSyncToggleChange}
-                        />
-                    </div>
+                    <LibrarySelector
+                        onSelectionChange={handleLibrarySelectionChange}
+                        libraryStatistics={libraryStatistics}
+                        setLibraryStatistics={setLibraryStatistics}
+                        disableSyncToggle={!isLibrarySynced(1)}
+                        useZoteroSync={useZoteroSync}
+                        handleSyncToggleChange={handleSyncToggleChange}
+                    />
                 )}
 
                 {/* ------------- Step 2: Syncing Process ------------- */}
