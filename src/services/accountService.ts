@@ -13,6 +13,7 @@ interface AuthorizationRequest {
     require_onboarding: boolean;
     processing_tier: ProcessingTier;
     use_zotero_sync: boolean;
+    consent_to_share: boolean;
 }
 
 interface ProfileRequest {
@@ -110,7 +111,13 @@ export class AccountService extends ApiService {
      * @param requireOnboarding Whether the user needs to complete onboarding
      * @returns Promise with the response message
      */
-    async authorizeAccess(requireOnboarding: boolean = true, libraries: ZoteroLibrary[], processingTier: ProcessingTier, syncWithZotero: boolean = false): Promise<{ message: string }> {
+    async authorizeAccess(
+        requireOnboarding: boolean = true,
+        libraries: ZoteroLibrary[],
+        processingTier: ProcessingTier,
+        syncWithZotero: boolean = false,
+        consentToShare: boolean = false
+    ): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<{ message: string }>('/api/v1/account/authorize', {
             zotero_local_id: localUserKey,
@@ -118,7 +125,8 @@ export class AccountService extends ApiService {
             require_onboarding: requireOnboarding,
             libraries: libraries,
             processing_tier: processingTier,
-            use_zotero_sync: syncWithZotero
+            use_zotero_sync: syncWithZotero,
+            consent_to_share: consentToShare
         } as AuthorizationRequest);
     }
 
