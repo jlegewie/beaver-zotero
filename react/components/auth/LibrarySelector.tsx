@@ -5,6 +5,7 @@ import { planFeaturesAtom, profileBalanceAtom, planNameAtom, planDisplayNameAtom
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
+import ConsentToggle from "../preferences/ConsentToggle";
 
 interface LibrarySelectorProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;
@@ -269,17 +270,20 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
                     </div>
                 </div>
             )} */}
-
+            <div className="flex-1" />
             {!isLoading && (
-                <>
-                    <div className="flex-1" />
+                <div className="display-flex flex-col gap-3">
                     <div className="h-1 border-top-quinary" />
                     <ZoteroSyncToggle 
                         checked={useZoteroSync}
                         onChange={handleSyncToggleChange}
                         disabled={disableSyncToggle}
                     />
-                </>
+                    <ConsentToggle
+                        checked={false}
+                        onChange={() => {}}
+                    />
+                </div>
             )}
             
 
