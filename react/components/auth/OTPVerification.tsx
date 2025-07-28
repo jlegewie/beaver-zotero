@@ -130,7 +130,7 @@ export function OTPVerification({
           <button
             onClick={onResend}
             disabled={resendCountdown > 0 || isLoading}
-            className={`webapp-link text-sm ${resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`webapp-link-muted text-sm ${resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             style={{ pointerEvents: resendCountdown > 0 || isLoading ? 'none' : 'auto' }}
           >
             {resendCountdown > 0 
