@@ -36,12 +36,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const getDefaultIcon = () => {
         switch (message.type) {
             case 'warning':
-                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-yellow" />;
+                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'error':
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
             case 'plan_change':
             case 'indexing_complete':
-                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-primary" />;
+                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-blue" />;
@@ -53,23 +53,15 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     switch (message.type) {
         case 'error':
             fontColor = 'font-color-red';
-            backgroundColor = 'var(--tag-red-quinary)';
-            borderColor = 'var(--tag-red-quarternary)';
+            backgroundColor = 'var(--material-mix-quarternary)';
+            borderColor = 'var(--fill-quinary)';
             break;
         case 'info':
-            fontColor = 'font-color-blue';
-            backgroundColor = 'var(--tag-blue-quinary)';
-            borderColor = 'var(--tag-blue-quarternary)';
-            break;
         case 'warning':
-            fontColor = 'font-color-yellow';
-            backgroundColor = 'var(--tag-yellow-quinary)';
-            borderColor = 'var(--tag-yellow-quarternary)';
-            break;
         case 'plan_change':
         case 'indexing_complete':
         default:
-            fontColor = 'font-color-primary';
+            fontColor = 'font-color-secondary';
             backgroundColor = 'var(--material-mix-quarternary)';
             borderColor = 'var(--fill-quinary)';
             break;
@@ -109,8 +101,9 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         )}
                         <IconButton
                             icon={CancelIcon}
+                            variant="ghost-secondary"
                             onClick={handleDismiss}
-                            iconClassName={`scale-11 ${fontColor}`}
+                            // iconClassName={`${fontColor}`}
                         />
                     </div>
                 </div>
@@ -122,7 +115,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                             {message.customContent}
                         </div>
                     ) : (
-                        <div className={`text-base ${fontColor} opacity-60`}>{message.text}</div>
+                        <div className='text-base font-color-tertiary'>{message.text}</div>
                     )
                 )}
 
