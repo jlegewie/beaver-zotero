@@ -125,10 +125,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
     
     return (
         <div className="display-flex flex-col gap-4 flex-1 min-h-0">
-            <div className="text-lg font-semibold">Step 1: Authorize Library Access</div>
-            <div className="text-base font-color-secondary">
-                Select the libraries you want to sync with Beaver.
-            </div>
+            <div className="text-lg font-semibold">Step 1: Select Libraries</div>
             <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
                 {/* Library list */}
@@ -195,9 +192,9 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
                         Loading library statistics may take a few minutes...
                     </div>
                 )}
-                
-                {/* Free Account */}
-                {!isLoading && planName === 'free' && (
+
+                {/* Beta Account */}
+                {!isLoading && (planName === 'beta') && (
                     <div className="mt-4 display-flex flex-col gap-3">
                         <div className="p-3 rounded-md bg-senary border-popup">
                             <div className="display-flex flex-row items-center mb-1">
@@ -205,7 +202,40 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
                                 <div className="flex-1"/>
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                    // <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
+                                        <div className='text-sm font-color-red'>
+                                            Page limit exceeded
+                                        </div>
+                                        <Icon className="font-color-red mt-015" icon={InformationCircleIcon}/>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
+                                <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
+                            </div>
+                        </div>
+                        <div className="p-3 rounded-md bg-senary">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <div className="font-medium">Coming soon</div>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Better search with semantic document understanding.
+                            </div>
+                        </div>
+                    </div>
+                )}
+                
+                {/* Free Account */}
+                {!isLoading && (planName === 'free') && (
+                    <div className="mt-4 display-flex flex-col gap-3">
+                        <div className="p-3 rounded-md bg-senary border-popup">
+                            <div className="display-flex flex-row items-center mb-1">
+                                <div className="font-medium">{planDisplayName} Account (free)</div>
+                                <div className="flex-1"/>
+                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
+                                {exceedsBalance && (
+                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
                                         <div className='text-sm font-color-red'>
                                             Page limit exceeded
                                         </div>
@@ -238,7 +268,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
                                 <div className="flex-1"/>
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
+                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
                                         <div className='text-sm font-medium font-color-yellow'>
                                             Account limit exceeded
                                         </div>
