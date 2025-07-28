@@ -135,7 +135,7 @@ export const updateSourcesFromZoteroItemsAtom = atom(
             set(addPopupMessageAtom, {
                 type: 'warning',
                 title: 'Attachment Limit Exceeded',
-                text: `Maximum of ${get(planFeaturesAtom).maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
+                text: `Maximum of ${maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
                 expire: true
             });
         }

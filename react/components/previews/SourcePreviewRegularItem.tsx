@@ -76,7 +76,7 @@ const SourcePreviewRegularItem: React.FC<SourcePreviewRegularItemProps> = ({ sou
             setPopupMessage({
                 type: 'warning',
                 title: 'Attachment Limit Exceeded',
-                text: `Maximum of ${planFeatures.maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
+                text: `Maximum of ${maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
                 expire: true
             });
             return;
