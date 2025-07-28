@@ -65,6 +65,11 @@ export const selectedModelAtom = atom<FullModelConfig | null>(lastUsedModel);
 export const isAgentModelAtom = atom((get) => get(selectedModelAtom)?.is_agent || false);
 
 /**
+ * Derived atom that indicates if the selected model uses the app's API key
+ */
+export const isAppKeyModelAtom = atom((get) => get(selectedModelAtom)?.use_app_key || false);
+
+/**
  * Derived atom that filters supported models based on available API keys
  * Models are available if they:
  * 1. Use the app's API key (app_key: true), or
