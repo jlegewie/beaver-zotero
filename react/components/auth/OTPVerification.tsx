@@ -53,7 +53,7 @@ export function OTPVerification({
   useEffect(() => {
     focusFirstInput()
     isVerifying.current = false
-  }, [focusFirstInput])
+  }, [])
   
   const handleVerify = useCallback(async () => {
     if (!validateOTPCode(otpCode) || isLoading) return
