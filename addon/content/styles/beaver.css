@@ -1591,7 +1591,7 @@ attachment-box .metadata-table #beaver-status {
 }
 
 /* Link styles */
-[id^="beaver-pane-"] .webapp-link {
+[id^="beaver-pane-"] .text-link {
     color: var(--accent-blue);
     text-decoration: none;
     cursor: pointer;
@@ -1600,11 +1600,11 @@ attachment-box .metadata-table #beaver-status {
     background-color: transparent;
 }
 
-[id^="beaver-pane-"] .webapp-link:hover {
+[id^="beaver-pane-"] .text-link:hover {
     text-decoration: underline;
 }
 
-[id^="beaver-pane-"] .webapp-link-muted {
+[id^="beaver-pane-"] .text-link-muted {
     color: var(--fill-secondary);
     text-decoration: none;
     cursor: pointer;
@@ -1613,7 +1613,22 @@ attachment-box .metadata-table #beaver-status {
     background-color: transparent;
 }
 
-[id^="beaver-pane-"] .webapp-link-muted:hover {
+[id^="beaver-pane-"] .text-link-muted:hover {
     color: var(--fill-primary);
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .text-link-red {
+    color: var(--tag-red);
+    font-weight: 700;
+    opacity: 0.8;
+    text-decoration: none;
+    cursor: pointer;
+    border: 0px solid transparent;
+    box-shadow: none;
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .text-link-red:hover {
     text-decoration: underline;
 }

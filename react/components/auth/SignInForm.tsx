@@ -229,7 +229,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
               {error && (
                 <span className='text-xs font-color-red'>
                   {error == 'Signups not allowed for otp'
-                    ? <span>Invalid email address</span>
+                    ? <span>Invalid email address. Signup <a className="text-link-red" href={process.env.WEBAPP_BASE_URL + '/join'}>here</a>.</span>
                     : error}
                 </span>
               )}
@@ -269,7 +269,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                       setPref("authMethod", "password")
                     }}
                     disabled={isLoading}
-                    className="webapp-link-muted text-sm"
+                    className="text-link-muted text-sm"
                 >
                     Use password
                 </button>
@@ -339,7 +339,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                 type="button"
                 onClick={resetToInitial}
                 disabled={isLoading}
-                className="webapp-link-muted text-sm"
+                className="text-link-muted text-sm"
               >
                 Sign in with email code
               </button>
@@ -348,7 +348,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                   type="button"
                   onClick={handleForgotPassword}
                   disabled={isLoading}
-                  className="webapp-link-muted text-sm"
+                  className="text-link-muted text-sm"
                 >
                   Forgot password?
                 </button>

@@ -292,7 +292,7 @@ const PreferencePage: React.FC = () => {
                         <button
                             type="button"
                             onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
-                            className="webapp-link-muted text-sm"
+                            className="text-link-muted text-sm"
                         >
                             Terms of Service
                         </button>
@@ -300,7 +300,7 @@ const PreferencePage: React.FC = () => {
                         <button
                             type="button"
                             onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
-                            className="webapp-link-muted text-sm"
+                            className="text-link-muted text-sm"
                         >
                             Privacy Policy
                         </button>

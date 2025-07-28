@@ -130,7 +130,7 @@ export function OTPVerification({
           <button
             onClick={onResend}
             disabled={resendCountdown > 0 || isLoading}
-            className={`webapp-link-muted text-sm ${resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`text-link-muted text-sm ${resendCountdown > 0 || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             style={{ pointerEvents: resendCountdown > 0 || isLoading ? 'none' : 'auto' }}
           >
             {resendCountdown > 0 
@@ -144,7 +144,7 @@ export function OTPVerification({
               <button
                 onClick={onChangeEmail}
                 disabled={isLoading}
-                className={`webapp-link-muted text-sm ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`text-link-muted text-sm ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
               >
                 Wrong email? Change it

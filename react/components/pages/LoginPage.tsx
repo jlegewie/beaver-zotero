@@ -33,7 +33,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
                         Don&apos;t have an account?{' '}
                         <span
                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}
-                            className="webapp-link font-medium"
+                            className="text-link font-medium"
                         >
                             Get started
                         </span>
