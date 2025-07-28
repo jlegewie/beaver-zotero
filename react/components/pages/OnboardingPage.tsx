@@ -6,7 +6,7 @@ import { fileStatusSummaryAtom } from "../../atoms/files";
 import { isSyncCompleteAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { hasAuthorizedAccessAtom } from '../../atoms/profile';
-import LibrarySelector from "../auth/LibrarySelector";
+import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
@@ -218,7 +218,7 @@ const OnboardingPage: React.FC = () => {
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
-                    <LibrarySelector
+                    <AuthorizeLibraryAccess
                         onSelectionChange={handleLibrarySelectionChange}
                         libraryStatistics={libraryStatistics}
                         setLibraryStatistics={setLibraryStatistics}

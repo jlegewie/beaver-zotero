@@ -7,7 +7,7 @@ import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
 import ConsentToggle from "../preferences/ConsentToggle";
 
-interface LibrarySelectorProps {
+interface AuthorizeLibraryAccessProps {
     onSelectionChange?: (selectedLibraries: number[]) => void;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
@@ -16,7 +16,7 @@ interface LibrarySelectorProps {
     disableSyncToggle: boolean;
 }
 
-const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics, useZoteroSync, handleSyncToggleChange, disableSyncToggle }) => {
+const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelectionChange, libraryStatistics, setLibraryStatistics, useZoteroSync, handleSyncToggleChange, disableSyncToggle }) => {
     // Plan and profile balance
     const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -305,4 +305,4 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
     );
 };
 
-export default LibrarySelector;
+export default AuthorizeLibraryAccess;
