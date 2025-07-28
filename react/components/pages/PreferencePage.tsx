@@ -288,6 +288,23 @@ const PreferencePage: React.FC = () => {
                         </Button>
                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
                     </div>
+                    <div className="display-flex flex-row gap-1 items-start mt-15">
+                        <button
+                            type="button"
+                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
+                            className="webapp-link-muted text-sm"
+                        >
+                            Terms of Service
+                        </button>
+                        <div className="font-color-secondary">|</div>
+                        <button
+                            type="button"
+                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
+                            className="webapp-link-muted text-sm"
+                        >
+                            Privacy Policy
+                        </button>
+                    </div>
                 </div>
             ) : (
                 <div className="card p-3">
