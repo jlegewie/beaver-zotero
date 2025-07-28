@@ -344,15 +344,9 @@ const PreferencePage: React.FC = () => {
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
             <div className="text-sm font-color-secondary mb-3">
-                Add your own API key to use better models like Gemini 2.5 Pro, Claude 3.7 or Open AI 4o. Your keys are only stored locally and never on our server.
-                {' '}
-                <a
-                    href="#"
-                    className="font-color-tertiary hover:underline"
-                    onClick={(e) => {e.preventDefault(); Zotero.getActiveZoteroPane().loadURI('https://beaver.org/docs/api-keys');}}
-                >
-                    Read more.
-                </a>
+                Add your own API key to use models from Google, Anthropic, and OpenAI.
+                When you use your own API key, your provider's terms and data-use rules apply.
+                Your keys are only stored locally and never on our server.
             </div>
             <div className="display-flex flex-col gap-3">
                 <ApiKeyInput
