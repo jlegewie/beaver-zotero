@@ -273,6 +273,7 @@ const LibrarySelector: React.FC<LibrarySelectorProps> = ({ onSelectionChange, li
             {!isLoading && (
                 <>
                     <div className="flex-1" />
+                    <div className="h-1 border-top-quinary" />
                     <ZoteroSyncToggle 
                         checked={useZoteroSync}
                         onChange={handleSyncToggleChange}
