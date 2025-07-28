@@ -23,7 +23,7 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
             <div className="display-flex flex-row gap-2 items-start">
                 <input
                     type="checkbox" 
-                    className="mr-1 scale-90"
+                    className="mr-1 scale-90 mt-15"
                     style={{minWidth: 'auto'}}
                     checked={checked}
                     onChange={handleToggle}
@@ -31,14 +31,14 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
                     disabled={disabled}
                 />
 
-                <div className="display-flex flex-col gap-1">
-                    <div className="display-flex flex-col gap-2 items-start">
-                        <div className="display-flex flex-row gap-4 items-center">
+                <div className="display-flex flex-col gap-05">
+                    <div className="display-flex flex-col gap-1 items-start">
+                        <div className="display-flex flex-row gap-2 items-center">
                             <div className="font-color-primary text-base">
                                 Sync with Zotero
                             </div>
                             {!disabled && !error && (
-                                <div className="font-color-secondary scale-90 px-15 py-05 mt-020 text-sm rounded-md bg-quinary border-quinary">
+                                <div className="font-color-secondary scale-90 px-15 py-05 mt-015 text-sm rounded-md bg-quinary border-quinary">
                                     Recommended
                                 </div>
                             )}
