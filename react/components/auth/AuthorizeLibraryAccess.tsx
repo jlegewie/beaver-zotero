@@ -206,10 +206,10 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({ onSelec
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
                                     <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                        <div className='text-sm font-medium font-color-yellow'>
-                                            Account limit exceeded
+                                        <div className='text-sm font-color-red'>
+                                            Page limit exceeded
                                         </div>
-                                        <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
+                                        <Icon className="font-color-red mt-015" icon={InformationCircleIcon}/>
                                     </div>
                                 )}
                             </div>
