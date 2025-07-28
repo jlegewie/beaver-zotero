@@ -49,7 +49,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
             <div className="display-flex flex-row gap-2 items-start">
                 <input
                     type="checkbox" 
-                    className="mr-1 scale-90 mt-15"
+                    className={`mr-1 scale-90 ${showRecommended ? 'mt-15' : 'mt-020'}`}
                     style={{minWidth: 'auto'}}
                     checked={checked}
                     onChange={handleToggle}
