@@ -1,4 +1,5 @@
 import React from "react";
+import PreferenceToggle from "./PreferenceToggle";
 
 interface ZoteroSyncToggleProps {
     checked: boolean;
@@ -8,57 +9,19 @@ interface ZoteroSyncToggleProps {
 }
 
 const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, disabled, error }) => {
-    const handleToggle = () => {
-        onChange(!checked);
-    };
-
     return (
-        <div
-            className={`display-flex flex-col rounded-md ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-            onClick={disabled ? undefined : handleToggle}
-            title={disabled
-                ? "Enable Zotero sync for your main library to use this feature."
-                : "When enabled, Beaver will build on Zotero sync for multi-device support and improved sync. When disabled, you can only use Beaver on this device."}
-        >
-            <div className="display-flex flex-row gap-2 items-start">
-                <input
-                    type="checkbox" 
-                    className="mr-1 scale-90 mt-15"
-                    style={{minWidth: 'auto'}}
-                    checked={checked}
-                    onChange={handleToggle}
-                    onClick={(e) => e.stopPropagation()}
-                    disabled={disabled}
-                />
-
-                <div className="display-flex flex-col gap-05">
-                    <div className="display-flex flex-col gap-1 items-start">
-                        <div className="display-flex flex-row gap-2 items-center">
-                            <div className="font-color-primary text-base">
-                                Sync with Zotero
-                            </div>
-                            {!disabled && !error && (
-                                <div className="font-color-secondary scale-90 px-15 py-05 mt-015 text-sm rounded-md bg-quinary border-quinary">
-                                    Recommended
-                                </div>
-                            )}
-                            {error && (
-                                <div
-                                    className="scale-90 px-15 py-05 mt-020 text-sm rounded-md bg-quinary border-error"
-                                    style={{ color: 'var(--tag-red-secondary)', borderColor: 'var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
-                                    title="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
-                                >
-                                    Error
-                                </div>
-                            )}
-                        </div>
-                        <div className="font-color-secondary text-sm">
-                            Build on Zotero sync for multi-device support and improved sync.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <PreferenceToggle
+            checked={checked}
+            onChange={onChange}
+            disabled={disabled}
+            error={error}
+            title="Sync with Zotero"
+            description="Build on Zotero sync for multi-device support and improved sync."
+            tooltip="When enabled, Beaver will build on Zotero sync for multi-device support and improved sync. When disabled, you can only use Beaver on this device."
+            disabledTooltip="Enable Zotero sync for your main library to use this feature."
+            errorTooltip="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
+            showRecommended={true}
+        />
     );
 };
 
