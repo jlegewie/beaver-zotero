@@ -14,6 +14,7 @@ import CustomPromptSettings from "../preferences/CustomPromptSettings";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
+import ConsentToggle from "../preferences/ConsentToggle";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -38,11 +39,14 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
+    const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
+
 
     // Update local state when atom changes
     React.useEffect(() => {
         setLocalSyncToggle(syncWithZotero);
-    }, [syncWithZotero]);
+        setConsentToShare(profileWithPlan?.consent_to_share || false);
+    }, [syncWithZotero, profileWithPlan?.consent_to_share]);
 
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -169,6 +173,27 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [saveCustomPromptsToPrefs]);
+
+    // --- Consent Toggle Change Handler ---
+    const handleConsentChange = useCallback(async (checked: boolean) => {
+        const action = checked ? 'enable' : 'disable';
+        try {
+            logger(`User confirmed to ${action} consent to share. New value: ${checked}`);
+            await accountService.updatePreference('consent_to_share', checked);
+
+            setProfileWithPlan((prev) => {
+                if (!prev) return null;
+                return { ...prev, consent_to_share: checked };
+            });
+            setConsentToShare(checked);
+            logger('Successfully updated consent to share preference.');
+        } catch (error) {
+            logger(`Failed to update consent to share preference: ${error}`, 1);
+            Zotero.logError(error as Error);
+            // Revert the toggle on error
+            setConsentToShare(!checked);
+        }
+    }, [setProfileWithPlan]);
 
     // --- Sync Toggle Change Handler ---
     const handleSyncToggleChange = useCallback(async (checked: boolean) => {
@@ -357,6 +382,15 @@ const PreferencePage: React.FC = () => {
             </div>
             
             {/* <LibrarySelection /> */}
+
+            {/* --- Telemetry & Feedback Section --- */}
+            <SectionHeader>Telemetry & Feedback</SectionHeader>
+
+            <ConsentToggle
+                checked={consentToShare}
+                onChange={handleConsentChange}
+            />
+
 
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
