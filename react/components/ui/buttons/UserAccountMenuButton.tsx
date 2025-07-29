@@ -33,7 +33,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             disabled: !hasCompletedOnboarding,
         },
         {
-            label: "Manage account",
+            label: "Manage Account",
             onClick: () => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login'),
             icon: UserIcon,
             disabled: false,

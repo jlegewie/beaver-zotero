@@ -310,7 +310,6 @@ const PreferencePage: React.FC = () => {
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
                             variant="outline"
-                            disabled={true}
                             icon={UserIcon}
                             onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
                         >
