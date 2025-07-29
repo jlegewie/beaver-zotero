@@ -15,6 +15,9 @@ import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import ConsentToggle from "../preferences/ConsentToggle";
+import CitationFormatToggle from "../preferences/CitationFormatToggle";
+import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
+import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -26,21 +29,22 @@ const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
     const logout = useSetAtom(logoutAtom);
 
+    // --- User profile ---
+    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+
     // --- State for Preferences ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
-    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-
-    // --- Sync Toggle State ---
-    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
-    const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
-    const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
+    const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
+    const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
+    const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
-
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
+    const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -290,6 +294,7 @@ const PreferencePage: React.FC = () => {
                 </h1>
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
+
             {/* --- Account Section --- */}
             <SectionHeader>Account</SectionHeader>
             {user ? (
@@ -383,14 +388,26 @@ const PreferencePage: React.FC = () => {
             
             {/* <LibrarySelection /> */}
 
-            {/* --- Telemetry & Feedback Section --- */}
-            <SectionHeader>Telemetry & Feedback</SectionHeader>
-
-            <ConsentToggle
-                checked={consentToShare}
-                onChange={handleConsentChange}
-            />
-
+            {/* --- General Settings Section --- */}
+            <SectionHeader>General Settings</SectionHeader>
+            <div className="display-flex flex-col gap-3">
+                <CitationFormatToggle 
+                    checked={citationFormat} 
+                    onChange={setCitationFormat} 
+                />
+                <AddSelectedItemsOnNewThreadToggle 
+                    checked={addSelectedOnNewThread} 
+                    onChange={setAddSelectedOnNewThread} 
+                />
+                <AddSelectedItemsOnOpenToggle 
+                    checked={addSelectedOnOpen} 
+                    onChange={setAddSelectedOnOpen} 
+                />
+                <ConsentToggle
+                    checked={consentToShare}
+                    onChange={handleConsentChange}
+                />
+            </div>
 
             {/* --- API Keys Section --- */}
             <SectionHeader>API Keys</SectionHeader>
