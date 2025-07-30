@@ -180,7 +180,7 @@ const LibrarySelection: React.FC = () => {
                                             <>
                                                 {statistics.itemCount} items,{' '}
                                                 {statistics.attachmentCount} attachments,{' '}
-                                                {statistics.pageCount} pages
+                                                Approx. {statistics.pageCount} pages
                                             </>
                                         ) : (
                                             "No statistics available"
