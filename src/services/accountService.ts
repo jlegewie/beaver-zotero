@@ -19,6 +19,7 @@ interface AuthorizationRequest {
 interface ProfileRequest {
     zotero_local_id: string;
     zotero_user_id: string | undefined;
+    frontend_version: string;
 }
 
 interface ProfileResponse {
@@ -69,12 +70,14 @@ export class AccountService extends ApiService {
      * @returns Promise with the profile data
      */
     async getProfileWithPlan(): Promise<ProfileResponse> {
+        const version = Zotero.Beaver.pluginVersion || '';
         const { userID, localUserKey } = getZoteroUserIdentifier();
         
         try {
             return await this.post<ProfileResponse>('/api/v1/account/profile', {
                 zotero_local_id: localUserKey,
-                zotero_user_id: userID
+                zotero_user_id: userID,
+                frontend_version: version
             } as ProfileRequest);
         } catch (error) {
             // Handle profile-specific 403 errors as Zotero instance mismatch
