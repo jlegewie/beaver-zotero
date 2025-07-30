@@ -18,6 +18,8 @@ const getErrorMessage = (errorType: string) => {
             return "Invalid model. Please select a different model.";
         case 'rate_limit':
             return "Usage limit reached. Please try again later.";
+        case 'beaver_rate_limit':
+            return "Beaver rate limit reached. Please try again later.";
         case 'auth':
             return "Login failed. Please try again later.";
         case 'invalid_request':
