@@ -249,7 +249,7 @@ export class ChatService extends ApiService {
                             // Non-2xx -> error
                             if (xhr.status < 200 || xhr.status >= 300) {
                                 this.handleXHRError(xhr, onError);
-                                reject(xhr.status);
+                                resolve(); // Don't reject since we've handled the error
                                 return;
                             }
                             // onDone();
@@ -266,9 +266,10 @@ export class ChatService extends ApiService {
                     timeout: 0, // indefinite streaming
                     cancellerReceiver: setCanceller // Pass the canceller function to the caller
                 }).catch((err: unknown) => {
-                    // If the request fails to even start (network error)
-                    onError(null, 'network');
-                    reject(err);
+                    // Errors are handled in onreadystatechange, which has access
+                    // to the xhr object and can provide more specific error types.
+                    // This catch is to prevent unhandled promise rejection warnings.
+                    Zotero.debug(`Zotero.HTTP.request rejected: ${err}. This is handled by onreadystatechange.`);
                 });
 
             } catch (outerErr) {
@@ -402,7 +403,7 @@ export class ChatService extends ApiService {
         } else if (status === 400) {
             errorType = 'invalid_request';
         } else if (status === 429) {
-            errorType = 'rate_limit';
+            errorType = 'beaver_rate_limit';
         } else if (status >= 500) {
             errorType = 'server_error';
         } else if (status >= 400) {
