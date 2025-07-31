@@ -42,7 +42,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     
     // Determine icon
     const getStatusIcon = (): React.ReactNode => {
-        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return SpinnerIcon;
+        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting' || connectionStatus === 'polling') return SpinnerIcon;
         if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return AlertIconIcon;
         if(totalFiles === 0) return CheckmarkIconGrey;
         if (isComplete) return CheckmarkIcon;
