@@ -1,3 +1,4 @@
+import React from "react";
 import { setPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
 import { SafeProfileWithPlan } from "../types/profile";
@@ -5,6 +6,7 @@ import { addPopupMessageAtom } from "./popupMessageUtils";
 import { store } from "../index";
 import { fileStatusSummaryAtom, calculateFileStatusSummary } from "../atoms/files";
 import { fetchFileStatus } from "../hooks/useFileStatus";
+import { Icon, PuzzleIcon } from "../components/icons/icons";
 
 export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
 
@@ -21,16 +23,18 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
     const title = `Welcome to the ${profile.plan.display_name} plan!`;
     if (totalFiles > 0 && progress < 100) {
         setPref("showIndexingCompleteMessage", true);
-        let text = "We're indexing files up to your new plan's limit. Full search will be available once this is complete.";
-        if (profile.plan.name === "pro") {
-            text = "We're indexing your files to unlock all Pro features. Full search will be available shortly.";
-        }
+        const text = "We're processing your files for the new plan. Full text search will be available once this is complete. You can view the processing status under 'File Status'.";
         store.set(addPopupMessageAtom, { 
             title, 
             text, 
-            type: "plan_change",
+            type: "info",
+            icon: React.createElement(Icon, { 
+                icon: PuzzleIcon, 
+                className: "scale-12 mt-020 font-color-secondary" 
+            }),
             showProgress: true,
-            expire: false
+            expire: false,
+            showGoToFileStatusButton: true
         });
     }
 
@@ -51,8 +55,12 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
         setPref("showIndexingCompleteMessage", false);
         store.set(addPopupMessageAtom, { 
             title, 
-            text: "No files to index. You can add files to your library to start indexing.",
-            type: "plan_change",
+            text: "There are no files to process for full-text search. You can add files to your library to start indexing.",
+            type: "info",
+            icon: React.createElement(Icon, { 
+                icon: PuzzleIcon, 
+                className: "scale-12 mt-020 font-color-secondary" 
+            }),
             showProgress: false,
             expire: false
         });
