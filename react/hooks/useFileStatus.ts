@@ -8,7 +8,7 @@ import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 
-export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
+export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
 export interface FileStatusConnection {
     connectionStatus: ConnectionStatus;
