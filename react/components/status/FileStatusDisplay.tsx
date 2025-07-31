@@ -135,33 +135,35 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 />
             )}
 
-            <div className="display-flex flex-col gap-3">
-                {/* Failed processing */}
-                {connectionStatus === 'connected' && fileStats.failedProcessingCount > 0 && (
-                    <PaginatedFailedProcessingList
-                        statuses={["failed_user", "failed_system"]}
-                        count={fileStats.failedProcessingCount}
-                        title={`Failed processing`}
-                        tooltipTitle="Processing errors"
-                        tooltipContent={<FailedProcessingTooltipContent />}
-                        icon={AlertIcon}
-                        textColorClassName="font-color-red"
-                    />
-                )}
+            {connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || fileStats.planLimitProcessingCount > 0) && (
+                <div className="display-flex flex-col gap-3">
+                    {/* Failed processing */}
+                    {fileStats.failedProcessingCount > 0 && (
+                        <PaginatedFailedProcessingList
+                            statuses={["failed_user", "failed_system"]}
+                            count={fileStats.failedProcessingCount}
+                            title={`Failed processing`}
+                            tooltipTitle="Processing errors"
+                            tooltipContent={<FailedProcessingTooltipContent />}
+                            icon={AlertIcon}
+                            textColorClassName="font-color-red"
+                        />
+                    )}
 
-                {/* Skipped files (combined from upload and processing) */}
-                {connectionStatus === 'connected' && fileStats.planLimitProcessingCount > 0 && (
-                    <PaginatedFailedProcessingList
-                        statuses={["plan_limit"]}
-                        count={fileStats.planLimitProcessingCount}
-                        title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''}`}
-                        tooltipTitle="Reasons"
-                        tooltipContent={<SkippedProcessingTooltipContent />}
-                        icon={InformationCircleIcon}
-                        textColorClassName="font-color-secondary"
-                    />
-                )}
-            </div>
+                    {/* Skipped files (combined from upload and processing) */}
+                    {fileStats.planLimitProcessingCount > 0 && (
+                        <PaginatedFailedProcessingList
+                            statuses={["plan_limit"]}
+                            count={fileStats.planLimitProcessingCount}
+                            title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''}`}
+                            tooltipTitle="Reasons"
+                            tooltipContent={<SkippedProcessingTooltipContent />}
+                            icon={InformationCircleIcon}
+                            textColorClassName="font-color-secondary"
+                        />
+                    )}
+                </div>
+            )}
         </div>
     );
 };
