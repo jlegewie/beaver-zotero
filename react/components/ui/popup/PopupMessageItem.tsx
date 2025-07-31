@@ -1,11 +1,14 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
 import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon } from '../../icons/icons';
-import { useSetAtom } from 'jotai';
-import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
+import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
+import { showFileStatusDetailsAtom } from '../../../atoms/ui';
+import Button from "../Button";
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -13,6 +16,10 @@ interface PopupMessageItemProps {
 
 const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const removeMessage = useSetAtom(removePopupMessageAtom);
+    const newThread = useSetAtom(newThreadAtom);
+    const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
+    const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
 
     useEffect(() => {
         let timerId: number | null = null;
@@ -33,6 +40,20 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         removeMessage(message.id);
     };
 
+    const showFileStatusDetails = async () => {
+        if (currentThreadId !== null) {
+            await newThread();
+        }
+        setShowFileStatusDetails(true);
+        updatePopupMessage({
+            messageId: message.id,
+            updates: {
+                expire: true,
+                duration: 100
+            }
+        });
+    };
+
     const getDefaultIcon = () => {
         switch (message.type) {
             case 'warning':
@@ -44,7 +65,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
             default:
-                return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-blue" />;
+                return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-secondary" />;
         }
     };
 
@@ -127,6 +148,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 {/* Content for indexing_complete */}
                 {message.type === 'indexing_complete' && (
                     <IndexingCompleteMessageContent message={message} />
+                )}
+
+                {message.showGoToFileStatusButton && (
+                    <div className="display-flex flex-row gap-2 items-end w-full justify-end py-1">
+                        <Button onClick={showFileStatusDetails} variant="outline">View File Status</Button>
+                    </div>
                 )}
             </div>
         </div>

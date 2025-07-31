@@ -19,4 +19,5 @@ export interface PopupMessage {
     showProgress?: boolean;
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
+    showGoToFileStatusButton?: boolean;
 }
