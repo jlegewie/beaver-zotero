@@ -4,9 +4,10 @@ import { fileStatusAtom } from '../atoms/files';
 import { FileStatus } from '../types/fileStatus';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
 import { fetchFileStatus, FileStatusConnection } from './useFileStatus';
 import { isEqual } from 'lodash';
+import { store } from '../index';
 
 /**
  * Adaptive polling configuration based on data freshness
@@ -123,7 +124,8 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
         }));
 
         try {
-            const currentStatus = await fetchFileStatus(userIdRef.current);
+            const processingTier = store.get(planFeaturesAtom)?.processingTier;
+            const currentStatus = await fetchFileStatus(userIdRef.current, processingTier);
             
             // Check if we got a null response, which could indicate an error
             // or legitimately no data. We need to distinguish between these cases.
@@ -218,7 +220,8 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
         
         // Fetch initial data immediately
         try {
-            const initialStatus = await fetchFileStatus(userId);
+            const processingTier = store.get(planFeaturesAtom)?.processingTier;
+            const initialStatus = await fetchFileStatus(userId, processingTier);
             setFileStatus(initialStatus);
             lastFileStatusRef.current = initialStatus;
             

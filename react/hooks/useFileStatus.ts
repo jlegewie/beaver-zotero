@@ -5,9 +5,8 @@ import { fileStatusAtom } from '../atoms/files';
 import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
-import { store } from '../index';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 import { ProcessingTier } from '../types/profile';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
@@ -63,12 +62,11 @@ export const fetchFileStatus = async (userId: string, processingTier?: Processin
         let selectString = '*';
         if (processingTier) {
             selectString = 'upload_not_uploaded,upload_pending,upload_completed,upload_failed,upload_plan_limit';
-            const planFeatures = store.get(planFeaturesAtom);
-            if (planFeatures.processingTier === 'basic') {
+            if (processingTier === 'basic') {
                 selectString += ',text_queued,text_processing,text_completed,text_failed_system,text_failed_user,text_plan_limit,text_unsupported_file';
-            } else if (planFeatures.processingTier === 'standard') {
+            } else if (processingTier === 'standard') {
                 selectString += ',md_queued,md_processing,md_completed,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file';
-            } else if (planFeatures.processingTier === 'advanced') {
+            } else if (processingTier === 'advanced') {
                 selectString += ',docling_queued,docling_processing,docling_completed,docling_failed_system,docling_failed_user,docling_plan_limit,docling_unsupported_file';
             }
         }
