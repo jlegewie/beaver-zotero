@@ -41,24 +41,24 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
         const textParts: React.ReactNode[] = [];
         if (fileStatusSummary.completedFiles > 0) textParts.push(
             <div className="display-flex flex-row gap-2 items-center">
-                <Icon icon={CheckmarkCircleIcon} className="scale-12 font-color-green" />
-                <span className="font-color-green text-base">
+                <Icon icon={CheckmarkCircleIcon} className="scale-12 font-color-secondary" />
+                <span className="font-color-secondary text-base">
                     {`${fileStatusSummary.completedFiles.toLocaleString()} file${fileStatusSummary.completedFiles > 1 ? 's' : ''} completed`}
                 </span>
             </div>
         );
         if (failedFiles > 0) textParts.push(
             <div className="display-flex flex-row gap-2 items-center">
-                <Icon icon={CancelCircleIcon} className="scale-12 font-color-red" />
-                <span className="font-color-red text-base">
+                <Icon icon={CancelCircleIcon} className="scale-12 font-color-secondary" />
+                <span className="font-color-secondary text-base">
                     {`${failedFiles.toLocaleString()} file${failedFiles > 1 ? 's' : ''} failed`}
                 </span>
             </div>
         );
         if (skippedFiles > 0) textParts.push(
             <div className="display-flex flex-row gap-2 items-center">
-                <Icon icon={InformationCircleIcon} className="scale-12 font-color-yellow" />
-                <span className="font-color-yellow text-base">
+                <Icon icon={InformationCircleIcon} className="scale-12 font-color-secondary" />
+                <span className="font-color-secondary text-base">
                     {`${skippedFiles.toLocaleString()} file${skippedFiles > 1 ? 's' : ''} skipped because of plan limits`}
                 </span>
             </div>
@@ -93,7 +93,7 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
                     <Button variant="surface">Upgrade</Button>
                 )}
                 {(skippedFiles > 0 || failedFiles > 0) && (
-                    <Button onClick={handleShowDetails} variant="surface">View Details</Button>
+                    <Button onClick={handleShowDetails} variant="outline">View Details</Button>
                 )}
             </div>
 
