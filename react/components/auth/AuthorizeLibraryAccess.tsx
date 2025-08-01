@@ -130,6 +130,10 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     const handleCheckboxClick = (e: React.MouseEvent) => {
         e.stopPropagation();
     };
+
+    const getExceedsBalanceText = (page_limit: number) => {
+        return `Your library exceeds your available page credits. The page count is an estimate and may include pages that won't be processed. If the final count exceeds the limit, some documents won't be searchable, but you can still add them manually`;
+    };
     
     // Check if selected libraries exceed the page balance
     const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
@@ -214,7 +218,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
                                     // <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
+                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
                                         <div className='text-sm font-color-red'>
                                             Page limit exceeded
                                         </div>
@@ -246,7 +250,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                 <div className="flex-1"/>
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
+                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
                                         <div className='text-sm font-color-red'>
                                             Page limit exceeded
                                         </div>
@@ -279,7 +283,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                 <div className="flex-1"/>
                                 {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
                                 {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title={`Your libraries exceed the ${profileBalance.pagesRemaining.toLocaleString()}‑page limit. Some documents won't be searchable, but you can still add them manually.`}>
+                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
                                         <div className='text-sm font-medium font-color-yellow'>
                                             Account limit exceeded
                                         </div>
