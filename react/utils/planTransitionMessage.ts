@@ -10,6 +10,11 @@ import { Icon, PuzzleIcon } from "../components/icons/icons";
 
 export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
 
+    // Don't show messages if onboarding is not complete
+    if (!profile.has_completed_onboarding) {
+        return;
+    }
+
     // Status of file processing (if not available, fetch it)
     let fileStatusSummary = store.get(fileStatusSummaryAtom);
     if (!fileStatusSummary.fileStatusAvailable) {
