@@ -6,9 +6,9 @@ import process from 'process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load environment variables based on mode
-const loadEnv = (mode) => {
-    const envFile = mode === 'production' ? '.env.production' : '.env.development';
+// Load environment variables based on build environment
+const loadEnv = (buildEnv) => {
+    const envFile = `.env.${buildEnv}`;
     const result = dotenv.config({ path: envFile });
 
     // If env file doesn't exist (like in CI), use process.env directly
@@ -26,13 +26,15 @@ const loadEnv = (mode) => {
 
 export default (env, argv) => {
     const mode = argv.mode || 'development';
-    const envVars = loadEnv(mode);
+    // Use custom BUILD_ENV or fall back to webpack mode
+    const buildEnv = process.env.BUILD_ENV || mode;
+    const envVars = loadEnv(buildEnv);
 
     return {
         mode,
         target: 'web',
         entry: './react/index.tsx',
-        devtool: mode === 'production' ? false : 'inline-source-map',
+        devtool: mode === 'development' ? 'inline-source-map' : false,
         output: {
             path: path.resolve(__dirname, 'addon', 'content'),
             filename: 'reactBundle.js',
@@ -65,6 +67,7 @@ export default (env, argv) => {
         plugins: [
             new webpack.DefinePlugin({
                 'process.env.NODE_ENV': JSON.stringify(mode),
+                'process.env.BUILD_ENV': JSON.stringify(buildEnv),
                 'process.env.SUPABASE_URL': JSON.stringify(envVars.SUPABASE_URL),
                 'process.env.SUPABASE_ANON_KEY': JSON.stringify(envVars.SUPABASE_ANON_KEY),
                 'process.env.API_BASE_URL': JSON.stringify(envVars.API_BASE_URL),

@@ -24,6 +24,7 @@
         "start": "concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
         "build": "NODE_ENV=production npm run build-react:prod && zotero-plugin build && tsc --noEmit",
         "build:dev": "NODE_ENV=development npm run build-react:dev && zotero-plugin build && tsc --noEmit",
+        "build:staging": "BUILD_ENV=staging npm run build-react:staging && zotero-plugin build && tsc --noEmit",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",
@@ -32,6 +33,7 @@
         "build-react": "webpack --config webpack.config.js",
         "build-react:dev": "webpack --config webpack.config.js --mode=development",
         "build-react:prod": "webpack --config webpack.config.js --mode=production",
+        "build-react:staging": "BUILD_ENV=staging webpack --config webpack.config.js --mode=production",
         "watch-react": "webpack --config webpack.config.js --watch"
     },
     "dependencies": {
