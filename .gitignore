@@ -9,6 +9,7 @@ yarn.lock
 # Scaffold
 .env
 .env.production
+.env.staging
 .scaffold
 build
 logs
