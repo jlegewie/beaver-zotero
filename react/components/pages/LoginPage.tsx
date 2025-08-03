@@ -26,19 +26,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
                 <div className="webapp-space-y-6">
                     <SignInForm setErrorMsg={setErrorMsg} emailInputRef={emailInputRef} />
                 </div>
-                
-                {/* Additional links */}
-                <div className="mt-8 text-center">
-                    <p className="font-color-secondary">
-                        Don&apos;t have an account?{' '}
-                        <span
-                            onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}
-                            className="text-link font-medium"
-                        >
-                            Get started
-                        </span>
-                    </p>
-                </div>
 
                 {/* {errorMsg && (
                     <div className="mt-8">
