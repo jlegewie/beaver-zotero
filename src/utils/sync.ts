@@ -423,7 +423,7 @@ export async function syncItemsToBackend(
     syncType: SyncType,
     syncMethod: SyncMethod,
     onStatusChange?: (libraryID: number, status: SyncStatus) => void,
-    onProgress?: (libraryID: number, processed: number, total: number) => void,
+    onProgress?: (libraryID: number, processed: number, totalForLibrary: number) => void,
     batchSize: number = 200,
 ) {
     const userId = store.get(userIdAtom);
@@ -432,20 +432,20 @@ export async function syncItemsToBackend(
         return;
     }
 
-    const totalItems = items.length;
+    const totalItemsForLibrary = items.length;
     let processedCount = 0;
     let syncFailed = false;
     const syncCompleted = false;
     onStatusChange?.(libraryID, 'in_progress');
     
-    if (totalItems === 0) {
+    if (totalItemsForLibrary === 0) {
         logger(`Beaver Sync '${syncSessionId}':   No items to process`, 3);
         onStatusChange?.(libraryID, 'completed');
         if (onProgress) onProgress(libraryID, 0, 0);
         return;
     }
     
-    logger(`Beaver Sync '${syncSessionId}':   Processing ${totalItems} items in batches of ${batchSize}`, 3);
+    logger(`Beaver Sync '${syncSessionId}':   Processing ${totalItemsForLibrary} items in batches of ${batchSize}`, 3);
 
     // Get clientDateModified for all items
     const clientDateModifiedMap = await getClientDateModifiedBatch(items.map(item => item.item));
@@ -583,7 +583,7 @@ export async function syncItemsToBackend(
 
             // Update progress for this batch
             processedCount += batchItems.length;
-            if (onProgress) onProgress(libraryID, processedCount, totalItems);
+            if (onProgress) onProgress(libraryID, processedCount, totalItemsForLibrary);
             
         } catch (error: any) {
             logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${error.message}`, 1);
@@ -594,9 +594,9 @@ export async function syncItemsToBackend(
         }
     }
     if (!syncFailed) {
-        logger(`Beaver Sync '${syncSessionId}':   All ${totalItems} items requiring sync were processed; marking as complete.`, 3);
+        logger(`Beaver Sync '${syncSessionId}':   All ${totalItemsForLibrary} items requiring sync were processed; marking as complete.`, 3);
         onStatusChange?.(libraryID, 'completed');
-        if (onProgress) onProgress(libraryID, totalItems, totalItems);
+        if (onProgress) onProgress(libraryID, totalItemsForLibrary, totalItemsForLibrary);
     }
 }
 
@@ -659,8 +659,8 @@ export async function syncZoteroDatabase(
     }
 
     // On progress callback
-    const onProgress = (libraryID: number, processed: number, total: number) => {
-        const status = processed >= total ? 'completed' : 'in_progress';
+    const onProgress = (libraryID: number, processed: number, totalForLibrary: number) => {
+        const status = processed >= totalForLibrary ? 'completed' : 'in_progress';
         updateSyncStatus(libraryID, { syncedCount: processed, status });
     };
 
@@ -783,9 +783,7 @@ export async function syncZoteroDatabase(
                 updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
             }
-            updateSyncStatus(libraryID, libraryInitialStatus);
-
-            
+            updateSyncStatus(libraryID, libraryInitialStatus);            
             
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
