@@ -173,7 +173,12 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
   // Handle forgot password - redirect to webapp
   const handleForgotPassword = () => {
-    Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/forgot-password')
+    const baseUrl = process.env.WEBAPP_BASE_URL?.replace(/\/$/, '') || ''
+    const params = new URLSearchParams({
+      'forgot-password': 'true',
+      'email': email
+    })
+    Zotero.launchURL(`${baseUrl}/login?${params.toString()}`)
   }
 
   // Reset to initial state
