@@ -2,7 +2,7 @@
     "name": "beaver-zotero",
     "type": "module",
     "version": "0.3.7",
-    "description": "Beaver chews through your research powered by AI, seamlessly integrates with Zotero, finds exactly what you need with smart search, and answers questions about whatever you're reading.",
+    "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
     "config": {
         "addonName": "Beaver",
         "addonID": "beaver@jlegewie.com",
@@ -18,7 +18,7 @@
     "bugs": {
         "url": "https://github.com/jlegewie/beaver-zotero/issues"
     },
-    "homepage": "https://github.com/jlegewie/beaver-zotero#readme",
+    "homepage": "https://www.beaverapp.ai",
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
