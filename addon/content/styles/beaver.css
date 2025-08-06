@@ -254,6 +254,7 @@ attachment-box .metadata-table #beaver-status {
 
 [id^="beaver-pane-"] .chat-input:focus {
     border-color: var(--fill-quarternary);
+    box-shadow: 0 0 0 0px transparent;
 }
 
 [id^="beaver-pane-"] .chat-input::placeholder {
