@@ -19,7 +19,7 @@ Welcome to Beaver! Beaver is an **AI plugin for Zotero** designed by academic re
 
 5. **Citations**. Beaver cites references from your library with direct links to the relevant page making it easy to explore the underlying source materials.
 
-6. **Feature-rich free version**: We have a feature-packed free version with unlimited metadata and related item search, free processing of medium-sized libraries for keyword search, and unlimited use with your own API keys.
+6. **Feature-rich free version**: We have a feature-packed free version with unlimited metadata and related item search, and unlimited use with your own API keys.
 
 7. **Soon: Advanced paid version**: To enable all features such as advanced file processing, powerful hybrid search for large libraries and more, we plan to introduce paid versions that cover the cost of operation.
 
@@ -54,11 +54,11 @@ Related reference search finds Zotero items based on semantic similarity. It all
 
 #### 3. Full-text Search
 
-Full-text search is the most powerful search tool that requires document processing and is the only search that distinguishes the free from the paid plans:
+Full-text search is the most powerful search tool that requires document processing. Beaver uses two types of full-text search:
 
-- **Keyword search (Free plan and beta)**: The free plan and the beta use full-text keyword search for all documents that were processed up to the plan limit (75,000 pages or about 2,500 articles for the beta version). Keyword search is similar to Zotero's built-in full-text search. Beaver improves on that with additional processing and by splitting documents into pages, which allows the model to better cite specific parts of articles. Keyword search is particularly powerful with an AI system that is optimized to formulate good keyword search terms. I mean, who types this in the search bar: `("education" OR "school achievement" OR "academic performance") AND ("socioeconomic status" OR "poverty" OR "income inequality" OR "class background")`
+- **Keyword search**: Keyword search uses keyword matching to search the full-text of your library up to the plan limit (free during the beta period for 75,000 pages or about 2,500 articles). Keyword search is similar to Zotero's built-in full-text search. Beaver improves on that with additional processing and by splitting documents into pages, which allows the model to better cite specific parts of articles. Keyword search is particularly powerful with an AI system that is optimized to formulate good keyword search terms. I mean, who types this in the search bar: `("education" OR "school achievement" OR "academic performance") AND ("socioeconomic status" OR "poverty" OR "income inequality" OR "class background")`. We are currently evaluating whether we can offer keyword search as part of the free plan but it might be associated with a small fee because of the cost associated with processing large libraries and maintaining search indices.
 
-- **Hybrid search (Paid plans)**: The paid plans will use hybrid search that combines keyword search with semantic search. Hybrid search can retrieve parts of documents based either on keyword matching or on semantic similarity. Hybrid search is considered the state-of-the-art search approach in RAG applications.
+- **Hybrid search**: Hybrid search combines keyword search with semantic search. Hybrid search can retrieve parts of documents based either on keyword matching or on semantic similarity. Hybrid search is considered the state-of-the-art search approach in RAG applications.
 
 Together, these search tools allow the research agent to iteratively explore your library and find relevant references, documents or specific paragraphs and pages within them.
 
