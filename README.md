@@ -3,25 +3,25 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
+[![Create Beaver Account](https://img.shields.io/badge/Beaver_%F0%9F%A6%AB-Create_Account-red)](https://www.beaverapp.ai)
+
 Welcome to Beaver! Beaver is an **AI plugin for Zotero** designed by academic researchers to help with the research process. What, another AI plugin for Zotero? Yes, indeed! But we think the feature set makes it compelling. There are other excellent options available, and you should explore them all. Here are some things that make Beaver special.
 
-**Beta**: Beaver is currently in beta!
+**Preview**: Beaver is currently in beta!
 
 ## Key Features
 
-1. **Seamless integration into Zotero Library and PDF Reader**. As a side panel, Beaver is right there in Zotero and always knows what you are doing. Reading an article in Zotero? Beaver knows which one it is and can see the page you are on. This seamless integration makes it easy to ask questions about your references and allows for natural queries such as "Can you explain this super-duper complicated equation to me?".
+1. **Agentic Search**. Beaver intelligently searches your library using metadata, semantic similarity, and full-text search to find exactly what you need.
 
-2. **Metadata and related reference search**. Beaver can search your entire library by metadata (author, year, title) or for references related to a specific topic (semantic search). All 100% free, without limits.
+2. **Seamless Integration into Zotero Library and PDF Reader**. Lives directly in Zotero as a side panel. Ask questions about the paper you're reading, and Beaver knows exactly which page you're on.
 
-3. **Full-text search**. Beaver processes all of your attachments (up to a page limit) for its most powerful search tool: full-text search. Depending on your plan, it uses either keyword search or hybrid search, which combines keyword matching with semantic search based on embeddings.
+3. **Precise Citations**. Answers include direct citations with page-level links back to your source PDFs, ensuring transparency and verifiability.
 
-4. **Research agent**. Beaver is _agentic_ and can iteratively search your library using different search strategies to find relevant information.
+4. **Your Library, Your Control**. Works exclusively with your curated Zotero library. No generic web results, only insights from sources you trust.
 
-5. **Citations**. Beaver cites references from your library with direct links to the relevant page making it easy to explore the underlying source materials.
+5. **Built with Privacy in Mind**: Your data stays yours. We don't train models on your data without explicit opt-in, and we're building local storage options.
 
-6. **Feature-rich free version**: We have a feature-packed free version with unlimited metadata and related item search, and unlimited use with your own API keys.
-
-7. **Soon: Advanced paid version**: To enable all features such as advanced file processing, powerful hybrid search for large libraries and more, we plan to introduce paid versions that cover the cost of operation.
+6. **Accessible by Design**: Created by academics who believe powerful research tools shouldn't be locked behind expensive paywalls.
 
 ## Getting started
 
@@ -36,35 +36,29 @@ Beaver syncs your entire library with our servers, prepares your library for met
 
 ## How does library search work?
 
-Library search is important to understand how Beaver works. Beaver uses **agentic search**, which means that the large language model has access to different search tools and can decide when to use which type of search to iteratively explore your library. Currently, Beaver has access to three search tools:
+Beaver uses **agentic search**, meaning the AI agent can choose between different search tools and use them iteratively to explore your Zotero library. Currently, Beaver has access to three types of search:
 
 #### 1. Metadata Search
 
-Metadata search finds Zotero items by metadata such as author, year, or title. This search allows the model to find specific references either because you ask for articles by a specific author or because it determined that a specific reference is important based on other papers.
+This search finds Zotero items using metadata such as author, year, or title. It's best for locating specific references either because you mention an author directly, or because the model identifies a reference as important based on context. Metadata search will remain free and unlimited.
 
-- **Free plan**: Unlimited across your entire Zotero library
-- **Paid plans**: Unlimited across your entire Zotero library
+#### 2. Related Reference Search (Semantic Search)
 
-#### 2. Related Reference Search
+This search finds references that are conceptually related to a topic, even if they don't use the same keywords. For example, a search for crime may surface articles about incarceration, policing, or violence even if the word crime isn't mentioned. Related reference search will remain free and unlimited.
 
-Related reference search finds Zotero items based on semantic similarity. It allows the model to find all references related to a specific topic. For example, searching for "crime" will find articles that are related to the topic regardless of whether they use the word "crime" in the title or abstract.
+#### 3. Full-text Search (keyword and semantic)
 
-- **Free plan**: Unlimited across your entire Zotero library
-- **Paid plans**: Unlimited across your entire Zotero library
+This is the most powerful search option, as it works on the full content of your documents. Beaver uses two different methods:
 
-#### 3. Full-text Search
+- **Keyword search**: Finds matching terms in the full text of your library (up to your plan's page limit). As part of an agentic AI system, it performs surprisingly well. Our systematic evaluations show strong performance on key benchmarks. During the beta, it’s free for up to 75,000 pages (roughly 2,500 articles).
 
-Full-text search is the most powerful search tool that requires document processing. Beaver uses two types of full-text search:
+- **Hybrid search**: Combines keyword and semantic search to retrieve relevant passages even when exact keywords aren't present. This is the current state-of-the-art in search for RAG (retrieval-augmented generation) applications.
 
-- **Keyword search**: Keyword search uses keyword matching to search the full-text of your library up to the plan limit (free during the beta period for 75,000 pages or about 2,500 articles). Keyword search is similar to Zotero's built-in full-text search. Beaver improves on that with additional processing and by splitting documents into pages, which allows the model to better cite specific parts of articles. Keyword search is particularly powerful with an AI system that is optimized to formulate good keyword search terms. I mean, who types this in the search bar: `("education" OR "school achievement" OR "academic performance") AND ("socioeconomic status" OR "poverty" OR "income inequality" OR "class background")`. We are currently evaluating whether we can offer keyword search as part of the free plan but it might be associated with a small fee because of the cost associated with processing large libraries and maintaining search indices.
-
-- **Hybrid search**: Hybrid search combines keyword search with semantic search. Hybrid search can retrieve parts of documents based either on keyword matching or on semantic similarity. Hybrid search is considered the state-of-the-art search approach in RAG applications.
-
-Together, these search tools allow the research agent to iteratively explore your library and find relevant references, documents or specific paragraphs and pages within them.
+Together, these tools allow the research agent to explore your library and find relevant references, documents, or specific paragraphs and pages.
 
 ## Responsible Use of Generative AI in Academic Research
 
-The use of generative AI in academic research is a hotly debated topic (see one discussion [here](https://statmodeling.stat.columbia.edu/2025/07/18/i-am-no-longer-chairing-defenses-or-joining-committees-where-students-use-generative-ai-for-their-writing/#comments)). Everyone using these tools should engage with these questions and understand that there are very different views. As the developers of Beaver, we want to highlight some things that we think are important for using generative AI tools such as Beaver for academic research and writing.
+The use of generative AI in academic research is a hotly debated topic (see one discussion [here](https://statmodeling.stat.columbia.edu/2025/07/18/i-am-no-longer-chairing-defenses-or-joining-committees-where-students-use-generative-ai-for-their-writing/#comments)). Everyone using these tools should engage with these questions and understand that there are very different views. As the developers of Beaver, we want to highlight some important things when using generative AI tools such as Beaver for academic research and writing.
 
 **First and foremost**, students should talk with their advisor, committee, mentor, department, or other relevant people about how and when you are allowed to use generative AI. Rules will differ and it is important to be upfront to avoid any misunderstanding later on. Many universities, departments, journals, publishers, etc. have rules and guidelines. Make sure you are familiar with them.
 
@@ -76,7 +70,7 @@ The use of generative AI in academic research is a hotly debated topic (see one 
 
 Beaver is designed specifically for academic research. It relies on and incorporates references from _your_ Zotero library so you can curate the information used by Beaver. It also directly integrates into your reference manager for easy access directly where you work and read PDFs.
 
-Here are some examples of the types of questions you might ask Beaver. In each case, the difference compared to ChatGPT, Claude etc is that Beaver will search _your_ library for relevant materials, correctly cite these materials and link back directly to the source document.
+Here are some examples of the types of questions you might ask Beaver. In each case, the difference compared to ChatGPT, Claude etc is that Beaver will search _your_ library for relevant materials, correctly cite these materials and link back to the source document.
 
 - "I don't understand the difference between 'legal cynicism' and 'legal estrangement'. Can you give me a clear definitions and discuss how the two terms are used in empirical research?"
 - "What are the key findings in this article and how do they relate to other research? Identify the key findings and then search for other research that either supports or contradicts the key findings."
@@ -95,15 +89,15 @@ If you prefer local solutions, take a look at other Zotero plugins such as [A.R.
 
 Chat credits apply to both your chat messages and any related tool calls (e.g. metadata searches, full-text searches). Each time you send a message to the model, you spend one chat credit.
 
-If the model requests a tool call, our servers execute the tool (e.g. searches for relevant Zotero items) and feed the results back to the model in a second request. This second request costs one more chat credit. A single request can generate multiple tool calls and each tool call costs an additional chat credit.
+If the model requests a tool call, our servers execute the tool (e.g. searches for relevant Zotero items) and feed the results back to the model in a second request. This second request costs one more chat credit. A single question can generate multiple tool calls and each tool call costs an additional chat credit.
 
-If you prefer, you can switch to using your own API key at any time. In that case, tool calls on our platform no longer consume chat credits—instead, you’ll pay your API provider directly according to their token-usage rates.
+If you prefer, you can switch to using your own API key at any time. In that case, tool calls no longer consume chat credits. You'll pay your API provider directly according to their token-usage rates.
 
-### How do the page limits work?
+### How do page limits work?
 
 The page limits determine how many pages will be indexed for full-text search. If the size of your library exceeds the page limit, additional files will not be indexed for search. You can see any files that exceed the limit under "File Status" when starting a new thread.
 
-Importantly, the page limit _only_ impacts full-text search! Metadata and related reference search is unlimited. You can also add documents that exceed your page balance manually to any chat. The document is just excluded from full-text search.
+Importantly, the page limit _only_ impacts full-text search! Metadata and related reference search is unlimited. You can also manually add documents that exceed your page balance to any chat. The document is just excluded from full-text search.
 
 ### What types of attachments are supported?
 
@@ -118,6 +112,8 @@ Here are two concrete tips:
 1. **Maintain a clean Zotero library**: Beaver searches your Zotero library, so maintaining a clean library helps a lot! For example, using clear filenames helps Beaver identify the right items and attachments. Using "main_article.pdf", "appendix.pdf" and "book_review.pdf" as filenames helps Beaver distinguish the different types of documents. In most cases this won't make a difference, but it is one example of countless ways in which Beaver relies on the data in your library.
 
 2. **Use custom prompts**: Add details to the custom prompt under preferences. This text will be added to every conversation and helps Beaver understand your specific research context and preferences.
+
+3. **Help improve Beaver**: Considering enabling data sharing in your account settings to help us improve Beaver. We only use anonymized data.
 
 ## System Requirements
 
