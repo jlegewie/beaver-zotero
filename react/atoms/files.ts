@@ -98,7 +98,10 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
     let planLimitProcessingCount = 0;
     let unsupportedFileCount = 0;
 
-    if(fileStatus && processingTier === 'basic') {
+    if(fileStatus && processingTier === 'none') {
+        completedFiles = uploadCompletedCount;
+        planLimitProcessingCount = uploadPlanLimitCount;
+    } else if(fileStatus && processingTier === 'basic') {
         queuedProcessingCount = fileStatus.text_queued;
         processingProcessingCount = (fileStatus.text_processing);
         completedFiles = fileStatus.text_completed;

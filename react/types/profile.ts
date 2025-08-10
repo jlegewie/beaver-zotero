@@ -50,6 +50,7 @@ export enum SubscriptionStatus {
 }
 
 export enum ProcessingTier {
+    NONE = "none",
     BASIC = "basic",
     STANDARD = "standard",
     ADVANCED = "advanced"
