@@ -51,7 +51,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         return (
             <div 
                 id="beaver-messages"
-                className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 mb-2"
+                className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0"
                 onScroll={handleScroll}
                 ref={ref}
             >
