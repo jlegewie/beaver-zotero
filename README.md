@@ -7,9 +7,9 @@
 
 Welcome to Beaver — a research agent with native Zotero integration. Beaver combines two parts:
 
-1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you’re reading, and your broader library to generate answers with page‑level citations.
+1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, and your broader library to generate answers with page‑level citations.
 
-2. **Native Zotero Integration**: Beaver runs inside Zotero, using your curated library and reading context. When you’re viewing a PDF, Beaver knows which page you’re on and relates it to the rest of your library without disrupting your workflow.
+2. **Native Zotero Integration**: Beaver runs inside Zotero, using your curated library and reading context. When you're viewing a PDF, Beaver knows which page you're on and relates it to the rest of your library without disrupting your workflow.
 
 ### Preview release
 
@@ -21,19 +21,19 @@ We welcome feedback on GitHub and in Slack. Access to the preview release may be
 
 1. **Autonomous Research Agent**: Beaver uses multi‑tool agentic search that goes beyond simple queries. The agent combines metadata, semantic, and full‑text retrieval, adapting its strategy to your task to find specific passages across thousands of papers and synthesize findings.
 
-2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you’re reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving the PDF reader.
+2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving the PDF reader.
 
 3. **Your Library as Knowledge Base**: Results come from your Zotero library—no generic web results—ensuring traceability to sources you trust.
 
 4. **Precise Citations**: Every claim includes exact citations with direct links to the source pages in your PDFs.
 
-5. **Privacy**: We don’t train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
+5. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
 
 6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑text search for up to 75,000 pages (~2,500 articles). Includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
 
 ## Evaluations
 
-We continuously evaluate Beaver to guide development. Early results on a modified version of the LitQA2 benchmark using 197 multiple‑choice questions from Future House’s [LAB‑Bench](https://github.com/Future-House/LAB-Bench) show strong performance. LitQA2 emphasizes genuine literature retrieval: answers are in main texts (not abstracts) and ideally in a single paper, pushing systems to find and read the correct source rather than rely on memorization.
+We continuously evaluate Beaver to guide development. Early results on a modified version of the LitQA2 benchmark using 197 multiple‑choice questions from Future House's [LAB‑Bench](https://github.com/Future-House/LAB-Bench) show strong performance. LitQA2 emphasizes genuine literature retrieval: answers are in main texts (not abstracts) and ideally in a single paper, pushing systems to find and read the correct source rather than rely on memorization.
 
 Beaver's agentic search outperforms baselines, including tool‑augmented frontier models, on this task. Performance varies by model, from 92.4% (GPT‑5) to 77.9% (Gemini 2.5 Flash). From a cost‑effectiveness standpoint, Beaver with GPT‑5 Mini achieves 83.5% accuracy at approximately $0.0102 per task (about 1.25× the cost of Gemini 2.5 Flash).
 
@@ -41,7 +41,7 @@ Beaver's agentic search outperforms baselines, including tool‑augmented fronti
 
 ![Figure: Performance comparison for Beaver Preview](/docs/litqa2-accuracy-preview.png)
 
-We use these and other evaluations to refine search strategies, improve citation accuracy, and strengthen cross‑domain performance. We’ll share additional benchmarks and updates as Beaver evolves.
+We use these and other evaluations to refine search strategies, improve citation accuracy, and strengthen cross‑domain performance. We'll share additional benchmarks and updates as Beaver evolves.
 
 ## Getting started
 
@@ -52,7 +52,7 @@ We use these and other evaluations to refine search strategies, improve citation
 
 ## How does Beaver work?
 
-Beaver is a research agent with native Zotero integration that autonomously selects and combines search strategies to find relevant information. It syncs your library to our servers, prepares metadata and related‑item search, and processes your files for full‑text search. See our [privacy policy](https://www.beaverapp.ai/privacy-policy). We’re also building features to keep more data local. Prefer a local‑only approach? Consider Zotero plugins like [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
+Beaver is a research agent with native Zotero integration that autonomously selects and combines search strategies to find relevant information. It syncs your library to our servers, prepares metadata and related‑item search, and processes your files for full‑text search. See our [privacy policy](https://www.beaverapp.ai/privacy-policy). We're also building features to keep more data local. Prefer a local‑only approach? Consider Zotero plugins like [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
 
 ## How does library search work?
 
@@ -85,13 +85,13 @@ The role of generative AI in research is actively debated (see one discussion [h
 
 ## Frequently Asked Questions
 
-### What’s the difference between Beaver and general‑purpose tools like ChatGPT?
+### What's the difference between Beaver and general‑purpose tools like ChatGPT?
 
 Beaver is built for academic research and works directly with your Zotero library, ensuring you can curate sources. It integrates into Zotero for easy access where you read PDFs and writes answers with correct citations and links back to the source document.
 
 Examples of useful prompts:
 
-- “What’s the difference between ‘legal cynicism’ and ‘legal estrangement’? Provide clear definitions and discuss empirical usage.”
+- “What's the difference between ‘legal cynicism' and ‘legal estrangement'? Provide clear definitions and discuss empirical usage.”
 - “What are the key findings of this article, and how do they relate to other work? Identify the findings and search for supporting or contradicting research.”
 - “Has research examined interactions between socioeconomic status and educational outcomes?”
 - (In the Zotero PDF reader) “Why do they control for income here? Do other studies in this area do the same?”
@@ -99,7 +99,7 @@ Examples of useful prompts:
 
 ### Do you store and use my data?
 
-Beaver syncs your data, uploads attachments, and processes files in the cloud to provide functionality. See our detailed [privacy policy](https://www.beaverapp.ai/privacy-policy). We do not sell your data or train models on it unless you explicitly opt in. We’re also working on features to store chats locally (Zotero data will still sync).
+Beaver syncs your data, uploads attachments, and processes files in the cloud to provide functionality. See our detailed [privacy policy](https://www.beaverapp.ai/privacy-policy). We do not sell your data or train models on it unless you explicitly opt in. We're also working on features to store chats locally (Zotero data will still sync).
 
 Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
 
@@ -111,9 +111,9 @@ You can switch to your own API key at any time. When using your key, tool calls 
 
 ### How do page limits work?
 
-Page limits control how many pages are indexed for full‑text search. If your library exceeds the limit, additional files aren’t indexed for full‑text search. You can view files over the limit under “File Status” when starting a new thread.
+Page limits control how many pages are indexed for full‑text search. If your library exceeds the limit, additional files aren't indexed for full‑text search. You can view files over the limit under “File Status” when starting a new thread.
 
-Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can manually add over‑limit documents to any chat; they’re just excluded from full‑text search.
+Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can manually add over‑limit documents to any chat; they're just excluded from full‑text search.
 
 ### What attachment types are supported?
 
