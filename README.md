@@ -35,7 +35,7 @@ We welcome feedback on GitHub and in Slack. Access to the preview release may be
 
 We continuously evaluate Beaver to guide development. Early results on a modified version of the LitQA2 benchmark using 197 multiple‑choice questions from Future House’s [LAB‑Bench](https://github.com/Future-House/LAB-Bench) show strong performance. LitQA2 emphasizes genuine literature retrieval: answers are in main texts (not abstracts) and ideally in a single paper, pushing systems to find and read the correct source rather than rely on memorization.
 
-Beaver’s agentic search outperforms baselines, including tool‑augmented frontier models, on this task. Performance varies by model, from 92.4% (GPT‑5) to 74.1% (Gemini 2.5 Flash). From a cost‑effectiveness standpoint, Beaver with GPT‑5 Mini achieves 84.8% accuracy at approximately $0.0079 per task (about 1.5× the cost of Gemini 2.5 Flash, while delivering >50% higher accuracy).
+Beaver's agentic search outperforms baselines, including tool‑augmented frontier models, on this task. Performance varies by model, from 92.4% (GPT‑5) to 77.9% (Gemini 2.5 Flash). From a cost‑effectiveness standpoint, Beaver with GPT‑5 Mini achieves 83.5% accuracy at approximately $0.0102 per task (about 1.25× the cost of Gemini 2.5 Flash).
 
 <!-- As an additional comparison, [Lála et al. (2023)](https://arxiv.org/abs/2312.07559) report accuracy for Perplexity of 18%, Perplexity (Co‑pilot) of 58%, Elicit of 24%, Scite of 24%, AutoGPT of 41.4%, PaperQA of 69.5%, and human performance of 66.8%. However, direct comparisons to Beaver are problematic. -->
 
