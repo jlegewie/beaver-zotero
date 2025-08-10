@@ -246,20 +246,12 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     <div className="mt-4 display-flex flex-col gap-3">
                         <div className="p-3 rounded-md bg-senary border-popup">
                             <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">{planDisplayName} Account (free)</div>
+                                <div className="font-medium">Free Account</div>
                                 <div className="flex-1"/>
-                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                                {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
-                                        <div className='text-sm font-color-red'>
-                                            Page limit exceeded
-                                        </div>
-                                        <Icon className="font-color-red mt-015" icon={InformationCircleIcon}/>
-                                    </div>
-                                )}
+                                <Icon className="scale-12" icon={TickIcon}/>
                             </div>
                             <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
+                                <div>Unlimited metadata and related item search</div>
                             </div>
                         </div>
                         <div className="p-3 rounded-md bg-senary">
@@ -268,7 +260,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                 <Button variant="surface">Upgrade</Button>
                             </div>
                             <div className="text-sm font-color-secondary">
-                                Better search with semantic document understanding
+                                Full-text search and more...
                             </div>
                         </div>
                     </div>
