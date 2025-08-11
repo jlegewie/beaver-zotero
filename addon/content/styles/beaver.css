@@ -1453,6 +1453,7 @@ attachment-box .metadata-table #beaver-status {
 /* Primary button variant (Send code to email / Sign in) */
 [id^="beaver-pane-"] .webapp-btn-primary {
     /* background-color: var(--accent-blue); */
+    font-size: 0.9rem;
     background-color: var(--fill-primary);
     color: var(--material-sidepane);
     border-color: var(--fill-primary);
