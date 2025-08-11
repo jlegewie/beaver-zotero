@@ -9,6 +9,15 @@ import { planIdAtom } from './profile';
  */
 export type ProviderType = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
+export type Verbosity = "low" | "medium" | "high";
+
+
+export interface ModelPricing {
+    input: number;
+    output: number;
+    cache_write?: number;
+    cache_read?: number;
+}
 
 /**
  * ModelConfig interface representing an AI model for chat completion
@@ -17,10 +26,10 @@ export type ReasoningEffort = "low" | "medium" | "high" | "max";
  * @property snapshot - The provider's model identifier used in API calls
  * @property is_agent - Whether the model supports agent capabilities
  * @property reasoning_model - Whether the model provides reasoning capabilities
+ * @property reasoning_effort - The effort of the model for reasoning
+ * @property verbosity - The verbosity of the model
+ * @property pricing - The pricing of the model
  * @property kwargs - Additional provider-specific parameters
- * @property price_input_tokens - The cost of input tokens
- * @property price_output_tokens - The cost of output tokens
- * @property cache_discount - The discount for cached responses
  */
 export interface ModelConfig {
     id: string;
@@ -30,10 +39,9 @@ export interface ModelConfig {
     is_agent: boolean;
     reasoning_model?: boolean;
     reasoning_effort?: ReasoningEffort;
+    verbosity?: Verbosity;
+    pricing: ModelPricing;
     kwargs?: Record<string, any>;
-    price_input_tokens?: number;
-    price_output_tokens?: number;
-    cache_discount?: number;
 }
 
 export interface FullModelConfig extends ModelConfig {
