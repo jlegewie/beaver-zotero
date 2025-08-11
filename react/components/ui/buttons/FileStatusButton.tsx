@@ -63,11 +63,9 @@ const FileStatusButton: React.FC<{
         return null; 
     }
 
-    // Define animation classes. Ensure 'beaver-flash-border' and 'beaver-flash-bg' 
-    // are defined in your CSS (e.g., addon/content/styles/beaver.css) 
-    // to create the desired visual effect (e.g., temporary border/background color change).
+    // Define animation classes
     const baseClasses = 'transition-colors duration-300 ease-in';
-    const flashClasses = 'beaver-flash-border beaver-flash-bg';
+    const flashClasses = 'beaver-flash-bg';
     const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
 
     // Conditionally apply 'animate-spin' to SyncIcon

@@ -1416,12 +1416,9 @@ attachment-box .metadata-table #beaver-status {
 }
 
 /* Flash animations for status updates */
-[id^="beaver-pane-"] .beaver-flash-border {
-    border-color: var(--accent-blue);
-}
-
 [id^="beaver-pane-"] .beaver-flash-bg {
-    background-color: var(--accent-blue10);
+    border-radius: 6px;
+    background-color: var(--fill-quinary);
 }
 
 /* Flash animation for Stat component text */
