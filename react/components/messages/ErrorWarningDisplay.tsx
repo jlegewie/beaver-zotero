@@ -20,6 +20,9 @@ const getErrorMessage = (errorType: string) => {
             return "Usage limit reached. Please try again later.";
         case 'content_filtered':
             return "The AI response was blocked by the provider's safety filters.";
+        case 'streaming_verification_error':
+            return "OpenAI requires verification to use this model with streaming.";
+            // https://github.com/jlegewie/beaver-zotero?tab=readme-ov-file#verification-for-openai-api-keys
         case 'beaver_rate_limit':
             return "Beaver rate limit reached. Please try again later.";
         case 'auth':
@@ -68,20 +71,31 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
             style={{ background: 'var(--tag-red-quinary)' }}
         >
             <div className="font-color-red display-flex flex-row gap-3 items-start">
-                <Icon icon={AlertIcon} className="scale-11 mt-020" />
+                <Icon icon={AlertIcon} className="mt-020" />
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-start">
                         <div className="text-base">{getErrorMessage(errorType)}</div>
                     </div>
                 </div>
             </div>
-            {(showSettingsButton || showApiKeyButton) && (
+            {(showSettingsButton || showApiKeyButton || errorType === 'streaming_verification_error') && (
                 <div className="font-color-red display-flex flex-row gap-3 items-start">
                     <div className="flex-1"/>
-                    
+                    {errorType === 'streaming_verification_error' && (
                         <Button
                             variant="outline"
-                            className="scale-90 mt-020 border-error font-color-red"
+                            className="border-error font-color-red mr-1"
+                            onClick={() => {
+                                Zotero.launchURL('https://github.com/jlegewie/beaver-zotero?tab=readme-ov-file#verification-for-openai-api-keys');
+                            }}
+                        >
+                            Learn more
+                        </Button>
+                    )}
+                    {(showSettingsButton || showApiKeyButton) && (
+                        <Button
+                            variant="outline"
+                            className="border-error font-color-red mr-1"
                             rightIcon={SettingsIcon}
                             onClick={() => {
                                 setIsPreferencePageVisible(true);
@@ -89,7 +103,7 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                         >
                             Settings
                         </Button>
-                    
+                    )}
                     {/* {showApiKeyButton && (
                         <Button
                             variant="outline"
