@@ -190,6 +190,17 @@ declare namespace Zotero {
                 orderDirection?: 'ASC' | 'DESC'
             ): Promise<import("../src/services/database").SyncLogsRecord[]>;
 
+            /**
+             * Get the most recent sync log record for specific library_ids and user_id.
+             * @param user_id The user_id to filter by
+             * @param library_ids The library_ids to filter by
+             * @returns The SyncLogsRecord with most recent timestamp, or null if not found
+             */
+            getMostRecentSyncLogForLibraries(
+                user_id: string,
+                library_ids: number[]
+            ): Promise<import("../src/services/database").SyncLogsRecord | null>;
+
         }
 
         /**

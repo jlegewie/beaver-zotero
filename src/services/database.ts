@@ -761,4 +761,22 @@ export class BeaverDB {
         return rows.map((row: any) => BeaverDB.rowToSyncLogsRecord(row));
     }
 
+    public async getMostRecentSyncLogForLibraries(user_id: string, library_ids: number[]): Promise<SyncLogsRecord | null> {
+        if (!library_ids || library_ids.length === 0) return null;
+
+        const placeholders = library_ids.map(() => '?').join(',');
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM sync_logs
+             WHERE user_id = ? AND library_id IN (${placeholders})
+             ORDER BY timestamp DESC
+             LIMIT 1`,
+            [user_id, ...library_ids]
+        );
+
+        if (rows.length === 0) {
+            return null;
+        }
+        return BeaverDB.rowToSyncLogsRecord(rows[0]);
+    }
+
 }
