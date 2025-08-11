@@ -129,6 +129,12 @@ Beaver explores your library using different tools. A clean library helps it fin
 
 3. **Help improve Beaver**: Consider enabling anonymized data sharing in account settings.
 
+### Verification for OpenAI API keys
+
+If you are trying to use your own OpenAI API key, you might run into to the verification error. Unfortunatly, OpenAI requires verification including ID check before using API keys for streaming model responses (which is pretty essential for a good user experience in chat applications). You can resolve this issue by going to [here](https://platform.openai.com/settings/organization/general) and clicking on Verify Organization.
+
+If this requirement motivates you to try a different provider, I suggest adding an API key for Gemini ([link](https://aistudio.google.com/app/apikey)).
+
 ## System Requirements
 
 - Zotero 7.0 or later
