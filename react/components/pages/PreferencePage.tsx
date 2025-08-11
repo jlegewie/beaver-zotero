@@ -55,6 +55,42 @@ const PreferencePage: React.FC = () => {
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
+    const [lastSyncedText, setLastSyncedText] = useState<string>('Never');
+ 
+     // --- Load last synced timestamp from local DB ---
+     const loadLastSynced = useCallback(async () => {
+         try {
+             if (!user?.id || !syncLibraryIds?.length) {
+                setLastSyncedText('Unable to retrieve');
+                return;
+             }
+             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncLibraryIds);
+             if (!latest) {
+                setLastSyncedText('Never');
+                return;
+             }
+ 
+            // Timestamps are stored like 'YYYY-MM-DD HH:MM:SS' (UTC); add 'Z' for robust parsing
+            const stamp = latest.timestamp.endsWith('Z') ? latest.timestamp : `${latest.timestamp}Z`;
+            const localDate = new Date(stamp);
+            // e.g., "Aug 11, 2025, 2:34 PM"
+            const nice = new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+            }).format(localDate);
+            setLastSyncedText(nice);
+        } catch (e: any) {
+            logger(`Failed to load last sync time: ${e.message}`, 1);
+            setLastSyncedText('—');
+        }
+    }, [user?.id, syncLibraryIds]);
+
+    React.useEffect(() => {
+        loadLastSynced();
+    }, [loadLastSynced]);
 
     // Helper function to save custom prompts array to preferences
     const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
@@ -126,6 +162,8 @@ const PreferencePage: React.FC = () => {
             
             logger('Full sync completed successfully');
             setSyncStatus('completed');
+            // Refresh last synced info
+            await loadLastSynced();
             
             // Reset to idle after 2 seconds
             setTimeout(() => {
@@ -350,8 +388,8 @@ const PreferencePage: React.FC = () => {
 
             <div className="display-flex flex-col gap-3">
                 <div className="display-flex flex-row items-center gap-3">
-                    <div className="font-color-secondary">Sync Status:</div>
-                    <div className="font-color-secondary">Last synced on XXXX</div>
+                    <div className="font-color-secondary">Last synced:</div>
+                    <div className="font-color-secondary">{lastSyncedText}</div>
                 </div>
                 <div className="display-flex flex-row items-center gap-4">
                     <Button 
