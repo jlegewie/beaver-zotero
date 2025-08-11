@@ -56,42 +56,54 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
     const showSettingsButton = errorType === 'inactive_subscription';
-    
     const showApiKeyButton =
         errorType === 'app_key_limit_exceeded' ||
         errorType === 'user_key_failed_unexpected' ||
         errorType === 'user_key_rate_limit_exceeded' ||
         errorType === 'user_key_failed';
-    
+
     return (
         <div
-            className="display-flex flex-col gap-0 rounded-md border-quinary mb-3 mt-3"
-            style={{ borderColor: 'var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+            className="display-flex flex-col p-3 gap-3 rounded-lg mb-3"
+            style={{ background: 'var(--tag-red-quinary)' }}
         >
-            <div className="font-color-red p-3 display-flex flex-row gap-3 items-start">
-                <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                <div className="display-flex flex-col flex-1 gap-2">
-                    <div className="display-flex flex-row gap-4 items-center">
-                        <div>Error</div>
-                        <div className="flex-1"/>
-                        {showSettingsButton &&
-                            <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={SettingsIcon} onClick={() => {
-                                setIsPreferencePageVisible(true);
-                            }}>
-                                Settings
-                            </Button>
-                        }
-                        {showApiKeyButton &&
-                            <Button variant="outline" className="scale-90 border-error font-color-red" rightIcon={KeyIcon} onClick={() => {
-                                setIsPreferencePageVisible(true);
-                            }}>
-                                Settings
-                            </Button>
-                        }
+            <div className="font-color-red display-flex flex-row gap-3 items-start">
+                <Icon icon={AlertIcon} className="scale-11 mt-020" />
+                <div className="display-flex flex-col flex-1 gap-2 min-w-0">
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <div className="text-base">{getErrorMessage(errorType)}</div>
                     </div>
-                    <div className="text-sm">{getErrorMessage(errorType)}</div>
                 </div>
             </div>
+            {(showSettingsButton || showApiKeyButton) && (
+                <div className="font-color-red display-flex flex-row gap-3 items-start">
+                    <div className="flex-1"/>
+                    
+                        <Button
+                            variant="outline"
+                            className="scale-90 mt-020 border-error font-color-red"
+                            rightIcon={SettingsIcon}
+                            onClick={() => {
+                                setIsPreferencePageVisible(true);
+                            }}
+                        >
+                            Settings
+                        </Button>
+                    
+                    {/* {showApiKeyButton && (
+                        <Button
+                            variant="outline"
+                            className="scale-90 mt-020 border-error font-color-red"
+                            rightIcon={KeyIcon}
+                            onClick={() => {
+                                setIsPreferencePageVisible(true);
+                            }}
+                        >
+                            API Key
+                        </Button>
+                    )} */}
+                </div>
+            )}
         </div>
     );
 };
