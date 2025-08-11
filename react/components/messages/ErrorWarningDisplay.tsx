@@ -71,7 +71,7 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
             style={{ background: 'var(--tag-red-quinary)' }}
         >
             <div className="font-color-red display-flex flex-row gap-3 items-start">
-                <Icon icon={AlertIcon} className="mt-020" />
+                <Icon icon={AlertIcon} className="scale-11 mt-020" />
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-start">
                         <div className="text-base">{getErrorMessage(errorType)}</div>
