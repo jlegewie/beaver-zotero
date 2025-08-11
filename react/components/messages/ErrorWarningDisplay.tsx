@@ -48,6 +48,8 @@ const getErrorMessage = (errorType: string) => {
             return "Your API key hit its usage limit.";
         case 'user_key_failed':
             return "Your API key didn't work. Please check it's correct.";
+        case 'user_key_not_set':
+            return "Your API key for this model is not set. Please set it in the settings.";
         case 'server_error':
             return "AI service error. Please try again later.";
         default:
@@ -63,7 +65,8 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
         errorType === 'app_key_limit_exceeded' ||
         errorType === 'user_key_failed_unexpected' ||
         errorType === 'user_key_rate_limit_exceeded' ||
-        errorType === 'user_key_failed';
+        errorType === 'user_key_failed' ||
+        errorType === 'user_key_not_set';
 
     return (
         <div

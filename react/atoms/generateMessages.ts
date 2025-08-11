@@ -225,8 +225,21 @@ export const generateResponseAtom = atom(
         // Get current model
         const model = get(selectedModelAtom);
         if (!model) {
-            logger('generateResponseAtom: No model selected');
+            // Create user and assistant messages so we can display a proper error in-thread
+            const userMsg = createUserMessage(payload.content);
+            const assistantMsg = createAssistantMessage({ status: 'in_progress' });
+
+            const threadMessages = get(threadMessagesAtom);
+            set(threadMessagesAtom, [...threadMessages, userMsg, assistantMsg]);
+            set(currentAssistantMessageIdAtom, assistantMsg.id);
+
+            // Stop spinner and surface an actionable error
             set(isChatRequestPendingAtom, false);
+            set(setMessageStatusAtom, {
+                id: assistantMsg.id,
+                status: 'error',
+                errorType: 'invalid_model'
+            });
             return;
         }
 
@@ -372,27 +385,18 @@ export const regenerateFromMessageAtom = atom(
     }
 );
 
-function getUserApiKey(model: FullModelConfig, get:any, set: any): string | undefined {
-    let userApiKey = undefined;
+function getUserApiKey(model: FullModelConfig): string | undefined {
+    // Only relevant for models that require a user API key
+    if (model.use_app_key) return undefined;
+
     if (model.provider === 'google') {
-        userApiKey = getPref('googleGenerativeAiApiKey') || undefined;
+        return getPref('googleGenerativeAiApiKey') || undefined;
     } else if (model.provider === 'openai') {
-        userApiKey = getPref('openAiApiKey') || undefined;
+        return getPref('openAiApiKey') || undefined;
     } else if (model.provider === 'anthropic') {
-        userApiKey = getPref('anthropicApiKey') || undefined;
+        return getPref('anthropicApiKey') || undefined;
     }
-    
-    // If no API key available, find default model from supported models
-    if (!userApiKey) {
-        const supportedModels = get(supportedModelsAtom);
-        model = supportedModels.find((m: FullModelConfig) => m.is_default);
-        if (!model) {
-            logger('No default model found, cannot generate response');
-            set(isChatRequestPendingAtom, false);
-            throw new Error('Invalid model: No default model found, cannot generate response');
-        }
-    }
-    return userApiKey;
+    return undefined;
 }
 
 async function _handleThreadMessages(userMessage: MessageData, threadId: string | null, set: any, get: any): Promise<{threadId: string, messages: MessageData[]}> {
@@ -447,8 +451,19 @@ async function _processChatCompletionViaBackend(
     set: any,
     get: any
 ) {
-    // Set user API key
-    const userApiKey = getUserApiKey(model, get, set);
+    // Set user API key (only for user-key models)
+    const userApiKey = getUserApiKey(model);
+
+    // If a user-key model is selected but no key is configured, surface UI error
+    if (!model.use_app_key && !userApiKey) {
+        set(isChatRequestPendingAtom, false);
+        set(setMessageStatusAtom, {
+            id: assistantMessageId,
+            status: 'error',
+            errorType: 'user_key_not_set'
+        });
+        return;
+    }
 
     // User message
     const userMessage = {
