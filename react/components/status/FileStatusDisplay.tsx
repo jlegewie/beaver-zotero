@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { CheckmarkIcon, SpinnerIcon, CheckmarkIconGrey, AlertIcon as AlertIconIcon } from "./icons";
 import { AlertIcon, InformationCircleIcon } from "../icons/icons";
@@ -9,6 +9,7 @@ import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
 import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
+import { planFeaturesAtom } from "../../atoms/profile";
 
 interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
@@ -16,6 +17,7 @@ interface FileStatusDisplayProps {
 
 const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus }) => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
 
     // Calculate overall statistics
@@ -80,6 +82,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
         return "File Processing";
     };
 
+    const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
+
     return (
         <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">
             <div className="display-flex flex-row gap-4">
@@ -135,7 +139,20 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 />
             )}
 
-            {connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || fileStats.planLimitProcessingCount > 0) && (
+            {/* Skipped uploads (only shown if the user has no processing tier) */}
+            {processingTier === 'none' && fileStats.uploadPlanLimitCount > 0 && (
+                <PaginatedFailedUploadsList
+                    statuses={["plan_limit"]}
+                    count={fileStats.uploadPlanLimitCount}
+                    icon={AlertIcon}
+                    title={`Skipped upload${fileStats.uploadPlanLimitCount > 1 ? 's' : ''}`}
+                    tooltipTitle="Skipped Uploads"
+                    textColorClassName="font-color-secondary"
+                />
+            )}
+
+            {/* Failed and skipped processing (only shown if the user has a processing tier) */}
+            {processingTier !== 'none' && connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || fileStats.planLimitProcessingCount > 0) && (
                 <div className="display-flex flex-col gap-3">
                     {/* Failed processing */}
                     {fileStats.failedProcessingCount > 0 && (
