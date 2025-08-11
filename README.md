@@ -87,21 +87,29 @@ The role of generative AI in research is actively debated (see one discussion [h
 
 ### What's the difference between Beaver and general‑purpose tools like ChatGPT?
 
-Beaver is built for academic research and works directly with your Zotero library, ensuring you can curate sources. It integrates into Zotero for easy access where you read PDFs and writes answers with correct citations and links back to the source document.
+Beaver is built for academic research and works directly with your Zotero library, ensuring you can curate sources. It integrates into Zotero for easy access where you read PDFs and writes answers with correct citations and links back to the source document. On evaluations, it significantly outperforms general purpose chat bots for scientific literature retrieval and reasoning.
 
 Examples of useful prompts:
 
-- “What's the difference between ‘legal cynicism' and ‘legal estrangement'? Provide clear definitions and discuss empirical usage.”
-- “What are the key findings of this article, and how do they relate to other work? Identify the findings and search for supporting or contradicting research.”
-- “Has research examined interactions between socioeconomic status and educational outcomes?”
-- (In the Zotero PDF reader) “Why do they control for income here? Do other studies in this area do the same?”
-- (In the Zotero PDF reader) “This measure of wealth is unclear. How do other studies measure wealth?”
+- "What's the difference between 'legal cynicism' and 'legal estrangement'? Provide clear definitions and discuss empirical usage."
+- "What are the key findings of this article, and how do they relate to other work? Identify the findings and search for supporting or contradicting research."
+- "Has research examined interactions between socioeconomic status and educational outcomes?"
+- (In the Zotero PDF reader) "Why do they control for income here? Do other studies in this area do the same?"
+- (In the Zotero PDF reader) "This measure of wealth is unclear. How do other studies measure wealth?"
 
 ### Do you store and use my data?
 
 Beaver syncs your data, uploads attachments, and processes files in the cloud to provide functionality. See our detailed [privacy policy](https://www.beaverapp.ai/privacy-policy). We do not sell your data or train models on it unless you explicitly opt in. We're also working on features to store chats locally (Zotero data will still sync).
 
 Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
+
+### Which models do you recommand?
+
+Beaver uses Gemini 2.5 Flash as the default model because it delivers excellent performance at a low price. GPT-5 Mini is a strong alternative at a similar cost, though our system prompt is not yet fully tuned for GPT-5, so occasional undesirable behavior may occur.
+
+Frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4 offer even higher performance, especially for complex questions and tasks. Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase quickly. GPT-5, in particular, tends to pull in extensive context, which increases benchmark performance but also cost. For example,
+
+Claude Sonnet 4 is an excellent choice, especially for agentic applications like Beaver. That said, Anthropic's pricing model is more expensive in Beaver because it does not offer discounted rates for cached inputs (at least not by default). In contrast, OpenAI and Google reduce the cost of reusing the same input within 5 minutes by up to 90%, which is a significant advantage for agentic workflows.
 
 ### How do chat credits work?
 
@@ -111,7 +119,7 @@ You can switch to your own API key at any time. When using your key, tool calls 
 
 ### How do page limits work?
 
-Page limits control how many pages are indexed for full‑text search. If your library exceeds the limit, additional files aren't indexed for full‑text search. You can view files over the limit under “File Status” when starting a new thread.
+Page limits control how many pages are indexed for full‑text search. If your library exceeds the limit, additional files aren't indexed for full‑text search. You can view files over the limit under "File Status" when starting a new thread.
 
 Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can manually add over‑limit documents to any chat; they're just excluded from full‑text search.
 
