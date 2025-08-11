@@ -50,6 +50,16 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
 
         setIsLoading(true);
         try {
+            // If the user has no processing tier, don't show the list
+            if (processingTier === 'none') {
+                setAttachments([]);
+                setHasMore(false);
+                setCurrentPage(0);
+                setShowList(false);
+                return;
+            }
+
+            // Fetch items based on processing status
             const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
                 statuses,
                 processingTier,
@@ -133,7 +143,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
         }
     };
 
-    if (count === 0) {
+    if (processingTier === 'none' || count === 0) {
         return null;
     }
 
