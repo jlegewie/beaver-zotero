@@ -5,7 +5,7 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-Welcome to Beaver — a research agent with native Zotero integration. Beaver combines two parts:
+Welcome to Beaver, a research agent with native Zotero integration. Beaver combines two parts:
 
 1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, and your broader library to generate answers with page‑level citations.
 
@@ -23,7 +23,7 @@ We welcome feedback on GitHub and in Slack. Access to the preview release may be
 
 2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving the PDF reader.
 
-3. **Your Library as Knowledge Base**: Results come from your Zotero library—no generic web results—ensuring traceability to sources you trust.
+3. **Your Library as Knowledge Base**: Results come from your Zotero library (no generic web results) ensuring traceability to sources you trust.
 
 4. **Precise Citations**: Every claim includes exact citations with direct links to the source pages in your PDFs.
 
