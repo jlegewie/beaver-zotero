@@ -19,9 +19,9 @@ We welcome feedback on GitHub and in Slack. Access to the preview release may be
 
 ## Key Features
 
-1. **Autonomous Research Agent**: Beaver uses multi‑tool agentic search that goes beyond simple queries. The agent combines metadata, semantic, and full‑text retrieval, adapting its strategy to your task to find specific passages across thousands of papers and synthesize findings.
+1. **Autonomous Research Agent**: Beaver uses multi‑tool agentic search. The agent combines metadata, semantic, and full‑text retrieval, adapting its strategy to your task to find specific passages across thousands of papers and synthesize findings.
 
-2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving the PDF reader.
+2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving Zotero.
 
 3. **Your Library as Knowledge Base**: Results come from your Zotero library (no generic web results) ensuring traceability to sources you trust.
 
