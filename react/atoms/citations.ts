@@ -5,6 +5,20 @@ import { createZoteroItemReference } from "../types/zotero";
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 import { AttachmentCitation } from '../types/attachments/uiTypes';
+import { CitationMetadata } from '../types/citations';
+
+
+/*
+ * Citation metadata
+ *
+ * citationMetadataAtom are all citations metadata for the current thread.
+ * Populated by (a) "citation_metadata" events during streaming, and (b)
+ * citations in message metadata.
+ * 
+ * They are used to display the citations in the assistant message footer.
+ * 
+ */
+export const citationMetadataAtom = atom<CitationMetadata[]>([]);
 
 /*
  * Attachment citations
