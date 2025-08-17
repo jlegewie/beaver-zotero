@@ -35,8 +35,9 @@ import { store } from '../index';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
-import { updateAttachmentCitationsAtom } from './citations';
+import { citationMetadataAtom, updateAttachmentCitationsAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
+import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 
@@ -567,6 +568,12 @@ async function _processChatCompletionViaBackend(
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+            },
+            onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
+                logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${citationMetadata}`, 1);
+                set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+                    return [...prev, citationMetadata];
+                });
             },
             onComplete: (messageId: string) => {
                 logger(`event 'onComplete': ${messageId}`, 1);
