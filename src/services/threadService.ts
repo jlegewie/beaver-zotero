@@ -5,6 +5,7 @@ import { MessageModel } from '../../react/types/chat/apiTypes';
 import { toMessageUI } from '../../react/types/chat/converters';
 import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
 import { ThreadModel } from '../../react/types/chat/apiTypes';
+import { CitationMetadata } from '../../react/types/citations';
 
 
 // Based on backend MessageModel
@@ -50,12 +51,20 @@ export class ThreadService extends ApiService {
      */
     async getThreadMessages(
         threadId: string
-    ): Promise<{ messages: ChatMessage[], userAttachments: MessageAttachmentWithId[], toolAttachments: MessageAttachmentWithId[] }> {
+    ): Promise<{
+        messages: ChatMessage[],
+        userAttachments: MessageAttachmentWithId[],
+        toolAttachments: MessageAttachmentWithId[],
+        citationMetadata: CitationMetadata[]
+    }> {
         // Get thread messages from backend
         const messages = await this.get<MessageModel[]>(`/api/v1/threads/${threadId}/messages`);
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
+
+        // Get citation metadata from thread messages
+        const citationMetadata = messages.flatMap(message => message.metadata?.citations || []);
         
         // Get user attachments from thread messages
         const userAttachments: MessageAttachmentWithId[] = [];
@@ -69,7 +78,12 @@ export class ThreadService extends ApiService {
             }
         }
 
-        return { messages: chatMessages, userAttachments: userAttachments, toolAttachments: toolAttachments };
+        return {
+            messages: chatMessages,
+            userAttachments: userAttachments,
+            toolAttachments: toolAttachments,
+            citationMetadata: citationMetadata
+        };
     }
 
     /**
