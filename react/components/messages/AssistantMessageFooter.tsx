@@ -10,7 +10,7 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { attachmentCitationsAtom } from '../../atoms/citations';
+import { attachmentCitationsAtom, citationMetadataAtom } from '../../atoms/citations';
 import { AttachmentCitation } from '../../types/attachments/uiTypes';
 import { selectItem } from '../../../src/utils/selectItem';
 
@@ -26,6 +26,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const citations = useAtomValue(attachmentCitationsAtom);
+    const citationMetadata = useAtomValue(citationMetadataAtom);
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -44,6 +45,13 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             onClick: () => copyRequestId()
         }
     ];
+
+    if (Zotero.Beaver.data.env === "development") {
+        shareMenuItems.push({
+            label: 'Copy Citation Metadata',
+            onClick: () => copyCitationMetadata()
+        });
+    }
 
     // Toggle sources visibility
     const toggleSources = () => {
@@ -72,6 +80,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
     const copyRequestId = async () => {
         await copyToClipboard(message.id);
+    }
+
+    const copyCitationMetadata = async () => {
+        await copyToClipboard(JSON.stringify(citationMetadata, null, 2));
     }
 
     return (
