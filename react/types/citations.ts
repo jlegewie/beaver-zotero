@@ -24,7 +24,7 @@ export interface CitationPart {
     /** The unique identifier for this specific chunk of text. */
     part_id: string;
     /** Physical location of the part in the document. */
-    locators?: Locator;
+    locators?: Locator[];
 }
 
 export interface CitationMetadata extends ZoteroItemReference {
