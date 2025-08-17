@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from 
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { attachmentCitationsAtom, updateAttachmentCitationsAtom } from "./citations";
+import { attachmentCitationsAtom, citationMetadataAtom, updateAttachmentCitationsAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -99,6 +99,7 @@ export const newThreadAtom = atom(
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
         set(attachmentCitationsAtom, []);
+        set(citationMetadataAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
@@ -148,13 +149,14 @@ export const loadThreadAtom = atom(
             }
         } else {
             // Use remote API
-            const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments, citationMetadata } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
                 // Update the thread messages and attachments state
                 set(threadMessagesAtom, messages);
                 set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
+                set(citationMetadataAtom, citationMetadata);
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
             }
