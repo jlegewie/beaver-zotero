@@ -7,6 +7,7 @@ import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages } from '../../types/citations';
+import { formatNumberRanges } from '../../utils/stringUtils';
 
 const TOOLTIP_WIDTH = '250px';
 
@@ -105,12 +106,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Default behavior for zotero://open-pdf, zotero://select and other protocols
     };
 
+    // FORMAT PAGES
+    // p.12-14
+    // p.13,15
+    // p.13, 16-17
+
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
         displayText = consecutive
-            ? (pages.length > 0 ? `p.${pages.join(',')}` : 'Ibid')
-            : (pages.length > 0 ? `${citation}, p.${pages.join(',')}` : citation);
+            ? (pages.length > 0 ? `p.${formatNumberRanges(pages)}` : 'Ibid')
+            : (pages.length > 0 ? `${citation}, p.${formatNumberRanges(pages)}` : citation);
     } else {
         displayText = attachmentCitation?.numericCitation || citation;
     }
