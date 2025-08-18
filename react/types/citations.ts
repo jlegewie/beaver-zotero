@@ -38,6 +38,8 @@ export interface CitationMetadata extends ZoteroItemReference {
     preview?: string;
     /** A list of the specific parts/chunks cited. */
     parts: CitationPart[];
+    /** The message ID of the citation. */
+    message_id: string;
 }
 
 export interface CitationData extends CitationMetadata {

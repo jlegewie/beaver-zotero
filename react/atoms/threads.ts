@@ -141,7 +141,10 @@ export const loadThreadAtom = atom(
             }
 
             // Get citation metadata from messages
-            const citationMetadata = messagesDB.flatMap(message => message.metadata?.citations || []);
+            const citationMetadata = messagesDB.flatMap(message => {
+                const messageCitations = (message.metadata?.citations || []);
+                return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
+            });
             
             // Update the thread messages and attachments state
             if (messages.length > 0) {
