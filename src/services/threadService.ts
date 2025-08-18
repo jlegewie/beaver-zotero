@@ -64,7 +64,10 @@ export class ThreadService extends ApiService {
         const chatMessages = messages.map(toMessageUI);
 
         // Get citation metadata from thread messages
-        const citationMetadata = messages.flatMap(message => message.metadata?.citations || []);
+        const citationMetadata = messages.flatMap(message => {
+            const messageCitations = (message.metadata?.citations || []);
+            return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
+        });
         
         // Get user attachments from thread messages
         const userAttachments: MessageAttachmentWithId[] = [];

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -10,7 +10,7 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataAtom, citationDataUniqueAtom } from '../../atoms/citations';
+import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData } from '../../types/citations';
 import { store } from '../../index';
@@ -24,8 +24,33 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const citations = useAtomValue(citationDataUniqueAtom);
+    const citations = useAtomValue(citationDataAtom);
     const lastMessage = messages[messages.length - 1];
+
+    // Message IDs for the message group
+    const messageIds = useMemo(() => {
+        return messages.map(message => message.id);
+    }, [messages]);
+
+    // Uniqiue citations for messages in message group
+    const uniqueCitations = useMemo(() => {
+        const seen = new Set<string>();
+        const unique: CitationData[] = [];
+        const messageCitations = citations.filter(citation => messageIds.includes(citation.message_id));
+        
+        for (const citation of messageCitations) {
+            const key = `${citation.library_id}-${citation.zotero_key}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                unique.push({
+                    ...citation,
+                    numericCitation: (unique.length + 1).toString()
+                });
+            }
+        }
+        
+        return unique;
+    }, [citations, messageIds]);
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -98,7 +123,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             >
                 {/* Sources button */}
                 <div className="flex-1">
-                    {citations.length > 0 && (
+                    {uniqueCitations.length > 0 && (
                         <Button
                             variant="ghost"
                             onClick={toggleSources}
@@ -108,7 +133,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                             // className="text-sm"
                         >
                             <span>
-                                {citations.length} Source{citations.length === 1 ? '' : 's'}
+                                {uniqueCitations.length} Source{uniqueCitations.length === 1 ? '' : 's'}
                                 {/* Sources ({citations.length}) */}
                             </span>
                         </Button>
@@ -143,8 +168,11 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             </div>
 
             {/* Sources section */}
-            {sourcesVisible && citations.length > 0 && (
-                <CitedSourcesList saveAsNote={saveAsNote} />
+            {sourcesVisible && (
+                <CitedSourcesList
+                    saveAsNote={saveAsNote}
+                    citations={uniqueCitations}
+                />
             )}
         </>
     );
