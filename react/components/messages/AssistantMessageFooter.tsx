@@ -145,7 +145,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                         <MenuButton
                             icon={ShareIcon}
                             menuItems={shareMenuItems}
-                            className="scale-12"
+                            className="scale-11"
                             ariaLabel="Share"
                             variant="ghost"
                             positionAdjustment={{ x: 0, y: 0 }}
@@ -154,14 +154,14 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                     <IconButton
                         icon={RepeatIcon}
                         onClick={handleRepeat}
-                        className="scale-12"
+                        className="scale-11"
                         ariaLabel="Regenerate response"
                     />
                     {lastMessage.status !== 'error' &&
                         <CopyButton
                             content={lastMessage.content}
                             formatContent={renderToMarkdown}
-                            className="scale-12"
+                            className="scale-11"
                         />
                     }
                 </div>
