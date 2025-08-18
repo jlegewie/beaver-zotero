@@ -10,9 +10,9 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { attachmentCitationsAtom, citationMetadataAtom } from '../../atoms/citations';
-import { AttachmentCitation } from '../../types/attachments/uiTypes';
+import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
+import { CitationData } from '../../types/citations';
 
 interface AssistantMessageFooterProps {
     message: ChatMessage;
@@ -25,8 +25,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const citations = useAtomValue(attachmentCitationsAtom);
-    const citationMetadata = useAtomValue(citationMetadataAtom);
+    const citations = useAtomValue(citationDataAtom);
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -67,7 +66,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         await copyToClipboard(formattedContent);
     };
 
-    const saveAsNote = async (citation?: AttachmentCitation) => {
+    const saveAsNote = async (citation?: CitationData) => {
         const formattedContent = renderToHTML(message.content);
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
@@ -83,7 +82,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     }
 
     const copyCitationMetadata = async () => {
-        await copyToClipboard(JSON.stringify(citationMetadata, null, 2));
+        await copyToClipboard(JSON.stringify(citations, null, 2));
     }
 
     return (

@@ -1,11 +1,12 @@
 import React from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { attachmentCitationsAtom } from '../../atoms/citations';
+import { citationDataAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
+import { getCitationPages } from '../../types/citations';
 
 const TOOLTIP_WIDTH = '250px';
 
@@ -20,13 +21,12 @@ interface ZoteroCitationProps {
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
     id,
-    pages = '',
     consecutive = false,
     children,
     exportRendering = false
 }) => {
     // Get the sources from atom state
-    const attachmentCitations = useAtomValue(attachmentCitationsAtom);
+    const citationsData = useAtomValue(citationDataAtom);
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
@@ -39,7 +39,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const libraryID = parseInt(libraryIDString) || 1;
 
     // Find the attachmentCitation in the available sources
-    const attachmentCitation = attachmentCitations.find(a => a.library_id === libraryID && a.zotero_key === itemKey);
+    const attachmentCitation = citationsData.find(a => a.library_id === libraryID && a.zotero_key === itemKey);
 
     // Get citation data
     let formatted_citation = '';
@@ -48,9 +48,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // If we have a attachmentCitation, use it
     if (attachmentCitation) {
-        formatted_citation = attachmentCitation.formatted_citation;
-        citation = attachmentCitation.citation;
-        url = attachmentCitation.url;
+        formatted_citation = attachmentCitation.formatted_citation || '';
+        citation = attachmentCitation.citation || '';
+        url = attachmentCitation.url || '';
     // Fallback: get the Zotero item and create the citation data
     } else {
         // Get the Zotero item
@@ -67,7 +67,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
     
     // Add the URL to open the PDF/Note
-    const firstPage = pages ? parseInt(pages.split(/[-,]/)[0]) : null;
+    const pages = getCitationPages(attachmentCitation);
+
+    const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
     // Handle click on citation

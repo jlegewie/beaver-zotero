@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from 
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { attachmentCitationsAtom, citationMetadataAtom, updateAttachmentCitationsAtom } from "./citations";
+import { attachmentCitationsAtom, citationMetadataAtom, citationDataAtom, updateAttachmentCitationsAtom, updateCitationDataAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -100,6 +100,7 @@ export const newThreadAtom = atom(
         set(toolAttachmentsAtom, []);
         set(attachmentCitationsAtom, []);
         set(citationMetadataAtom, []);
+        set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
@@ -139,13 +140,18 @@ export const loadThreadAtom = atom(
                     }
                 }
             }
+
+            // Get citation metadata from messages
+            const citationMetadata = messagesDB.flatMap(message => message.metadata?.citations || []);
             
             // Update the thread messages and attachments state
             if (messages.length > 0) {
                 set(threadMessagesAtom, messages);
+                set(citationMetadataAtom, citationMetadata);
                 set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                set(updateCitationDataAtom);
             }
         } else {
             // Use remote API
@@ -157,6 +163,7 @@ export const loadThreadAtom = atom(
                 set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
                 set(citationMetadataAtom, citationMetadata);
+                set(updateCitationDataAtom);
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
             }

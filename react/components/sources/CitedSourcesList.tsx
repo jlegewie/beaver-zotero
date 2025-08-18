@@ -5,18 +5,18 @@ import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
-import { attachmentCitationsAtom } from '../../atoms/citations';
+import { CitationData } from '../../types/citations';
+import { citationDataAtom } from '../../atoms/citations';
 import { useAtomValue } from 'jotai';
-import { AttachmentCitation } from '../../types/attachments/uiTypes';
 
 interface CitedSourcesListProps {
-    saveAsNote: (source?: AttachmentCitation) => Promise<void>;
+    saveAsNote: (source?: CitationData) => Promise<void>;
 }
 
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     saveAsNote
 }) => {
-    const citations = useAtomValue(attachmentCitationsAtom);
+    const citations = useAtomValue(citationDataAtom);
     const authorYearFormat = getPref("citationFormat") !== "numeric";
     
     return (

@@ -35,7 +35,7 @@ import { store } from '../index';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
-import { citationMetadataAtom, updateAttachmentCitationsAtom } from './citations';
+import { citationMetadataAtom, updateAttachmentCitationsAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
@@ -366,6 +366,11 @@ export const regenerateFromMessageAtom = atom(
         set(toolAttachmentsAtom, (prev) =>
             prev.filter(a => a.messageId && messageIds.includes(a.messageId))
         );
+
+        // Update citation metadata
+        // set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+        //     return prev.filter(a => a.messageId && messageIds.includes(a.messageId));
+        // });
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);
@@ -574,6 +579,7 @@ async function _processChatCompletionViaBackend(
                 set(citationMetadataAtom, (prev: CitationMetadata[]) => {
                     return [...prev, citationMetadata];
                 });
+                set(updateCitationDataAtom);
             },
             onComplete: (messageId: string) => {
                 logger(`event 'onComplete': ${messageId}`, 1);
