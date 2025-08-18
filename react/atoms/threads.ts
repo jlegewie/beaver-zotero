@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from 
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { attachmentCitationsAtom, citationMetadataAtom, citationDataAtom, updateAttachmentCitationsAtom, updateCitationDataAtom } from "./citations";
+import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -98,7 +98,6 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
-        set(attachmentCitationsAtom, []);
         set(citationMetadataAtom, []);
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
@@ -148,7 +147,6 @@ export const loadThreadAtom = atom(
             if (messages.length > 0) {
                 set(threadMessagesAtom, messages);
                 set(citationMetadataAtom, citationMetadata);
-                set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
                 set(updateCitationDataAtom);
@@ -160,7 +158,6 @@ export const loadThreadAtom = atom(
             if (messages.length > 0) {
                 // Update the thread messages and attachments state
                 set(threadMessagesAtom, messages);
-                set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
                 set(citationMetadataAtom, citationMetadata);
                 set(updateCitationDataAtom);

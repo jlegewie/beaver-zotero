@@ -35,7 +35,7 @@ import { store } from '../index';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
-import { citationMetadataAtom, updateAttachmentCitationsAtom, updateCitationDataAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
@@ -524,11 +524,6 @@ async function _processChatCompletionViaBackend(
                         id: messageId,
                         chunk: delta
                     });
-                    // Update source citations if the delta contains the closing '>' of
-                    // a citation (or other) tag
-                    if (delta.includes('>')) {
-                        set(updateAttachmentCitationsAtom);
-                    }
                 }
                 if (type === "reasoning") {
                     if (delta) {
@@ -537,9 +532,6 @@ async function _processChatCompletionViaBackend(
                             id: messageId,
                             chunk: delta
                         });
-                        if (delta.includes('>')) {
-                            set(updateAttachmentCitationsAtom);
-                        }
                     }
                 }
             },
@@ -553,12 +545,6 @@ async function _processChatCompletionViaBackend(
                 // Add the tool call sources to the thread sources (if any)
                 if (message.status === 'completed' && message.tool_calls) {
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: [message]});
-                }
-
-                // Update source citations if the message contains the closing '>' of
-                // a citation (or other) tag
-                if (message.role === 'assistant' && message.content && message.content.includes('>')) {
-                    set(updateAttachmentCitationsAtom);
                 }
 
                 // Store message locally
