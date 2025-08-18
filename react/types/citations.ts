@@ -49,3 +49,11 @@ export interface CitationData extends CitationMetadata {
     url: string | null;          // URL for the zotero attachment
     numericCitation: string | null;     // Numeric citation
 }
+
+export const getCitationPages = (citation: CitationData | CitationMetadata | null | undefined): number[] => {
+    if (!citation) return [];
+    return citation?.parts
+        .flatMap(p => p.locators || [])  
+        .map(l => l.page_number)
+        .filter((page): page is number => page !== undefined);
+}
