@@ -106,11 +106,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Default behavior for zotero://open-pdf, zotero://select and other protocols
     };
 
-    // FORMAT PAGES
-    // p.12-14
-    // p.13,15
-    // p.13, 16-17
-
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
