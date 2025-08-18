@@ -34,11 +34,19 @@ export const updateCitationDataAtom = atom(
         const metadata = get(citationMetadataAtom);
         const prev = get(citationDataAtom);
         const newCitationData: CitationData[] = [];
+        const citationKeyToNumeric = new Map<string, string>();
         logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
 
         // Extend the citation metadata with the attachment citation data
         for (const citation of metadata) {
+            const citationKey = `${citation.library_id}-${citation.zotero_key}`;
             const prevCitation = prev.find((c) => c.citation_id === citation.citation_id);
+
+            // Get or assign numeric citation for this citationKey
+            if (!citationKeyToNumeric.has(citationKey)) {
+                citationKeyToNumeric.set(citationKey, (citationKeyToNumeric.size + 1).toString());
+            }
+            const numericCitation = citationKeyToNumeric.get(citationKey)!;
 
             // Use existing extended metadata if available
             if (prevCitation) {
@@ -64,7 +72,7 @@ export const updateCitationDataAtom = atom(
                     citation: getCitationFromItem(itemToCite),
                     formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
-                    numericCitation: (newCitationData.length + 1).toString()
+                    numericCitation
                 });
             } catch (error) {
                 logger(`updateCitationDataAtom: Error processing citation ${citation.citation_id}: ${error instanceof Error ? error.message : String(error)}`);
@@ -76,7 +84,7 @@ export const updateCitationDataAtom = atom(
                     citation: citation.author_year || null,
                     formatted_citation: null,
                     url: null,
-                    numericCitation: (newCitationData.length + 1).toString()
+                    numericCitation
                 });
             }
         }
