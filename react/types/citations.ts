@@ -34,6 +34,18 @@ export interface CitationMetadata extends ZoteroItemReference {
     marker?: string;
     /** The author-year of the citation. */
     author_year?: string;
+    /** Preview of the cited item. */
+    preview?: string;
     /** A list of the specific parts/chunks cited. */
     parts: CitationPart[];
+}
+
+export interface CitationData extends CitationMetadata {
+    parentKey: string | null;    // Key of the parent item
+    icon: string | null;         // Icon for the zotero attachment
+    name: string | null;         // Display name
+    citation: string | null;     // In-text citation
+    formatted_citation: string | null;  // Bibliographic reference
+    url: string | null;          // URL for the zotero attachment
+    numericCitation: string | null;     // Numeric citation
 }
