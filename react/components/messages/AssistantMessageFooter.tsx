@@ -16,17 +16,16 @@ import { CitationData } from '../../types/citations';
 import { store } from '../../index';
 
 interface AssistantMessageFooterProps {
-    message: ChatMessage;
-    isLastMessage: boolean;
+    messages: ChatMessage[];
 }
 
 const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
-    message,
-    isLastMessage,
+    messages
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const citations = useAtomValue(citationDataUniqueAtom);
+    const lastMessage = messages[messages.length - 1];
 
     // New state for source visibility
     const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
@@ -59,16 +58,16 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     };
 
     const handleRepeat = async () => {
-        await regenerateFromMessage(message.id);
+        await regenerateFromMessage(lastMessage.id);
     }
 
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(message.content);
+        const formattedContent = renderToMarkdown(lastMessage.content);
         await copyToClipboard(formattedContent);
     };
 
     const saveAsNote = async (citation?: CitationData) => {
-        const formattedContent = renderToHTML(message.content);
+        const formattedContent = renderToHTML(lastMessage.content);
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
         if (citation && citation.parentKey) {
@@ -79,7 +78,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     }
 
     const copyRequestId = async () => {
-        await copyToClipboard(message.id);
+        await copyToClipboard(lastMessage.id);
     }
 
     const copyCitationMetadata = async () => {
@@ -91,8 +90,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             <div
                 className={`
                     display-flex flex-row items-center pt-2 mr-4
-                    ${isLastMessage || sourcesVisible ? '' : 'hover-fade'}
-                    ${message.status === 'in_progress' || message.status === 'thinking' || (message.tool_calls && message.tool_calls.length > 0 && message.tool_calls.map(call => call.status).includes('in_progress'))
+                    ${lastMessage.status === 'in_progress' || lastMessage.status === 'thinking' || (lastMessage.tool_calls && lastMessage.tool_calls.length > 0 && lastMessage.tool_calls.map(call => call.status).includes('in_progress'))
                         ? 'hidden'
                         : ''
                     }
@@ -118,7 +116,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                 </div>
                 {/* Copy, repeat, and share buttons - visible on hover */}
                 <div className="display-flex gap-4">
-                    {message.status !== 'error' &&
+                    {lastMessage.status !== 'error' &&
                         <MenuButton
                             icon={ShareIcon}
                             menuItems={shareMenuItems}
@@ -134,9 +132,9 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                         className="scale-12"
                         ariaLabel="Regenerate response"
                     />
-                    {message.status !== 'error' &&
+                    {lastMessage.status !== 'error' &&
                         <CopyButton
-                            content={message.content}
+                            content={lastMessage.content}
                             formatContent={renderToMarkdown}
                             className="scale-12"
                         />

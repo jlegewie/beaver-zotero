@@ -5,7 +5,6 @@ import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { ErrorDisplay, WarningDisplay } from './ErrorWarningDisplay';
 import { AssistantMessageTools} from './AssistantMessageTools';
-import AssistantMessageFooter from './AssistantMessageFooter';
 import GeneratingIndicator from '../ui/GeneratingIndicator';
 import ThinkingContent from './ThinkingContent';
 
@@ -14,7 +13,6 @@ interface AssistantMessageProps {
     isFirstAssistantMessage: boolean;
     previousMessageHasToolCalls: boolean;
     isLastMessage: boolean;
-    showActionButtons: boolean;
 }
 
 const AssistantMessage: React.FC<AssistantMessageProps> = ({
@@ -22,7 +20,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
     isFirstAssistantMessage,
     previousMessageHasToolCalls,
     isLastMessage,
-    showActionButtons
 }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
         
@@ -35,12 +32,12 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
     } = useSelectionContextMenu(contentRef);
 
     return (
-        <div id={`message-${message.id}`} className={`px-4 ${isLastMessage ? 'pb-3' : ''} hover-trigger`}>
-            <div 
-                className="user-select-text"
-                ref={contentRef}
-                onContextMenu={handleContextMenu}
-            >
+        <div
+            id={`message-${message.id}`}
+            className="px-4 hover-trigger user-select-text"
+            ref={contentRef}
+            onContextMenu={handleContextMenu}
+        >
                 {/* Warnings */}
                 {message.warnings?.map((warning) => (
                     <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
@@ -79,15 +76,6 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 {message.status === 'error' &&
                     <ErrorDisplay errorType={message.errorType || 'unknown'} />
                 }
-            </div>
-
-            {/* Footer with buttons and sources */}
-            {showActionButtons && (
-                <AssistantMessageFooter
-                    message={message}
-                    isLastMessage={isLastMessage}
-                />
-            )}
 
             {/* Text selection context menu */}
             <ContextMenu

@@ -84,7 +84,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0`}>
+        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0 py-1`}>
             <Button
                 variant="ghost-secondary"
                 onClick={toggleResults}
@@ -96,7 +96,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
                     ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
                     ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
                 `}
-                style={{ padding: '4px 6px', maxHeight: 'none'}}
+                style={{ padding: '2px 6px', maxHeight: 'none'}}
                 disabled={isButtonDisabled && !canToggleResults}
             >
                 <div className="display-flex flex-row px-3 gap-2">
@@ -136,7 +136,7 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     }
 
     const getTopMargin = function() {
-        if (message.content == '' && previousMessageHasToolCalls) return '-mt-3';
+        if (message.content == '' && previousMessageHasToolCalls) return '-mt-2';
         if (message.content == '' && isFirstAssistantMessage) return '-mt-1';
         return 'mt-1';
     }

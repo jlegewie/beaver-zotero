@@ -6,7 +6,7 @@ import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
 import { CitationData } from '../../types/citations';
-import { citationDataUniqueAtom } from '../../atoms/citations';
+import { citationDataAtom } from '../../atoms/citations';
 import { useAtomValue } from 'jotai';
 
 interface CitedSourcesListProps {
@@ -16,13 +16,32 @@ interface CitedSourcesListProps {
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     saveAsNote
 }) => {
-    const citations = useAtomValue(citationDataUniqueAtom);
+    const citations = useAtomValue(citationDataAtom);
     const authorYearFormat = getPref("citationFormat") !== "numeric";
+    
+    // Deduplicate citations by library_id + zotero_key combination
+    const uniqueCitations = useMemo(() => {
+        const seen = new Set<string>();
+        const unique: CitationData[] = [];
+        
+        for (const citation of citations) {
+            const key = `${citation.library_id}-${citation.zotero_key}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                unique.push({
+                    ...citation,
+                    numericCitation: (unique.length + 1).toString()
+                });
+            }
+        }
+        
+        return unique;
+    }, [citations]);
     
     return (
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
-                {citations.map((citation, index) => (
+                {uniqueCitations.map((citation, index) => (
                     <div key={`${citation.library_id}-${citation.zotero_key}`} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         {!authorYearFormat &&
