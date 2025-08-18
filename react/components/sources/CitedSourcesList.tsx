@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { openSource, revealSource } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
@@ -6,7 +6,7 @@ import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
 import { CitationData } from '../../types/citations';
-import { citationDataAtom } from '../../atoms/citations';
+import { citationDataUniqueAtom } from '../../atoms/citations';
 import { useAtomValue } from 'jotai';
 
 interface CitedSourcesListProps {
@@ -16,14 +16,14 @@ interface CitedSourcesListProps {
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     saveAsNote
 }) => {
-    const citations = useAtomValue(citationDataAtom);
+    const citations = useAtomValue(citationDataUniqueAtom);
     const authorYearFormat = getPref("citationFormat") !== "numeric";
     
     return (
         <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
             <div className="space-y-3">
                 {citations.map((citation, index) => (
-                    <div key={index} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                    <div key={`${citation.library_id}-${citation.zotero_key}`} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         {!authorYearFormat &&
                             <div className="p-2">
