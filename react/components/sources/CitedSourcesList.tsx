@@ -21,7 +21,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     
     
     return (
-        <div className="mt-2 mx-3 bg-quaternary rounded-md border border-quinary">
+        <div className="mt-2 rounded-md border border-popup">
             <div className="space-y-3">
                 {citations.map((citation, index) => (
                     <div key={`${citation.library_id}-${citation.zotero_key}`} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
