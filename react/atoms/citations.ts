@@ -29,6 +29,26 @@ export const citationMetadataAtom = atom<CitationMetadata[]>([]);
 export const citationDataAtom = atom<CitationData[]>([]);
 
 
+/*
+ * Citation data unique by library_id + zotero_key
+ */
+export const citationDataUniqueAtom = atom<CitationData[]>((get) => {
+    const citations = get(citationDataAtom);
+    const seen = new Set<string>();
+    const unique: CitationData[] = [];
+    
+    for (const citation of citations) {
+        const key = `${citation.library_id}-${citation.zotero_key}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push({ ...citation });
+        }
+    }
+
+    return unique;
+});
+
+
 export const updateCitationDataAtom = atom(
     null,
     async (get, set) => {
