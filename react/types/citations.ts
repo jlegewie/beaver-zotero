@@ -52,7 +52,8 @@ export interface CitationData extends CitationMetadata {
 
 export const getCitationPages = (citation: CitationData | CitationMetadata | null | undefined): number[] => {
     if (!citation) return [];
-    return citation?.parts
+    if (!citation.parts) return [];
+    return citation.parts
         .flatMap(p => p.locators || [])  
         .map(l => l.page_number)
         .filter((page): page is number => page !== undefined);
