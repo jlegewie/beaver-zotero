@@ -14,6 +14,7 @@ const TOOLTIP_WIDTH = '250px';
 // Define prop types for the component
 interface ZoteroCitationProps {
     id: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization)
+    cid: string;
     pages?: string;       // Format: "3-6,19"
     consecutive?: boolean;
     children?: React.ReactNode;
@@ -21,7 +22,8 @@ interface ZoteroCitationProps {
 }
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
-    id,
+    id: unique_key,
+    cid: citationId,
     consecutive = false,
     children,
     exportRendering = false
@@ -32,15 +34,15 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
 
-    if (!id) return null;
+    if (!unique_key || !citationId) return null;
     
     // Parse the id to get libraryID and itemKey
-    id = id.replace('user-content-', '');
-    const [libraryIDString, itemKey] = id.includes('-') ? id.split('-') : [id, id];
+    unique_key = unique_key.replace('user-content-', '');
+    const [libraryIDString, itemKey] = unique_key.includes('-') ? unique_key.split('-') : [unique_key, unique_key];
     const libraryID = parseInt(libraryIDString) || 1;
 
     // Find the attachmentCitation in the available sources
-    const attachmentCitation = citationsData.find(a => a.library_id === libraryID && a.zotero_key === itemKey);
+    const attachmentCitation = citationsData.find(a => a.citation_id === citationId);
 
     // Get citation data
     let formatted_citation = '';
@@ -57,7 +59,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Get the Zotero item
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) {
-            console.log('Failed to format citation for id:', id);
+            console.log('Failed to format citation for id:', unique_key);
             return null;
         }
 
