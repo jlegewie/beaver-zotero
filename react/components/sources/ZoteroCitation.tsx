@@ -11,6 +11,7 @@ import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReader } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
+import { logger } from '../../../src/utils/logger';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -63,7 +64,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Get the Zotero item
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) {
-            console.log('Failed to format citation for id:', unique_key);
+            logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
             return null;
         }
 
@@ -79,51 +80,63 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
-    // Create temporary annotations for bounding boxes
+        // Create temporary annotations for bounding boxes using approach 1 (setAnnotations directly)
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
         if (boundingBoxData.length === 0) return [];
         
         try {
             const reader = getCurrentReader();
+            await reader._initPromise;
             if (!reader || !reader._internalReader) {
-                console.warn('No active reader found for creating bounding box highlights');
+                logger('ZoteroCitation: No active reader found for creating bounding box highlights');
                 return [];
             }
 
-            const annotationIds: string[] = [];
+            const tempAnnotations: any[] = [];
+            const annotationReferences: ZoteroItemReference[] = [];
             
             for (const { page, bboxes } of boundingBoxData) {
                 const pageIndex = page - 1; // Convert to 0-based index
                 const rects = bboxesToZoteroRects(bboxes);
                 
-                // Create highlight annotation for this page
-                const tempHighlight = await reader._internalReader._annotationManager.addAnnotation(
-                    Components.utils.cloneInto({
-                        type: 'highlight',
-                        color: '#00bbff', // Blue highlight
-                        sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
-                        position: {
-                            pageIndex: pageIndex,
-                            rects: rects
-                        },
-                        authorName: 'Beaver',
-                        text: BEAVER_ANNOTATION_TEXT
-                    }, reader._iframeWindow)
-                );
+                // Create temporary annotation object (no database save)
+                const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const tempAnnotation = {
+                    id: tempId,
+                    type: 'highlight',
+                    color: '#00bbff', // Blue highlight
+                    sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
+                    position: {
+                        pageIndex: pageIndex,
+                        rects: rects
+                    },
+                    authorName: 'Beaver',
+                    text: BEAVER_ANNOTATION_TEXT,
+                    // Mark as temporary so it doesn't get saved
+                    isTemporary: true
+                };
                 
+                tempAnnotations.push(tempAnnotation);
                 
-                if (tempHighlight && tempHighlight.id) {
-                    annotationIds.push(tempHighlight.id);
-                }
+                // Create reference for tracking
+                const libraryID = Zotero.Items.get(reader.itemID).libraryID;
+                annotationReferences.push({
+                    zotero_key: tempId,
+                    library_id: libraryID
+                });
             }
             
-            const libraryID = Zotero.Items.get(reader.itemID).libraryID;
-            return annotationIds.map(id => ({
-                zotero_key: id,
-                library_id: libraryID
-            } as ZoteroItemReference));
+            // Add temporary annotations directly to reader display (no database save)
+            if (tempAnnotations.length > 0) {
+                // await reader._internalReader._annotationManager.addAnnotation(
+                await reader._internalReader.setAnnotations(
+                    Components.utils.cloneInto(tempAnnotations, reader._iframeWindow)
+                );
+            }
+            
+            return annotationReferences;
         } catch (error) {
-            console.error('Failed to create bounding box highlights:', error);
+            logger('ZoteroCitation: Failed to create bounding box highlights: ' + error);
             return [];
         }
     };
@@ -188,6 +201,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 if (reader && reader._initPromise) {
                     await reader._initPromise;
                 }
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
 
             // Handle the three scenarios
@@ -213,7 +227,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             // Scenario 3: No locators - PDF is already open, nothing more needed
             
         } catch (error) {
-            console.error('Failed to handle citation click:', error);
+            logger('ZoteroCitation: Failed to handle citation click: ' + error);
             
             // Fallback: try to use the original URL-based approach
             if (url.includes('zotero://')) {
@@ -227,8 +241,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         return () => {
             // Cleanup temporary annotations when component unmounts
             if (BeaverTemporaryAnnotations.getCount() > 0) {
-                console.log('cleanupTemporaryAnnotations');
-                BeaverTemporaryAnnotations.cleanupAll().catch(console.error);
+                logger('ZoteroCitation: cleanupTemporaryAnnotations');
+                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
             }
         };
     }, [citationId]);
