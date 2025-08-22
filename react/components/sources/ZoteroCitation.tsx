@@ -176,6 +176,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Enhanced click handler with bounding box support
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
+
+        // Cleanup any existing temporary annotations
+        await BeaverTemporaryAnnotations.cleanupAll();
         
         // Get the item key and library ID from the data attributes or URL
         let itemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
@@ -204,8 +207,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
 
-        // Cleanup any existing temporary annotations
-        await BeaverTemporaryAnnotations.cleanupAll();
+        
 
         // Get bounding box data from citation
         const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
