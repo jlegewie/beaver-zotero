@@ -226,7 +226,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     reader = await Zotero.Reader.open(item.id, { pageIndex: pages[0] - 1 });
                 } else {
                     // Open without specific page
-                    reader = await Zotero.Reader.open(item.id);
+                    reader = await Zotero.Reader.open(item.id, { pageIndex: 0 });
                 }
                 
                 // Wait for reader to initialize
