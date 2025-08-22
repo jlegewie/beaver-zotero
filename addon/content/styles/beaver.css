@@ -565,7 +565,7 @@ attachment-box .metadata-table #beaver-status {
     text-decoration: underline;
 }
 
-[id^="beaver-pane-"] .markdown a.zotero-citation {
+[id^="beaver-pane-"] .markdown span.zotero-citation {
     cursor: pointer;
     font-size: 0.8em;
     margin-left: 0.15em;
@@ -579,7 +579,7 @@ attachment-box .metadata-table #beaver-status {
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .markdown a.zotero-citation:hover {
+[id^="beaver-pane-"] .markdown span.zotero-citation:hover {
     color: var(--fill-primary);
     /* border: 1px solid var(--fill-quarternary); */
 }

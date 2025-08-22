@@ -92,3 +92,30 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
         .map(l => l.page_number)
         .filter((page): page is number => page !== undefined);
 }
+
+export interface CitationBoundingBoxData {
+    page: number;
+    bboxes: BoundingBox[];
+}
+
+export const getCitationBoundingBoxes = (citation: CitationData | CitationMetadata | null | undefined): CitationBoundingBoxData[] => {
+    if (!citation) return [];
+    if (!citation.parts) return [];
+    
+    const result: CitationBoundingBoxData[] = [];
+    
+    for (const part of citation.parts) {
+        if (!part.locators) continue;
+        
+        for (const locator of part.locators) {
+            if (locator.page_number && locator.bboxes && locator.bboxes.length > 0) {
+                result.push({
+                    page: locator.page_number,
+                    bboxes: locator.bboxes
+                });
+            }
+        }
+    }
+    
+    return result;
+}

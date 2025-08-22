@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
 import { citationDataAtom } from '../../atoms/citations';
@@ -6,10 +6,15 @@ import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCitationPages } from '../../types/citations';
+import { getCitationPages, getCitationBoundingBoxes, bboxesToZoteroRects } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
+import { getCurrentReader } from '../../utils/readerUtils';
 
 const TOOLTIP_WIDTH = '250px';
+export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
+
+// Track temporary annotations globally to ensure cleanup
+let currentTemporaryAnnotations: string[] = [];
 
 // Define prop types for the component
 interface ZoteroCitationProps {
@@ -75,19 +80,76 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
-    // Handle click on citation
-    const handleClick = async (e: React.MouseEvent) => {
-        // Handle file links
-        if (url.startsWith('file:///')) {
-            e.preventDefault();
-            const filePath = url.replace('file:///', '');
-            Zotero.launchFile(filePath);
-            return;
+    // Cleanup function for temporary annotations
+    const cleanupTemporaryAnnotations = async () => {
+        if (currentTemporaryAnnotations.length === 0) return;
+        
+        try {
+            const reader = getCurrentReader();
+            if (reader && reader._internalReader) {
+                await reader._internalReader.unsetAnnotations(
+                    Components.utils.cloneInto(currentTemporaryAnnotations, reader._iframeWindow)
+                );
+            }
+        } catch (error) {
+            console.error('Failed to cleanup temporary annotations:', error);
         }
+        
+        currentTemporaryAnnotations = [];
+    };
 
-        // Get the item key and library ID from the data attributes
+    // Create temporary annotations for bounding boxes
+    const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
+        if (boundingBoxData.length === 0) return [];
+        
+        try {
+            const reader = getCurrentReader();
+            if (!reader || !reader._internalReader) {
+                console.warn('No active reader found for creating bounding box highlights');
+                return [];
+            }
+
+            const annotationIds: string[] = [];
+            
+            for (const { page, bboxes } of boundingBoxData) {
+                const pageIndex = page - 1; // Convert to 0-based index
+                const rects = bboxesToZoteroRects(bboxes);
+                
+                // Create highlight annotation for this page
+                const tempHighlight = await reader._internalReader._annotationManager.addAnnotation(
+                    Components.utils.cloneInto({
+                        type: 'highlight',
+                        color: '#ffff00', // Yellow highlight
+                        sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
+                        position: {
+                            pageIndex: pageIndex,
+                            rects: rects
+                        },
+                        authorName: 'Beaver',
+                        text: BEAVER_ANNOTATION_TEXT
+                    }, reader._iframeWindow)
+                );
+                
+                if (tempHighlight && tempHighlight.id) {
+                    annotationIds.push(tempHighlight.id);
+                }
+            }
+            
+            return annotationIds;
+        } catch (error) {
+            console.error('Failed to create bounding box highlights:', error);
+            return [];
+        }
+    };
+
+    // Enhanced click handler with bounding box support
+    const handleClick = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        
+        // Get the item key and library ID from the data attributes or URL
         let itemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
         let libraryID: number | null = parseInt((e.target as HTMLElement).dataset.libraryId || '0');
+        
         // Fallback: parse the URL if the data attributes are not set
         if (!libraryID || !itemKey) {
             ({ libraryID, itemKey } = parseZoteroURI(url));
@@ -100,13 +162,90 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
         // Handle note links
         if (item.isNote()) {
-            e.preventDefault();
-            // Open the note window
             await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
-            // await Zotero.getActiveZoteroPane().selectItem(item.id);
+            return;
         }
-        // Default behavior for zotero://open-pdf, zotero://select and other protocols
+
+        // Handle file links
+        if (url.startsWith('file:///')) {
+            const filePath = url.replace('file:///', '');
+            Zotero.launchFile(filePath);
+            return;
+        }
+
+        // Cleanup any existing temporary annotations
+        await cleanupTemporaryAnnotations();
+
+        // Get bounding box data from citation
+        const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
+        const pages = getCitationPages(attachmentCitation);
+
+        try {
+            let reader = getCurrentReader();
+            
+            // Check if we need to open or switch to the correct PDF
+            if (!reader || reader.itemID !== item.id) {
+                // Open the PDF
+                if (boundingBoxData.length > 0) {
+                    // Open at the first page with bounding boxes
+                    const firstPage = boundingBoxData[0].page;
+                    reader = await Zotero.Reader.open(item.id, { pageIndex: firstPage - 1 });
+                } else if (pages.length > 0) {
+                    // Open at the first cited page
+                    reader = await Zotero.Reader.open(item.id, { pageIndex: pages[0] - 1 });
+                } else {
+                    // Open without specific page
+                    reader = await Zotero.Reader.open(item.id);
+                }
+                
+                // Wait for reader to initialize
+                if (reader && reader._initPromise) {
+                    await reader._initPromise;
+                }
+            }
+
+            // Handle the three scenarios
+            if (boundingBoxData.length > 0) {
+                // Scenario 1: With bounding boxes - create temporary highlights
+                const annotationIds = await createBoundingBoxHighlights(boundingBoxData, item);
+                currentTemporaryAnnotations = annotationIds;
+                
+                // Navigate to the first annotation if created successfully
+                if (annotationIds.length > 0 && reader) {
+                    // Small delay to ensure annotation is rendered
+                    setTimeout(() => {
+                        if (reader._internalReader) {
+                            reader._internalReader.navigate({ annotationID: annotationIds[0] });
+                        }
+                    }, 100);
+                }
+            } else if (pages.length > 0) {
+                // Scenario 2: With pages only - navigate to page
+                if (reader) {
+                    reader.navigate({ pageIndex: pages[0] - 1 });
+                }
+            }
+            // Scenario 3: No locators - PDF is already open, nothing more needed
+            
+        } catch (error) {
+            console.error('Failed to handle citation click:', error);
+            
+            // Fallback: try to use the original URL-based approach
+            if (url.includes('zotero://')) {
+                window.location.href = url;
+            }
+        }
     };
+
+    // Cleanup effect for when component unmounts or citation changes
+    useEffect(() => {
+        return () => {
+            // Cleanup temporary annotations when component unmounts
+            if (currentTemporaryAnnotations.length > 0) {
+                cleanupTemporaryAnnotations().catch(console.error);
+            }
+        };
+    }, [citationId]);
 
     // Format for display
     let displayText = '';
@@ -146,8 +285,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }*/
 
     const citationElement = (
-        <a 
-            href={url} 
+        <span 
             onClick={handleClick} 
             className="zotero-citation"
             data-pages={pages}
@@ -155,7 +293,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             data-library-id={libraryID}
         >
             {displayText}
-        </a>
+        </span>
     );
     
     // Return the citation with tooltip and click handler

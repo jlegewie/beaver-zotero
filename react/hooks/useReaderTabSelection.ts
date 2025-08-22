@@ -6,6 +6,7 @@ import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSele
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -176,6 +177,7 @@ export function useReaderTabSelection() {
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                        if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                         await updateSourcesFromZoteroItems([item], true);
                     }
                     // Delete events
