@@ -119,7 +119,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const tempHighlight = await reader._internalReader._annotationManager.addAnnotation(
                     Components.utils.cloneInto({
                         type: 'highlight',
-                        color: '#ffff00', // Yellow highlight
+                        color: '#00bbff', // blue highlight
                         sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
                         position: {
                             pageIndex: pageIndex,
@@ -240,6 +240,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         return () => {
             // Cleanup temporary annotations when component unmounts
             if (currentTemporaryAnnotations.length > 0) {
+                console.log('cleanupTemporaryAnnotations');
                 cleanupTemporaryAnnotations().catch(console.error);
             }
         };
