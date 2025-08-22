@@ -4,7 +4,7 @@ import { fileUploader } from './FileUploader';
 import { getZoteroItem, isSourceValid } from '../../react/utils/sourceUtils';
 import { getMimeType } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
-import { store } from '../../react/index';
+import { store } from '../../react/store';
 import { planFeaturesAtom } from '../../react/atoms/profile';
 
 /**

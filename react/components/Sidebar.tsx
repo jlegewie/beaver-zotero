@@ -18,7 +18,7 @@ import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import ErrorReportDialog from './ErrorReportDialog';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
-import { store } from '../index';
+import { store } from '../store';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);

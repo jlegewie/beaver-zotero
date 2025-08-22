@@ -31,7 +31,7 @@ import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
-import { store } from '../index';
+import { store } from '../store';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';

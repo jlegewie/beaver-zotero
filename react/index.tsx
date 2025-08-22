@@ -9,9 +9,8 @@ import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
+import { store } from './store';
 
-// Create a shared store instance
-export const store = createStore();
 
 /**
  * Component to initialize global hooks that should only run once.

@@ -13,7 +13,7 @@ import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData } from '../../types/citations';
-import { store } from '../../index';
+import { store } from '../../store';
 
 interface AssistantMessageFooterProps {
     messages: ChatMessage[];

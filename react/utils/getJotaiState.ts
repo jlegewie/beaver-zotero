@@ -7,7 +7,7 @@ import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLib
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, isSyncCompleteAtom } from "../atoms/sync"
 import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
-import { store } from "../index"
+import { store } from "../store"
 
 export const atomRegistry = {
     // Auth

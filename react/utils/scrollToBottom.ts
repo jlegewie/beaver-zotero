@@ -1,4 +1,4 @@
-import { store } from "../index";
+import { store } from "../store";
 import { userScrolledAtom } from "../atoms/ui";
 
 // Function to scroll to the bottom of the chat container

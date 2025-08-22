@@ -7,7 +7,7 @@ import { logger } from '../../src/utils/logger';
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
 import { fetchFileStatus, FileStatusConnection } from './useFileStatus';
 import { isEqual } from 'lodash';
-import { store } from '../index';
+import { store } from '../store';
 
 /**
  * Adaptive polling configuration based on data freshness

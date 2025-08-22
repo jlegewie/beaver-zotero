@@ -4,7 +4,7 @@ import { scrollToBottom } from "../../utils/scrollToBottom";
 import { ChatMessage, MessageGroup } from "../../types/chat/uiTypes";
 import AssistantMessagesGroup from "./AssistantMessagesGroup";
 import { userScrolledAtom } from "../../atoms/ui";
-import { store } from "../../index";
+import { store } from "../../store";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
