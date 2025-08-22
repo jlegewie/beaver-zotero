@@ -264,6 +264,56 @@ const ZoteroImageAnnotations = {
 };
 
 /**
+ * Global manager for temporary annotations created by Beaver
+ */
+export const BeaverTemporaryAnnotations = {
+    // Track temporary annotation IDs globally
+    _currentAnnotations: [] as string[],
+
+    /**
+     * Add annotation IDs to the tracking list
+     * @param ids Array of annotation IDs to track
+     */
+    addToTracking(ids: string[]): void {
+        this._currentAnnotations.push(...ids);
+    },
+
+    /**
+     * Clean up all tracked temporary annotations
+     */
+    async cleanupAll(): Promise<void> {
+        if (this._currentAnnotations.length === 0) return;
+        
+        try {
+            const reader = getCurrentReader();
+            if (reader && reader._internalReader) {
+                await reader._internalReader.unsetAnnotations(
+                    Components.utils.cloneInto(this._currentAnnotations, reader._iframeWindow)
+                );
+            }
+        } catch (error) {
+            console.error('Failed to cleanup temporary annotations:', error);
+        }
+        
+        this._currentAnnotations = [];
+    },
+
+    /**
+     * Get count of currently tracked annotations
+     */
+    getCount(): number {
+        return this._currentAnnotations.length;
+    },
+
+    /**
+     * Clear tracking without cleaning up annotations (use when reader is already closed)
+     */
+    clearTracking(): void {
+        this._currentAnnotations = [];
+    }
+};
+
+/**
  * Example usage
  * 
  * const annotation = await ZoteroImageAnnotations.createImageAnnotation({
