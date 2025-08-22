@@ -214,9 +214,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 if (annotationIds.length > 0 && reader) {
                     // Small delay to ensure annotation is rendered
                     setTimeout(() => {
-                        if (reader._internalReader) {
-                            reader._internalReader.navigate({ annotationID: annotationIds[0] });
-                        }
+                        reader.navigate({annotationID: annotationIds[0]});
                     }, 100);
                 }
             } else if (pages.length > 0) {
