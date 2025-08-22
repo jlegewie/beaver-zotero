@@ -3,16 +3,16 @@ import UserMessageDisplay from "./UserMessageDisplay"
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { ChatMessage, MessageGroup } from "../../types/chat/uiTypes";
 import AssistantMessagesGroup from "./AssistantMessagesGroup";
+import { userScrolledAtom } from "../../atoms/ui";
+import { store } from "../../index";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
-    userScrolled: boolean;
-    setUserScrolled: (userScrolled: boolean) => void;
 };
 
 export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
     function MessagesArea(
-        { messages, userScrolled, setUserScrolled }: MessagesAreaProps,
+        { messages }: MessagesAreaProps,
         ref: React.ForwardedRef<HTMLDivElement>
     ) {
         const lastScrollTopRef = useRef(0);
@@ -20,9 +20,9 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         // Scroll to bottom when messages change
         useEffect(() => {
             if (ref && 'current' in ref && ref.current && messages.length > 0) {
-                scrollToBottom(ref as React.RefObject<HTMLElement>, userScrolled);
+                scrollToBottom(ref as React.RefObject<HTMLElement>);
             }
-        }, [messages, userScrolled, ref]);
+        }, [messages, ref]);
 
         // Group messages by role
         const messageGroups = useMemo(() => {
@@ -50,9 +50,9 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                             
                 // Check if not at the bottom
                 if (distanceFromBottom > BOTTOM_THRESHOLD) {
-                    setUserScrolled(true);
+                    store.set(userScrolledAtom, true);
                 } else {
-                    setUserScrolled(false);
+                    store.set(userScrolledAtom, false);
                 }
                 
                 // Still track last scroll position for reference

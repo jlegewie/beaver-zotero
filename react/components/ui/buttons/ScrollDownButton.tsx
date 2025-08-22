@@ -1,20 +1,19 @@
 import React from 'react';
 import { Icon, ArrowDownIcon } from '../../icons/icons';
-import { activePreviewAtom } from '../../../atoms/ui';
+import { activePreviewAtom, userScrolledAtom } from '../../../atoms/ui';
 import { useAtomValue } from 'jotai';
 import { popupMessagesAtom } from '../../../atoms/ui';
 
 interface ScrollDownButtonProps extends React.HTMLProps<HTMLButtonElement> {
     onClick: () => void;
-    userScrolled: boolean;
 }
 
 export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
     onClick,
     className,
     style,
-    userScrolled
 }) => {
+    const userScrolled = useAtomValue(userScrolledAtom);
     const activePreview = useAtomValue(activePreviewAtom);
     const popupMessages = useAtomValue(popupMessagesAtom);
 

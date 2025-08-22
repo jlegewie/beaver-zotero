@@ -1,3 +1,6 @@
+import { store } from "../index";
+import { userScrolledAtom } from "../atoms/ui";
+
 // Function to scroll to the bottom of the chat container
 // const scrollToBottom = () => {
 //   if (containerRef.current && !userScrolled) {
@@ -7,8 +10,9 @@
 
 export const scrollToBottom = (
     containerRef: React.RefObject<HTMLElement>,
-    userScrolled: boolean
+    userScrolledOverride?: boolean
 ) => {
+    const userScrolled = userScrolledOverride !== undefined ? userScrolledOverride : store.get(userScrolledAtom);
     // If user has manually scrolled, or container doesn't exist, don't auto-scroll
     if (!containerRef.current || userScrolled) {
         return;
