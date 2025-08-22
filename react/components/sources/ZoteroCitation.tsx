@@ -9,12 +9,10 @@ import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, bboxesToZoteroRects } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReader } from '../../utils/readerUtils';
+import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
-
-// Track temporary annotations globally to ensure cleanup
-let currentTemporaryAnnotations: string[] = [];
 
 // Define prop types for the component
 interface ZoteroCitationProps {
@@ -80,24 +78,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
-    // Cleanup function for temporary annotations
-    const cleanupTemporaryAnnotations = async () => {
-        if (currentTemporaryAnnotations.length === 0) return;
-        
-        try {
-            const reader = getCurrentReader();
-            if (reader && reader._internalReader) {
-                await reader._internalReader.unsetAnnotations(
-                    Components.utils.cloneInto(currentTemporaryAnnotations, reader._iframeWindow)
-                );
-            }
-        } catch (error) {
-            console.error('Failed to cleanup temporary annotations:', error);
-        }
-        
-        currentTemporaryAnnotations = [];
-    };
-
     // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
         if (boundingBoxData.length === 0) return [];
@@ -119,7 +99,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const tempHighlight = await reader._internalReader._annotationManager.addAnnotation(
                     Components.utils.cloneInto({
                         type: 'highlight',
-                        color: '#00bbff', // blue highlight
+                        color: '#00bbff', // Blue highlight
                         sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
                         position: {
                             pageIndex: pageIndex,
@@ -174,7 +154,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
 
         // Cleanup any existing temporary annotations
-        await cleanupTemporaryAnnotations();
+        await BeaverTemporaryAnnotations.cleanupAll();
 
         // Get bounding box data from citation
         const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
@@ -208,7 +188,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             if (boundingBoxData.length > 0) {
                 // Scenario 1: With bounding boxes - create temporary highlights
                 const annotationIds = await createBoundingBoxHighlights(boundingBoxData, item);
-                currentTemporaryAnnotations = annotationIds;
+                BeaverTemporaryAnnotations.addToTracking(annotationIds);
                 
                 // Navigate to the first annotation if created successfully
                 if (annotationIds.length > 0 && reader) {
@@ -239,9 +219,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     useEffect(() => {
         return () => {
             // Cleanup temporary annotations when component unmounts
-            if (currentTemporaryAnnotations.length > 0) {
+            if (BeaverTemporaryAnnotations.getCount() > 0) {
                 console.log('cleanupTemporaryAnnotations');
-                cleanupTemporaryAnnotations().catch(console.error);
+                BeaverTemporaryAnnotations.cleanupAll().catch(console.error);
             }
         };
     }, [citationId]);
