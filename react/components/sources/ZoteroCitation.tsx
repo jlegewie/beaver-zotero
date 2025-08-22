@@ -207,8 +207,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
 
-        
-
         // Get bounding box data from citation
         const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
         const pages = getCitationPages(attachmentCitation);
