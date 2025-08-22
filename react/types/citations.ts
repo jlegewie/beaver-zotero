@@ -1,11 +1,43 @@
 import { ZoteroItemReference } from "./zotero";
 
+
+export enum CoordOrigin {
+    TOPLEFT = "t",
+    BOTTOMLEFT = "b"
+}
+
 export interface BoundingBox {
     l: number; // left
     t: number; // top
     r: number; // right
     b: number; // bottom
+
+    coord_origin: CoordOrigin;
 }
+
+/**
+ * Convert BoundingBox to Zotero annotation rect format
+ */
+export function bboxToZoteroRect(bbox: BoundingBox): number[] {
+    if (bbox.coord_origin !== CoordOrigin.BOTTOMLEFT) {
+        throw new Error(`Expected BOTTOMLEFT coordinates, got ${bbox.coord_origin}`);
+    }
+    
+    // For BOTTOMLEFT coordinates, direct mapping to Zotero format:
+    // bbox.l = left edge (x1)
+    // bbox.b = bottom edge (y1) 
+    // bbox.r = right edge (x2)
+    // bbox.t = top edge (y2)
+    return [bbox.l, bbox.b, bbox.r, bbox.t];
+}
+
+/**
+ * Convert multiple BoundingBox objects to Zotero rects array
+ */
+export function bboxesToZoteroRects(bboxes: BoundingBox[]): number[][] {
+    return bboxes.map(bbox => bboxToZoteroRect(bbox));
+}
+
 
 export interface Locator {
     /** Physical or logical location inside an attachment. */
