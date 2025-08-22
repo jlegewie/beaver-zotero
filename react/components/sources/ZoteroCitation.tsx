@@ -80,17 +80,19 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
-        // Create temporary annotations for bounding boxes using approach 1 (setAnnotations directly)
+        // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
         if (boundingBoxData.length === 0) return [];
         
         try {
             const reader = getCurrentReader();
-            await reader._initPromise;
             if (!reader || !reader._internalReader) {
                 logger('ZoteroCitation: No active reader found for creating bounding box highlights');
                 return [];
             }
+
+            // Wait for reader initialization
+            await reader._initPromise;
 
             const tempAnnotations: any[] = [];
             const annotationReferences: ZoteroItemReference[] = [];
@@ -99,10 +101,18 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const pageIndex = page - 1; // Convert to 0-based index
                 const rects = bboxesToZoteroRects(bboxes);
                 
-                // Create temporary annotation object (no database save)
+                // Create unique IDs for the temporary annotation
                 const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const tempKey = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                // Create properly structured annotation object matching Zotero.Annotations.toJSON() output
                 const tempAnnotation = {
+                    // Core identification
                     id: tempId,
+                    key: tempKey,
+                    libraryID: reader._item.libraryID,
+                    
+                    // Required annotation properties
                     type: 'highlight',
                     color: '#00bbff', // Blue highlight
                     sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
@@ -110,26 +120,48 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                         pageIndex: pageIndex,
                         rects: rects
                     },
-                    authorName: 'Beaver',
+                    
+                    // Critical properties to prevent crashes - MUST be present
+                    tags: [],
+                    comment: '',
                     text: BEAVER_ANNOTATION_TEXT,
-                    // Mark as temporary so it doesn't get saved
+                    authorName: 'Beaver',
+                    pageLabel: '',
+                    isExternal: false,
+                    readOnly: false,
+                    lastModifiedByUser: '',
+                    dateModified: new Date().toISOString(),
+                    
+                    // Backup annotation properties
+                    annotationType: 'highlight',
+                    annotationAuthorName: 'Beaver',
+                    annotationText: BEAVER_ANNOTATION_TEXT,
+                    annotationComment: '',
+                    annotationColor: '#00bbff',
+                    annotationPageLabel: '',
+                    annotationSortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
+                    annotationPosition: JSON.stringify({
+                        pageIndex: pageIndex,
+                        rects: rects
+                    }),
+                    annotationIsExternal: false,
+                    
+                    // Mark as temporary so it doesn't get saved to database
                     isTemporary: true
                 };
                 
                 tempAnnotations.push(tempAnnotation);
                 
                 // Create reference for tracking
-                const libraryID = Zotero.Items.get(reader.itemID).libraryID;
                 annotationReferences.push({
                     zotero_key: tempId,
-                    library_id: libraryID
+                    library_id: reader._item.libraryID
                 });
             }
             
             // Add temporary annotations directly to reader display (no database save)
             if (tempAnnotations.length > 0) {
-                // await reader._internalReader._annotationManager.addAnnotation(
-                await reader._internalReader.setAnnotations(
+                reader._internalReader.setAnnotations(
                     Components.utils.cloneInto(tempAnnotations, reader._iframeWindow)
                 );
             }
