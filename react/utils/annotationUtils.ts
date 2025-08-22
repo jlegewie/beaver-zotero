@@ -1,4 +1,6 @@
+import { logger } from "../../src/utils/logger";
 import { getCurrentReader } from "./readerUtils";
+import { ZoteroItemReference } from "../types/zotero";
 
 /**
 * Types for the Zotero Reader API
@@ -268,14 +270,15 @@ const ZoteroImageAnnotations = {
  */
 export const BeaverTemporaryAnnotations = {
     // Track temporary annotation IDs globally
-    _currentAnnotations: [] as string[],
+    _currentAnnotations: [] as ZoteroItemReference[],
 
     /**
      * Add annotation IDs to the tracking list
      * @param ids Array of annotation IDs to track
      */
-    addToTracking(ids: string[]): void {
-        this._currentAnnotations.push(...ids);
+    addToTracking(annotationReferences: ZoteroItemReference[]): void {
+        logger(`BeaverTemporaryAnnotations: Adding to tracking ${annotationReferences}`);
+        this._currentAnnotations.push(...annotationReferences);
     },
 
     /**
@@ -283,16 +286,25 @@ export const BeaverTemporaryAnnotations = {
      */
     async cleanupAll(): Promise<void> {
         if (this._currentAnnotations.length === 0) return;
+        logger('BeaverTemporaryAnnotations: Cleaning up temporary annotations');
         
         try {
+            // Erase annotations from Zotero
+            for (const reference of this._currentAnnotations) {
+                const annotations = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                if(annotations) await annotations.eraseTx();
+            }
+
+            // UI cleanup
             const reader = getCurrentReader();
             if (reader && reader._internalReader) {
                 await reader._internalReader.unsetAnnotations(
-                    Components.utils.cloneInto(this._currentAnnotations, reader._iframeWindow)
+                    Components.utils.cloneInto(this._currentAnnotations.map(reference => reference.zotero_key), reader._iframeWindow)
                 );
             }
+            logger('BeaverTemporaryAnnotations: Successfully cleaned up temporary annotations');
         } catch (error) {
-            console.error('Failed to cleanup temporary annotations:', error);
+            console.error('BeaverTemporaryAnnotations: Failed to cleanup temporary annotations:', error);
         }
         
         this._currentAnnotations = [];

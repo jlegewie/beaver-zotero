@@ -7,6 +7,7 @@ import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTy
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
+import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -148,7 +149,11 @@ export function useReaderTabSelection() {
                     if (selectedTab.type === 'reader') {
                         const newReader = Zotero.Reader.getByTabID(selectedTab.id);
                         if (newReader && newReader.itemID !== currentReaderIdRef.current) {
-                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Setting up new reader.`);
+                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Cleaning up temporary annotations and setting up new reader.`);
+                            
+                            // Clean up temporary annotations from the previous reader
+                            await BeaverTemporaryAnnotations.cleanupAll();
+                            
                             setupReader(newReader);
                         } else if (!newReader) {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
@@ -161,7 +166,11 @@ export function useReaderTabSelection() {
                         // If newReader is the same as current, do nothing - already handled
                     } else {
                         // Tab switched to something other than a reader (e.g., library)
-                        logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state.`);
+                        logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state and temporary annotations.`);
+                        
+                        // Clean up temporary annotations when leaving reader tabs
+                        await BeaverTemporaryAnnotations.cleanupAll();
+                        
                         if (selectionCleanupRef.current) {
                             selectionCleanupRef.current();
                             selectionCleanupRef.current = null;
@@ -224,6 +233,11 @@ export function useReaderTabSelection() {
             currentReaderIdRef.current = null;
             // Reset atom state on unmount
             setReaderTextSelection(null);
+            
+            // Clean up any remaining temporary annotations on unmount
+            BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+                logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
+            });
         };
     }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
 

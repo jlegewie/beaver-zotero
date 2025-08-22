@@ -10,6 +10,7 @@ import { getCitationPages, getCitationBoundingBoxes, bboxesToZoteroRects } from 
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReader } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
+import { ZoteroItemReference } from '../../types/zotero';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -110,12 +111,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     }, reader._iframeWindow)
                 );
                 
+                
                 if (tempHighlight && tempHighlight.id) {
                     annotationIds.push(tempHighlight.id);
                 }
             }
             
-            return annotationIds;
+            const libraryID = Zotero.Items.get(reader.itemID).libraryID;
+            return annotationIds.map(id => ({
+                zotero_key: id,
+                library_id: libraryID
+            } as ZoteroItemReference));
         } catch (error) {
             console.error('Failed to create bounding box highlights:', error);
             return [];
@@ -187,8 +193,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
                 // Scenario 1: With bounding boxes - create temporary highlights
-                const annotationIds = await createBoundingBoxHighlights(boundingBoxData, item);
-                BeaverTemporaryAnnotations.addToTracking(annotationIds);
+                const annotationReferences = await createBoundingBoxHighlights(boundingBoxData, item);
+                BeaverTemporaryAnnotations.addToTracking(annotationReferences);
+                const annotationIds = annotationReferences.map(reference => reference.zotero_key);
                 
                 // Navigate to the first annotation if created successfully
                 if (annotationIds.length > 0 && reader) {
