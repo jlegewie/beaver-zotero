@@ -5,7 +5,7 @@ import { ZoteroItemReference } from "../types/zotero";
 /**
 * Types for the Zotero Reader API
 */
-interface ZoteroReader {
+export interface ZoteroReader {
     _internalReader: {
         _annotationManager: {
             addAnnotation: (data: any) => Promise<Annotation>;
@@ -268,9 +268,6 @@ const ZoteroImageAnnotations = {
 /**
  * Global manager for temporary annotations created by Beaver
  */
-/**
- * Global manager for temporary annotations created by Beaver
- */
 export const BeaverTemporaryAnnotations = {
     // Track temporary annotation references globally (both database and temporary-only)
     _currentAnnotations: [] as ZoteroItemReference[],
@@ -286,8 +283,9 @@ export const BeaverTemporaryAnnotations = {
 
     /**
      * Clean up all tracked temporary annotations
+     * @param readerInstance The specific reader instance to clean up annotations from
      */
-    async cleanupAll(): Promise<void> {
+    async cleanupAll(readerInstance?: ZoteroReader): Promise<void> {
         if (this._currentAnnotations.length === 0) return;
         logger('BeaverTemporaryAnnotations: Cleaning up temporary annotations');
         
@@ -306,7 +304,7 @@ export const BeaverTemporaryAnnotations = {
             }
 
             // UI cleanup for all annotations (both database and temporary-only)
-            const reader = getCurrentReader();
+            const reader = readerInstance || (getCurrentReader() as unknown as ZoteroReader);
             if (reader && reader._internalReader) {
                 const allAnnotationIds = this._currentAnnotations.map(reference => reference.zotero_key);
                 await reader._internalReader.unsetAnnotations(
