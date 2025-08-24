@@ -3,7 +3,7 @@ import { setPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
 import { SafeProfileWithPlan } from "../types/profile";
 import { addPopupMessageAtom } from "./popupMessageUtils";
-import { store } from "../index";
+import { store } from "../store";
 import { fileStatusSummaryAtom, calculateFileStatusSummary } from "../atoms/files";
 import { fetchFileStatus } from "../hooks/useFileStatus";
 import { Icon, PuzzleIcon } from "../components/icons/icons";

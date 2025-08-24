@@ -9,7 +9,7 @@
 import PQueue from 'p-queue';
 import { getPDFPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
-import { store } from '../../react/index';
+import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';

@@ -44,7 +44,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isTh
         <div className={`
             ${resultsVisible ? 'border-popup' : 'border-transparent'} 
             rounded-md flex flex-col min-w-0 display-flex flex-col py-1 mb-2
-            ${previousMessageHasToolCalls ? '-mt-3' : ''}
+            ${previousMessageHasToolCalls ? '-mt-2' : ''}
         `}>
             <Button
                 variant="ghost-secondary"
@@ -53,7 +53,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isTh
                 onMouseLeave={() => setIsButtonHovered(false)}
                 className="text-base scale-105 w-full min-w-0 align-start text-left"
                 // ${isThinking ? 'justify-start' : ''}
-                style={{ padding: '4px 6px', maxHeight: 'none'}}
+                style={{ padding: '2px 6px', maxHeight: 'none'}}
                 // disabled={isButtonDisabled && !canToggleResults}
             >
                 <div className="display-flex flex-row px-3 gap-2">

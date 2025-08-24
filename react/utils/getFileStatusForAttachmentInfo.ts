@@ -3,7 +3,7 @@ import { fileUploader } from '../../src/services/FileUploader';
 import { logger } from '../../src/utils/logger';
 import { errorMapping } from '../atoms/files';
 import { AttachmentStatusResponse, attachmentsService } from '../../src/services/attachmentsService';
-import { store } from '../index';
+import { store } from '../store';
 import { userAtom } from '../atoms/auth';
 import { planFeaturesAtom, syncLibraryIdsAtom } from '../atoms/profile';
 import attachmentStatusManager from '../../src/services/attachmentStatusManager';

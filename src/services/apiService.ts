@@ -1,6 +1,6 @@
 import { ApiError, ServerError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
-import { store } from '../../react/index';
+import { store } from '../../react/store';
 import { sessionAtom } from '../../react/atoms/auth';
 
 /**

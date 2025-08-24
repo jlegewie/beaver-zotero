@@ -4,7 +4,7 @@ import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
 import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../../utils/sourceUtils';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
 import { updateSourcesFromZoteroItemsAtom } from '../../atoms/input';
-import { store } from '../../index';
+import { store } from '../../store';
 import { getPref } from '../../../src/utils/prefs';
 import { useSetAtom } from 'jotai';
 

@@ -6,6 +6,8 @@ import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSele
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
+import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -27,6 +29,7 @@ export function useReaderTabSelection() {
     const selectionCleanupRef = useRef<(() => void) | null>(null);
     const zoteroNotifierIdRef = useRef<string | null>(null);
     const currentReaderIdRef = useRef<number | null>(null);
+    const currentReaderRef = useRef<ZoteroReader | null>(null);
 
     // Define main window
     const window = Zotero.getMainWindow();
@@ -85,6 +88,7 @@ export function useReaderTabSelection() {
         }
 
         currentReaderIdRef.current = reader.itemID; // Store just the ID
+        currentReaderRef.current = reader;
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
         // Update reader attachment for the new reader
@@ -147,7 +151,11 @@ export function useReaderTabSelection() {
                     if (selectedTab.type === 'reader') {
                         const newReader = Zotero.Reader.getByTabID(selectedTab.id);
                         if (newReader && newReader.itemID !== currentReaderIdRef.current) {
-                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Setting up new reader.`);
+                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Cleaning up temporary annotations and setting up new reader.`);
+                            
+                            // Clean up temporary annotations from the previous reader
+                            await BeaverTemporaryAnnotations.cleanupAll(currentReaderRef.current as ZoteroReader);
+                            
                             setupReader(newReader);
                         } else if (!newReader) {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
@@ -155,17 +163,23 @@ export function useReaderTabSelection() {
                             if (selectionCleanupRef.current) selectionCleanupRef.current();
                             selectionCleanupRef.current = null;
                             currentReaderIdRef.current = null;
+                            currentReaderRef.current = null;
                             setReaderTextSelection(null);
                         }
                         // If newReader is the same as current, do nothing - already handled
                     } else {
                         // Tab switched to something other than a reader (e.g., library)
-                        logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state.`);
+                        logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state and temporary annotations.`);
+                        
+                        // Clean up temporary annotations when leaving reader tabs
+                        await BeaverTemporaryAnnotations.cleanupAll(currentReaderRef.current as ZoteroReader);
+                        
                         if (selectionCleanupRef.current) {
                             selectionCleanupRef.current();
                             selectionCleanupRef.current = null;
                         }
                         currentReaderIdRef.current = null;
+                        currentReaderRef.current = null;
                         setReaderTextSelection(null);
                         setReaderAttachment(null);
                     }
@@ -176,6 +190,7 @@ export function useReaderTabSelection() {
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                        if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                         await updateSourcesFromZoteroItems([item], true);
                     }
                     // Delete events
@@ -219,9 +234,19 @@ export function useReaderTabSelection() {
                 }
                 zoteroNotifierIdRef.current = null;
             }
+            
+            // Stash reader instance before clearing refs
+            const readerToClean = currentReaderRef.current;
+
             currentReaderIdRef.current = null;
+            currentReaderRef.current = null;
             // Reset atom state on unmount
             setReaderTextSelection(null);
+            
+            // Clean up any remaining temporary annotations on unmount
+            BeaverTemporaryAnnotations.cleanupAll(readerToClean as ZoteroReader).catch(error => {
+                logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
+            });
         };
     }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
 

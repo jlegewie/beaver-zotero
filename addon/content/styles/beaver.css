@@ -565,23 +565,23 @@ attachment-box .metadata-table #beaver-status {
     text-decoration: underline;
 }
 
-[id^="beaver-pane-"] .markdown a.zotero-citation {
+[id^="beaver-pane-"] .markdown span.zotero-citation {
     cursor: pointer;
     font-size: 0.8em;
     margin-left: 0.15em;
     text-decoration: none;
-    background: var(--fill-quarternary);
+    background: var(--fill-quinary);
     padding-right: 0.35em;
     padding-left: 0.35em;
-    border-radius: 0.5em;
-    border: 1px solid var(--fill-quarternary);
+    border-radius: 0.25em;
+    border: 1px solid var(--fill-quinary);
     color: var(--fill-secondary);
     transition: all 0.2s ease-in-out;
 }
 
-[id^="beaver-pane-"] .markdown a.zotero-citation:hover {
+[id^="beaver-pane-"] .markdown span.zotero-citation:hover {
     color: var(--fill-primary);
-    border: 1px solid var(--fill-tertiary);
+    /* border: 1px solid var(--fill-quarternary); */
 }
 
 [id^="beaver-pane-"] .markdown h1,

@@ -4,7 +4,7 @@ import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
 import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom } from "../atoms/profile";
-import { store } from "../index";
+import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
 

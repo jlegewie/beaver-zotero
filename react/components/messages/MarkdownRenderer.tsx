@@ -13,7 +13,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'pages', 'consecutive']
+        citation: ['id', 'cid', 'pids', 'consecutive']
     }
 });
 
@@ -50,7 +50,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         //     // Add closing ``` for proper formatting during streaming
         //     return processed + "\n```";
         // }
-        
+
+        // Complete unclosed bold formatting for rendering during streaming
+        // Strategy: Count ** pairs and if there's an odd number, temporarily add closing **
+        const boldMarkers = (processed.match(/\*\*/g) || []).length;
+        if (boldMarkers % 2 === 1) {
+            if (!processed.endsWith('**')) {
+                processed = processed + '**';
+            }
+        }
+
         // Clean up backticks around complete citations
         processed = processed.replace(/`(<citation[^>]*\/>)`/g, '$1');
 

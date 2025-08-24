@@ -34,6 +34,11 @@ export interface ChatMessage {
     warnings?: WarningMessage[];
 }
 
+export interface MessageGroup {
+    role: 'user' | 'assistant' | 'system';
+    messages: ChatMessage[];
+}
+
 // Factory functions for creating messages
 export const createUserMessage = (content: string): ChatMessage => {
     return {

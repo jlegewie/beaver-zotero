@@ -1,5 +1,6 @@
 import { ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
+import { CitationMetadata } from "../citations";
 
 export interface ThreadModel {
     id: string;
@@ -30,11 +31,26 @@ export interface ToolCall {
     status?: 'in_progress' | 'completed' | 'error';
 }
 
+export interface UsageModel {
+    input: number;
+    output: number;
+    cache_write: number;
+    cache_read: number;
+    total_token: number;
+}
+
+export interface MessageModelMetadata {
+    model?: string;
+    cost?: number;
+    usage?: UsageModel;
+    citations?: CitationMetadata[];
+}
+
 // Input messagemodel for chat completions requests
 export interface MessageData {
     id: string;
     role: 'user' | 'assistant' | 'system';
-    content: string;    
+    content: string;
     reader_state: ReaderState | null;
     attachments: MessageAttachment[] | null;
     tool_request: ToolRequest | null;
@@ -63,7 +79,7 @@ export interface MessageModel {
     // Message metadata
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
     created_at?: string; // Set in DB
-    metadata?: Record<string, any>;
+    metadata?: MessageModelMetadata;
     error?: string;
 }
 

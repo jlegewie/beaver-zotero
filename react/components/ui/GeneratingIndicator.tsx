@@ -25,7 +25,7 @@ const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previ
         // Matching style of AssistantMessageTools
         <div className={`
             border-transparent rounded-md flex flex-col min-w-0 display-flex flex-col py-1 mb-2
-            ${previousMessageHasToolCalls ? '-mt-3' : ''}
+            ${previousMessageHasToolCalls ? '-mt-2' : ''}
         `}>
             <Button
                 variant="ghost-secondary"
@@ -33,7 +33,7 @@ const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previ
                     text-base scale-105 w-full min-w-0 align-start text-left
                     disabled-but-styled
                 `}
-                style={{ maxHeight: '5rem', padding: '4px 6px' }}
+                style={{ maxHeight: '5rem', padding: '2px 6px' }}
                 disabled={true}
             >
                 <div className="display-flex flex-row px-3 gap-2">

@@ -5,7 +5,7 @@ import { planDisplayNameAtom, planNameAtom } from '../atoms/profile';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { useEffect } from 'react';
 import { logger } from '../../src/utils/logger';
-import { store } from '../index';
+import { store } from '../store';
 
 export const useIndexingCompleteMessage = () => {
     const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);

@@ -1,4 +1,4 @@
-import { attachmentCitationsAtom } from "../atoms/citations"
+import { citationMetadataAtom, citationDataAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForPlanLimitFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { currentMessageContentAtom, currentSourcesAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom, readerTextSelectionAtom, removedItemKeysCache } from "../atoms/input"
@@ -7,7 +7,7 @@ import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLib
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, isSyncCompleteAtom } from "../atoms/sync"
 import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
-import { store } from "../index"
+import { store } from "../store"
 
 export const atomRegistry = {
     // Auth
@@ -16,7 +16,8 @@ export const atomRegistry = {
     authLoading: authLoadingAtom,
 
     // Citations
-    attachmentCitations: attachmentCitationsAtom,
+    citationMetadata: citationMetadataAtom,
+    citationMetadataView: citationDataAtom,
 
     // Files
     fileStatus: fileStatusAtom,

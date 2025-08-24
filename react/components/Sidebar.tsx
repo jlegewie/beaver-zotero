@@ -3,7 +3,7 @@ import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./messages/MessagesArea"
 import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
-import { useSetAtom, useAtomValue, useAtom } from 'jotai';
+import { useAtomValue, useAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
 import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
@@ -18,6 +18,7 @@ import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import ErrorReportDialog from './ErrorReportDialog';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { store } from '../store';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -25,7 +26,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const threadId = useAtomValue(currentThreadIdAtom);
     const threadMessages = useAtomValue(threadMessagesAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
-    const [userScrolled, setUserScrolled] = useAtom(userScrolledAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
@@ -41,7 +41,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
-            setUserScrolled(false);
+            store.set(userScrolledAtom, false);
             scrollToBottom(messagesContainerRef, false);
         }
     };
@@ -101,8 +101,6 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {threadMessages.length > 0 ? (
                 <MessagesArea 
                     messages={threadMessages} 
-                    userScrolled={userScrolled} 
-                    setUserScrolled={setUserScrolled}
                     ref={messagesContainerRef}
                 />
             ) : (
@@ -112,7 +110,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 <PopupMessageContainer />
-                <ScrollDownButton onClick={handleScrollToBottom} userScrolled={userScrolled} />
+                <ScrollDownButton onClick={handleScrollToBottom} />
                 <PreviewContainer />
                 <DragDropWrapper>
                     <InputArea inputRef={inputRef} />

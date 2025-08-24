@@ -2,6 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
 import { ProviderType } from '../../react/atoms/models';
+import { CitationMetadata } from '../../react/types/citations';
 
 export interface ToolRequest {
     function: "rag_search";
@@ -56,6 +57,13 @@ export interface SSECallbacks {
      * @param toolCall The tool call object
      */
     onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
+
+    /**
+     * Handles "citation_metadata" event when a citation metadata is received
+     * @param messageId ID of the assistant message
+     * @param citationMetadata The citation metadata object
+     */
+    onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => void;
     
     /**
      * Handles "complete" event when a message processing is fully complete.
@@ -197,7 +205,7 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onDelta, onMessage, onToolcall, onComplete, onDone, onError, onWarning } = callbacks;
+        const { onThread, onDelta, onMessage, onToolcall, onCitationMetadata, onComplete, onDone, onError, onWarning } = callbacks;
 
         const endpoint = `${this.baseUrl}/api/v1/chat/completions`;
         
@@ -234,6 +242,7 @@ export class ChatService extends ApiService {
                                     onDelta,
                                     onMessage,
                                     onToolcall,
+                                    onCitationMetadata,
                                     onComplete,
                                     onDone,
                                     onError,
@@ -293,6 +302,7 @@ export class ChatService extends ApiService {
             onDelta,
             onMessage,
             onToolcall,
+            onCitationMetadata,
             onComplete,
             onDone,
             onError,
@@ -302,6 +312,7 @@ export class ChatService extends ApiService {
             onDelta: (messageId: string, delta: string, type: DeltaType) => void;
             onMessage: (data: MessageModel) => void;
             onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
+            onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => void;
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
@@ -362,6 +373,12 @@ export class ChatService extends ApiService {
                 if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolcall) {
                     const toolcall = JSON.parse(parsedData.toolcall) as ToolCall;
                     onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
+                }
+                break;
+            case 'citation_metadata':
+                // e.g. data: {"messageId": "uuid", "citationMetadata": {...}}
+                if (parsedData?.messageId && parsedData?.metadata) {
+                    onCitationMetadata(parsedData.messageId, parsedData.metadata as CitationMetadata);
                 }
                 break;
             case 'complete':

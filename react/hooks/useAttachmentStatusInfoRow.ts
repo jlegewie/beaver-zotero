@@ -1,7 +1,7 @@
 import { useEventSubscription } from './useEventSubscription';
 import { getFileStatusForAttachmentInfo } from '../utils/getFileStatusForAttachmentInfo';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { store } from '../../react/index';
+import { store } from '../store';
 import { useEffect, useRef } from 'react';
 
 export function useAttachmentStatusInfoRow() {

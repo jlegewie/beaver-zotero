@@ -31,12 +31,13 @@ import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
-import { store } from '../index';
+import { store } from '../store';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
-import { updateAttachmentCitationsAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
+import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 
@@ -365,6 +366,11 @@ export const regenerateFromMessageAtom = atom(
         set(toolAttachmentsAtom, (prev) =>
             prev.filter(a => a.messageId && messageIds.includes(a.messageId))
         );
+
+        // Update citation metadata
+        // set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+        //     return prev.filter(a => a.messageId && messageIds.includes(a.messageId));
+        // });
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);
@@ -518,11 +524,6 @@ async function _processChatCompletionViaBackend(
                         id: messageId,
                         chunk: delta
                     });
-                    // Update source citations if the delta contains the closing '>' of
-                    // a citation (or other) tag
-                    if (delta.includes('>')) {
-                        set(updateAttachmentCitationsAtom);
-                    }
                 }
                 if (type === "reasoning") {
                     if (delta) {
@@ -531,9 +532,6 @@ async function _processChatCompletionViaBackend(
                             id: messageId,
                             chunk: delta
                         });
-                        if (delta.includes('>')) {
-                            set(updateAttachmentCitationsAtom);
-                        }
                     }
                 }
             },
@@ -549,12 +547,6 @@ async function _processChatCompletionViaBackend(
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: [message]});
                 }
 
-                // Update source citations if the message contains the closing '>' of
-                // a citation (or other) tag
-                if (message.role === 'assistant' && message.content && message.content.includes('>')) {
-                    set(updateAttachmentCitationsAtom);
-                }
-
                 // Store message locally
                 if (!getPref('statefulChat')) {
                     const user_id = store.get(userIdAtom);
@@ -567,6 +559,14 @@ async function _processChatCompletionViaBackend(
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+            },
+            onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
+                logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
+                set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+                    const newCitation = { ...citationMetadata, messageId };
+                    return [...prev, newCitation];
+                });
+                set(updateCitationDataAtom);
             },
             onComplete: (messageId: string) => {
                 logger(`event 'onComplete': ${messageId}`, 1);

@@ -1,9 +1,11 @@
+import { logger } from "../../src/utils/logger";
 import { getCurrentReader } from "./readerUtils";
+import { ZoteroItemReference } from "../types/zotero";
 
 /**
 * Types for the Zotero Reader API
 */
-interface ZoteroReader {
+export interface ZoteroReader {
     _internalReader: {
         _annotationManager: {
             addAnnotation: (data: any) => Promise<Annotation>;
@@ -260,6 +262,76 @@ const ZoteroImageAnnotations = {
         
         // Format: padded pageIndex|padded yPos|padded xPos
         return `${pageIndex.toString().padStart(5, '0')}|${yPos.toString().padStart(6, '0')}|${xPos.toString().padStart(5, '0')}`;
+    }
+};
+
+/**
+ * Global manager for temporary annotations created by Beaver
+ */
+export const BeaverTemporaryAnnotations = {
+    // Track temporary annotation references globally (both database and temporary-only)
+    _currentAnnotations: [] as ZoteroItemReference[],
+
+    /**
+     * Add annotation references to the tracking list
+     * @param annotationReferences Array of annotation references to track
+     */
+    addToTracking(annotationReferences: ZoteroItemReference[]): void {
+        logger(`BeaverTemporaryAnnotations: Adding to tracking ${annotationReferences.length} annotations`);
+        this._currentAnnotations.push(...annotationReferences);
+    },
+
+    /**
+     * Clean up all tracked temporary annotations
+     * @param readerInstance The specific reader instance to clean up annotations from
+     */
+    async cleanupAll(readerInstance?: ZoteroReader): Promise<void> {
+        if (this._currentAnnotations.length === 0) return;
+        logger('BeaverTemporaryAnnotations: Cleaning up temporary annotations');
+        
+        try {
+            // Split into database annotations and temporary-only annotations
+            const annotationReferences = this._currentAnnotations;
+            
+            // Erase database annotations from Zotero
+            for (const reference of annotationReferences) {
+                try {
+                    const annotation = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                    if (annotation) await annotation.eraseTx();
+                } catch (error) {
+                    console.warn(`Failed to erase database annotation ${reference.zotero_key}:`, error);
+                }
+            }
+
+            // UI cleanup for all annotations (both database and temporary-only)
+            const reader = readerInstance || (getCurrentReader() as unknown as ZoteroReader);
+            if (reader && reader._internalReader) {
+                const allAnnotationIds = this._currentAnnotations.map(reference => reference.zotero_key);
+                await reader._internalReader.unsetAnnotations(
+                    Components.utils.cloneInto(allAnnotationIds, reader._iframeWindow)
+                );
+            }
+            
+            logger(`BeaverTemporaryAnnotations: Successfully cleaned up ${annotationReferences.length} database annotations`);
+        } catch (error) {
+            console.error('BeaverTemporaryAnnotations: Failed to cleanup temporary annotations:', error);
+        }
+        
+        this._currentAnnotations = [];
+    },
+
+    /**
+     * Get count of currently tracked annotations
+     */
+    getCount(): number {
+        return this._currentAnnotations.length;
+    },
+
+    /**
+     * Clear tracking without cleaning up annotations (use when reader is already closed)
+     */
+    clearTracking(): void {
+        this._currentAnnotations = [];
     }
 };
 

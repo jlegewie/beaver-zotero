@@ -1,7 +1,7 @@
 import { syncService, SyncDataResponse } from '../services/syncService';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
-import { store } from "../../react/index";
+import { store } from "../../react/store";
 import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';

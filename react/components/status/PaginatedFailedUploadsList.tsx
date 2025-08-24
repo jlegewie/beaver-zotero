@@ -10,7 +10,7 @@ import { retryUploadsByStatus } from "../../../src/services/FileUploader";
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
-import { store } from '../../../react/index';
+import { store } from '../../../react/store';
 import { planFeaturesAtom } from '../../atoms/profile';
 
 const ITEMS_PER_PAGE = 10;

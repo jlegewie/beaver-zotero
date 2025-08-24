@@ -5,8 +5,7 @@ import { syncingItemFilter } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { userIdAtom } from '../atoms/auth';
-import { store } from '../index';
+import { CitationData } from '../types/citations';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -160,7 +159,7 @@ export function createSourceFromAttachmentOrNoteOrAnnotation(
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: InputSource | MessageAttachmentWithId | SourceAttachment): Zotero.Item | null {
+export function getZoteroItem(source: InputSource | MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -283,14 +282,14 @@ export async function isSourceValid(source: InputSource): Promise<{valid: boolea
     return await isValidZoteroItem(item);
 }
 
-export function revealSource(source: SourceAttachment) {
+export function revealSource(source: SourceAttachment | CitationData) {
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
         selectItemById(itemID);
     }
 }
 
-export async function openSource(source: SourceAttachment) {
+export async function openSource(source: SourceAttachment | CitationData) {
     const item = getZoteroItem(source);
     if (!item) return;
     

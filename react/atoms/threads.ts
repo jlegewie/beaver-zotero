@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from 
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { attachmentCitationsAtom, updateAttachmentCitationsAtom } from "./citations";
+import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -98,7 +98,8 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
-        set(attachmentCitationsAtom, []);
+        set(citationMetadataAtom, []);
+        set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
@@ -138,23 +139,31 @@ export const loadThreadAtom = atom(
                     }
                 }
             }
+
+            // Get citation metadata from messages
+            const citationMetadata = messagesDB.flatMap(message => {
+                const messageCitations = (message.metadata?.citations || []);
+                return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
+            });
             
             // Update the thread messages and attachments state
             if (messages.length > 0) {
                 set(threadMessagesAtom, messages);
-                set(updateAttachmentCitationsAtom);
+                set(citationMetadataAtom, citationMetadata);
                 set(userAttachmentsAtom, userAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                set(updateCitationDataAtom);
             }
         } else {
             // Use remote API
-            const { messages, userAttachments, toolAttachments } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments, citationMetadata } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
                 // Update the thread messages and attachments state
                 set(threadMessagesAtom, messages);
-                set(updateAttachmentCitationsAtom);
                 set(userAttachmentsAtom, userAttachments);
+                set(citationMetadataAtom, citationMetadata);
+                set(updateCitationDataAtom);
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
             }
