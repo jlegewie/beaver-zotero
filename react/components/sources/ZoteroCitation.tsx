@@ -53,12 +53,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     let formatted_citation = '';
     let citation = '';
     let url = '';
+    let previewText = '';
 
     // If we have a attachmentCitation, use it
     if (attachmentCitation) {
         formatted_citation = attachmentCitation.formatted_citation || '';
         citation = attachmentCitation.citation || '';
         url = attachmentCitation.url || '';
+        previewText = attachmentCitation.preview
+            ? `"${attachmentCitation.preview}`
+            : formatted_citation || '';
     // Fallback: get the Zotero item and create the citation data
     } else {
         // Get the Zotero item
@@ -327,6 +331,22 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             {displayText}
         </span>
     );
+
+    const citationPreview = (
+        <div>
+            <div className="px-3 py-15 display-flex flex-row border-bottom-quinary">
+                <div className="font-color-primary text-sm">{citation}</div>
+                <div className="flex-1"/>
+                {pages && pages.length > 0 && pages[0] &&
+                    <div className="font-color-secondary text-sm">Page {pages[0]}</div>
+                }
+                
+            </div>
+            <div className="font-color-secondary text-sm px-3 py-15">
+                {previewText}
+            </div>
+        </div>
+    )
     
     // Return the citation with tooltip and click handler
     return (
@@ -334,7 +354,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             {exportRendering ?
                 citationElement
             :
-                <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
+                // <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
+                <Tooltip
+                    content={previewText}
+                    customContent={citationPreview}
+                    width={TOOLTIP_WIDTH}
+                    padding={false}
+                >
                     {citationElement}
                 </Tooltip>
             }

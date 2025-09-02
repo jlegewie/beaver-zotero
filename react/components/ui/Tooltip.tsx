@@ -21,6 +21,8 @@ export interface TooltipProps {
     disabled?: boolean;
     /** Whether to use a portal for rendering (prevents containment issues) */
     usePortal?: boolean;
+    /** Padding */
+    padding?: boolean;
     /** Whether to show the tooltip on hover */
     width?: string;
     /** Whether to parse HTML in the content (use with caution) */
@@ -45,6 +47,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     classNames = '',
     disabled = false,
     usePortal = false,
+    padding = true,
     width,
     allowHtml = false,
     customContent,
@@ -214,7 +217,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         <span
             ref={tooltipRef}
             className={`
-                bg-quaternary rounded-md p-0 shadow-md fixed z-1000 border-quinary block
+                bg-quaternary rounded-md shadow-md fixed z-1000 border-popup block
                 ${position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'}
                 ${classNames}
             `}
@@ -229,7 +232,7 @@ const Tooltip: React.FC<TooltipProps> = ({
             aria-hidden={!isOpen}
         >
             <span className={`
-                    px-2 py-1 block
+                    ${padding && 'px-2 py-1'} block
                     ${singleLine ? 'display-flex items-center' : ''}
                     ${singleLine ? 'single-line' : ''}
                 `}
