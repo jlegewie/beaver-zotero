@@ -101,9 +101,22 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             const tempAnnotations: any[] = [];
             const annotationReferences: ZoteroItemReference[] = [];
             
+            // Group bounding boxes by page
+            const pageGroups = new Map<number, any[][]>();
             for (const { page, bboxes } of boundingBoxData) {
+                if (!pageGroups.has(page)) {
+                    pageGroups.set(page, []);
+                }
+                pageGroups.get(page)!.push(bboxes);
+            }
+            
+            // Create one annotation per page with combined rects
+            for (const [page, allBboxesOnPage] of pageGroups) {
                 const pageIndex = page - 1; // Convert to 0-based index
-                const rects = bboxesToZoteroRects(bboxes);
+                
+                // Combine all bboxes on this page
+                const combinedBboxes = allBboxesOnPage.flat();
+                const rects = bboxesToZoteroRects(combinedBboxes);
                 
                 // Create unique IDs for the temporary annotation
                 const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -128,7 +141,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     // Critical properties to prevent crashes - MUST be present
                     tags: [],
                     comment: '',
-                    text: BEAVER_ANNOTATION_TEXT,
+                    text: `${BEAVER_ANNOTATION_TEXT}${page ? ` (Page ${page})` : ''}`,
                     authorName: 'Beaver',
                     pageLabel: '',
                     isExternal: false,
@@ -139,7 +152,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     // Backup annotation properties
                     annotationType: 'highlight',
                     annotationAuthorName: 'Beaver',
-                    annotationText: BEAVER_ANNOTATION_TEXT,
+                    annotationText: `${BEAVER_ANNOTATION_TEXT}${page ? ` (Page ${page})` : ''}`,
                     annotationComment: '',
                     annotationColor: '#00bbff',
                     annotationPageLabel: '',
