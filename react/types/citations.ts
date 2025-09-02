@@ -39,13 +39,10 @@ export function bboxesToZoteroRects(bboxes: BoundingBox[]): number[][] {
 }
 
 
-export interface Locator {
+export interface PageLocation {
     /** Physical or logical location inside an attachment. */
-    page_number?: number; // 1-based page number
-    bboxes?: BoundingBox[];
-    // character offsets for text-exact mapping
-    char_start?: number;
-    char_end?: number;
+    page_idx: number; // 1-based page number
+    boxes?: BoundingBox[];
 }
 
 export interface CitationPart {
@@ -56,7 +53,7 @@ export interface CitationPart {
     /** The unique identifier for this specific chunk of text. */
     part_id: string;
     /** Physical location of the part in the document. */
-    locators?: Locator[];
+    locations?: PageLocation[];
 }
 
 export interface CitationMetadata extends ZoteroItemReference {
@@ -88,8 +85,8 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
     if (!citation) return [];
     if (!citation.parts) return [];
     return citation.parts
-        .flatMap(p => p.locators || [])  
-        .map(l => l.page_number)
+        .flatMap(p => p.locations || [])  
+        .map(l => l.page_idx + 1)
         .filter((page): page is number => page !== undefined);
 }
 
@@ -105,13 +102,13 @@ export const getCitationBoundingBoxes = (citation: CitationData | CitationMetada
     const result: CitationBoundingBoxData[] = [];
     
     for (const part of citation.parts) {
-        if (!part.locators) continue;
+        if (!part.locations) continue;
         
-        for (const locator of part.locators) {
-            if (locator.page_number && locator.bboxes && locator.bboxes.length > 0) {
+        for (const locator of part.locations) {
+            if (locator.page_idx && locator.boxes && locator.boxes.length > 0) {
                 result.push({
-                    page: locator.page_number,
-                    bboxes: locator.bboxes
+                    page: locator.page_idx + 1,
+                    bboxes: locator.boxes
                 });
             }
         }
