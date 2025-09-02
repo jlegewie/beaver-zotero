@@ -28,7 +28,7 @@ export function bboxToZoteroRect(bbox: BoundingBox): number[] {
     // bbox.b = bottom edge (y1) 
     // bbox.r = right edge (x2)
     // bbox.t = top edge (y2)
-    return [bbox.l, bbox.b, bbox.r, bbox.t];
+    return [bbox.l - 1, bbox.b - 1, bbox.r + 1, bbox.t + 1];
 }
 
 /**
