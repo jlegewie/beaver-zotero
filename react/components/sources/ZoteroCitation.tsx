@@ -61,7 +61,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         citation = attachmentCitation.citation || '';
         url = attachmentCitation.url || '';
         previewText = attachmentCitation.preview
-            ? `"${attachmentCitation.preview}`
+            ? `"${attachmentCitation.preview}"`
             : formatted_citation || '';
     // Fallback: get the Zotero item and create the citation data
     } else {
