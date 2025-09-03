@@ -6,7 +6,7 @@ import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCitationPages, getCitationBoundingBoxes, bboxesToZoteroRects } from '../../types/citations';
+import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReader } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
@@ -113,10 +113,15 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             // Create one annotation per page with combined rects
             for (const [page, allBboxesOnPage] of pageGroups) {
                 const pageIndex = page - 1; // Convert to 0-based index
+
+                // Get the exact viewport used by the reader for this page
+                const pageView = reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer._pages[pageIndex];
+                const viewBox = pageView.viewport.viewBox; // [xMin, yMin, xMax, yMax]
+                const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
                 
                 // Combine all bboxes on this page
                 const combinedBboxes = allBboxesOnPage.flat();
-                const rects = bboxesToZoteroRects(combinedBboxes);
+                const rects = combinedBboxes.map(b => toZoteroRectFromBBox(b, viewBoxLL));
                 
                 // Create unique IDs for the temporary annotation
                 const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;

@@ -38,6 +38,16 @@ export function bboxesToZoteroRects(bboxes: BoundingBox[]): number[][] {
     return bboxes.map(bbox => bboxToZoteroRect(bbox));
 }
 
+// Adjust bboxes from page/MediaBox origin to viewport (CropBox) origin
+export function toZoteroRectFromBBox(
+	bbox: BoundingBox,
+	viewBoxLL: [number, number]
+): number[] {
+	const [vx, vy] = viewBoxLL; // CropBox lower-left
+	// bbox has bottom-left origin: l, b, r, t
+	return [bbox.l + vx, bbox.b + vy, bbox.r + vx, bbox.t + vy];
+}
+
 
 export interface PageLocation {
     /** Physical or logical location inside an attachment. */
