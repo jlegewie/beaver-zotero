@@ -105,7 +105,7 @@ export const getCitationBoundingBoxes = (citation: CitationData | CitationMetada
         if (!part.locations) continue;
         
         for (const locator of part.locations) {
-            if (locator.page_idx && locator.boxes && locator.boxes.length > 0) {
+            if (locator.page_idx !== undefined && locator.boxes && locator.boxes.length > 0) {
                 result.push({
                     page: locator.page_idx + 1,
                     bboxes: locator.boxes
