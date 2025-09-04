@@ -198,7 +198,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Enhanced click handler with bounding box support
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
-
+        logger('ZoteroCitation: Handle citation click');
+        
         // Cleanup any existing temporary annotations
         await BeaverTemporaryAnnotations.cleanupAll();
         
@@ -213,11 +214,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         if (!libraryID || !itemKey) return;
 
         // Get the item
+        logger(`ZoteroCitation: Zotero Item (${libraryID}, ${itemKey})`);
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-        if (!item) return;
+        if (!item) {
+            logger(`ZoteroCitation: Failed to get Zotero item (${libraryID}, ${itemKey})`);
+            return;
+        }
 
         // Handle note links
         if (item.isNote()) {
+            logger(`ZoteroCitation: Note Link (${item.id})`);
             await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
             return;
         }
@@ -225,46 +231,56 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Handle file links
         if (url.startsWith('file:///')) {
             const filePath = url.replace('file:///', '');
+            logger(`ZoteroCitation: File Link (${filePath})`);
             Zotero.launchFile(filePath);
             return;
         }
 
+        // // Handle attachment links
+        // if (!item.isAttachment()) {
+        //     logger(`ZoteroCitation: Not an attachment (${item.id})`);
+        //     return;
+        // }
+
         // Get bounding box data from citation
         const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
         const pages = getCitationPages(attachmentCitation);
+        logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
         try {
             let reader = getCurrentReader();
+            logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
             
             // Check if we need to open or switch to the correct PDF
             if (!reader || reader.itemID !== item.id) {
-                // Open the PDF
+                logger(`ZoteroCitation: Opening PDF in reader or switching to the correct PDF`);
+
+                // Determine the page to open
+                let pageIndex = 0;
                 if (boundingBoxData.length > 0) {
-                    // Open at the first page with bounding boxes
-                    const firstPage = boundingBoxData[0].page;
-                    reader = await Zotero.Reader.open(item.id, { pageIndex: firstPage - 1 });
+                    pageIndex = boundingBoxData[0].page;
                 } else if (pages.length > 0) {
-                    // Open at the first cited page
-                    reader = await Zotero.Reader.open(item.id, { pageIndex: pages[0] - 1 });
-                } else {
-                    // Open without specific page
-                    reader = await Zotero.Reader.open(item.id, { pageIndex: 0 });
+                    pageIndex = pages[0];
                 }
-                
+
+                // Open the PDF at page
+                logger(`ZoteroCitation: Opening PDF at page ${pageIndex}`);
+                reader = await Zotero.Reader.open(item.id, { pageIndex: pageIndex - 1 });
+
                 // Wait for reader to initialize
                 if (reader && reader._initPromise) {
                     await reader._initPromise;
                 }
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 250));
             }
 
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
+                logger(`ZoteroCitation: Highlighting bounding boxes`);
                 // Scenario 1: With bounding boxes - create temporary highlights
                 const annotationReferences = await createBoundingBoxHighlights(boundingBoxData, item);
                 BeaverTemporaryAnnotations.addToTracking(annotationReferences);
                 const annotationIds = annotationReferences.map(reference => reference.zotero_key);
-                
                 // Navigate to the first annotation if created successfully
                 if (annotationIds.length > 0 && reader) {
                     // Small delay to ensure annotation is rendered
@@ -273,6 +289,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     }, 100);
                 }
             } else if (pages.length > 0) {
+                logger(`ZoteroCitation: Navigating to page ${pages[0]}`);
                 // Scenario 2: With pages only - navigate to page
                 if (reader) {
                     reader.navigate({ pageIndex: pages[0] - 1 });
