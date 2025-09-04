@@ -7,29 +7,29 @@
 
 Welcome to Beaver, a research agent with native Zotero integration. Beaver combines two parts:
 
-1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, and your broader library to generate answers with page‑level citations.
+1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, and your broader library to generate answers with sentence‑level citations.
 
 2. **Native Zotero Integration**: Beaver runs inside Zotero, using your curated library and reading context. When you're viewing a PDF, Beaver knows which page you're on and relates it to the rest of your library without disrupting your workflow.
 
 ### Preview release
 
-Beaver is in beta and available for free. Sign up for the preview [here](https://www.beaverapp.ai). Key capabilities are still in progress, but current performance is strong and improving. We plan to offer a free version and a paid tier to cover ongoing development and operating costs.
+Beaver is in beta and available for free for a limited number of users during the beta. Sign up for the preview [here](https://www.beaverapp.ai). Key capabilities are still in progress, but current performance is strong and improving. We plan to offer a free version and a paid tier to cover ongoing development and operating costs.
 
 We welcome feedback on GitHub and in Slack. Access to the preview release may be limited based on server capacity.
 
 ## Key Features
 
-1. **Autonomous Research Agent**: Beaver uses multi‑tool agentic search. The agent combines metadata, semantic, and full‑text retrieval, adapting its strategy to your task to find specific passages across thousands of papers and synthesize findings.
+1. **Research Agent**: Beaver uses multi‑tool agentic search. The agent combines metadata, semantic, and full‑text retrieval, adapting its strategy to your task to find specific passages across thousands of papers and synthesize findings.
 
-2. **Context‑Aware Intelligence**: Tight Zotero integration. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles; all without leaving Zotero.
+2. **Zotero plugin**: You can use Beaver directly from Zotero. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles.
 
 3. **Your Library as Knowledge Base**: Results come from your Zotero library (no generic web results) ensuring traceability to sources you trust.
 
-4. **Precise Citations**: Every claim includes exact citations with direct links to the source pages in your PDFs.
+4. **Precise, sentence-level Citations**: Every claim includes exact citations with direct links to specific sentences in your PDFs. Hover over a citation to see the text or click on it to reveal the exact passage in the document.
 
 5. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
 
-6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑text search for up to 75,000 pages (~2,500 articles). Includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑text search for up to 75,000 pages (~2,500 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
 
 ## Evaluations
 
@@ -41,7 +41,7 @@ Beaver's agentic search outperforms baselines, including tool‑augmented fronti
 
 ![Figure: Performance comparison for Beaver Preview](/docs/litqa2-accuracy-preview.png)
 
-We use these and other evaluations to refine search strategies, improve citation accuracy, and strengthen cross‑domain performance. We'll share additional benchmarks and updates as Beaver evolves.
+We use these and other evaluations to refine search strategies, improve citation accuracy, and strengthen overall response quality. We'll share additional benchmarks and updates as Beaver evolves.
 
 ## Getting started
 
@@ -56,7 +56,7 @@ Beaver is a research agent with native Zotero integration that autonomously sele
 
 ## How does library search work?
 
-Beaver uses agentic search: the AI can choose among different search tools and iterate to explore your Zotero library. Currently, Beaver supports three search tools:
+Beaver uses agentic search: the AI can choose among different search tools, filter based on metadata and iterate to explore your Zotero library. Currently, Beaver supports three search tools:
 
 #### 1. Metadata Search
 
@@ -68,13 +68,13 @@ Find conceptually related references even without keyword overlap (e.g., "crime"
 
 #### 3. Full‑text Search (keyword and semantic)
 
-Beaver uses two complementary methods for full-text search:
+Beaver uses hybrid search with reranking to search the full-text content of your documents and retrieve relevant passages. Hybrid search combines keyword and semantic search based on embeddings to find relevant passages even without exact terms.
 
-- **Keyword search**: Finds term matches across your indexed full text (up to your page limit). Works surprisingly well within the agentic system and performs strongly in evaluations. During the preview, full‑text keyword search is free for up to 75,000 pages (~2,500 articles).
+<!-- During the preview, the implementation of full-text search will change repeatedly as we continue to improve Beaver. -->
 
-- **Hybrid search**: Relies on more advanced document processing to combine keyword and semantic search to retrieve relevant passages even without exact terms.
+During the preview, full‑text keyword search is free for up to 75,000 pages (~2,500 articles).
 
-Together these tools let the agent explore your library to find relevant references, documents, and specific paragraphs/pages.
+Together these tools allow the agent explore your library to find relevant references, documents, and specific paragraphs/pages.
 
 ## Responsible Use of Generative AI in Academic Research
 
@@ -105,11 +105,11 @@ Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/
 
 ### Which models do you recommand?
 
-Beaver uses Gemini 2.5 Flash as the default model because it delivers excellent performance at a low price. GPT-5 Mini is a strong alternative at a similar cost, though our system prompt is not yet fully tuned for GPT-5, so occasional undesirable behavior may occur.
+Beaver uses Gemini 2.5 Flash as the default model because it delivers excellent performance at a low price. GPT-5 Mini is a strong alternative at a similar cost, though our system prompt is not yet fully optimized for GPT-5, so occasional undesirable behavior may occur.
 
-Frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4 offer even higher performance, especially for complex questions and tasks. Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase quickly. GPT-5, in particular, tends to pull in extensive context, which increases benchmark performance but also cost. For example,
+Frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4 offer even higher performance. The difference is noticeable especially for complex questions and tasks. Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase quickly. GPT-5, in particular, tends to pull in extensive context, which increases benchmark performance but also cost.
 
-Claude Sonnet 4 is an excellent choice, especially for agentic applications like Beaver. That said, Anthropic's pricing model is more expensive in Beaver because it does not offer discounted rates for cached inputs (at least not by default). In contrast, OpenAI and Google reduce the cost of reusing the same input within 5 minutes by up to 90%, which is a significant advantage for agentic workflows.
+Claude Sonnet 4 is an excellent choice, especially for agentic applications like Beaver. That said, Anthropic's pricing model is more expensive because it does not offer discounted rates for cached inputs by default (we might add support later). A single request with Sonnet 4 can easily cost $0.5 or more. In contrast, OpenAI and Google reduce the cost of reusing the same input within 5 minutes by up to 90%, which is a significant advantage for agentic workflows.
 
 ### How do chat credits work?
 
@@ -121,11 +121,11 @@ You can switch to your own API key at any time. When using your key, tool calls 
 
 Page limits control how many pages are indexed for full‑text search. If your library exceeds the limit, additional files aren't indexed for full‑text search. You can view files over the limit under "File Status" when starting a new thread.
 
-Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can manually add over‑limit documents to any chat; they're just excluded from full‑text search.
+Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can also manually add over‑limit documents to any chat. They're just excluded from full‑text search.
 
 ### What attachment types are supported?
 
-Currently PDFs only. Each plan also sets limits on pages and per‑file size.
+Currently PDFs only with limits on per‑file pages and file size.
 
 ### How can I improve the results?
 
