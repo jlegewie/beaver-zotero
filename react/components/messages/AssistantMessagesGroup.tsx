@@ -17,10 +17,6 @@ const AssistantMessagesGroup: React.FC<AssistantMessagesGroupProps> = ({
     isFirstAssistantGroup,
 }) => {
 
-    const lastMessage = messages[messages.length - 1];
-    const firstMessage = messages[0];
-    const isChatRequestPending = useAtomValue(isChatRequestPendingAtom);
-
     return (
         <div className="assistant-messages-group display-flex flex-col gap-3">
             {messages.map((message, index) => {
