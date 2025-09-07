@@ -1,8 +1,9 @@
 import { atom } from 'jotai';
 
-// File uploader status - simplified to just track running and failed states
+// File uploader status to track running, failed and backoff states
 export const isFileUploaderRunningAtom = atom<boolean>(false);
 export const isFileUploaderFailedAtom = atom<boolean>(false);
+export const fileUploaderBackoffUntilAtom = atom<number | null>(null);
 
 export type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';

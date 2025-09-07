@@ -1,9 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { CheckmarkIcon, SpinnerIcon, CheckmarkIconGrey, AlertIcon as AlertIconIcon } from "./icons";
 import { AlertIcon, InformationCircleIcon } from "../icons/icons";
 import { ProgressBar } from "./ProgressBar";
 import { fileStatusSummaryAtom } from "../../atoms/files";
+import { fileUploaderBackoffUntilAtom } from "../../atoms/sync";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
@@ -15,9 +16,37 @@ interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
 }
 
+const useTimeRemaining = (targetTime: number | null) => {
+    const [remaining, setRemaining] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (targetTime === null) {
+            setRemaining(null);
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const now = Date.now();
+            const newRemaining = Math.max(0, Math.ceil((targetTime - now) / 1000));
+            setRemaining(newRemaining);
+            if (newRemaining === 0) {
+                clearInterval(interval);
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [targetTime]);
+
+    return remaining;
+};
+
+
 const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus }) => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
+    const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
+    const timeRemaining = useTimeRemaining(backoffUntil);
+
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
 
     // Calculate overall statistics
@@ -55,6 +84,10 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const getStatusText = (): string => {
         const textParts: string[] = [];
         
+        if (backoffUntil && timeRemaining !== null && timeRemaining > 0) {
+            return `Retrying uploads in ${timeRemaining}s...`;
+        }
+
         if (fullyCompleteFiles > 0) {
             textParts.push(`${fullyCompleteFiles.toLocaleString()} done`);
         }

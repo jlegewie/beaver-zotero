@@ -12,7 +12,7 @@ import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode } from './attachmentsService';
-import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from '../../react/atoms/sync';
+import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
@@ -70,6 +70,7 @@ export class FileUploader {
         // Set running state
         store.set(isFileUploaderRunningAtom, true);
         store.set(isFileUploaderFailedAtom, false);
+        store.set(fileUploaderBackoffUntilAtom, null);
         
         logger(`File Uploader: Starting file uploader (session type: ${sessionType})`, 3);
 
@@ -141,6 +142,8 @@ export class FileUploader {
                 // If we've had too many consecutive errors, add a longer backoff
                 if (consecutiveErrors > 0) {
                     logger(`File Uploader Queue: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
+                    const nextRetryAt = Date.now() + errorBackoffTime;
+                    store.set(fileUploaderBackoffUntilAtom, nextRetryAt);
                     await new Promise(resolve => setTimeout(resolve, errorBackoffTime));
                     // Exponential backoff with max of 1 minute
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
@@ -163,6 +166,7 @@ export class FileUploader {
                 // Reset idle and error counters on successful queue read
                 consecutiveErrors = 0;
                 errorBackoffTime = ERROR_BACKOFF_TIME;
+                store.set(fileUploaderBackoffUntilAtom, null);
 
                 // Add each upload task to the concurrency queue
                 for (const item of items) {
@@ -195,6 +199,7 @@ export class FileUploader {
         this.isRunning = false;
         logger('File Uploader Queue: Finished processing queue.', 3);
         store.set(isFileUploaderRunningAtom, false);
+        store.set(fileUploaderBackoffUntilAtom, null);
     }
 
     private async uploadFileToSupabase(storagePath: string, blob: Blob): Promise<void> {
