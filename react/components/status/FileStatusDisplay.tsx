@@ -25,6 +25,12 @@ const useTimeRemaining = (targetTime: number | null) => {
             return;
         }
 
+        // Add safety check for valid timestamps
+        if (targetTime <= Date.now()) {
+            setRemaining(0);
+            return;
+        }
+
         const interval = setInterval(() => {
             const now = Date.now();
             const newRemaining = Math.max(0, Math.ceil((targetTime - now) / 1000));
@@ -34,7 +40,11 @@ const useTimeRemaining = (targetTime: number | null) => {
             }
         }, 1000);
 
-        return () => clearInterval(interval);
+        // Immediate cleanup on unmount
+        return () => {
+            clearInterval(interval);
+            setRemaining(null);
+        };
     }, [targetTime]);
 
     return remaining;
