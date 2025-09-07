@@ -563,7 +563,7 @@ async function _processChatCompletionViaBackend(
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
                 set(citationMetadataAtom, (prev: CitationMetadata[]) => {
-                    const newCitation = { ...citationMetadata, messageId };
+                    const newCitation = { ...citationMetadata, message_id: messageId };
                     return [...prev, newCitation];
                 });
                 set(updateCitationDataAtom);
