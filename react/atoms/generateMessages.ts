@@ -71,11 +71,11 @@ function flattenSources(
  * Uses cached validation results when available to avoid redundant backend calls.
  * 
  * @param sources - Array of InputSource objects to be validated
- * @returns Array of valid sources sorted by timestamp
+ * @returns An object containing arrays of valid and invalid sources
  */
 async function validateSources(
     sources: InputSource[]
-): Promise<InputSource[]> {
+): Promise<{ validSources: InputSource[], invalidSources: { source: InputSource, reason: string }[] }> {
     logger(`validateSources: Validating ${sources.length} sources before sending message`, 3);
     
     const validations = await Promise.all(sources.map(async (source) => {
@@ -93,25 +93,32 @@ async function validateSources(
                 logger(`validateSources: Source ${source.itemKey} is invalid: ${result.reason}`, 2);
             }
             
-            return { source, isValid };
+            return { source, isValid, reason: result.reason };
         } catch (error: any) {
             logger(`validateSources: Error validating source ${source.itemKey}: ${error.message}`, 1);
             // Fall back to local validation if manager fails
             const fallbackResult = await isSourceValid(source);
-            return { source, isValid: fallbackResult.valid };
+            return { source, isValid: fallbackResult.valid, reason: fallbackResult.error };
         }
     }));
 
     const validSources = validations
         .filter(v => v.isValid)
         .map(v => v.source);
+    
+    const invalidSources = validations
+        .filter(v => !v.isValid)
+        .map(v => ({ source: v.source, reason: v.reason || 'Unknown reason' }));
 
-    const invalidCount = sources.length - validSources.length;
+    const invalidCount = invalidSources.length;
     if (invalidCount > 0) {
         logger(`validateSources: Filtered out ${invalidCount} invalid sources`, 2);
     }
 
-    return validSources.sort((a, b) => a.timestamp - b.timestamp);
+    return { 
+        validSources: validSources.sort((a, b) => a.timestamp - b.timestamp),
+        invalidSources
+    };
 }
 
 
@@ -256,7 +263,42 @@ export const generateResponseAtom = atom(
 
         // Prepare sources
         const flattenedSources = flattenSources(payload.sources);
-        const validatedSources = await validateSources(flattenedSources);
+        const { validSources: validatedSources, invalidSources } = await validateSources(flattenedSources);
+
+        // If some sources were removed, add a warning
+        if (invalidSources.length > 0) {
+            logger(`generateResponseAtom: Filtered out ${invalidSources.length} invalid sources`, 2);
+            
+            let message: string;
+            if (invalidSources.length === 1) {
+                message = `1 source was removed: ${invalidSources[0].reason}`;
+            } else {
+                const reasons = new Set(invalidSources.map(s => s.reason));
+                if (reasons.size === 1) {
+                    const reason = invalidSources[0].reason;
+                    message = `${invalidSources.length} sources were removed: ${reason}`;
+                } else {
+                    message = `${invalidSources.length} sources were removed because they are invalid.`;
+                }
+            }
+            
+            const warning = {
+                id: uuidv4(), 
+                type: "missing_attachments", 
+                message
+            } as WarningMessage;
+            
+            // warning.attachments = invalidSources.map(s => ({
+            //     library_id: s.source.libraryID, 
+            //     zotero_key: s.source.itemKey
+            // }) as ZoteroItemReference);
+            
+            // Add the warning message for the assistant message
+            set(setMessageStatusAtom, {
+                id: assistantMsg.id,
+                warnings: [warning]
+            });
+        }
 
         // Convert sources to MessageAttachments and process image annotations
         const messageAttachments = await Promise.all(
