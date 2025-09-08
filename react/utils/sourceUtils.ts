@@ -6,6 +6,8 @@ import { isValidAnnotationType, SourceAttachment } from '../types/attachments/ap
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
+import { syncLibraryIdsAtom } from '../atoms/profile';
+import { store } from '../store';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -215,6 +217,10 @@ export function getChildItems(source: InputSource): Zotero.Item[] {
 * Source method: Check if a source is valid
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: boolean, error?: string}> {
+
+    // Is library synced?
+    const libraryIds = store.get(syncLibraryIdsAtom);
+    if (!libraryIds.includes(item.libraryID)) return {valid: false, error: "This item's library is not synced with Beaver."};
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
