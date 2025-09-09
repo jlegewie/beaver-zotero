@@ -1,7 +1,6 @@
 import { ApiError, ServerError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
-import { store } from '../../react/store';
-import { sessionAtom } from '../../react/atoms/auth';
+import { supabase } from './supabaseClient';
 
 /**
 * Base API service that handles authentication and common HTTP methods
@@ -22,20 +21,28 @@ export class ApiService {
     }
     
     /**
-    * Gets authentication headers with JWT token if user is signed in
+    * Gets authentication headers with JWT token if user is signed in.
+    * This method leverages supabase.auth.getSession() to ensure a valid
+    * access token is available, automatically handling token refreshes.
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
-        // Get the current session
-        const session = store.get(sessionAtom);
-        if (!session) {
-            throw new ApiError(401, 'User not authenticated');
+        // Get the current session from Supabase, which handles token refreshes
+        const { data, error } = await supabase.auth.getSession();
+
+        if (error) {
+            logger(`Error getting session: ${error.message}`, 2);
+            throw new ApiError(401, 'Error retrieving user session');
         }
 
-        const token = session.access_token;
+        if (!data.session) {
+            throw new ApiError(401, 'User not authenticated');
+        }
+        
+        const token = data.session.access_token;
         if (!token) {
             throw new ApiError(401, 'No access token available');
         }
-
+        
         return {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
