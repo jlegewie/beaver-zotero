@@ -1,4 +1,4 @@
-import { syncService, SyncDataResponse } from '../services/syncService';
+import { syncService } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
