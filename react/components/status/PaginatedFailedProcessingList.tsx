@@ -21,6 +21,8 @@ interface PaginatedFailedProcessingListProps {
     tooltipContent?: React.ReactNode;
     icon: React.ComponentType<any>;
     textColorClassName?: string;
+    errorCode?: string;
+    show?: boolean;
 }
 
 const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps> = ({
@@ -31,8 +33,10 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
     tooltipContent,
     icon,
     textColorClassName = 'font-color-secondary',
+    errorCode,
+    show = false,
 }) => {
-    const [showList, setShowList] = useState(false);
+    const [showList, setShowList] = useState(show);
     const [attachments, setAttachments] = useState<FailedFileReference[]>([]);
     const [currentPage, setCurrentPage] = useState(0);
     const [hasMore, setHasMore] = useState(false);
@@ -60,12 +64,20 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             }
 
             // Fetch items based on processing status
-            const result: AttachmentStatusPagedResponse = await attachmentsService.getAttachmentsByStatus(
-                statuses,
-                processingTier,
-                page + 1, // API is 1-based
-                ITEMS_PER_PAGE
-            );
+            const result: AttachmentStatusPagedResponse = errorCode
+                ? await attachmentsService.getAttachmentsByStatusAndErrorCode(
+                    statuses,
+                    errorCode,
+                    processingTier,
+                    page + 1, // API is 1-based
+                    ITEMS_PER_PAGE
+                )
+                : await attachmentsService.getAttachmentsByStatus(
+                    statuses,
+                    processingTier,
+                    page + 1, // API is 1-based
+                    ITEMS_PER_PAGE
+                );
 
             const newItems = await Promise.all(result.items.map(async (item) => {
                 let enableRetry = false;
@@ -108,7 +120,11 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
         } finally {
             setIsLoading(false);
         }
-    }, [userId, processingTier, statuses]);
+    }, [userId, processingTier, statuses, errorCode]);
+
+    useEffect(() => {
+        setShowList(show);
+    }, [show]);
 
     useEffect(() => {
         if (!userId || count === 0) {

@@ -34,7 +34,7 @@ export const FailedProcessingTooltipContent: React.FC = () => {
                 (!aggregatedErrorMessagesForFailedFiles || Object.keys(aggregatedErrorMessagesForFailedFiles).length === 0) ? (
                     <div className="text-base font-color-secondary">No specific error details available.</div>
                 ) : (
-                    Object.entries(aggregatedErrorMessagesForFailedFiles).map(([message, count]) => (
+                    Object.entries(aggregatedErrorMessagesForFailedFiles).map(([errorCode, { message, count }]) => (
                         <div key={message} className="display-flex justify-between items-center text-base whitespace-nowrap">
                             <span className="font-color-tertiary mr-4">{message}:</span>
                             <span className="font-color-secondary font-mono">{count}</span>

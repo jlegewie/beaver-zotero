@@ -15,6 +15,9 @@ export const isErrorReportDialogVisibleAtom = atom(false);
 export const errorReportTextAtom = atom('');
 export const isErrorReportSendingAtom = atom(false);
 
+// Skipped Files Dialog
+export const isSkippedFilesDialogVisibleAtom = atom(false);
+
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 

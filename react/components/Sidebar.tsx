@@ -19,6 +19,7 @@ import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import ErrorReportDialog from './ErrorReportDialog';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
+import SkippedFilesDialog from './status/SkippedFilesDialog';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -53,6 +54,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 <Header />
                 <LoginPage emailInputRef={loginEmailRef} />
                 <ErrorReportDialog />
+                <SkippedFilesDialog />
             </div>
         );
     }
@@ -64,6 +66,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 <Header />
                 <OnboardingPage />
                 <ErrorReportDialog />
+                <SkippedFilesDialog />
             </div>
         );
     }
@@ -75,6 +78,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 <Header />
                 <DeviceAuthorizationPage />
                 <ErrorReportDialog />
+                <SkippedFilesDialog />
             </div>
         );
     }
@@ -86,6 +90,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 <Header settingsPage={true}/>
                 <PreferencePage />
                 <ErrorReportDialog />
+                <SkippedFilesDialog />
             </div>
         );
     }
@@ -119,6 +124,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
             {/* Error Report Dialog */}
             <ErrorReportDialog />
+            <SkippedFilesDialog />
         </div>
     );
 };
