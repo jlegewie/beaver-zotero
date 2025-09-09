@@ -56,7 +56,7 @@ const SkippedFilesDialog: React.FC = () => {
                 >
                     {/* Header */}
                     <div className="display-flex flex-row items-center justify-between p-4 pb-3">
-                        <div className="text-lg font-semibold">Skipped Files</div>
+                        <div className="text-lg font-semibold">{skippedFilesCount > 0 ? `${skippedFilesCount} Skipped Files` : 'Skipped Files'}</div>
                         <IconButton
                             icon={CancelIcon}
                             onClick={handleClose}
@@ -73,7 +73,7 @@ const SkippedFilesDialog: React.FC = () => {
                             title="Skipped files"
                             tooltipTitle="Reasons for skipping files"
                             icon={InformationCircleIcon}
-                            show={true}
+                            collapseable={false}
                         />
                     </div>
                 </div>
