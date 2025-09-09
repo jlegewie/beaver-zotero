@@ -52,7 +52,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 const allLibraries = await Zotero.Libraries.getAll();
                 // Filter to user libraries
                 // TODO: Add support for group libraries with library.libraryType == "group"
-                const userLibraries = allLibraries.filter(library => library.libraryType === 'user');
+                const userLibraries = allLibraries.filter(library => library.libraryType === 'user' || library.libraryType === 'group');
                 
                 // Create a simple array with just id, name, isGroup
                 const basicInfo = userLibraries.map(library => ({
@@ -144,7 +144,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
             <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
                 {/* Library list */}
-                <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-col gap-1">
                     {libraries.map((library) => {
                         // Find detailed statistics for this library if available
                         const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
@@ -168,7 +168,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
                                     <div className="display-flex flex-col gap-3">
                                         <div className="display-flex flex-row gap-3 items-center">
-                                            <CSSIcon name="library" className="icon-16" />
+                                            <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
                                             <div className="font-color-primary text-base">
                                                 {library.name}
                                             </div>
@@ -200,6 +200,9 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                             </div>
                         );
                     })}
+                </div>
+                <div className="display-flex flex-row gap-2">
+                    <Button variant="outline" onClick={() => handleLibraryToggle(0)}>Select Group Libraries</Button>
                 </div>
 
                 {isLoading && (
