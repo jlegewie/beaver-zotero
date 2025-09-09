@@ -80,11 +80,28 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
     const metadataHash = await calculateObjectHash(hashedFields);
 
     // ------- 4. Construct final ItemData object -------
+    let finalDateModified: string;
+    if (clientDateModified) {
+        finalDateModified = clientDateModified;
+    } else {
+        try {
+            // Fallback to dateModified if clientDateModified was invalid
+            finalDateModified = Zotero.Date.sqlToISO8601(item.dateModified);
+        } catch (e) {
+            logger(
+                `Beaver Sync: Invalid clientDateModified and dateModified for item ${item.key}. Falling back to dateAdded.`,
+                2,
+            );
+            // As a last resort, use dateAdded
+            finalDateModified = Zotero.Date.sqlToISO8601(item.dateAdded);
+        }
+    }
+
     const itemData: ItemData = {
         ...hashedFields,
         // Add non-hashed fields
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded), // Convert UTC SQL datetime format to ISO string
-        date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
+        date_modified: finalDateModified,
         // Add the calculated hash
         zotero_version: item.version,
         zotero_synced: item.synced,
@@ -162,6 +179,23 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
     // 3. Metadata Hash: Calculate hash from the prepared hashed fields object
     const metadataHash = await calculateObjectHash(hashedFields);
 
+    let finalDateModified: string;
+    if (clientDateModified) {
+        finalDateModified = clientDateModified;
+    } else {
+        try {
+            // Fallback to dateModified if clientDateModified was invalid
+            finalDateModified = Zotero.Date.sqlToISO8601(item.dateModified);
+        } catch (e) {
+            logger(
+                `Beaver Sync: Invalid clientDateModified and dateModified for item ${item.key}. Falling back to dateAdded.`,
+                2,
+            );
+            // As a last resort, use dateAdded
+            finalDateModified = Zotero.Date.sqlToISO8601(item.dateAdded);
+        }
+    }
+
     // 4. AttachmentData: Construct final AttachmentData object
     const attachmentData: AttachmentDataWithMimeType = {
         ...hashedFields,
@@ -169,7 +203,7 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
         file_hash: file_hash,
         mime_type: await getMimeType(item),
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
-        date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
+        date_modified: finalDateModified,
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
         zotero_version: item.version,
@@ -471,9 +505,24 @@ export async function syncItemsToBackend(
 
     // 2. Create batches respecting clientDateModifiedMap boundaries
     const batches = createBatches(
-        items, 
-        batchSize, 
-        (item) => clientDateModifiedMap.get(item.item.id) || item.item.dateModified
+        items,
+        batchSize,
+        (item) => {
+            const clientDate = clientDateModifiedMap.get(item.item.id);
+            if (clientDate) {
+                return clientDate;
+            }
+            // Fallback for items with invalid clientDateModified
+            try {
+                return Zotero.Date.sqlToISO8601(item.item.dateModified);
+            } catch (e) {
+                logger(
+                    `Beaver Sync '${syncSessionId}': Could not parse dateModified '${item.item.dateModified}' for item ${item.item.id}. Using epoch for batching.`,
+                    2,
+                );
+                return new Date(0).toISOString();
+            }
+        },
     );
 
     // 3. Process each batch

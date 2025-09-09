@@ -62,7 +62,17 @@ export async function getClientDateModifiedBatch(
         // The value from DB is a SQL datetime string (UTC)
         // Convert to ISO string. Append 'Z' to treat it as UTC.
         if (row.clientDateModified) {
-            result.set(row.itemID, Zotero.Date.sqlToISO8601(row.clientDateModified));
+            try {
+                result.set(
+                    row.itemID,
+                    Zotero.Date.sqlToISO8601(row.clientDateModified),
+                );
+            } catch (e) {
+                logger(
+                    `getClientDateModifiedBatch: Could not parse clientDateModified '${row.clientDateModified}' for item ${row.itemID}. This item will not be included in date-based batching.`,
+                    2,
+                );
+            }
         }
     }
 
