@@ -38,6 +38,7 @@ export async function extractDeleteData(item: Zotero.Item): Promise<DeleteData> 
         zotero_version: item.version,
         zotero_synced: item.synced,
         date_modified: await getClientDateModified(item)
+        // date_modified: await getClientDateModifiedAsISOString(item)
     };
 }
 
