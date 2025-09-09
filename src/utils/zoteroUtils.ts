@@ -18,7 +18,7 @@ export async function getClientDateModified(item: Zotero.Item | number): Promise
  */
 export async function getClientDateModifiedAsISOString(item: Zotero.Item | number): Promise<string> {
     const clientDateModified = await getClientDateModified(item);
-    return new Date(clientDateModified + 'Z').toISOString()
+    return Zotero.Date.sqlToISO8601(clientDateModified);
 }
 
 /**
@@ -39,7 +39,7 @@ export async function getCollectionClientDateModified(collection: Zotero.Collect
  */
 export async function getCollectionClientDateModifiedAsISOString(collection: Zotero.Collection | number): Promise<string> {
     const clientDateModified = await getCollectionClientDateModified(collection);
-    return new Date(clientDateModified + 'Z').toISOString()
+    return Zotero.Date.sqlToISO8601(clientDateModified);
 }
 
 /**
@@ -62,7 +62,7 @@ export async function getClientDateModifiedBatch(
         // The value from DB is a SQL datetime string (UTC)
         // Convert to ISO string. Append 'Z' to treat it as UTC.
         if (row.clientDateModified) {
-            result.set(row.itemID, new Date(row.clientDateModified + 'Z').toISOString());
+            result.set(row.itemID, Zotero.Date.sqlToISO8601(row.clientDateModified));
         }
     }
 

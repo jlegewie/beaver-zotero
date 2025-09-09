@@ -83,8 +83,7 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
     const itemData: ItemData = {
         ...hashedFields,
         // Add non-hashed fields
-        // Replace with Zotero.Date.sqlToISO8601(...)??
-        date_added: new Date(item.dateAdded + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
+        date_added: Zotero.Date.sqlToISO8601(item.dateAdded), // Convert UTC SQL datetime format to ISO string
         date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
         // Add the calculated hash
         zotero_version: item.version,
@@ -169,7 +168,7 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
         // Add non-hashed fields
         file_hash: file_hash,
         mime_type: await getMimeType(item),
-        date_added: new Date(item.dateAdded + 'Z').toISOString(),
+        date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
         date_modified: clientDateModified || await getClientDateModifiedAsISOString(item),
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
