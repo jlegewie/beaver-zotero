@@ -4,16 +4,13 @@ import {
     aggregatedErrorMessagesForSkippedFilesAtom,
     errorCodeStatsErrorAtom,
     errorCodeStatsIsLoadingAtom,
+    errorMappingOverview
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 
-const detailedByErrorCode = {
-    "no_text_layer": "The current beta version does not support files without a text layer.",
-    // "unsupported_file": "The current beta version does not support files without a text layer.",
-}
 
 
 export const SkippedFilesSummary: React.FC = () => {
@@ -61,22 +58,21 @@ export const SkippedFilesSummary: React.FC = () => {
 
     return (
         <div className="display-flex flex-col gap-2 w-full">
-            {Object.entries(aggregatedMessages).map(
-                ([errorCode, { message, count }]) => (
-                    <div
-                        key={errorCode}
-                        className="display-flex flex-col items-start text-base"
-                    >
-                        <span className="font-color-secondary mr-4">
-                            {String(count).toLocaleString()}x {String(message)}
-                        </span>
-                        <span className="font-color-tertiary mr-4">
-                            The current beta version does not support files without a text layer.
-                        </span>
-                    </div>
-                )
-            )}
-            <div className="display-flex justify-end mt-2">
+            <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}>
+                {Object.entries(aggregatedMessages).map(
+                    ([errorCode, { message, count }]) => (
+                        <li key={errorCode}>
+                            <span className="font-color-secondary mr-4">
+                                {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
+                            </span>
+                            {/* <span className="font-color-tertiary mr-4">
+                                The current beta version does not support files without a text layer.
+                            </span> */}
+                        </li>
+                    )
+                )}
+            </ul>
+            <div className="display-flex justify-start mt-2">
                 <Button
                     variant="outline"
                     onClick={handleShowFiles}
