@@ -43,44 +43,39 @@ export const errorMapping = {
     "unexpected_error": "Unexpected error"
 }
 
-export const errorMappingPlural = {
+export const errorMappingOverview = {
     // Queue failed
-    "queue_failed": "Files with unexpected errors",
-    "queue_failed_invalid_user": "Files with unexpected errors",
+    "queue_failed": "Files with processing errors",
+    "queue_failed_invalid_user": "Files with processing errors",
     "queue_failed_invalid_page_count": "Files unable to read",
-    "queue_failed_database_error": "Files with unexpected errors",
+    "queue_failed_database_error": "Files with processing errors",
     
     // Plan limits
     "plan_limit_unsupported_file": "Files with unsupported file type",
-    "plan_limit_max_pages": "Files exceeded max pages or file size",
-    "plan_limit_max_pages_ocr": "Files exceeded max pages for OCR",
-    "plan_limit_insufficient_balance": "Files with insufficient balance",
-    "plan_limit_file_size": "Files exceeded max pages or file size",
+    "plan_limit_max_pages": "Files over the per-file page limit (max 100 pages)",
+    "plan_limit_max_pages_ocr": "Files over the OCR page limit",
+    "plan_limit_insufficient_balance": "Files blocked by page balance",
+    "plan_limit_file_size": "Files over the per-file size limit (max 50MB)",
     
     // File errors
-    "encrypted": "Files encrypted",
-    "no_text_layer": "Files requiring OCR",
-    "insufficient_text": "Files with insufficient text",
-    "file_missing": "Files missing",
-    "ocr_failed": "Files with OCR failed",
-    "download_failed": "Files with unexpected errors",
-    "preprocessing_failed": "Files with unexpected errors",
-    "conversion_failed": "Files with unexpected errors",
-    "opening_failed": "Files with unexpected errors",
-    "upload_failed": "Files with unexpected errors",
-    "chunk_failed": "Files with unexpected errors",
-    "embedding_failed": "Files with unexpected errors",
-    "db_update_failed": "Files with unexpected errors",
-    "max_retries": "Files with unexpected errors",
-    "timeout": "Files with unexpected errors",
-    "unexpected_error": "Files with unexpected errors"
+    "encrypted": "Password-protected files",
+    "no_text_layer": "Scanned PDFs that need OCR",
+    "insufficient_text": "Files with too little readable text",
+    "file_missing": "Files not found",
+    "ocr_failed": "Files where OCR failed",
+
+    "download_failed": "Files with processing errors",
+    "preprocessing_failed": "Files with processing errors",
+    "conversion_failed": "Files with processing errors",
+    "opening_failed": "Files with processing errors",
+    "upload_failed": "Files with processing errors",
+    "chunk_failed": "Files with processing errors",
+    "embedding_failed": "Files with processing errors",
+    "db_update_failed": "Files with processing errors",
+    "max_retries": "Files with processing errors",
+    "timeout": "Files with processing errors",
+    "unexpected_error": "Files with processing errors"
 }
-
-export const errorMappingDetails = {
-    "no_text_layer": "The current beta version does not support files without a text layer.",
-
-}
-
 
 
 // File processing status summary
