@@ -1295,6 +1295,10 @@ attachment-box .metadata-table #beaver-status {
     background-color: transparent;
 }
 
+[id^="beaver-pane-"] .marker-secondary>li::marker {
+    color: var(--fill-secondary);
+}
+
 /* Scroll down button */
 [id^="beaver-pane-"] .scroll-down-button {
     transform: translateY(-29px);
