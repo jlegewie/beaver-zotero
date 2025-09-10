@@ -4,7 +4,8 @@ import {
     aggregatedErrorMessagesForSkippedFilesAtom,
     errorCodeStatsErrorAtom,
     errorCodeStatsIsLoadingAtom,
-    errorMappingOverview
+    errorMappingOverview,
+    errorMappingHint
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
@@ -61,18 +62,22 @@ export const SkippedFilesSummary: React.FC = () => {
             <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}>
                 {Object.entries(aggregatedMessages).map(
                     ([errorCode, { message, count }]) => (
-                        <li key={errorCode}>
-                            <span className="font-color-secondary mr-4">
-                                {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
-                            </span>
-                            {/* <span className="font-color-tertiary mr-4">
-                                The current beta version does not support files without a text layer.
-                            </span> */}
+                        <li key={errorCode} className="mb-3">
+                            <div className="display-flex flex-col gap-1">
+                                <span className="font-color-secondary mr-4">
+                                    {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
+                                </span>
+                                {errorMappingHint[errorCode as keyof typeof errorMappingHint] && (
+                                    <span className="font-color-tertiary mr-4">
+                                        {errorMappingHint[errorCode as keyof typeof errorMappingHint]}
+                                    </span>
+                                )}
+                            </div>
                         </li>
                     )
                 )}
             </ul>
-            <div className="display-flex justify-start mt-2">
+            <div className="display-flex justify-start">
                 <Button
                     variant="outline"
                     onClick={handleShowFiles}
