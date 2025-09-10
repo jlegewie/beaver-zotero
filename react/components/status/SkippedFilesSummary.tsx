@@ -12,7 +12,18 @@ import { Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 
-
+/**
+ * Convert plural "Files" to singular "File" when count is 1
+ * @param text The text containing "Files"
+ * @param count The number of files
+ * @returns Text with appropriate singular/plural form
+ */
+const makeSingularIfNeeded = (text: string, count: number): string => {
+    if (count === 1) {
+        return text.replace(/^Files\b/, 'File');
+    }
+    return text;
+};
 
 export const SkippedFilesSummary: React.FC = () => {
     const { fetchStats } = useErrorCodeStats();
@@ -55,17 +66,23 @@ export const SkippedFilesSummary: React.FC = () => {
     if (Object.keys(aggregatedMessages).length === 0) {
         return null;
     }
-    console.log(aggregatedMessages);
+
+    // Sort entries by count (highest first)
+    const sortedEntries = Object.entries(aggregatedMessages).sort(
+        ([, a], [, b]) => b.count - a.count
+    );
 
     return (
         <div className="display-flex flex-col gap-3 w-full ml-1">
-            {/* <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}> */}
             <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
-                {Object.entries(aggregatedMessages).map(
+                {sortedEntries.map(
                     ([errorCode, { message, count }]) => (
-                        <div className="display-flex flex-col gap-0">
+                        <div key={errorCode} className="display-flex flex-col gap-0">
                             <span className="font-color-secondary mr-4">
-                                {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
+                                {String(count).toLocaleString()} {makeSingularIfNeeded(
+                                    String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview]),
+                                    count
+                                )}
                             </span>
                             {errorMappingHint[errorCode as keyof typeof errorMappingHint] && (
                                 <span className="font-color-tertiary mr-4">
@@ -76,7 +93,6 @@ export const SkippedFilesSummary: React.FC = () => {
                     )
                 )}
             </div>
-            {/* </ul> */}
             <div className="display-flex justify-start ml-2">
                 <Button
                     variant="outline"
