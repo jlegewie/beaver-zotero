@@ -60,7 +60,7 @@ export const SkippedFilesSummary: React.FC = () => {
     return (
         <div className="display-flex flex-col gap-3 w-full ml-1">
             {/* <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}> */}
-            <div className="display-flex flex-col border-left-quarternary px-2 gap-3">
+            <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
                 {Object.entries(aggregatedMessages).map(
                     ([errorCode, { message, count }]) => (
                         <div className="display-flex flex-col gap-0">
