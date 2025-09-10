@@ -5,7 +5,7 @@ import {
     errorCodeStatsErrorAtom,
     errorCodeStatsIsLoadingAtom,
     errorMappingOverview,
-    errorMappingHint
+    errorMappingHintAtom
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
@@ -20,7 +20,7 @@ import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
  */
 const makeSingularIfNeeded = (text: string, count: number): string => {
     if (count === 1) {
-        return text.replace(/^Files\b/, 'File');
+        return text.replace(/^Files exceed\b/, 'File exceeds').replace(/^Files\b/, 'File');
     }
     return text;
 };
@@ -32,6 +32,7 @@ export const SkippedFilesSummary: React.FC = () => {
     const aggregatedMessages = useAtomValue(
         aggregatedErrorMessagesForSkippedFilesAtom
     );
+    const errorHint = useAtomValue(errorMappingHintAtom);
     const setIsDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
 
     React.useEffect(() => {
@@ -84,9 +85,9 @@ export const SkippedFilesSummary: React.FC = () => {
                                     count
                                 )}
                             </span>
-                            {errorMappingHint[errorCode as keyof typeof errorMappingHint] && (
+                            {errorHint[errorCode as keyof typeof errorHint] && (
                                 <span className="font-color-tertiary mr-4">
-                                    {errorMappingHint[errorCode as keyof typeof errorMappingHint]}
+                                    {errorHint[errorCode as keyof typeof errorHint]}
                                 </span>
                             )}
                         </div>

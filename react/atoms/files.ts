@@ -77,15 +77,16 @@ export const errorMappingOverview = {
     "unexpected_error": "Files with processing errors"
 }
 
-export const errorMappingHint = {
-    "plan_limit_max_pages": "100 pages max per file for Beta",
-    "plan_limit_file_size": "50MB max per file for Beta",
-    "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
-    "plan_limit_insufficient_balance": "Full-document search limited to 75k pages. You can still add files manually.",
-    "no_text_layer": "Supported in the future",
-}
-
-
+export const errorMappingHintAtom = atom((get) => {
+    const planFeatures = get(planFeaturesAtom);
+    return {
+        "plan_limit_max_pages": `${planFeatures.maxPageCount} pages max per file`,
+        "plan_limit_file_size": `${planFeatures.uploadFileSizeLimit}MB max per file`,
+        "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
+        "plan_limit_insufficient_balance": "Full-document search limited to 75k pages for Beta. You can still add files manually.",
+        "no_text_layer": "Supported in the future",
+    };
+});
 
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
