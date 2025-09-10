@@ -54,7 +54,7 @@ export const errorMappingOverview = {
     "plan_limit_unsupported_file": "Files with unsupported file type",
     "plan_limit_max_pages": "Files over the per-file page limit",
     "plan_limit_max_pages_ocr": "Files over the OCR page limit",
-    "plan_limit_insufficient_balance": "Files blocked by page balance",
+    "plan_limit_insufficient_balance": "Files exceed your page balance",
     "plan_limit_file_size": "Files over the per-file size limit",
     
     // File errors
@@ -81,7 +81,7 @@ export const errorMappingHint = {
     "plan_limit_max_pages": "100 pages max per file for Beta",
     "plan_limit_file_size": "50MB max per file for Beta",
     "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
-    "plan_limit_insufficient_balance": "You are limited to 75,000 pages",
+    "plan_limit_insufficient_balance": "Full-document search limited to 75k pages. You can still add files manually.",
     "no_text_layer": "Supported in the future",
 }
 
