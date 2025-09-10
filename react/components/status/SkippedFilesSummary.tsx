@@ -58,26 +58,26 @@ export const SkippedFilesSummary: React.FC = () => {
     console.log(aggregatedMessages);
 
     return (
-        <div className="display-flex flex-col gap-2 w-full">
-            <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}>
+        <div className="display-flex flex-col gap-3 w-full ml-1">
+            {/* <ul className="marker-secondary" style={{ paddingInlineStart: '15px', marginBlockStart: '0px', marginBlockEnd: '0px' }}> */}
+            <div className="display-flex flex-col border-left-quarternary px-2 gap-3">
                 {Object.entries(aggregatedMessages).map(
                     ([errorCode, { message, count }]) => (
-                        <li key={errorCode} className="mb-3">
-                            <div className="display-flex flex-col gap-1">
-                                <span className="font-color-secondary mr-4">
-                                    {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
+                        <div className="display-flex flex-col gap-0">
+                            <span className="font-color-secondary mr-4">
+                                {String(count).toLocaleString()} {String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview])}
+                            </span>
+                            {errorMappingHint[errorCode as keyof typeof errorMappingHint] && (
+                                <span className="font-color-tertiary mr-4">
+                                    {errorMappingHint[errorCode as keyof typeof errorMappingHint]}
                                 </span>
-                                {errorMappingHint[errorCode as keyof typeof errorMappingHint] && (
-                                    <span className="font-color-tertiary mr-4">
-                                        {errorMappingHint[errorCode as keyof typeof errorMappingHint]}
-                                    </span>
-                                )}
-                            </div>
-                        </li>
+                            )}
+                        </div>
                     )
                 )}
-            </ul>
-            <div className="display-flex justify-start">
+            </div>
+            {/* </ul> */}
+            <div className="display-flex justify-start ml-2">
                 <Button
                     variant="outline"
                     onClick={handleShowFiles}
