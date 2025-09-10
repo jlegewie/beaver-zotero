@@ -84,15 +84,6 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prom
                 className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
             />
             <div className="display-flex flex-row gap-4 items-center">
-                <label className={`display-flex items-center gap-05 text-sm ${prompt.librarySearch ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
-                    <input
-                        type="checkbox"
-                        checked={prompt.librarySearch}
-                        onChange={handleCheckboxChange('librarySearch')}
-                        className="scale-90"
-                    />
-                    Library Search
-                </label>
                 <label className={`display-flex items-center gap-05 text-sm ${prompt.requiresAttachment ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
                     <input
                         type="checkbox"
