@@ -78,9 +78,11 @@ export const errorMappingOverview = {
 }
 
 export const errorMappingHint = {
-    "plan_limit_max_pages": "100 pages max per file for Beta.",
-    "plan_limit_file_size": "50MB max per file for Beta.",
-    "no_text_layer": "Supported in the future.",
+    "plan_limit_max_pages": "100 pages max per file for Beta",
+    "plan_limit_file_size": "50MB max per file for Beta",
+    "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
+    "plan_limit_insufficient_balance": "You are limited to 75,000 pages",
+    "no_text_layer": "Supported in the future",
 }
 
 
