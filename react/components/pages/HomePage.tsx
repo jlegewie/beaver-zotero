@@ -34,8 +34,7 @@ const HomePage: React.FC = () => {
         // Generate response
         generateResponse({
             content: prompt.text,
-            sources: currentSources,
-            isLibrarySearch: prompt.librarySearch
+            sources: currentSources
         });
 
         // console.log('Chat completion:', prompt.text);

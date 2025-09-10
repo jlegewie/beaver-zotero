@@ -226,7 +226,6 @@ export const generateResponseAtom = atom(
     async (get, set, payload: {
         content: string;
         sources: InputSource[];
-        isLibrarySearch: boolean;
     }) => {
         set(isChatRequestPendingAtom, true);
 
@@ -343,7 +342,6 @@ export const generateResponseAtom = atom(
             userMsg.content,
             messageAttachments,
             readerState,
-            payload.isLibrarySearch,
             model,
             set,
             get
@@ -423,7 +421,6 @@ export const regenerateFromMessageAtom = atom(
             "",                    // content remains unchanged
             [],                    // sources remain unchanged
             null,                  // readerState remains unchanged
-            false,                 // isLibrarySearch remains unchanged
             model,
             set,
             get
@@ -494,7 +491,6 @@ async function _processChatCompletionViaBackend(
     content: string,
     attachments: MessageAttachment[],
     readerState: ReaderState | null,
-    isLibrarySearch: boolean,
     model: FullModelConfig,
     set: any,
     get: any
@@ -520,7 +516,7 @@ async function _processChatCompletionViaBackend(
         content: content,
         attachments: attachments,
         reader_state: readerState,
-        tool_request: isLibrarySearch ? search_tool_request : null,
+        tool_request: null,
         status: "completed"
     } as MessageData;
 
