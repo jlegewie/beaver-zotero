@@ -508,6 +508,9 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .rounded-xl { border-radius: 0.75rem; }
 
 /* Borders */
+[id^="beaver-pane-"] .border-left-quinary { border-left: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-left-quarternary { border-left: 1px solid var(--fill-quarternary); }
+[id^="beaver-pane-"] .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
