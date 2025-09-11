@@ -56,7 +56,7 @@ const LibrarySelection: React.FC = () => {
         const fetchLibraryStatistics = async () => {
             try {
                 setIsLoading(true);
-                const stats = await getLibraryStatistics();
+                const stats = await getLibraryStatistics(false);
                 setLibraryStatistics(stats);
             } catch (error) {
                 logger(`LibrarySelection: Error fetching library statistics: ${error}`);
@@ -76,7 +76,7 @@ const LibrarySelection: React.FC = () => {
                 return {
                     itemCount: totals.itemCount + lib.itemCount,
                     attachmentCount: totals.attachmentCount + lib.attachmentCount,
-                    pageCount: totals.pageCount + lib.pageCount
+                    pageCount: totals.pageCount + (lib.pageCount || 0)
                 };
             }, { 
                 itemCount: 0, 
