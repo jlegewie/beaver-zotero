@@ -33,7 +33,7 @@ export const useErrorCodeStats = () => {
         const handler = setTimeout(() => {
             setDebouncedFailedCount(failedProcessingCount);
             setDebouncedSkippedCount(planLimitProcessingCount);
-        }, 5000); // 1000ms debounce delay
+        }, 3000); // 3000ms debounce delay
 
         return () => {
             clearTimeout(handler);
