@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '../../src/utils/logger';
 import {
@@ -25,19 +25,34 @@ export const useErrorCodeStats = () => {
     const setIsLoading = useSetAtom(errorCodeStatsIsLoadingAtom);
     const setError = useSetAtom(errorCodeStatsErrorAtom);
     
-    // Clear stats when there are no errors
+    // Debounce error counts to prevent excessive fetching
+    const [debouncedFailedCount, setDebouncedFailedCount] = useState(failedProcessingCount);
+    const [debouncedSkippedCount, setDebouncedSkippedCount] = useState(planLimitProcessingCount);
+
     useEffect(() => {
-        const totalErrors = failedProcessingCount + planLimitProcessingCount;
+        const handler = setTimeout(() => {
+            setDebouncedFailedCount(failedProcessingCount);
+            setDebouncedSkippedCount(planLimitProcessingCount);
+        }, 3000); // 3000ms debounce delay
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [failedProcessingCount, planLimitProcessingCount]);
+
+    // Clear stats when there are no errors (using debounced values)
+    useEffect(() => {
+        const totalErrors = debouncedFailedCount + debouncedSkippedCount;
         if (totalErrors === 0) {
             if (errorCodeStats !== null) {
                 setErrorCodeStats(null);
                 setLastFetchedCounts(null);
             }
         }
-    }, [failedProcessingCount, planLimitProcessingCount, errorCodeStats, setErrorCodeStats, setLastFetchedCounts]);
+    }, [debouncedFailedCount, debouncedSkippedCount, errorCodeStats, setErrorCodeStats, setLastFetchedCounts]);
 
     const fetchStats = useCallback(async () => {
-        const totalErrors = failedProcessingCount + planLimitProcessingCount;
+        const totalErrors = debouncedFailedCount + debouncedSkippedCount;
 
         // Don't fetch if no errors
         if (totalErrors === 0) {
@@ -46,18 +61,18 @@ export const useErrorCodeStats = () => {
 
         // Check if we have valid cached data for current counts and processing tier
         const hasValidCache = lastFetchedCounts &&
-            failedProcessingCount === lastFetchedCounts.failed &&
-            planLimitProcessingCount === lastFetchedCounts.skipped &&
+            debouncedFailedCount === lastFetchedCounts.failed &&
+            debouncedSkippedCount === lastFetchedCounts.skipped &&
             lastFetchedCounts.processingTier === planFeatures.processingTier &&
             errorCodeStats !== null;
 
         // Don't fetch if we have valid cached data
         if (hasValidCache) {
-            logger(`useErrorCodeStats: Using cached data for failed=${failedProcessingCount}, skipped=${planLimitProcessingCount}, tier=${planFeatures.processingTier}`);
+            logger(`useErrorCodeStats: Using cached data for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}, tier=${planFeatures.processingTier}`);
             return;
         }
 
-        logger(`useErrorCodeStats: Fetching error code stats for failed=${failedProcessingCount}, skipped=${planLimitProcessingCount}, tier=${planFeatures.processingTier}`);
+        logger(`useErrorCodeStats: Fetching error code stats for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}, tier=${planFeatures.processingTier}`);
         
         setIsLoading(true);
         setError(null);
@@ -77,8 +92,8 @@ export const useErrorCodeStats = () => {
             logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
             setErrorCodeStats(stats);
             setLastFetchedCounts({ 
-                failed: failedProcessingCount, 
-                skipped: planLimitProcessingCount,
+                failed: debouncedFailedCount, 
+                skipped: debouncedSkippedCount,
                 processingTier: planFeatures.processingTier
             });
         } catch (err) {
@@ -88,8 +103,8 @@ export const useErrorCodeStats = () => {
             setIsLoading(false);
         }
     }, [
-        failedProcessingCount,
-        planLimitProcessingCount,
+        debouncedFailedCount,
+        debouncedSkippedCount,
         lastFetchedCounts,
         errorCodeStats,
         setErrorCodeStats,
