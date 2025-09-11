@@ -201,14 +201,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     <Button variant="outline" onClick={() => handleLibraryToggle(0)}>Select Group Libraries</Button>
                 </div> */}
 
-                {isLoading && (
-                    <div className="font-color-tertiary text-sm">
-                        Loading library statistics may take a few minutes...
-                    </div>
-                )}
-
                 {/* Beta Account */}
-                {!isLoading && (planName !== 'free') && (
+                {planName !== 'free' && (
                     <div className="font-color-tertiary text-sm px-2">
                         {/* Your beta account includes unlimited metadata and related reference search. */}
                         Full-document search in beta supports 75,000 pages total, with PDFs up to 500 pages (50MB each).
@@ -216,7 +210,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 )}
                 
                 {/* Free Account */}
-                {!isLoading && (planName === 'free') && (
+                {planName === 'free' && (
                     <div className="display-flex flex-col gap-3">
                         <div className="font-color-tertiary text-sm px-2">
                             Free accounts supports unlimited metadata and related item search.
@@ -236,20 +230,18 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 )}
 
                 <div className="flex-1" />
-                {!isLoading && (
-                    <div className="display-flex flex-col gap-3">
-                        <div className="h-1 border-top-quinary" />
-                        <ZoteroSyncToggle 
-                            checked={useZoteroSync}
-                            onChange={handleSyncToggleChange}
-                            disabled={disableSyncToggle}
-                        />
-                        <ConsentToggle
-                            checked={consentToShare}
-                            onChange={handleConsentChange}
-                        />
-                    </div>
-                )}
+                <div className="display-flex flex-col gap-3">
+                    <div className="h-1 border-top-quinary" />
+                    <ZoteroSyncToggle 
+                        checked={useZoteroSync}
+                        onChange={handleSyncToggleChange}
+                        disabled={disableSyncToggle}
+                    />
+                    <ConsentToggle
+                        checked={consentToShare}
+                        onChange={handleConsentChange}
+                    />
+                </div>
                 
             </div>
         </div>
