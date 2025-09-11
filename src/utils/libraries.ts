@@ -24,7 +24,7 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     const allLibraryData = await Promise.all(libraries.map(async (library) => {
         const allItems = await getAllItemsToSync(library.libraryID);
         const regularItems = allItems.filter(item => item.isRegularItem());
-        const attachments = allItems.filter(item => item.isAttachment());
+        const attachments = allItems.filter(item => item.isPDFAttachment());
         const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
         
         return {
