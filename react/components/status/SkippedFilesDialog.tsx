@@ -74,6 +74,7 @@ const SkippedFilesDialog: React.FC = () => {
                             tooltipTitle="Reasons for skipping files"
                             icon={InformationCircleIcon}
                             collapseable={false}
+                            maxHeight="250px"
                         />
                     </div>
                 </div>
