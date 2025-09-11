@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, Spinner, CSSIcon, TickIcon, InformationCircleIcon } from "../icons/icons";
+import { Spinner, CSSIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom, planNameAtom, planDisplayNameAtom} from "../../atoms/profile";
+import { profileBalanceAtom, planNameAtom} from "../../atoms/profile";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
@@ -29,10 +29,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     handleConsentChange
 }) => {
     // Plan and profile balance
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
     const planName = useAtomValue(planNameAtom);
-    const planDisplayName = useAtomValue(planDisplayNameAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
     // Track which libraries are selected
@@ -129,10 +127,6 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     // Prevent click propagation from checkbox to parent div
     const handleCheckboxClick = (e: React.MouseEvent) => {
         e.stopPropagation();
-    };
-
-    const getExceedsBalanceText = (page_limit: number) => {
-        return `Your library exceeds your available page credits. The page count is an estimate and may include pages that won't be processed. If the final count exceeds the limit, some documents won't be searchable, but you can still add them manually`;
     };
     
     // Check if selected libraries exceed the page balance
@@ -241,14 +235,6 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     </div>
                 )}
 
-                {/* {!isLoading && exceedsBalance && (
-                    <div className="font-color-red p-2 display-flex flex-row gap-3 items-start">
-                        <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                        <div className="display-flex flex-col gap-2">
-                            {`Pages in selected libraries exceed plan limits. Some documents won't be searchable.`}
-                        </div>
-                    </div>
-                )} */}
                 <div className="flex-1" />
                 {!isLoading && (
                     <div className="display-flex flex-col gap-3">
@@ -264,20 +250,6 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                         />
                     </div>
                 )}
-                
-
-                {/* Totals for selected libraries */}
-                {/* {libraryStatistics.length > 0 && (
-                    <div className="display-flex flex-col gap-1 mt-2 p-3 border-t border-quinary">
-                        <div className="font-medium font-color-primary">Selected Libraries Total:</div>
-                        <div className="display-flex flex-row gap-4 font-color-secondary text-sm">
-                            {selectedLibraryTotals.itemCount} items,{' '}
-                            {selectedLibraryTotals.attachmentCount} attachments,{' '}
-                            {selectedLibraryTotals.pageCount} pages
-                        </div>
-                    </div>
-                )} */}
-
                 
             </div>
         </div>
