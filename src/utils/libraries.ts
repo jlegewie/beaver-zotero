@@ -23,12 +23,14 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     // Collect all attachments first
     const allLibraryData = await Promise.all(libraries.map(async (library) => {
         const allItems = await getAllItemsToSync(library.libraryID);
+        const regularItems = allItems.filter(item => item.isRegularItem());
         const attachments = allItems.filter(item => item.isAttachment());
         const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
         
         return {
             library,
             allItems,
+            regularItems,
             attachments,
             pdfAttachments
         };
@@ -104,7 +106,7 @@ export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
             libraryID: libraryData.library.libraryID,
             name: libraryData.library.name,
             isGroup: libraryData.library.isGroup,
-            itemCount: libraryData.allItems.length,
+            itemCount: libraryData.regularItems.length,
             attachmentCount: libraryData.attachments.length,
             pdfCount: libraryData.pdfAttachments.length,
             imageCount: libraryData.attachments.filter(item => item.isImageAttachment()).length,
