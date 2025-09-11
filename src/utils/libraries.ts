@@ -3,6 +3,7 @@ import {
     getPDFPageCountFromFulltext,
     getPDFPageCountFromWorker,
 } from "../../react/utils/pdfUtils";
+import { logger } from "./logger";
 
 export interface LibraryStatistics {
     libraryID: number;
@@ -19,10 +20,11 @@ export const getLibraryStatistics = async (
     includePageCounts: boolean,
 ): Promise<LibraryStatistics[]> => {
     const libraries = await Zotero.Libraries.getAll();
+    const filteredLibraries = libraries.filter(library => library.libraryType === 'user' || library.libraryType === 'group');
 
     // Step 1: Collect basic item and attachment counts
-    const basicLibraryData = await Promise.all(
-        libraries.map(async (library) => {
+    const basicLibraryDataPromises = filteredLibraries.map(async (library) => {
+        try {
             const allItems = await getAllItemsToSync(library.libraryID);
             const regularItems = allItems.filter((item) => item.isRegularItem());
             const attachments = allItems.filter((item) => item.isAttachment());
@@ -40,11 +42,19 @@ export const getLibraryStatistics = async (
                 pdfAttachments,
                 imageAttachments,
             };
-        }),
+        } catch (error) {
+            logger(`Error processing library ${library.libraryID} (${library.name}): ${error}`,);
+            return null;
+        }
+    });
+
+    const basicLibraryDataWithNulls = await Promise.all(basicLibraryDataPromises);
+    const basicLibraryData = basicLibraryDataWithNulls.filter(
+        (data): data is NonNullable<typeof data> => data !== null,
     );
 
     if (!includePageCounts) {
-        return basicLibraryData.map((data) => ({
+        const statistics = basicLibraryData.map((data) => ({
             libraryID: data.library.libraryID,
             name: data.library.name,
             isGroup: data.library.isGroup,
@@ -54,6 +64,7 @@ export const getLibraryStatistics = async (
             imageCount: data.imageAttachments.length,
             pageCount: null,
         }));
+        return statistics;
     }
 
     // Step 2: Collect unique PDF hashes for page counting
