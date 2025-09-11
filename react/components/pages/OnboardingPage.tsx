@@ -267,7 +267,7 @@ const OnboardingPage: React.FC = () => {
             <div className="p-4 border-top-quinary">
                 {/* Library selection button */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-row items-center">
+                    <div className="display-flex flex-row items-center gap-1">
                         <div className="font-color-secondary text-sm">
                             {`By continuing, you agree to our `}
                             <a 
