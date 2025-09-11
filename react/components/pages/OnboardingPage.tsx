@@ -201,7 +201,7 @@ const OnboardingPage: React.FC = () => {
     const getHeaderMessage = () => {
         if (!hasAuthorizedAccess) {
             // Step 1: Library Selection & Authorization
-            return "Beaver syncs your Zotero libraries, uploads your PDFs and attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link this Zotero account to your Beaver account.";
+            return "Beaver syncs your Zotero data, uploads attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link your Zotero and Beaver account.";
         } else {
             // Step 2: Syncing Process
             return "We're now syncing your Zotero library and processing your files. This usually takes 20-60 minutes, depending on your library size and server load.\n\nYou can safely close Beaver and return later - just make sure Zotero stays open so syncing can continue in the background.";
