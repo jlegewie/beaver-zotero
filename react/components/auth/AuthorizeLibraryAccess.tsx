@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Icon, Spinner, CSSIcon, TickIcon, InformationCircleIcon } from "../icons/icons";
+import { Spinner, CSSIcon } from "../icons/icons";
 import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
-import { planFeaturesAtom, profileBalanceAtom, planNameAtom, planDisplayNameAtom} from "../../atoms/profile";
+import { profileBalanceAtom, planNameAtom} from "../../atoms/profile";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
 import Button from "../ui/Button";
@@ -29,10 +29,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     handleConsentChange
 }) => {
     // Plan and profile balance
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const profileBalance = useAtomValue(profileBalanceAtom);
     const planName = useAtomValue(planNameAtom);
-    const planDisplayName = useAtomValue(planDisplayNameAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
     // Track which libraries are selected
@@ -63,7 +61,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 
                 setLibraries(basicInfo);
                 // Pre-select all libraries by default
-                setSelectedLibraryIds(basicInfo.map(lib => lib.id));
+                setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.id));
             } catch (error) {
                 console.error("Error loading library info:", error);
             }
@@ -77,7 +75,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
         const fetchLibraryStatistics = async () => {
             try {
                 setIsLoading(true);
-                const stats = await getLibraryStatistics();
+                const stats = await getLibraryStatistics(false);
                 setLibraryStatistics(stats);
                 setIsLoading(false);
             } catch (error) {
@@ -99,7 +97,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     attachmentCount: totals.attachmentCount + lib.attachmentCount,
                     pdfCount: totals.pdfCount + lib.pdfCount,
                     imageCount: totals.imageCount + lib.imageCount,
-                    pageCount: totals.pageCount + lib.pageCount
+                    pageCount: totals.pageCount + (lib.pageCount || 0)
                 };
             }, { 
                 itemCount: 0, 
@@ -130,10 +128,6 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     const handleCheckboxClick = (e: React.MouseEvent) => {
         e.stopPropagation();
     };
-
-    const getExceedsBalanceText = (page_limit: number) => {
-        return `Your library exceeds your available page credits. The page count is an estimate and may include pages that won't be processed. If the final count exceeds the limit, some documents won't be searchable, but you can still add them manually`;
-    };
     
     // Check if selected libraries exceed the page balance
     const exceedsBalance = selectedLibraryTotals.pageCount > profileBalance.pagesRemaining;
@@ -144,7 +138,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
             <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
                 {/* Library list */}
-                <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '50px', maxHeight: '300px', overflowY: 'auto' }}>
                     {libraries.map((library) => {
                         // Find detailed statistics for this library if available
                         const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
@@ -168,7 +162,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
                                     <div className="display-flex flex-col gap-3">
                                         <div className="display-flex flex-row gap-3 items-center">
-                                            <CSSIcon name="library" className="icon-16" />
+                                            <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
                                             <div className="font-color-primary text-base">
                                                 {library.name}
                                             </div>
@@ -187,9 +181,11 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                                 </div>
                                             ) : statistics ? (
                                                 <>
-                                                    {statistics.itemCount.toLocaleString()} items,{' '}
-                                                    {statistics.attachmentCount.toLocaleString()} attachments,{' '}
-                                                    {statistics.pageCount.toLocaleString()} pages
+                                                    {[
+                                                        statistics.itemCount.toLocaleString()  + ' items',
+                                                        statistics.attachmentCount.toLocaleString() + ' attachments',
+                                                        statistics.pageCount ? statistics.pageCount.toLocaleString() + ' pages' : ''
+                                                    ].filter(Boolean).join(', ')}
                                                 </>
                                             ) : (
                                                 "No statistics available"
@@ -201,6 +197,9 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                         );
                     })}
                 </div>
+                {/* <div className="display-flex flex-row gap-2">
+                    <Button variant="outline" onClick={() => handleLibraryToggle(0)}>Select Group Libraries</Button>
+                </div> */}
 
                 {isLoading && (
                     <div className="font-color-tertiary text-sm">
@@ -209,104 +208,33 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 )}
 
                 {/* Beta Account */}
-                {!isLoading && (planName === 'beta') && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">{planDisplayName} Account (free)</div>
-                                <div className="flex-1"/>
-                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                                {exceedsBalance && (
-                                    // <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
-                                        <div className='text-sm font-color-red'>
-                                            Page limit exceeded
-                                        </div>
-                                        <Icon className="font-color-red mt-015" icon={InformationCircleIcon}/>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                            </div>
-                        </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Coming soon</div>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Better search with semantic document understanding.
-                            </div>
-                        </div>
+                {!isLoading && (planName !== 'free') && (
+                    <div className="font-color-tertiary text-sm px-2">
+                        {/* Your beta account includes unlimited metadata and related reference search. */}
+                        Full-document search in beta supports 75,000 pages total, with PDFs up to 500 pages (50MB each).
                     </div>
                 )}
                 
                 {/* Free Account */}
                 {!isLoading && (planName === 'free') && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">Free Account</div>
-                                <div className="flex-1"/>
-                                <Icon className="scale-12" icon={TickIcon}/>
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Unlimited metadata and related item search</div>
-                            </div>
+                    <div className="display-flex flex-col gap-3">
+                        <div className="font-color-tertiary text-sm px-2">
+                            Free accounts supports unlimited metadata and related item search.
                         </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Upgrade Account</div>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Full-text search and more...
+                        <div className="mt-4 display-flex flex-col gap-3">
+                            <div className="p-3 rounded-md bg-senary">
+                                <div className="display-flex flex-row justify-between items-center mb-1">
+                                    <div className="font-medium">Upgrade Account</div>
+                                    <Button variant="surface">Upgrade</Button>
+                                </div>
+                                <div className="text-sm font-color-secondary">
+                                    Full-document search, sentence-level citations, etc...
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* Core Account */}
-                {!isLoading && planName === 'core' && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">{planDisplayName} Account</div>
-                                <div className="flex-1"/>
-                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                                {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
-                                        <div className='text-sm font-medium font-color-yellow'>
-                                            Account limit exceeded
-                                        </div>
-                                        <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Better processing & semantic search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                            </div>
-                        </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Upgrade Account</div>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Unlimited pages and advanced semantic search
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* {!isLoading && exceedsBalance && (
-                    <div className="font-color-red p-2 display-flex flex-row gap-3 items-start">
-                        <Icon icon={AlertIcon} className="scale-12 mt-1"/>
-                        <div className="display-flex flex-col gap-2">
-                            {`Pages in selected libraries exceed plan limits. Some documents won't be searchable.`}
-                        </div>
-                    </div>
-                )} */}
                 <div className="flex-1" />
                 {!isLoading && (
                     <div className="display-flex flex-col gap-3">
@@ -322,20 +250,6 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                         />
                     </div>
                 )}
-                
-
-                {/* Totals for selected libraries */}
-                {/* {libraryStatistics.length > 0 && (
-                    <div className="display-flex flex-col gap-1 mt-2 p-3 border-t border-quinary">
-                        <div className="font-medium font-color-primary">Selected Libraries Total:</div>
-                        <div className="display-flex flex-row gap-4 font-color-secondary text-sm">
-                            {selectedLibraryTotals.itemCount} items,{' '}
-                            {selectedLibraryTotals.attachmentCount} attachments,{' '}
-                            {selectedLibraryTotals.pageCount} pages
-                        </div>
-                    </div>
-                )} */}
-
                 
             </div>
         </div>
