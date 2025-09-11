@@ -43,7 +43,9 @@ export const SkippedFilesSummary: React.FC = () => {
         setIsDialogVisible(true);
     };
 
-    if (isLoading) {
+    const hasData = Object.keys(aggregatedMessages).length > 0;
+
+    if (isLoading && !hasData) {
         return (
             <div className="text-base font-color-secondary mb-1 items-center display-flex flex-row">
                 <div className="mt-1">
@@ -64,7 +66,7 @@ export const SkippedFilesSummary: React.FC = () => {
         );
     }
 
-    if (Object.keys(aggregatedMessages).length === 0) {
+    if (!hasData) {
         return null;
     }
 
@@ -94,13 +96,19 @@ export const SkippedFilesSummary: React.FC = () => {
                     )
                 )}
             </div>
-            <div className="display-flex justify-start ml-2">
+            <div className="display-flex justify-between items-center ml-2">
                 <Button
                     variant="outline"
                     onClick={handleShowFiles}
                 >
                     Show Files
                 </Button>
+                {isLoading && (
+                    <div className="mr-2 display-flex items-center gap-1 font-color-tertiary">
+                        <div><Spinner className="mt-020" size={14} /></div>
+                        <div>Updating...</div>
+                    </div>
+                )}
             </div>
         </div>
     );
