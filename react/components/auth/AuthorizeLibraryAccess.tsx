@@ -77,7 +77,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
         const fetchLibraryStatistics = async () => {
             try {
                 setIsLoading(true);
-                const stats = await getLibraryStatistics();
+                const stats = await getLibraryStatistics(false);
                 setLibraryStatistics(stats);
                 setIsLoading(false);
             } catch (error) {
@@ -99,7 +99,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     attachmentCount: totals.attachmentCount + lib.attachmentCount,
                     pdfCount: totals.pdfCount + lib.pdfCount,
                     imageCount: totals.imageCount + lib.imageCount,
-                    pageCount: totals.pageCount + lib.pageCount
+                    pageCount: totals.pageCount + (lib.pageCount || 0)
                 };
             }, { 
                 itemCount: 0, 
@@ -187,9 +187,11 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                                 </div>
                                             ) : statistics ? (
                                                 <>
-                                                    {statistics.itemCount.toLocaleString()} items,{' '}
-                                                    {statistics.attachmentCount.toLocaleString()} attachments,{' '}
-                                                    {statistics.pageCount.toLocaleString()} pages
+                                                    {[
+                                                        statistics.itemCount.toLocaleString()  + ' items',
+                                                        statistics.attachmentCount.toLocaleString() + ' attachments',
+                                                        statistics.pageCount ? statistics.pageCount.toLocaleString() + ' pages' : ''
+                                                    ].filter(Boolean).join(', ')}
                                                 </>
                                             ) : (
                                                 "No statistics available"
