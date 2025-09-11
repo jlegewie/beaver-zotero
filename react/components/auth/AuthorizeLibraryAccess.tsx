@@ -63,7 +63,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 
                 setLibraries(basicInfo);
                 // Pre-select all libraries by default
-                setSelectedLibraryIds(basicInfo.map(lib => lib.id));
+                setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.id));
             } catch (error) {
                 console.error("Error loading library info:", error);
             }
@@ -144,8 +144,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
             <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
                 {/* Library list */}
-                <div className="display-flex flex-col gap-1">
-                    {libraries.map((library) => {
+                <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '50px', maxHeight: '150px', overflowY: 'auto' }}>
+                    {[...libraries, ...libraries, ...libraries, ...libraries].map((library) => {
                         // Find detailed statistics for this library if available
                         const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
                         const isSelected = selectedLibraryIds.includes(library.id);
@@ -201,9 +201,9 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                         );
                     })}
                 </div>
-                <div className="display-flex flex-row gap-2">
+                {/* <div className="display-flex flex-row gap-2">
                     <Button variant="outline" onClick={() => handleLibraryToggle(0)}>Select Group Libraries</Button>
-                </div>
+                </div> */}
 
                 {isLoading && (
                     <div className="font-color-tertiary text-sm">
@@ -212,91 +212,28 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 )}
 
                 {/* Beta Account */}
-                {!isLoading && (planName === 'beta') && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">{planDisplayName} Account (free)</div>
-                                <div className="flex-1"/>
-                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                                {exceedsBalance && (
-                                    // <div className="display-flex flex-row gap-1" title="Pages in selected libraries exceed plan limits. Some documents won't be searchable.">
-                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
-                                        <div className='text-sm font-color-red'>
-                                            Page limit exceeded
-                                        </div>
-                                        <Icon className="font-color-red mt-015" icon={InformationCircleIcon}/>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Basic processing and search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                            </div>
-                        </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Coming soon</div>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Better search with semantic document understanding.
-                            </div>
-                        </div>
+                {!isLoading && (planName !== 'free') && (
+                    <div className="font-color-tertiary text-sm px-2">
+                        {/* Your beta account includes unlimited metadata and related reference search. */}
+                        Full-document search in beta supports 75,000 pages total, with PDFs up to 500 pages (50MB each).
                     </div>
                 )}
                 
                 {/* Free Account */}
                 {!isLoading && (planName === 'free') && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">Free Account</div>
-                                <div className="flex-1"/>
-                                <Icon className="scale-12" icon={TickIcon}/>
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Unlimited metadata and related item search</div>
-                            </div>
+                    <div className="display-flex flex-col gap-3">
+                        <div className="font-color-tertiary text-sm px-2">
+                            Free accounts supports unlimited metadata and related item search.
                         </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Upgrade Account</div>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Full-text search and more...
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Core Account */}
-                {!isLoading && planName === 'core' && (
-                    <div className="mt-4 display-flex flex-col gap-3">
-                        <div className="p-3 rounded-md bg-senary border-popup">
-                            <div className="display-flex flex-row items-center mb-1">
-                                <div className="font-medium">{planDisplayName} Account</div>
-                                <div className="flex-1"/>
-                                {!exceedsBalance && ( <Icon className="scale-12" icon={TickIcon}/>)}
-                                {exceedsBalance && (
-                                    <div className="display-flex flex-row gap-1" title={getExceedsBalanceText(profileBalance.pagesRemaining)}>
-                                        <div className='text-sm font-medium font-color-yellow'>
-                                            Account limit exceeded
-                                        </div>
-                                        <Icon className="font-color-yellow mt-015" icon={InformationCircleIcon}/>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="display-flex flex-row justify-between items-center text-sm font-color-secondary">
-                                <div>Better processing & semantic search ({profileBalance.pagesRemaining.toLocaleString()} pages)</div>
-                            </div>
-                        </div>
-                        <div className="p-3 rounded-md bg-senary">
-                            <div className="display-flex flex-row justify-between items-center mb-1">
-                                <div className="font-medium">Upgrade Account</div>
-                                <Button variant="surface">Upgrade</Button>
-                            </div>
-                            <div className="text-sm font-color-secondary">
-                                Unlimited pages and advanced semantic search
+                        <div className="mt-4 display-flex flex-col gap-3">
+                            <div className="p-3 rounded-md bg-senary">
+                                <div className="display-flex flex-row justify-between items-center mb-1">
+                                    <div className="font-medium">Upgrade Account</div>
+                                    <Button variant="surface">Upgrade</Button>
+                                </div>
+                                <div className="text-sm font-color-secondary">
+                                    Full-document search, sentence-level citations, etc...
+                                </div>
                             </div>
                         </div>
                     </div>
