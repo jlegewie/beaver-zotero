@@ -24,6 +24,7 @@ interface PaginatedFailedProcessingListProps {
     errorCode?: string;
     show?: boolean;
     collapseable?: boolean;
+    maxHeight?: string | number;
 }
 
 const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps> = ({
@@ -37,6 +38,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
     errorCode,
     show = false,
     collapseable = true,
+    maxHeight = '250px',
 }) => {
     const [showList, setShowList] = useState(collapseable ? show : true);
     const [attachments, setAttachments] = useState<FailedFileReference[]>([]);
@@ -201,7 +203,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                         <div className="display-flex flex-col gap-2 w-full">
                             <ZoteroAttachmentList
                                 attachments={attachments}
-                                maxHeight="250px"
+                                maxHeight={maxHeight}
                             />
                             {hasMore && (
                                 <Button
