@@ -1268,11 +1268,14 @@ attachment-box .metadata-table #beaver-status {
 }
 
 [id^="beaver-pane-"] .source-citation {
-    background: var(--fill-quarternary);
+    font-size: 0.8em;
+    margin-left: 0.15em;
+    text-decoration: none;
+    background: var(--fill-quinary);
     padding-right: 0.35em;
     padding-left: 0.35em;
-    border-radius: 0.5em;
-    border: 1px solid var(--fill-quarternary);
+    border-radius: 0.25em;
+    border: 1px solid var(--fill-quinary);
     color: var(--fill-secondary);
 }
 
