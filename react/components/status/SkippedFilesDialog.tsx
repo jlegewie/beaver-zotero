@@ -46,7 +46,7 @@ const SkippedFilesDialog: React.FC = () => {
             {/* Dialog container */}
             <div className="absolute inset-0 display-flex items-center justify-center pointer-events-none">
                 <div
-                    className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full"
+                    className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full overflow-hidden"
                     style={{
                         background: 'var(--material-mix-quarternary)',
                         border: '1px solid var(--fill-quinary)',
