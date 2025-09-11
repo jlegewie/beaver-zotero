@@ -14,14 +14,14 @@ export interface LibraryStatistics {
 
 export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
     const libraries = await Zotero.Libraries.getAll();
-    const userLibraries = libraries.filter(library => library.libraryType === 'user');
+    // const userLibraries = libraries.filter(library => library.libraryType === 'user');
 
     // Step 1: Collect all PDF attachments across all libraries with their hashes
     const hashToPageCount = new Map<string, number>();
     const libraryToHashes = new Map<number, Set<string>>();
     
     // Collect all attachments first
-    const allLibraryData = await Promise.all(userLibraries.map(async (library) => {
+    const allLibraryData = await Promise.all(libraries.map(async (library) => {
         const allItems = await getAllItemsToSync(library.libraryID);
         const attachments = allItems.filter(item => item.isAttachment());
         const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
