@@ -1,5 +1,8 @@
 import { getAllItemsToSync } from "./sync";
-import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../react/utils/pdfUtils';
+import {
+    getPDFPageCountFromFulltext,
+    getPDFPageCountFromWorker,
+} from "../../react/utils/pdfUtils";
 
 export interface LibraryStatistics {
     libraryID: number;
@@ -9,110 +12,121 @@ export interface LibraryStatistics {
     attachmentCount: number;
     pdfCount: number;
     imageCount: number;
-    pageCount: number;
+    pageCount?: number | null;
 }
 
-export const getLibraryStatistics = async (): Promise<LibraryStatistics[]> => {
+export const getLibraryStatistics = async (
+    includePageCounts: boolean,
+): Promise<LibraryStatistics[]> => {
     const libraries = await Zotero.Libraries.getAll();
-    // const userLibraries = libraries.filter(library => library.libraryType === 'user');
 
-    // Step 1: Collect all PDF attachments across all libraries with their hashes
+    // Step 1: Collect basic item and attachment counts
+    const basicLibraryData = await Promise.all(
+        libraries.map(async (library) => {
+            const allItems = await getAllItemsToSync(library.libraryID);
+            const regularItems = allItems.filter((item) => item.isRegularItem());
+            const attachments = allItems.filter((item) => item.isAttachment());
+            const pdfAttachments = attachments.filter((item) =>
+                item.isPDFAttachment(),
+            );
+            const imageAttachments = attachments.filter((item) =>
+                item.isImageAttachment(),
+            );
+
+            return {
+                library,
+                regularItems,
+                attachments,
+                pdfAttachments,
+                imageAttachments,
+            };
+        }),
+    );
+
+    if (!includePageCounts) {
+        return basicLibraryData.map((data) => ({
+            libraryID: data.library.libraryID,
+            name: data.library.name,
+            isGroup: data.library.isGroup,
+            itemCount: data.regularItems.length,
+            attachmentCount: data.attachments.length,
+            pdfCount: data.pdfAttachments.length,
+            imageCount: data.imageAttachments.length,
+            pageCount: null,
+        }));
+    }
+
+    // Step 2: Collect unique PDF hashes for page counting
     const hashToPageCount = new Map<string, number>();
     const libraryToHashes = new Map<number, Set<string>>();
-    
-    // Collect all attachments first
-    const allLibraryData = await Promise.all(libraries.map(async (library) => {
-        const allItems = await getAllItemsToSync(library.libraryID);
-        const regularItems = allItems.filter(item => item.isRegularItem());
-        const attachments = allItems.filter(item => item.isPDFAttachment());
-        const pdfAttachments = attachments.filter(item => item.isPDFAttachment());
-        
-        return {
-            library,
-            allItems,
-            regularItems,
-            attachments,
-            pdfAttachments
-        };
-    }));
-
-    // Step 2: Build hash map for unique PDFs
     const uniquePdfAttachments = new Map<string, Zotero.Item>();
-    
-    for (const libraryData of allLibraryData) {
+
+    for (const data of basicLibraryData) {
         const libraryHashes = new Set<string>();
-        
-        for (const pdfAttachment of libraryData.pdfAttachments) {
+        for (const pdf of data.pdfAttachments) {
             try {
-                const hash = await pdfAttachment.attachmentHash;
+                const hash = await pdf.attachmentHash;
                 if (hash) {
                     libraryHashes.add(hash);
-                    
-                    // Store first occurrence of each hash for page counting
                     if (!uniquePdfAttachments.has(hash)) {
-                        uniquePdfAttachments.set(hash, pdfAttachment);
+                        uniquePdfAttachments.set(hash, pdf);
                     }
                 }
             } catch (error) {
-                // Skip items without valid hash
-                continue;
+                // Ignore attachments without a valid hash
             }
         }
-        
-        libraryToHashes.set(libraryData.library.libraryID, libraryHashes);
+        libraryToHashes.set(data.library.libraryID, libraryHashes);
     }
 
-    // Step 3: Calculate page counts for unique hashes only
+    // Step 3: Calculate page counts for unique PDFs
     const hashPageCounts = await Promise.all(
-        Array.from(uniquePdfAttachments.entries()).map(async ([hash, item]) => {
-            const pageCount = await getPDFPageCountFromFulltext(item);
-            return { hash, item, pageCount };
-        })
+        Array.from(uniquePdfAttachments.entries()).map(async ([hash, item]) => ({
+            hash,
+            item,
+            pageCount: await getPDFPageCountFromFulltext(item),
+        })),
     );
 
-    // Process items that need worker page count in batches of 5
-    const itemsNeedingWorkerPageCount = hashPageCounts.filter(hpc => hpc.pageCount === null);
-    
-    for (let i = 0; i < itemsNeedingWorkerPageCount.length; i += 5) {
-        const batch = itemsNeedingWorkerPageCount.slice(i, i + 5);
+    // Step 4: Use worker for PDFs where full-text count failed
+    const itemsForWorker = hashPageCounts.filter((hpc) => hpc.pageCount === null);
+    for (let i = 0; i < itemsForWorker.length; i += 5) {
+        const batch = itemsForWorker.slice(i, i + 5);
         const batchResults = await Promise.all(
-            batch.map(async (hpc) => {
-                const workerPageCount = await getPDFPageCountFromWorker(hpc.item);
-                return { hash: hpc.hash, pageCount: workerPageCount || 0 };
-            })
+            batch.map(async (hpc) => ({
+                hash: hpc.hash,
+                pageCount: (await getPDFPageCountFromWorker(hpc.item)) || 0,
+            })),
         );
-        
         for (const result of batchResults) {
             hashToPageCount.set(result.hash, result.pageCount);
         }
     }
 
-    // Store fulltext page counts
     for (const hpc of hashPageCounts) {
         if (hpc.pageCount !== null) {
             hashToPageCount.set(hpc.hash, hpc.pageCount);
         }
     }
 
-    // Step 4: Calculate statistics per library
-    const libraryStatistics = allLibraryData.map((libraryData) => {
-        const libraryHashes = libraryToHashes.get(libraryData.library.libraryID) || new Set();
-        
-        // Calculate unique page count for this library
-        const uniquePageCount = Array.from(libraryHashes)
-            .reduce((total, hash) => total + (hashToPageCount.get(hash) || 0), 0);
+    // Step 5: Assemble final statistics with page counts
+    return basicLibraryData.map((data) => {
+        const libraryHashes =
+            libraryToHashes.get(data.library.libraryID) || new Set();
+        const pageCount = Array.from(libraryHashes).reduce(
+            (total, hash) => total + (hashToPageCount.get(hash) || 0),
+            0,
+        );
 
         return {
-            libraryID: libraryData.library.libraryID,
-            name: libraryData.library.name,
-            isGroup: libraryData.library.isGroup,
-            itemCount: libraryData.regularItems.length,
-            attachmentCount: libraryData.attachments.length,
-            pdfCount: libraryData.pdfAttachments.length,
-            imageCount: libraryData.attachments.filter(item => item.isImageAttachment()).length,
-            pageCount: uniquePageCount,
-        } as LibraryStatistics;
+            libraryID: data.library.libraryID,
+            name: data.library.name,
+            isGroup: data.library.isGroup,
+            itemCount: data.regularItems.length,
+            attachmentCount: data.attachments.length,
+            pdfCount: data.pdfAttachments.length,
+            imageCount: data.imageAttachments.length,
+            pageCount,
+        };
     });
-
-    return libraryStatistics;
-}
+};
