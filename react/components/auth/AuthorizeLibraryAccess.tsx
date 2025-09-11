@@ -145,7 +145,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
                 {/* Library list */}
                 <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '50px', maxHeight: '300px', overflowY: 'auto' }}>
-                    {[...libraries, ...libraries, ...libraries, ...libraries].map((library) => {
+                    {libraries.map((library) => {
                         // Find detailed statistics for this library if available
                         const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
                         const isSelected = selectedLibraryIds.includes(library.id);
