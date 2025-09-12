@@ -271,7 +271,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 if (reader && reader._initPromise) {
                     await reader._initPromise;
                 }
-                await new Promise(resolve => setTimeout(resolve, 250));
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
 
             // Handle the three scenarios
