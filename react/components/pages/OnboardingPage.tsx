@@ -30,7 +30,7 @@ const OnboardingPage: React.FC = () => {
     const isUploadProcessed = useAtomValue(isUploadProcessedAtom);
 
     // Track selected libraries
-    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
+    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
 
     // Sync toggle state

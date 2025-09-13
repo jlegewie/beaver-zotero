@@ -10,15 +10,13 @@ interface LibrarySelectionProps {
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
     selectedLibraryIds: number[];
     setSelectedLibraryIds: Dispatch<SetStateAction<number[]>>;
-    initialSelection?: number[];
 }
 
 const LibrarySelection: React.FC<LibrarySelectionProps> = ({
     libraryStatistics,
     setLibraryStatistics,
     selectedLibraryIds,
-    setSelectedLibraryIds,
-    initialSelection = [],
+    setSelectedLibraryIds
 }) => {
     // Plan and profile balance
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -46,12 +44,6 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
                 }));
                 
                 setLibraries(basicInfo);
-                // Pre-select based on initialSelection or default to non-group libraries
-                if (initialSelection.length > 0) {
-                    setSelectedLibraryIds(initialSelection);
-                } else {
-                    setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.libraryID));
-                }
             } catch (error) {
                 console.error("Error loading library info:", error);
             }
