@@ -4,7 +4,7 @@ import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 import { fileStatusSummaryAtom } from '../../atoms/files';
 import { CancelIcon, InformationCircleIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
-import PaginatedFailedProcessingList from './PaginatedFailedProcessingList';
+import PaginatedFailedProcessingList from '../status/PaginatedFailedProcessingList';
 
 /**
  * Skipped files dialog component

@@ -16,7 +16,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
-import DialogContainer from './DialogContainer';
+import DialogContainer from './dialog/DialogContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
 

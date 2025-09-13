@@ -7,9 +7,9 @@ import {
     errorReportTextAtom,
     isErrorReportSendingAtom,
     DialogType,
-} from '../atoms/ui';
+} from '../../atoms/ui';
 import ErrorReportDialog from './ErrorReportDialog';
-import SkippedFilesDialog from './status/SkippedFilesDialog';
+import SkippedFilesDialog from './SkippedFilesDialog';
 
 const dialogs: Record<Exclude<DialogType, null>, React.FC> = {
     errorReport: ErrorReportDialog,

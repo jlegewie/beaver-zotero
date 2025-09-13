@@ -4,13 +4,13 @@ import {
     isErrorReportDialogVisibleAtom, 
     errorReportTextAtom, 
     isErrorReportSendingAtom
-} from '../atoms/ui';
-import { CancelIcon } from './icons/icons';
-import Button from './ui/Button';
-import IconButton from './ui/IconButton';
-import { getJotaiState } from '../utils/getJotaiState';
-import { accountService } from '../../src/services/accountService';
-import { getPref } from '../../src/utils/prefs';
+} from '../../atoms/ui';
+import { CancelIcon } from '../icons/icons';
+import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
+import { getJotaiState } from '../../utils/getJotaiState';
+import { accountService } from '../../../src/services/accountService';
+import { getPref } from '../../../src/utils/prefs';
 
 /**
  * Get all plugin preferences for debugging
