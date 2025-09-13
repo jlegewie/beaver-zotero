@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, LibraryIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
@@ -18,6 +18,7 @@ import ConsentToggle from "../preferences/ConsentToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
+import { isLibrarySelectionDialogVisibleAtom } from "../../atoms/ui";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -28,6 +29,7 @@ const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
     const logout = useSetAtom(logoutAtom);
+    const setIsLibrarySelectionDialogVisible = useSetAtom(isLibrarySelectionDialogVisibleAtom);
 
     // --- User profile ---
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
@@ -145,6 +147,10 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
+
+    const handleLibrarySelection = () => {
+        setIsLibrarySelectionDialogVisible(true);
+    };
 
     // --- Sync Handler ---
     const handleSync = useCallback(async () => {
@@ -387,11 +393,14 @@ const PreferencePage: React.FC = () => {
             </div> */}
 
             <div className="display-flex flex-col gap-3">
-                <div className="display-flex flex-row items-center gap-3">
-                    <div className="font-color-secondary">Last synced:</div>
-                    <div className="font-color-secondary">{lastSyncedText}</div>
-                </div>
                 <div className="display-flex flex-row items-center gap-4">
+                    <Button 
+                        variant="outline" 
+                        icon={LibraryIcon}
+                        onClick={handleLibrarySelection}
+                    >
+                        Select Libraries
+                    </Button>
                     <Button 
                         variant="outline" 
                         icon={syncButtonProps.icon}
@@ -410,6 +419,10 @@ const PreferencePage: React.FC = () => {
                     >
                         {verifyButtonProps.text}
                     </Button>
+                </div>
+                <div className="display-flex flex-row items-center gap-3">
+                    <div className="font-color-secondary">Last synced:</div>
+                    <div className="font-color-secondary">{lastSyncedText}</div>
                 </div>
 
                 {/* Sync with Zotero Toggle */}
