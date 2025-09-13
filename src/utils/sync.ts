@@ -30,6 +30,29 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
         // (collectionId ? item.inCollection(collectionId) : true);
 };
 
+export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
+    if (!item) return false;
+    
+    // Check if the item is a valid type
+    const isValidType = item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
+    if (!isValidType) return false;
+    
+    // Check if the item is deleted
+    if (item.deleted) return false;
+    if (item.isTopLevelItem()) return true;
+    
+    // For child items, check if the parent item is in the trash
+    try {
+        return !item.isInTrash();
+    } catch (error) {
+        // If the parent item is not loaded, get it from the library and key
+        if (!item.parentKey) return false;
+        const parent = await Zotero.Items.getByLibraryAndKeyAsync(item.libraryID, item.parentKey);
+        if (!parent) return false;
+        return !parent.isInTrash();
+    }
+};
+
 
 export async function extractDeleteData(item: Zotero.Item): Promise<DeleteData> {
     return {
