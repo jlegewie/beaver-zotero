@@ -43,6 +43,7 @@ const LibrarySelectionDialog: React.FC = () => {
 
         setIsConfirming(true);
         
+        // Confirming removal of libraries
         const removedLibraryIds = currentSyncLibraryIds.filter(id => !selectedLibraryIds.includes(id));
         if (removedLibraryIds.length > 0) {
             const confirmed = Zotero.getMainWindow().confirm(
@@ -55,6 +56,7 @@ const LibrarySelectionDialog: React.FC = () => {
             }
         }
         
+        // Update the libraries in the backend and locally
         try {
             const libraries = selectedLibraryIds
                 .map(id => {
@@ -71,41 +73,11 @@ const LibrarySelectionDialog: React.FC = () => {
                 })
                 .filter((library): library is ZoteroLibrary => library !== null);
 
-            // Using authorizeAccess to update the libraries
-            await accountService.authorizeAccess(
-                false, // Not part of initial onboarding
+            // Using updateSyncLibraries to update the libraries in the backend and locally
+            await accountService.updateSyncLibraries(
                 libraries, 
-                profileWithPlan.plan.processing_tier,
-                profileWithPlan.use_zotero_sync,
-                profileWithPlan.consent_to_share
-            );
-
-            // Optimistically update profile atom
-            setProfileWithPlan({ ...profileWithPlan, libraries });
-
-            // Update sync status for new and removed libraries
-            const newLibraryIds = selectedLibraryIds.filter(id => !currentSyncLibraryIds.includes(id));
-            setSyncStatus(prev => {
-                const next = { ...prev };
-
-                // Add new libraries
-                newLibraryIds.forEach(id => {
-                    const library = libraryStatistics.find(lib => lib.libraryID === id);
-                    next[id] = {
-                        libraryID: library?.libraryID,
-                        libraryName: library?.name || '',
-                        itemCount: library?.itemCount || 0,
-                        syncedCount: 0,
-                        status: (library?.itemCount ?? 0) > 0 ? 'idle' : 'completed',
-                    } as LibrarySyncStatus;
-                });
-
-                // Remove old libraries
-                removedLibraryIds.forEach(id => {
-                    delete next[id];
-                });
-
-                return next;
+            ).then(() => {
+                setProfileWithPlan({ ...profileWithPlan, libraries });
             });
 
             logger('Successfully updated synced libraries.');
@@ -154,7 +126,7 @@ const LibrarySelectionDialog: React.FC = () => {
 
             {/* Footer */}
             <div className="p-4 border-top-quinary display-flex flex-row justify-end gap-3">
-                <Button variant="outline" onClick={handleClose}>Cancel</Button>
+                {/* <Button variant="outline" onClick={handleClose}>Cancel</Button> */}
                 <Button 
                     variant="solid" 
                     onClick={handleConfirm}
