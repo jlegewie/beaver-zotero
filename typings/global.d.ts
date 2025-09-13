@@ -205,6 +205,13 @@ declare namespace Zotero {
                 library_ids: number[]
             ): Promise<import("../src/services/database").SyncLogsRecord | null>;
 
+            /**
+             * Deletes all sync log records for a specific library.
+             * @param user_id The user_id to filter by
+             * @param library_id The library_id to delete logs for
+             */
+            deleteSyncLogsForLibrary(user_id: string, library_id: number): Promise<void>;
+
         }
 
         /**
