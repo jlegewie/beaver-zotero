@@ -668,11 +668,13 @@ export async function syncZoteroDatabase(
 
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
-    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
+    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.libraryID));
+
+    logger(`Beaver Sync '${syncSessionId}': Syncing ${librariesToSync.length} libraries with IDs: ${libraryIds.join(', ')}`, 2);
 
     // Initialize sync status for all libraries
     for (const library of librariesToSync) {
-        updateSyncStatus(library.id, { status: 'in_progress', libraryName: library.name });
+        updateSyncStatus(library.libraryID, { status: 'in_progress', libraryName: library.name });
     }
 
     // Get user ID
@@ -712,7 +714,7 @@ export async function syncZoteroDatabase(
     
     // Sync each library
     for (const library of librariesToSync) {
-        const libraryID = library.id;
+        const libraryID = library.libraryID;
         const libraryName = library.name;
 
         try {
