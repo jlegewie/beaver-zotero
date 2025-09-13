@@ -51,14 +51,16 @@ const DialogContainer: React.FC = () => {
     const DialogContent = dialogs[activeDialog];
 
     return (
-        <div className="absolute inset-0 z-50 pointer-events-auto">
+        <div
+            className="absolute inset-0 z-50 pointer-events-auto"
+            onClick={handleClose}
+        >
             {/* Overlay backdrop */}
             <div
                 className="absolute inset-0 opacity-80 bg-quaternary"
-                onClick={handleClose}
             />
             {/* Dialog container */}
-            <div className="absolute inset-0 display-flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 display-flex items-center justify-center">
                 <DialogContent />
             </div>
         </div>
