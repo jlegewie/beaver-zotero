@@ -113,6 +113,7 @@ const OnboardingPage: React.FC = () => {
                     if (!library) return null;
                     return {
                         library_id: library.libraryID,
+                        group_id: library.isGroup ? library.id : null,
                         name: library.name,
                         is_group: library.isGroup,
                         type: library.libraryType,

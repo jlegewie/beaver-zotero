@@ -7,6 +7,7 @@ import { logger } from "./logger";
 
 export interface LibraryStatistics {
     libraryID: number;
+    groupID: number | null;
     name: string;
     isGroup: boolean;
     itemCount: number;
@@ -56,6 +57,7 @@ export const getLibraryStatistics = async (
     if (!includePageCounts) {
         const statistics = basicLibraryData.map((data) => ({
             libraryID: data.library.libraryID,
+            groupID: data.library.isGroup ? data.library.id : null,
             name: data.library.name,
             isGroup: data.library.isGroup,
             itemCount: data.regularItems.length,
@@ -131,6 +133,7 @@ export const getLibraryStatistics = async (
 
         return {
             libraryID: data.library.libraryID,
+            groupID: data.library.isGroup ? data.library.id : null,
             name: data.library.name,
             isGroup: data.library.isGroup,
             itemCount: data.regularItems.length,
@@ -203,6 +206,7 @@ export async function getLibraryItemCounts(libraryID: number): Promise<LibrarySt
     
     return {
         libraryID,
+        groupID: library.isGroup ? library.id : null,
         name: library.name,
         isGroup: library.isGroup,
         itemCount: regularItems || 0,

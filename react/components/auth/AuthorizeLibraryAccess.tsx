@@ -54,6 +54,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 // Create a simple array with just id, name, isGroup
                 const basicInfo = userLibraries.map(library => ({
                     id: library.libraryID,
+                    groupID: library.isGroup ? library.id : null,
                     name: library.name,
                     isGroup: library.isGroup
                 }));
