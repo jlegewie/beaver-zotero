@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Spinner, CSSIcon } from "../icons/icons";
-import { getLibraryStatistics, LibraryStatistics } from "../../../src/utils/libraries";
+import { getLibraryItemCounts, LibraryStatistics } from "../../../src/utils/libraries";
 import { profileBalanceAtom, planNameAtom} from "../../atoms/profile";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useAtomValue } from "jotai";
@@ -71,10 +71,12 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
     // Load detailed library statistics in a separate effect
     useEffect(() => {
+        if (libraries.length === 0) return;
         const fetchLibraryStatistics = async () => {
             try {
                 setIsLoading(true);
-                const stats = await getLibraryStatistics(false);
+                const promises = libraries.map(library => getLibraryItemCounts(library.id));
+                const stats = await Promise.all(promises);
                 setLibraryStatistics(stats);
                 setIsLoading(false);
             } catch (error) {
@@ -84,7 +86,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
         };
         
         fetchLibraryStatistics();
-    }, []);
+    }, [libraries]);
 
     // Calculate totals for selected libraries
     const selectedLibraryTotals = useMemo(() => {
