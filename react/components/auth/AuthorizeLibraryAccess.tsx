@@ -32,7 +32,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     const profileBalance = useAtomValue(profileBalanceAtom);
     const planName = useAtomValue(planNameAtom);
     // State for basic library information (available immediately)
-    const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
+    const [libraries, setLibraries] = useState<{ libraryID: number, name: string, isGroup: boolean }[]>([]);
     // Track which libraries are selected
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
     // Loading state
@@ -53,7 +53,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 
                 // Create a simple array with just id, name, isGroup
                 const basicInfo = userLibraries.map(library => ({
-                    id: library.libraryID,
+                    libraryID: library.libraryID,
                     groupID: library.isGroup ? library.id : null,
                     name: library.name,
                     isGroup: library.isGroup
@@ -61,7 +61,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 
                 setLibraries(basicInfo);
                 // Pre-select all libraries by default
-                setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.id));
+                setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.libraryID));
             } catch (error) {
                 console.error("Error loading library info:", error);
             }
@@ -76,7 +76,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
         const fetchLibraryStatistics = async () => {
             try {
                 setIsLoading(true);
-                const promises = libraries.map(library => getLibraryItemCounts(library.id));
+                const promises = libraries.map(library => getLibraryItemCounts(library.libraryID));
                 const stats = await Promise.all(promises);
                 setLibraryStatistics(stats);
                 setIsLoading(false);
@@ -143,14 +143,14 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '50px', maxHeight: '300px', overflowY: 'auto' }}>
                     {libraries.map((library) => {
                         // Find detailed statistics for this library if available
-                        const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
-                        const isSelected = selectedLibraryIds.includes(library.id);
+                        const statistics = libraryStatistics.find(stats => stats.libraryID === library.libraryID);
+                        const isSelected = selectedLibraryIds.includes(library.libraryID);
                         
                         return (
                             <div 
-                                key={library.id}
+                                key={library.libraryID}
                                 className="display-flex flex-col gap-2 p-2 rounded-md hover:bg-senary cursor-pointer"
-                                onClick={() => handleLibraryToggle(library.id)}
+                                onClick={() => handleLibraryToggle(library.libraryID)}
                             >
                                 <div className="display-flex flex-row gap-2 items-start">
 
@@ -158,7 +158,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                                         type="checkbox" 
                                         className="mr-1 scale-90"
                                         checked={isSelected}
-                                        onChange={() => handleLibraryToggle(library.id)}
+                                        onChange={() => handleLibraryToggle(library.libraryID)}
                                         onClick={handleCheckboxClick}
                                     />
 

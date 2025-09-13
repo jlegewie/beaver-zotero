@@ -12,7 +12,7 @@ const LibrarySelection: React.FC = () => {
     const currentSyncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     
     // State for basic library information
-    const [libraries, setLibraries] = useState<{ id: number, name: string, isGroup: boolean }[]>([]);
+    const [libraries, setLibraries] = useState<{ libraryID: number, name: string, isGroup: boolean }[]>([]);
     // State for library statistics
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
     // Track which libraries are selected
@@ -33,7 +33,7 @@ const LibrarySelection: React.FC = () => {
                 
                 // Create a simple array with just id, name, isGroup
                 const basicInfo = userLibraries.map(library => ({
-                    id: library.libraryID,
+                    libraryID: library.libraryID,
                     name: library.name,
                     isGroup: library.isGroup
                 }));
@@ -41,7 +41,7 @@ const LibrarySelection: React.FC = () => {
                 setLibraries(basicInfo);
                 // Initialize selection from current sync library IDs
                 setSelectedLibraryIds(currentSyncLibraryIds.filter(id => 
-                    basicInfo.some(lib => lib.id === id)
+                    basicInfo.some(lib => lib.libraryID === id)
                 ));
             } catch (error) {
                 logger(`LibrarySelection: Error loading library info: ${error}`);
@@ -143,21 +143,21 @@ const LibrarySelection: React.FC = () => {
             <div className="display-flex flex-col gap-2">
                 {libraries.map((library) => {
                     // Find detailed statistics for this library if available
-                    const statistics = libraryStatistics.find(stats => stats.libraryID === library.id);
-                    const isSelected = selectedLibraryIds.includes(library.id);
+                    const statistics = libraryStatistics.find(stats => stats.libraryID === library.libraryID);
+                    const isSelected = selectedLibraryIds.includes(library.libraryID);
                     
                     return (
                         <div 
-                            key={library.id}
+                            key={library.libraryID}
                             className="display-flex flex-col gap-2 p-2 rounded-md hover:bg-senary cursor-pointer"
-                            onClick={() => handleLibraryToggle(library.id)}
+                            onClick={() => handleLibraryToggle(library.libraryID)}
                         >
                             <div className="display-flex flex-row gap-2 items-start">
                                 <input
                                     type="checkbox" 
                                     className="mr-1 scale-90"
                                     checked={isSelected}
-                                    onChange={() => handleLibraryToggle(library.id)}
+                                    onChange={() => handleLibraryToggle(library.libraryID)}
                                     onClick={handleCheckboxClick}
                                 />
 

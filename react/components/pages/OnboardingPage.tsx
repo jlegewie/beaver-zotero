@@ -121,7 +121,7 @@ const OnboardingPage: React.FC = () => {
                     } as ZoteroLibrary;
                 })
                 .filter(library => library !== null);
-            
+            logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
             await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync, consentToShare);
 
             // Update local state
