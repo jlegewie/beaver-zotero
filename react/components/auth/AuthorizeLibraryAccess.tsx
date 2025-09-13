@@ -1,11 +1,12 @@
-import React from "react";
+import React, { Dispatch, SetStateAction } from "react";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import ConsentToggle from "../preferences/ConsentToggle";
 import LibrarySelection from "../LibrarySelection";
 
 interface AuthorizeLibraryAccessProps {
-    onSelectionChange?: (selectedLibraries: number[]) => void;
+    selectedLibraryIds: number[];
+    setSelectedLibraryIds: Dispatch<SetStateAction<number[]>>;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
     useZoteroSync: boolean;
@@ -16,7 +17,8 @@ interface AuthorizeLibraryAccessProps {
 }
 
 const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
-    onSelectionChange,
+    selectedLibraryIds,
+    setSelectedLibraryIds,
     libraryStatistics,
     setLibraryStatistics,
     useZoteroSync,
@@ -33,7 +35,8 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
                 {/* Library Selection */}
                 <LibrarySelection
-                    onSelectionChange={onSelectionChange}
+                    selectedLibraryIds={selectedLibraryIds}
+                    setSelectedLibraryIds={setSelectedLibraryIds}
                     libraryStatistics={libraryStatistics}
                     setLibraryStatistics={setLibraryStatistics}
                 />

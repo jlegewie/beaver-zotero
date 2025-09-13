@@ -60,11 +60,9 @@ const OnboardingPage: React.FC = () => {
         setUseZoteroSync(syncEnabled);
     }, []);
 
-    // Handle library selection change
-    const handleLibrarySelectionChange = (libraryIds: number[]) => {
-        setSelectedLibraryIds(libraryIds);
-        setIsLibrarySelectionValid(libraryIds.length > 0);
-    };
+    useEffect(() => {
+        setIsLibrarySelectionValid(selectedLibraryIds.length > 0);
+    }, [selectedLibraryIds]);
 
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
@@ -230,7 +228,8 @@ const OnboardingPage: React.FC = () => {
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
                     <AuthorizeLibraryAccess
-                        onSelectionChange={handleLibrarySelectionChange}
+                        selectedLibraryIds={selectedLibraryIds}
+                        setSelectedLibraryIds={setSelectedLibraryIds}
                         libraryStatistics={libraryStatistics}
                         setLibraryStatistics={setLibraryStatistics}
                         disableSyncToggle={!isLibrarySynced(1)}

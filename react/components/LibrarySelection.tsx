@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, Dispatch, SetStateAction } from "react";
 import { Spinner, CSSIcon } from "./icons/icons";
 import { getLibraryItemCounts, LibraryStatistics } from "../../src/utils/libraries";
 import { profileBalanceAtom, planNameAtom} from "../atoms/profile";
@@ -6,29 +6,27 @@ import { useAtomValue } from "jotai";
 import Button from "./ui/Button";
 
 interface LibrarySelectionProps {
-    onSelectionChange?: (selectedLibraries: number[]) => void;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
+    selectedLibraryIds: number[];
+    setSelectedLibraryIds: Dispatch<SetStateAction<number[]>>;
+    initialSelection?: number[];
 }
 
 const LibrarySelection: React.FC<LibrarySelectionProps> = ({
-    onSelectionChange,
     libraryStatistics,
-    setLibraryStatistics
+    setLibraryStatistics,
+    selectedLibraryIds,
+    setSelectedLibraryIds,
+    initialSelection = [],
 }) => {
     // Plan and profile balance
     const profileBalance = useAtomValue(profileBalanceAtom);
     const planName = useAtomValue(planNameAtom);
     // State for basic library information (available immediately)
     const [libraries, setLibraries] = useState<{ libraryID: number, name: string, isGroup: boolean }[]>([]);
-    // Track which libraries are selected
-    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
     // Loading state
     const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        onSelectionChange?.(selectedLibraryIds);
-    }, [isLoading]);
 
     // Load basic library info immediately
     useEffect(() => {
@@ -48,8 +46,12 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
                 }));
                 
                 setLibraries(basicInfo);
-                // Pre-select all libraries by default
-                setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.libraryID));
+                // Pre-select based on initialSelection or default to non-group libraries
+                if (initialSelection.length > 0) {
+                    setSelectedLibraryIds(initialSelection);
+                } else {
+                    setSelectedLibraryIds(basicInfo.filter(lib => !lib.isGroup).map(lib => lib.libraryID));
+                }
             } catch (error) {
                 console.error("Error loading library info:", error);
             }
@@ -79,7 +81,7 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
 
     // Calculate totals for selected libraries
     const selectedLibraryTotals = useMemo(() => {
-        return libraryStatistics
+        return (libraryStatistics || [])
             .filter(lib => selectedLibraryIds.includes(lib.libraryID))
             .reduce((totals, lib) => {
                 return {
@@ -103,15 +105,9 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
         setSelectedLibraryIds(prev => {
             const newSelection = prev.includes(libraryId)
                 ? prev.filter(id => id !== libraryId) // Remove if already selected
-                : [...prev, libraryId]; // Add if not selected
-            
-            // Call the parent component's callback with the new selection
-            if (onSelectionChange) {
-                onSelectionChange(newSelection);
-            }
-            
-            return newSelection;
-        });
+                : [...prev, libraryId]; // Add if not selected    
+                return newSelection;
+            });
     };
 
     // Prevent click propagation from checkbox to parent div
