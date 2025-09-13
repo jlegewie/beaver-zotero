@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 import { fileStatusSummaryAtom } from '../../atoms/files';
 import { CancelIcon, InformationCircleIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import PaginatedFailedProcessingList from './PaginatedFailedProcessingList';
-import { useAtomValue } from 'jotai';
 
 /**
  * Skipped files dialog component
@@ -32,52 +31,40 @@ const SkippedFilesDialog: React.FC = () => {
         setIsVisible(false);
     };
 
-    if (!isVisible) return null;
-
     const skippedFilesCount = fileStats.planLimitProcessingCount + fileStats.unsupportedFileCount;
 
     return (
-        <div className="absolute inset-0 z-50">
-            {/* Overlay backdrop */}
-            <div
-                className="absolute inset-0 opacity-80 bg-quaternary"
-                onClick={handleClose}
-            />
-            {/* Dialog container */}
-            <div className="absolute inset-0 display-flex items-center justify-center pointer-events-none">
-                <div
-                    className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full overflow-hidden"
-                    style={{
-                        background: 'var(--material-mix-quarternary)',
-                        border: '1px solid var(--fill-quinary)',
-                        borderRadius: '8px',
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    {/* Header */}
-                    <div className="display-flex flex-row items-center justify-between p-4 pb-3">
-                        <div className="text-lg font-semibold">{skippedFilesCount > 0 ? `${skippedFilesCount} Skipped Files` : 'Skipped Files'}</div>
-                        <IconButton
-                            icon={CancelIcon}
-                            onClick={handleClose}
-                            className="scale-12"
-                            ariaLabel="Close dialog"
-                        />
-                    </div>
+        <div
+            className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full overflow-hidden pointer-events-auto"
+            style={{
+                background: 'var(--material-mix-quarternary)',
+                border: '1px solid var(--fill-quinary)',
+                borderRadius: '8px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+        >
+            {/* Header */}
+            <div className="display-flex flex-row items-center justify-between p-4 pb-3">
+                <div className="text-lg font-semibold">{skippedFilesCount > 0 ? `${skippedFilesCount} Skipped Files` : 'Skipped Files'}</div>
+                <IconButton
+                    icon={CancelIcon}
+                    onClick={handleClose}
+                    className="scale-12"
+                    ariaLabel="Close dialog"
+                />
+            </div>
 
-                    {/* Content */}
-                    <div className="px-4 pb-4 display-flex flex-col gap-4">
-                        <PaginatedFailedProcessingList
-                            statuses={['plan_limit', 'unsupported_file']}
-                            count={skippedFilesCount}
-                            title="Skipped files"
-                            tooltipTitle="Reasons for skipping files"
-                            icon={InformationCircleIcon}
-                            collapseable={false}
-                            maxHeight="250px"
-                        />
-                    </div>
-                </div>
+            {/* Content */}
+            <div className="px-4 pb-4 display-flex flex-col gap-4">
+                <PaginatedFailedProcessingList
+                    statuses={['plan_limit', 'unsupported_file']}
+                    count={skippedFilesCount}
+                    title="Skipped files"
+                    tooltipTitle="Reasons for skipping files"
+                    icon={InformationCircleIcon}
+                    collapseable={false}
+                    maxHeight="250px"
+                />
             </div>
         </div>
     );
