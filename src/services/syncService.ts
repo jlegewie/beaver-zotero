@@ -190,6 +190,15 @@ export class SyncService extends ApiService {
     }
 
     /**
+     * Deletes all data for a given library from the backend.
+     * @param libraryId The Zotero library ID
+     * @returns Promise that resolves when deletion is complete
+     */
+    async deleteAllLibraryData(libraryId: number): Promise<void> {
+        return this.delete(`/api/v1/sync/libraries/${libraryId}`);
+    }
+
+    /**
      * Gets paginated sync data for a library
      * @param libraryId The Zotero library ID
      * @param updateSinceLibraryVersion Version to sync from (null for full sync)
