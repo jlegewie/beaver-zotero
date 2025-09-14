@@ -10,11 +10,10 @@ import { syncLibraryIdsAtom, profileWithPlanAtom } from '../../atoms/profile';
 import { logger } from '../../../src/utils/logger';
 import { accountService } from '../../../src/services/accountService';
 import { ZoteroLibrary } from '../../types/zotero';
-import { syncStatusAtom, LibrarySyncStatus } from '../../atoms/sync';
+import { syncZoteroDatabase, deleteLibraryDataFromBackend } from '../../../src/utils/sync';
 
 const LibrarySelectionDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isLibrarySelectionDialogVisibleAtom);
-    const setSyncStatus = useSetAtom(syncStatusAtom);
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const currentSyncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
@@ -36,6 +35,7 @@ const LibrarySelectionDialog: React.FC = () => {
     }, [setIsVisible]);
     
     const handleConfirm = async () => {
+        logger(`LibrarySelectionDialog: Confirming library selection update.`);
         if (!profileWithPlan) {
             logger('Profile not loaded, aborting library update.', 1);
             return;
@@ -56,8 +56,8 @@ const LibrarySelectionDialog: React.FC = () => {
             }
         }
         
-        // Update the libraries in the backend and locally
         try {
+            // Update sync libraries (backend and locally)
             const libraries = selectedLibraryIds
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
@@ -72,7 +72,7 @@ const LibrarySelectionDialog: React.FC = () => {
                     } as ZoteroLibrary;
                 })
                 .filter((library): library is ZoteroLibrary => library !== null);
-
+            
             // Using updateSyncLibraries to update the libraries in the backend and locally
             await accountService.updateSyncLibraries(
                 libraries, 
@@ -80,11 +80,20 @@ const LibrarySelectionDialog: React.FC = () => {
                 setProfileWithPlan({ ...profileWithPlan, libraries });
             });
 
-            logger('Successfully updated synced libraries.');
+            // Delete data for removed libraries
+            if (removedLibraryIds.length > 0) {
+                logger(`LibrarySelectionDialog: Removing ${removedLibraryIds.length} libraries from sync.`);
+                await Promise.all(removedLibraryIds.map(id => deleteLibraryDataFromBackend(id)));
+            }
+
+            // Sync the libraries
+            await syncZoteroDatabase(selectedLibraryIds);
+
+            logger('LibrarySelectionDialog: Successfully updated synced libraries.');
             handleClose();
 
         } catch (error) {
-            logger(`Failed to update synced libraries: ${error}`, 1);
+            logger(`LibrarySelectionDialog: Failed to update synced libraries: ${error}`, 1);
             Zotero.logError(error as Error);
             // Consider reverting optimistic updates here if needed
         } finally {
