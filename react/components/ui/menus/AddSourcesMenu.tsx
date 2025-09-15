@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon } from '../../icons/icons';
-import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../../../src/services/searchService';
+import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../../../utils/sourceUtils';
 import { createSourceFromItem } from '../../../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
@@ -242,7 +242,8 @@ const AddSourcesMenu: React.FC<{
                     customContent: (
                         <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
                             <div className="display-flex flex-row gap-2">
-                                <CSSIcon name="library" className="icon-16" />
+                                <CSSIcon name="library" className="icon-16 font-color-secondary" />
+                                {/* <Icon icon={LibraryIcon} className="scale-12 mt-020" /> */}
                                 <div>Select Library</div>
                             </div>
                             <div className="flex-1"/>
