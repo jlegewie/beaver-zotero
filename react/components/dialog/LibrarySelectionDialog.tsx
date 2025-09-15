@@ -83,7 +83,7 @@ const LibrarySelectionDialog: React.FC = () => {
             }
 
             // Sync new libraries to Zotero
-            await syncZoteroDatabase(addedLibraryIds);
+            // await syncZoteroDatabase(addedLibraryIds);
 
             // Using updateSyncLibraries to update the libraries in the backend
             await accountService.updateSyncLibraries(libraries);
@@ -136,14 +136,21 @@ const LibrarySelectionDialog: React.FC = () => {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-top-quinary display-flex flex-row justify-end gap-3">
+            <div className="p-3 display-flex flex-row">
+                {isConfirming && (
+                    <div className="text-sm text-tertiary">
+                        Updating libraries can take a moment...
+                    </div>
+                )}
+                <div className="flex-1" />
+
                 {/* <Button variant="outline" onClick={handleClose}>Cancel</Button> */}
                 <Button 
                     variant="solid" 
                     onClick={handleConfirm}
-                    disabled={isConfirming}
+                    loading={isConfirming}
                 >
-                    {isConfirming ? 'Confirming...' : 'Confirm'}
+                    {isConfirming ? 'Updating...' : 'Confirm'}
                 </Button>
             </div>
         </div>
