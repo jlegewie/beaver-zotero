@@ -93,7 +93,8 @@ const AddSourcesMenu: React.FC<{
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
     const setPopupMessage = useSetAtom(addPopupMessageAtom);
-
+    const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
+    
     // Add ref for tracking the current search request
     const currentSearchRef = useRef<string>('');
 
@@ -340,7 +341,6 @@ const AddSourcesMenu: React.FC<{
             
             if (!exists) {
                 // Check attachment limit before adding
-                const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
                 const maxUserAttachments = isAppKeyModel ? planFeatures.maxUserAttachments : getPref("maxAttachments");
                 const availableAttachments = maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);
                 
