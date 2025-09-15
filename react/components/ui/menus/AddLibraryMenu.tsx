@@ -2,8 +2,9 @@ import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibraryIcon, Icon, CSSIcon, TickIcon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { syncLibraryIdsAtom } from '../../../atoms/profile';
+import { currentLibraryIdsAtom } from '../../../atoms/input';
 
 interface AddLibraryMenuProps {
     showText: boolean;
@@ -27,6 +28,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
     const [allLibraries, setAllLibraries] = useState<Zotero.Library[]>([]);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
 
     const createMenuItemFromLibrary = useCallback((
         library: Zotero.Library,
@@ -44,6 +46,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
             label: library.name,
             onClick: () => {
                 console.log('Selected library:', library.name);
+                setCurrentLibraryIds([library.libraryID]);
             },
             customContent: (
                 <div className={'display-flex flex-row gap-2 items-start min-w-0'}>
