@@ -43,8 +43,11 @@ const LibrarySelectionDialog: React.FC = () => {
 
         setIsConfirming(true);
         
-        // Confirming removal of libraries
+        // Get removed and added library IDs
         const removedLibraryIds = currentSyncLibraryIds.filter(id => !selectedLibraryIds.includes(id));
+        const addedLibraryIds = selectedLibraryIds.filter(id => !currentSyncLibraryIds.includes(id));
+
+        // Confirming removal of libraries
         if (removedLibraryIds.length > 0) {
             const confirmed = Zotero.getMainWindow().confirm(
                 `Are you sure you want to remove ${removedLibraryIds.length} librarie${removedLibraryIds.length === 1 ? '' : 's'} from syncing? This will remove all associated data from Beaver.`
@@ -57,7 +60,7 @@ const LibrarySelectionDialog: React.FC = () => {
         }
         
         try {
-            // Update sync libraries (backend and locally)
+            // Update list of libraries to sync
             const libraries = selectedLibraryIds
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
@@ -72,22 +75,21 @@ const LibrarySelectionDialog: React.FC = () => {
                     } as ZoteroLibrary;
                 })
                 .filter((library): library is ZoteroLibrary => library !== null);
-            
-            // Using updateSyncLibraries to update the libraries in the backend and locally
-            await accountService.updateSyncLibraries(
-                libraries, 
-            ).then(() => {
-                setProfileWithPlan({ ...profileWithPlan, libraries });
-            });
 
-            // Delete data for removed libraries
+            // Delete data for removed libraries from backend
             if (removedLibraryIds.length > 0) {
                 logger(`LibrarySelectionDialog: Removing ${removedLibraryIds.length} libraries from sync.`);
                 await Promise.all(removedLibraryIds.map(id => deleteLibraryDataFromBackend(id)));
             }
 
-            // Sync the libraries
-            await syncZoteroDatabase(selectedLibraryIds);
+            // Sync new libraries to Zotero
+            await syncZoteroDatabase(addedLibraryIds);
+
+            // Using updateSyncLibraries to update the libraries in the backend
+            await accountService.updateSyncLibraries(libraries);
+
+            // Update local state (triggers database sync)
+            setProfileWithPlan({ ...profileWithPlan, libraries });
 
             logger('LibrarySelectionDialog: Successfully updated synced libraries.');
             handleClose();
