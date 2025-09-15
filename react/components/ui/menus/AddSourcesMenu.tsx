@@ -16,6 +16,7 @@ import { planFeaturesAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
 import { threadAttachmentCountAtom } from '../../../atoms/threads';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { isAppKeyModelAtom } from '../../../atoms/models';
+import { store } from '../../../store';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -202,10 +203,11 @@ const AddSourcesMenu: React.FC<{
             query = query.replace(/ ?(\d{1,4})$/, ' $1');
             query = query.trim();
             
-            logger(`AddSourcesMenu.handleSearch: Searching for ${query}`)
-            
             // Search Zotero items
-            const resultsItems = await searchTitleCreatorYear(query, syncLibraryIds);
+            const currentLibraryIds = store.get(currentLibraryIdsAtom);
+            const searchLibraryIds = currentLibraryIds.length > 0 ? currentLibraryIds : syncLibraryIds;
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}`)
+            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds);
             
             // Check if this search was cancelled
             if (searchId !== currentSearchRef.current) {
