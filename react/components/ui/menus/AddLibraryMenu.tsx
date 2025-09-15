@@ -45,8 +45,11 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
         return {
             label: library.name,
             onClick: () => {
-                console.log('Selected library:', library.name);
                 setCurrentLibraryIds([library.libraryID]);
+                // Delay the onClose call to ensure focus happens after menu is fully closed
+                setTimeout(() => {
+                    onClose();
+                }, 5);
             },
             customContent: (
                 <div className={'display-flex flex-row gap-2 items-start min-w-0'}>
@@ -144,7 +147,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
                 onSearch={() => {}}
                 noResultsText="No libraries found"
                 placeholder="Search libraries"
-                closeOnSelect={false}
+                closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
             />
