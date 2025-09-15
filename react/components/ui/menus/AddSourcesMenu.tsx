@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon } from '../../icons/icons';
+import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem, searchService } from '../../../../src/services/searchService';
 import { getDisplayNameFromItem, isSourceValid } from '../../../utils/sourceUtils';
 import { createSourceFromItem } from '../../../utils/sourceUtils';
@@ -12,7 +12,7 @@ import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync } from '../../../../src/utils/zoteroUtils';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
-import { planFeaturesAtom } from '../../../atoms/profile';
+import { planFeaturesAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
 import { threadAttachmentCountAtom } from '../../../atoms/threads';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { isAppKeyModelAtom } from '../../../atoms/models';
@@ -91,6 +91,7 @@ const AddSourcesMenu: React.FC<{
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
     const setPopupMessage = useSetAtom(addPopupMessageAtom);
     const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
@@ -233,6 +234,24 @@ const AddSourcesMenu: React.FC<{
         if (isMenuOpen) {
             const getMenuItems = async () => {
 
+                // Select Libraries menu
+                const librariesHeader = { label: "Select Library", isGroupHeader: true, onClick: () => {} };
+                const selectLibrariesMenuItem = {
+                    label: `"Select Library"`,
+                    onClick: async () => {},
+                    customContent: (
+                        <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                            <div className="display-flex flex-row gap-2">
+                                <CSSIcon name="library" className="icon-16" />
+                                <div>Select Library</div>
+                            </div>
+                            <div className="flex-1"/>
+                            <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
+                        </div>
+                    )
+                };
+                const menuItemsLibraries = syncLibraryIds.length > 1 ? [selectLibrariesMenuItem, librariesHeader] : [];
+
                 // Current sources
                 const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
                 const items = await Promise.all(
@@ -274,10 +293,12 @@ const AddSourcesMenu: React.FC<{
                         .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
                 );
 
-                const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentItemsHeader] : [];
+                const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0
+                    ? [...menuItemsRecentItems, recentItemsHeader]
+                    : [];
 
                 // Set menu items
-                setMenuItems([...menuItemsCurrentSourcesWithHeader,...menuItemsRecentItemsWithHeader]);
+                setMenuItems([...menuItemsLibraries, ...menuItemsCurrentSourcesWithHeader,...menuItemsRecentItemsWithHeader]);
             }
             getMenuItems();
         }
