@@ -205,7 +205,7 @@ const AddSourcesMenu: React.FC<{
             logger(`AddSourcesMenu.handleSearch: Searching for ${query}`)
             
             // Search Zotero items
-            const resultsItems = await searchTitleCreatorYear(query, true);
+            const resultsItems = await searchTitleCreatorYear(query, syncLibraryIds);
             
             // Check if this search was cancelled
             if (searchId !== currentSearchRef.current) {
