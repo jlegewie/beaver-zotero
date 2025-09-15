@@ -35,7 +35,7 @@ const MessageAttachmentDisplay = ({
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
                 // showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentSources.length == 0 && !currentReaderAttachment}
+                showText={currentSources.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
