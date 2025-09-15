@@ -13,6 +13,13 @@ import { isAppKeyModelAtom } from "./models";
 const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 /**
+* Current library IDs
+* Search will be limited to these libraries. Currently only supporting single library.
+* Array is used to support multiple libraries in the future. Empty array means all libraries.
+*/
+export const currentLibraryIdsAtom = atom<number[]>([]);
+
+/**
 * Current user message and sources
 */
 export const currentMessageContentAtom = atom<string>('');
