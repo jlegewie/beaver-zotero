@@ -20,6 +20,17 @@ const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelecti
 export const currentLibraryIdsAtom = atom<number[]>([]);
 
 /**
+* Remove a library from the current selection
+*/
+export const removeLibraryIdAtom = atom(
+    null,
+    (get, set, libraryId: number) => {
+        const currentIds = get(currentLibraryIdsAtom);
+        set(currentLibraryIdsAtom, currentIds.filter(id => id !== libraryId));
+    }
+);
+
+/**
 * Current user message and sources
 */
 export const currentMessageContentAtom = atom<string>('');
