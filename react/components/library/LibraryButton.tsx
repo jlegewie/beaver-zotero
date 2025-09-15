@@ -3,6 +3,7 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon } from '../icons/icons';
 import { removeLibraryIdAtom, currentLibraryIdsAtom } from '../../atoms/input';
 import { truncateText } from '../../utils/stringUtils';
+import { selectLibrary } from '../../../src/utils/selectItem';
 
 const MAX_LIBRARYBUTTON_TEXT_LENGTH = 20;
 
@@ -27,6 +28,13 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();
         removeLibraryId(library.libraryID);
+    };
+
+    const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+        e.stopPropagation();
+        if (!disabled) {
+            selectLibrary(library);
+        }
     };
 
     const getIconElement = () => {
@@ -67,6 +75,7 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
             onMouseLeave={() => setIsHovered(false)}
             className={getButtonClasses()}
             disabled={disabled}
+            onClick={handleButtonClick}
             {...rest}
         >
             {getIconElement()}

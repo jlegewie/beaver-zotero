@@ -112,3 +112,26 @@ async function switchToLibraryRoot(libraryId: number) {
         return false;
     }
 }
+
+/**
+ * Selects a library in the Zotero collections view
+ * @param {Zotero.Library} library - The library to select
+ * @returns {Promise<boolean>} - True if successfully selected, false otherwise
+ */
+export async function selectLibrary(library: Zotero.Library) {
+    if (!library) return false;
+
+    const zoteroPane = Zotero.getActiveZoteroPane();
+    if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
+
+    try {
+        const success = await zoteroPane.collectionsView.selectLibrary(library.libraryID);
+        if (success) {
+            await zoteroPane.itemsView.waitForLoad();
+        }
+        return success;
+    } catch (error) {
+        logger(`Error selecting library ${library.libraryID}: ${error}`, 2);
+        return false;
+    }
+}
