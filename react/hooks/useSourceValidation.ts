@@ -9,6 +9,7 @@ import {
 } from '../../src/services/sourceValidationManager';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
+import { syncLibraryIdsAtom } from '../atoms/profile';
 
 /**
  * Hook options for source validation
@@ -39,6 +40,7 @@ export function useSourceValidation({
     });
 
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
     // Validation function
     const validateSource = useCallback(async (force = false) => {
@@ -75,7 +77,7 @@ export function useSourceValidation({
                 isValidating: false
             }));
         }
-    }, [source, validationType, forceRefresh, isAuthenticated]);
+    }, [source, validationType, forceRefresh, isAuthenticated, syncLibraryIds]);
 
     // Run validation when dependencies change
     useEffect(() => {

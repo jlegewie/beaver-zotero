@@ -299,8 +299,12 @@ class SourceValidationManager {
                 }
 
                 if (this.isCacheValid(cachedEntry, currentFileHash)) {
-                    logger(`SourceValidationManager: Returning cached validation for ${source.itemKey}`, 4);
-                    return cachedEntry.result;
+                    const localValidationResult = await this.performLocalValidation(source);
+                    if (localValidationResult.isValid == cachedEntry.result.isValid) {
+                        logger(`SourceValidationManager: Returning cached validation for ${source.itemKey}`, 4);
+                        return cachedEntry.result;
+                    }
+                    logger(`SourceValidationManager: Cached validation is different from local validation for ${source.itemKey}`, 4);
                 }
             }
         }
