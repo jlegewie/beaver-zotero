@@ -21,12 +21,12 @@ export async function searchTitleCreatorYear(
 
     try {
         const search = new Zotero.Search();
-        search.addCondition("joinMode", "any");
+        search.addCondition('joinMode', 'any');
         
         // Set the search scope to the currently selected library.
         // Add library conditions as non-required (will be OR-ed together)
-        for (const libraryID of libraryIds || []) {
-            search.addCondition("libraryID", "is", libraryID, false); // false = not required
+        for (const libraryID of libraryIds ?? []) {
+            search.addCondition('libraryID', 'is', libraryID, false); // false = not required
         }
 
         // Use 'quicksearch-titleCreatorYear' condition.
