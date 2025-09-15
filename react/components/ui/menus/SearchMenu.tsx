@@ -287,27 +287,29 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             // Focus the input
             inputRef.current?.focus();
 
-            // If we have items, highlight first or last depending on direction
-            if (menuItems.length > 0) {
+            const displayOrderMenuItems = verticalPosition === 'above' 
+                ? [...menuItems].reverse() 
+                : menuItems;
+
+            if (displayOrderMenuItems.length > 0) {
                 let initialIndex = -1;
                 
                 if (verticalPosition === 'above') {
-                    // Start from the bottom (last in normal order)
-                    initialIndex = menuItems.length - 1;
-                    // Skip any group headers
-                    while (initialIndex >= 0 && menuItems[initialIndex].isGroupHeader) {
+                    // For 'above', we want the bottom-most item, which is the last in the displayed list.
+                    initialIndex = displayOrderMenuItems.length - 1;
+                    while (initialIndex >= 0 && displayOrderMenuItems[initialIndex].isGroupHeader) {
                         initialIndex--;
                     }
                 } else {
-                    // Start from the top (first in normal order)
+                    // For 'below', we want the top-most item, which is the first in the displayed list.
                     initialIndex = 0;
-                    // Skip any group headers
-                    while (initialIndex < menuItems.length && menuItems[initialIndex].isGroupHeader) {
+                    while (initialIndex < displayOrderMenuItems.length && displayOrderMenuItems[initialIndex].isGroupHeader) {
                         initialIndex++;
                     }
                 }
                 
-                setFocusedIndex(initialIndex >= 0 ? initialIndex : -1);
+                const isValidIndex = initialIndex >= 0 && initialIndex < displayOrderMenuItems.length;
+                setFocusedIndex(isValidIndex ? initialIndex : -1);
             } else {
                 setFocusedIndex(-1);
             }
