@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { isLibrarySelectionDialogVisibleAtom } from '../../atoms/ui';
 import { CancelIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
@@ -10,7 +10,7 @@ import { syncLibraryIdsAtom, profileWithPlanAtom } from '../../atoms/profile';
 import { logger } from '../../../src/utils/logger';
 import { accountService } from '../../../src/services/accountService';
 import { ZoteroLibrary } from '../../types/zotero';
-import { syncZoteroDatabase, deleteLibraryDataFromBackend } from '../../../src/utils/sync';
+import { deleteLibraryDataFromBackend } from '../../../src/utils/sync';
 
 const LibrarySelectionDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isLibrarySelectionDialogVisibleAtom);
