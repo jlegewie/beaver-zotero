@@ -144,7 +144,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         <>
             <button
                 className="variant-outline"
-                style={{ height: '22px !important', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                style={{  paddingRight: '4px', paddingLeft: '4px'}}
                 ref={buttonRef}
                 onClick={handleButtonClick}
                 disabled={disabled}
