@@ -12,8 +12,7 @@ import IconButton from '../ui/IconButton';
 import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom } from '../../atoms/sync';
-import { CancelIcon, SpinnerIcon } from '../status/icons';
-import Button from '../ui/Button';
+import { CancelIcon } from '../status/icons';
 
 type LastSyncedMap = Record<number, string>;
 
