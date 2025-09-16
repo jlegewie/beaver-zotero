@@ -771,6 +771,9 @@ export async function syncZoteroDatabase(
             // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
 
+            // Mark library as in-progress with the correct syncType
+            updateSyncStatus(libraryID, { status: 'in_progress', libraryName, syncType: isInitialSync ? 'initial' : 'verification' });
+
             logger(`Beaver Sync '${syncSessionId}':   Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
 
             if(!isInitialSync && syncMethod == 'version' && lastSyncVersion == library.libraryVersion) {
@@ -798,7 +801,8 @@ export async function syncZoteroDatabase(
                 libraryName,
                 itemCount,
                 syncedCount: 0,
-                status: 'in_progress'
+                status: 'in_progress',
+                syncType: isInitialSync ? 'initial' : 'verification'
             } as LibrarySyncStatus;
 
             logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete`, 3);
@@ -808,8 +812,8 @@ export async function syncZoteroDatabase(
                 updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
             }
-            updateSyncStatus(libraryID, libraryInitialStatus);            
-            
+            updateSyncStatus(libraryID, libraryInitialStatus);
+
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
             if(!syncType) syncType = isInitialSync ? 'initial' : 'verification';
