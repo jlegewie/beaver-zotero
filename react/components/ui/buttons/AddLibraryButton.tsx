@@ -152,7 +152,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
             >
-                <Icon icon={PlusSignIcon} className="scale-12" />
+                <Icon icon={PlusSignIcon} className="scale-11" />
                 <span>Add Library</span>
             </button>
             <SearchMenu

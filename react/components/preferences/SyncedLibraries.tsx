@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, PlusSignIcon, TickIcon } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -193,7 +193,7 @@ const SyncedLibraries: React.FC = () => {
             {/* Header */}
             <div className="display-flex flex-row items-center justify-between">
                 <div className="display-flex flex-row items-center gap-2">
-                    <Icon icon={LibraryIcon} className="font-color-secondary" />
+                    <Icon icon={LibraryIcon} className="font-color-secondary scale-11" />
                     <div className="font-color-secondary">Synced Libraries</div>
                 </div>
                 <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length} />
