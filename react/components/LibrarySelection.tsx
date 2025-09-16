@@ -183,7 +183,7 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
             {planName !== 'free' && (
                 <div className="font-color-tertiary text-sm px-2">
                     {/* Your beta account includes unlimited metadata and related reference search. */}
-                    {note ? note : 'Full-document search in beta supports 75,000 pages total, with PDFs up to 500 pages (50MB each).'}
+                    {note ? note : 'Beta accounts include unlimited metadata and related reference search. Full-document search is limited to 75,000 pages total, with PDFs up to 500 pages (50MB) per file.'}
                 </div>
             )}
             
