@@ -69,3 +69,22 @@ export const isSyncCompleteAtom = atom<boolean>((get) => {
     const librarySyncProgress = get(syncStatusSummaryAtom);
     return librarySyncProgress.completed && !librarySyncProgress.anyFailed;
 });
+
+
+/*
+ * Deletions tracking
+ */
+export type DeletionStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type DeletionJob = {
+  libraryID: number;
+  name: string;
+  isGroup: boolean;
+  startedAt: string;           // ISO
+  status: DeletionStatus;
+  msgId?: number;              // from backend queue
+  sessionId?: string;          // Unique ID for the deletion job
+  lastCheckedAt?: string;      // ISO
+  error?: string;
+};
+
+export const deletionJobsAtom = atom<Record<number, DeletionJob>>({});
