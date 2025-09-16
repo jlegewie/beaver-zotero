@@ -6,7 +6,7 @@ import IconButton from '../ui/IconButton';
 import Button from '../ui/Button';
 import LibrarySelection from '../LibrarySelection';
 import { LibraryStatistics } from '../../../src/utils/libraries';
-import { syncLibraryIdsAtom, profileWithPlanAtom } from '../../atoms/profile';
+import { syncLibraryIdsAtom, profileWithPlanAtom, profileBalanceAtom } from '../../atoms/profile';
 import { logger } from '../../../src/utils/logger';
 import { accountService } from '../../../src/services/accountService';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -16,6 +16,7 @@ const LibrarySelectionDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isLibrarySelectionDialogVisibleAtom);
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const currentSyncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const profileBalance = useAtomValue(profileBalanceAtom);
 
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>(currentSyncLibraryIds);
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
@@ -132,6 +133,7 @@ const LibrarySelectionDialog: React.FC = () => {
                     setSelectedLibraryIds={setSelectedLibraryIds}
                     libraryStatistics={libraryStatistics}
                     setLibraryStatistics={setLibraryStatistics}
+                    note={`You have ${profileBalance.pagesRemaining.toLocaleString()} pages remaining for full-document search. Removing a library will not free up pages.`}
                 />
             </div>
 
