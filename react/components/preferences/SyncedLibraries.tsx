@@ -270,7 +270,7 @@ const SyncedLibraries: React.FC = () => {
                                                 variant="ghost-secondary"
                                                 ariaLabel="Sync Library"
                                                 disabled={!!syncing || !!deleting}
-                                                title="Sync"
+                                                title="Sync Library with Beaver"
                                                 icon={!syncingComplete ? SyncIcon : TickIcon}
                                                 iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
                                                 className="scale-11"
@@ -278,9 +278,9 @@ const SyncedLibraries: React.FC = () => {
                                             <IconButton
                                                 onClick={() => handleDeleteOne(lib.libraryID)}
                                                 variant="ghost-secondary"
-                                                ariaLabel="Remove Library"
-                                                disabled={!!deleting || !!syncing}
-                                                title="Delete"
+                                                ariaLabel="Remove Library from Beaver"
+                                                disabled={!!deleting || !!syncing || syncLibraryIds.length <= 1}
+                                                title="Delete Library from Beaver"
                                                 icon={DeleteIcon}
                                                 className="scale-11"
                                             />
