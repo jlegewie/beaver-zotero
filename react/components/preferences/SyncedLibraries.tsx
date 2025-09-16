@@ -1,5 +1,5 @@
 import React from 'react';
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
@@ -39,6 +39,9 @@ const SyncedLibraries: React.FC = () => {
     const [isSyncing, setIsSyncing] = useState<Record<number, boolean>>({});
     const [isSyncingComplete, setIsSyncingComplete] = useState<Record<number, boolean>>({});
     const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
+
+    // Track libraries for which we've already refreshed after initial sync completes
+    const initialSyncRefreshed = useRef<Set<number>>(new Set());
 
     // Hydrate/poll deletion jobs
     const { jobs, startDeletion } = useLibraryDeletions();
@@ -134,6 +137,17 @@ const SyncedLibraries: React.FC = () => {
         }
     }, [isSyncing, refreshOne]);
 
+    // When an initial sync completes, refresh "Last synced" for that library
+    useEffect(() => {
+        for (const [idStr, s] of Object.entries(syncStatusMap)) {
+            const id = Number(idStr);
+            if (s?.status === 'completed' && s.syncType === 'initial' && !initialSyncRefreshed.current.has(id)) {
+                initialSyncRefreshed.current.add(id);
+                refreshOne(id);
+            }
+        }
+    }, [syncStatusMap, refreshOne]);
+
     const handleDeleteOne = useCallback(async (libraryID: number) => {
         if (isDeleting[libraryID]) return;
         const lib = Zotero.Libraries.get(libraryID);
@@ -220,9 +234,8 @@ const SyncedLibraries: React.FC = () => {
 
                                         {!isDeletingNow && (
                                             inProgressInitial ? (
-                                                <div className="display-flex flex-row items-center gap-2 text-sm font-color-tertiary">
-                                                    <span className="inline-flex items-center">{SpinnerIcon}</span>
-                                                    <span>Syncing{percent !== undefined ? ` • ${percent}%` : ''}</span>
+                                                <div className="text-sm font-color-tertiary">
+                                                    {`Syncing${percent !== undefined ? ` • ${percent}%` : ''}`}
                                                 </div>
                                             ) : failedInitial ? (
                                                 <div className="display-flex flex-row items-center gap-2 text-sm font-color-red">
@@ -244,6 +257,10 @@ const SyncedLibraries: React.FC = () => {
                                             <span className="font-color-tertiary">
                                                 {jobs[lib.libraryID].status === 'queued' ? 'Queued…' : 'Deleting…'}
                                             </span>
+                                            <Icon icon={SyncIcon} className="animate-spin font-color-tertiary" />
+                                        </div>
+                                    ) : inProgressInitial ? (
+                                        <div className="display-flex flex-row items-center gap-3">
                                             <Icon icon={SyncIcon} className="animate-spin font-color-tertiary" />
                                         </div>
                                     ) : (
