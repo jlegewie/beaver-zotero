@@ -50,7 +50,7 @@ const LibrarySelectionDialog: React.FC = () => {
         // Confirming removal of libraries
         if (removedLibraryIds.length > 0) {
             const confirmed = Zotero.getMainWindow().confirm(
-                `Are you sure you want to remove ${removedLibraryIds.length} librarie${removedLibraryIds.length === 1 ? '' : 's'} from syncing? This will remove all associated data from Beaver.`
+                `Are you sure you want to remove ${removedLibraryIds.length} ${removedLibraryIds.length === 1 ? 'library' : 'libraries'} from syncing?\n\nThis will delete all associated data from Beaver.`
                 // 'Confirm Library Removal'
             );
             if (!confirmed) {
