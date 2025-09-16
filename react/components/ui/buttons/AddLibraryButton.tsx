@@ -42,7 +42,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         if (!lib) return;
 
         const confirmed = Zotero.getMainWindow().confirm(
-            `Sync “${lib?.name}” with Beaver?\n\nWe'll import your Zotero data, upload attachments, and index everything for fast search and AI features.`
+            `Sync “${lib?.name}” with Beaver?\n\nWe'll import your Zotero data, upload attachments, and index everything for search and AI features.`
         );
         if (!confirmed) return;
 
