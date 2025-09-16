@@ -5,11 +5,12 @@ import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
 import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, PlusSignIcon, TickIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
-import { scheduleLibraryDeletion, syncZoteroDatabase } from '../../../src/utils/sync';
+import { syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
+import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -36,12 +37,28 @@ const SyncedLibraries: React.FC = () => {
     const [isSyncingComplete, setIsSyncingComplete] = useState<Record<number, boolean>>({});
     const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
 
+    // Hydrate/poll deletion jobs
+    const { jobs, startDeletion } = useLibraryDeletions();
+
     const libraries = useMemo(() => {
-        return syncLibraryIds
-            .sort((a, b) => a - b)
+        // Get synced libraries
+        const synced = syncLibraryIds
             .map((id) => Zotero.Libraries.get(id))
             .filter((lib): lib is Zotero.Library => !!lib);
-    }, [syncLibraryIds]);
+        
+        // Get deleting libraries
+        const deletingExtras = Object.values(jobs)
+            .filter(j => j.status !== 'completed' && j.status !== 'failed')
+            .map(j => Zotero.Libraries.get(j.libraryID) ?? ({ libraryID: j.libraryID, name: j.name, isGroup: j.isGroup } as any))
+            .filter((lib): lib is Zotero.Library => !!lib);
+        
+        // Combine and deduplicate
+        const map = new Map<number, Zotero.Library>();
+        for (const l of [...synced, ...deletingExtras]) map.set(l.libraryID, l as Zotero.Library);
+        
+        // Return sorted by libraryID
+        return Array.from(map.values()).sort((a, b) => a.libraryID - b.libraryID);
+    }, [syncLibraryIds, jobs]);
 
     // Load last-synced timestamps for each library
     useEffect(() => {
@@ -125,8 +142,8 @@ const SyncedLibraries: React.FC = () => {
 
         setIsDeleting((s) => ({ ...s, [libraryID]: true }));
         try {
-            logger(`SyncedLibraries: scheduling deletion for library ${libraryID}`);
-            await scheduleLibraryDeletion([libraryID]);
+            logger(`SyncedLibraries: Starting deletion for library ${libraryID}`);
+            await startDeletion({ libraryID, name: lib.name, isGroup: lib.isGroup });
 
             // Update list of libraries in backend/profile
             if (profileWithPlan) {
@@ -152,7 +169,7 @@ const SyncedLibraries: React.FC = () => {
         } finally {
             setIsDeleting((s) => ({ ...s, [libraryID]: false }));
         }
-    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting]);
+    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting, startDeletion]);
 
     return (
         <div className="display-flex flex-col gap-3">
@@ -199,27 +216,39 @@ const SyncedLibraries: React.FC = () => {
                                             {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
                                         </div>
                                     </div>
+
                                 </div>
                                 <div className="display-flex flex-row items-center gap-4 mr-1">
-                                    <IconButton
-                                        onClick={() => handleSyncOne(lib.libraryID)}
-                                        variant="ghost-secondary"
-                                        ariaLabel="Sync Library"
-                                        disabled={!!syncing || !!deleting}
-                                        title="Sync"
-                                        icon={!syncingComplete ? SyncIcon : TickIcon}
-                                        iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
-                                        className="scale-11"
-                                    />
-                                    <IconButton
-                                        onClick={() => handleDeleteOne(lib.libraryID)}
-                                        variant="ghost-secondary"
-                                        ariaLabel="Remove Library"
-                                        disabled={!!deleting || !!syncing}
-                                        title="Delete"
-                                        icon={DeleteIcon}
-                                        className="scale-11"
-                                    />
+                                    {jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing') ? (
+                                        <div className="display-flex flex-row items-center gap-3">
+                                            <Icon icon={SyncIcon} className="animate-spin font-color-tertiary" />
+                                            <span className="font-color-tertiary">
+                                                {jobs[lib.libraryID].status === 'queued' ? 'Queued…' : 'Deleting…'}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <IconButton
+                                                onClick={() => handleSyncOne(lib.libraryID)}
+                                                variant="ghost-secondary"
+                                                ariaLabel="Sync Library"
+                                                disabled={!!syncing || !!deleting}
+                                                title="Sync"
+                                                icon={!syncingComplete ? SyncIcon : TickIcon}
+                                                iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
+                                                className="scale-11"
+                                            />
+                                            <IconButton
+                                                onClick={() => handleDeleteOne(lib.libraryID)}
+                                                variant="ghost-secondary"
+                                                ariaLabel="Remove Library"
+                                                disabled={!!deleting || !!syncing}
+                                                title="Delete"
+                                                icon={DeleteIcon}
+                                                className="scale-11"
+                                            />
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         );
