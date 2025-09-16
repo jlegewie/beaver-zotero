@@ -29,6 +29,7 @@ declare namespace _ZoteroTypes {
       "citationStyle": string;
       "citationLocale": string;
       "customPrompts": string;
+      "deletionJobs": string;
     };
   }
 }

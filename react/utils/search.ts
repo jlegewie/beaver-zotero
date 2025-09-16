@@ -10,7 +10,7 @@ import { logger } from '../../src/utils/logger';
  */
 export async function searchTitleCreatorYear(
     searchTerm: string,
-    libraryCondition?: boolean
+    libraryIds?: number[]
 ): Promise<Zotero.Item[]> {
     // If no search term is provided, return an empty array.
     if (!searchTerm || searchTerm.trim() === "") {
@@ -21,20 +21,18 @@ export async function searchTitleCreatorYear(
 
     try {
         const search = new Zotero.Search();
+        search.addCondition('joinMode', 'any');
         
         // Set the search scope to the currently selected library.
-        if (libraryCondition) {
-            search.addCondition("libraryID", "is", 1)
-            // const libraryID = Zotero.getActiveZoteroPane()?.getSelectedLibraryID();
-            // if (libraryID !== null) {
-            //     search.addCondition("libraryID", "is", libraryID)
-            // }
+        // Add library conditions as non-required (will be OR-ed together)
+        for (const libraryID of libraryIds ?? []) {
+            search.addCondition('libraryID', 'is', libraryID, false); // false = not required
         }
 
         // Use 'quicksearch-titleCreatorYear' condition.
         // This internally creates an OR search across title-related fields,
         // creator fields, and the year field.
-        search.addCondition('quicksearch-titleCreatorYear', 'contains', searchTerm);
+        search.addCondition('quicksearch-titleCreatorYear', 'contains', searchTerm, true);
 
         // Execute the search
         const itemIDs: number[] = await search.search();

@@ -30,7 +30,7 @@ const OnboardingPage: React.FC = () => {
     const isUploadProcessed = useAtomValue(isUploadProcessedAtom);
 
     // Track selected libraries
-    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
+    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
 
     // Sync toggle state
@@ -60,11 +60,9 @@ const OnboardingPage: React.FC = () => {
         setUseZoteroSync(syncEnabled);
     }, []);
 
-    // Handle library selection change
-    const handleLibrarySelectionChange = (libraryIds: number[]) => {
-        setSelectedLibraryIds(libraryIds);
-        setIsLibrarySelectionValid(libraryIds.length > 0);
-    };
+    useEffect(() => {
+        setIsLibrarySelectionValid(selectedLibraryIds.length > 0);
+    }, [selectedLibraryIds]);
 
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
@@ -113,6 +111,7 @@ const OnboardingPage: React.FC = () => {
                     if (!library) return null;
                     return {
                         library_id: library.libraryID,
+                        group_id: library.isGroup ? library.id : null,
                         name: library.name,
                         is_group: library.isGroup,
                         type: library.libraryType,
@@ -120,7 +119,7 @@ const OnboardingPage: React.FC = () => {
                     } as ZoteroLibrary;
                 })
                 .filter(library => library !== null);
-            
+            logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
             await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync, consentToShare);
 
             // Update local state
@@ -229,7 +228,8 @@ const OnboardingPage: React.FC = () => {
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
                     <AuthorizeLibraryAccess
-                        onSelectionChange={handleLibrarySelectionChange}
+                        selectedLibraryIds={selectedLibraryIds}
+                        setSelectedLibraryIds={setSelectedLibraryIds}
                         libraryStatistics={libraryStatistics}
                         setLibraryStatistics={setLibraryStatistics}
                         disableSyncToggle={!isLibrarySynced(1)}

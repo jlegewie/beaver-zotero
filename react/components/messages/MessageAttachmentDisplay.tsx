@@ -1,12 +1,13 @@
 import React from 'react'
 import { SourceButton } from '../sources/SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom } from '../../atoms/input';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, currentLibraryIdsAtom } from '../../atoms/input';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { AnnotationButton } from '../input/AnnotationButton';
 import { SourceValidationType } from '../../../src/services/sourceValidationManager';
+import { LibraryButton } from '../library/LibraryButton';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -24,12 +25,17 @@ const MessageAttachmentDisplay = ({
     const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
+    const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
+
+    const selectedLibraries = currentLibraryIds
+        .map(id => Zotero.Libraries.get(id))
+        .filter(lib => lib) as Zotero.Library[];
 
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
                 // showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentSources.length == 0 && !currentReaderAttachment}
+                showText={currentSources.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -39,6 +45,10 @@ const MessageAttachmentDisplay = ({
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
             />
+            {/* Selected Libraries */}
+            {selectedLibraries.map(library => (
+                <LibraryButton key={library.libraryID} library={library} />
+            ))}
             {/* {threadSourceCount > 0 && (
                 <button
                     className="sources-info"

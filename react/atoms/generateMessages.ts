@@ -24,7 +24,7 @@ import {
 } from './threads';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
@@ -341,6 +341,7 @@ export const generateResponseAtom = atom(
             assistantMsg.id,
             userMsg.content,
             messageAttachments,
+            get(currentLibraryIdsAtom),
             readerState,
             model,
             set,
@@ -420,6 +421,7 @@ export const regenerateFromMessageAtom = atom(
             assistantMsg.id,       // new assistant message ID
             "",                    // content remains unchanged
             [],                    // sources remain unchanged
+            get(currentLibraryIdsAtom),
             null,                  // readerState remains unchanged
             model,
             set,
@@ -490,6 +492,7 @@ async function _processChatCompletionViaBackend(
     assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
+    libraryIds: number[] | null,
     readerState: ReaderState | null,
     model: FullModelConfig,
     set: any,
@@ -537,6 +540,7 @@ async function _processChatCompletionViaBackend(
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
         thread_id: threadId,
+        library_ids: libraryIds,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: userApiKey,
@@ -544,6 +548,8 @@ async function _processChatCompletionViaBackend(
         access_id: model.access_id,
         frontend_version: Zotero.Beaver.pluginVersion || ''
     } as ChatCompletionRequestBody;
+
+    logger(`generateMessages: payload: ${JSON.stringify(payload)}`, 1);
 
     // request chat completion
     chatService.requestChatCompletion(

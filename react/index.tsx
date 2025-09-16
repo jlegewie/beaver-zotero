@@ -10,6 +10,7 @@ import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
 import { store } from './store';
+import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 
 
 /**
@@ -28,6 +29,9 @@ const GlobalContextInitializer = () => {
 
     // Realtime listener for user profile
     useProfileSync();
+
+    // Validate sync libraries against local Zotero (once per session)
+    useValidateSyncLibraries();
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();

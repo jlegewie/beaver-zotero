@@ -3,6 +3,7 @@
  */
 export interface ZoteroLibrary {
     library_id: number;
+    group_id: number | null;
     name: string;
     is_group: boolean;
     type: string;

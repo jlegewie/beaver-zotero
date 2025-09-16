@@ -129,7 +129,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
 
     const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
 
-    const skippedFilesCount = fileStats.planLimitProcessingCount + fileStats.unsupportedFileCount;
+    const skippedFilesCount = fileStats.planLimitProcessingCount;
 
     return (
         <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">

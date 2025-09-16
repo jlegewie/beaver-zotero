@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -18,6 +18,7 @@ import ConsentToggle from "../preferences/ConsentToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
+import SyncedLibraries from "../preferences/SyncedLibraries";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -45,6 +46,7 @@ const PreferencePage: React.FC = () => {
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
+    const profileBalance = useAtomValue(profileBalanceAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -146,37 +148,6 @@ const PreferencePage: React.FC = () => {
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
 
-    // --- Sync Handler ---
-    const handleSync = useCallback(async () => {
-        if (syncStatus === 'running') return;
-        
-        setSyncStatus('running');
-        logger('handleSync: Starting full sync');
-        
-        try {
-            // Import the sync function
-            const { syncZoteroDatabase, syncingItemFilter } = await import('../../../src/utils/sync');
-            
-            // Run full sync for all sync libraries
-            await syncZoteroDatabase(syncLibraryIds, syncingItemFilter);
-            
-            logger('Full sync completed successfully');
-            setSyncStatus('completed');
-            // Refresh last synced info
-            await loadLastSynced();
-            
-            // Reset to idle after 2 seconds
-            setTimeout(() => {
-                setSyncStatus('idle');
-            }, 2000);
-            
-        } catch (error: any) {
-            logger(`Full sync failed: ${error.message}`, 1);
-            Zotero.logError(error);
-            setSyncStatus('idle');
-        }
-    }, [syncLibraryIds, syncStatus]);
-
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
         if (verifyStatus === 'running') return;
@@ -244,7 +215,16 @@ const PreferencePage: React.FC = () => {
             ? 'Are you sure you want to enable syncing with Zotero? This will build on Zotero sync for multi-device support and improved sync.'
             : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device.';
         
-        if (confirm(message)) {
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: checked ? 'Enable Coordinate with Zotero Sync?' : 'Disable Coordinate with Zotero Sync?',
+            text: message,
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+
+        if (buttonIndex === 0) { // If "Yes" is clicked
             try {
                 logger(`User confirmed to ${action} Zotero sync. New value: ${checked}`);
                 await accountService.updatePreference('use_zotero_sync', checked);
@@ -339,12 +319,18 @@ const PreferencePage: React.FC = () => {
                 <div className="display-flex flex-col gap-3">
                     <div className="display-flex flex-row items-center gap-2">
                         <div className="font-color-secondary">Signed in as:</div>
-                        <div className="font-semibold font-color-primary">{user.email}</div>
+                        <div className="font-color-primary">{user.email}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-2">
                         <div className="font-color-secondary">Plan:</div>
-                        <div className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
+                        <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
+                    {profileBalance.pagesRemaining && 
+                        <div className="display-flex flex-row items-center gap-2">
+                            <div className="font-color-secondary">Remaining Page Balance:</div>
+                            <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
+                        </div>
+                    }
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
                             variant="outline"
@@ -387,20 +373,11 @@ const PreferencePage: React.FC = () => {
             </div> */}
 
             <div className="display-flex flex-col gap-3">
-                <div className="display-flex flex-row items-center gap-3">
-                    <div className="font-color-secondary">Last synced:</div>
-                    <div className="font-color-secondary">{lastSyncedText}</div>
-                </div>
+                {/* Synced Libraries */}
+                <SyncedLibraries />
+
+                {/* Verify Data Button */}
                 <div className="display-flex flex-row items-center gap-4">
-                    <Button 
-                        variant="outline" 
-                        icon={syncButtonProps.icon}
-                        iconClassName={syncButtonProps.iconClassName}
-                        onClick={handleSync}
-                        disabled={syncButtonProps.disabled}
-                    >
-                        {syncButtonProps.text}
-                    </Button>
                     <Button 
                         variant="outline" 
                         icon={verifyButtonProps.icon}

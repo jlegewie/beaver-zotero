@@ -1,4 +1,4 @@
-import { syncService, SyncDataResponse } from '../services/syncService';
+import { syncService, DeleteLibraryTask } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
@@ -28,6 +28,29 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
     return (item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment()) &&
         !item.isInTrash()
         // (collectionId ? item.inCollection(collectionId) : true);
+};
+
+export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
+    if (!item) return false;
+    
+    // Check if the item is a valid type
+    const isValidType = item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
+    if (!isValidType) return false;
+    
+    // Check if the item is deleted
+    if (item.deleted) return false;
+    if (item.isTopLevelItem()) return true;
+    
+    // For child items, check if the parent item is in the trash
+    try {
+        return !item.isInTrash();
+    } catch (error) {
+        // If the parent item is not loaded, get it from the library and key
+        if (!item.parentKey) return false;
+        const parent = await Zotero.Items.getByLibraryAndKeyAsync(item.libraryID, item.parentKey);
+        if (!parent) return false;
+        return !parent.isInTrash();
+    }
 };
 
 
@@ -645,11 +668,13 @@ export async function syncZoteroDatabase(
 
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
-    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.id));
+    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.libraryID));
+
+    logger(`Beaver Sync '${syncSessionId}': Syncing ${librariesToSync.length} libraries with IDs: ${libraryIds.join(', ')}`, 2);
 
     // Initialize sync status for all libraries
     for (const library of librariesToSync) {
-        updateSyncStatus(library.id, { status: 'in_progress', libraryName: library.name });
+        updateSyncStatus(library.libraryID, { status: 'in_progress', libraryName: library.name, ...(syncType ? { syncType } : {}) });
     }
 
     // Get user ID
@@ -689,7 +714,7 @@ export async function syncZoteroDatabase(
     
     // Sync each library
     for (const library of librariesToSync) {
-        const libraryID = library.id;
+        const libraryID = library.libraryID;
         const libraryName = library.name;
 
         try {
@@ -699,7 +724,7 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             if (syncWithZotero && !isSyncedWithZotero) {
                 logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
-                onStatusChange(libraryID, 'failed');
+                updateSyncStatus(libraryID, { status: 'failed', syncType: syncType ?? 'incremental' });
                 store.set(addPopupMessageAtom, {
                     type: 'warning',
                     title: 'Unable to Complete Sync with Beaver',
@@ -746,6 +771,9 @@ export async function syncZoteroDatabase(
             // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
 
+            // Mark library as in-progress
+            updateSyncStatus(libraryID, { status: 'in_progress', libraryName, syncType: syncType ?? (isInitialSync ? 'initial' : 'incremental') });
+
             logger(`Beaver Sync '${syncSessionId}':   Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
 
             if(!isInitialSync && syncMethod == 'version' && lastSyncVersion == library.libraryVersion) {
@@ -773,7 +801,8 @@ export async function syncZoteroDatabase(
                 libraryName,
                 itemCount,
                 syncedCount: 0,
-                status: 'in_progress'
+                status: 'in_progress',
+                syncType: syncType ?? (isInitialSync ? 'initial' : 'incremental')
             } as LibrarySyncStatus;
 
             logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete`, 3);
@@ -783,11 +812,11 @@ export async function syncZoteroDatabase(
                 updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
             }
-            updateSyncStatus(libraryID, libraryInitialStatus);            
-            
+            updateSyncStatus(libraryID, libraryInitialStatus);
+
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
-            if(!syncType) syncType = isInitialSync ? 'initial' : 'verification';
+            if(!syncType) syncType = isInitialSync ? 'initial' : 'incremental';
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
             await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, syncMethod, onStatusChange, onProgress, batchSize);
 
@@ -802,6 +831,47 @@ export async function syncZoteroDatabase(
     }
         
     logger(`Beaver Sync ${syncSessionId}: Sync completed for all libraries`, 2);
+}
+
+/**
+ * Deletes all data for a specific library from the backend when a user removes it from sync.
+ * This includes all items, attachments, and sync logs associated with the library.
+ *
+ * @param libraryIds The IDs of the Zotero libraries to delete.
+ */
+export async function scheduleLibraryDeletion(libraryIds: number[]): Promise<DeleteLibraryTask[]> {
+    const syncSessionId = uuidv4();
+    logger(`Beaver Sync '${syncSessionId}': Deleting all data for libraries '${libraryIds.join(', ')}' from backend.`, 2);
+
+    const userId = store.get(userIdAtom);
+    if (!userId) {
+        logger(`Beaver Sync '${syncSessionId}': No user found. Aborting deletion for libraries '${libraryIds.join(', ')}'.`, 1);
+        store.set(addPopupMessageAtom, {
+            type: 'error',
+            title: 'Deletion Failed',
+            text: `Could not delete libraries '${libraryIds.join(', ')}' because no user is logged in.`,
+            expire: true,
+        });
+        return [];
+    }
+
+    try {
+        // 1. Delete all library data from backend
+        const tasks = await syncService.scheduleLibraryDeletion(libraryIds);
+        logger(`Beaver Sync '${syncSessionId}': Successfully scheduled deletion of libraries data from backend'.`, 3);
+
+        // 2. Delete local sync logs for the library
+        await Zotero.Beaver.db.deleteSyncLogsForLibraryIds(userId, libraryIds);
+        logger(`Beaver Sync '${syncSessionId}': Successfully deleted local sync logs for libraries '${libraryIds.join(', ')}'.`, 3);
+
+        // Return tasks to caller
+        return tasks;
+
+    } catch (error: any) {
+        logger(`Beaver Sync '${syncSessionId}': Failed to delete data for libraries '${libraryIds.join(', ')}': ${error.message}`, 1);
+        Zotero.logError(error);
+        return [];
+    }
 }
 
 /**

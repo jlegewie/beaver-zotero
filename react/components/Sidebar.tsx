@@ -16,10 +16,9 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
-import ErrorReportDialog from './ErrorReportDialog';
+import DialogContainer from './dialog/DialogContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
-import SkippedFilesDialog from './status/SkippedFilesDialog';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -58,8 +57,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <LoginPage emailInputRef={loginEmailRef} />
-                <ErrorReportDialog />
-                <SkippedFilesDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -70,8 +68,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <OnboardingPage />
-                <ErrorReportDialog />
-                <SkippedFilesDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -82,8 +79,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <DeviceAuthorizationPage />
-                <ErrorReportDialog />
-                <SkippedFilesDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -94,8 +90,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header settingsPage={true}/>
                 <PreferencePage />
-                <ErrorReportDialog />
-                <SkippedFilesDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -127,9 +122,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 </DragDropWrapper>
             </div>
 
-            {/* Error Report Dialog */}
-            <ErrorReportDialog />
-            <SkippedFilesDialog />
+            {/* Dialog Container */}
+            <DialogContainer />
         </div>
     );
 };

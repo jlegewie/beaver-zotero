@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from '../icons/icons';
+import { Icon, Spinner } from '../icons/icons';
 
 type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary';
 
@@ -62,8 +62,7 @@ const IconButton: React.FC<IconButtonProps> = ({
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <Icon icon={icon} className={iconClassName} />
-            {loading && <span className="spinner">●</span>}
+            <Icon icon={!loading ? icon : Spinner} className={iconClassName} />
         </button>
     );
 };
