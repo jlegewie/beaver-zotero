@@ -10,7 +10,7 @@ import { syncLibraryIdsAtom, profileWithPlanAtom, profileBalanceAtom } from '../
 import { logger } from '../../../src/utils/logger';
 import { accountService } from '../../../src/services/accountService';
 import { ZoteroLibrary } from '../../types/zotero';
-import { deleteLibraryDataFromBackend } from '../../../src/utils/sync';
+import { scheduleLibraryDeletion } from '../../../src/utils/sync';
 
 const LibrarySelectionDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isLibrarySelectionDialogVisibleAtom);
@@ -80,7 +80,7 @@ const LibrarySelectionDialog: React.FC = () => {
             // Delete data for removed libraries from backend
             if (removedLibraryIds.length > 0) {
                 logger(`LibrarySelectionDialog: Removing ${removedLibraryIds.length} libraries from sync.`);
-                await Promise.all(removedLibraryIds.map(id => deleteLibraryDataFromBackend(id)));
+                await scheduleLibraryDeletion(removedLibraryIds);
             }
 
             // Sync new libraries to Zotero

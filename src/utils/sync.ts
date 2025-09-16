@@ -833,50 +833,36 @@ export async function syncZoteroDatabase(
  * Deletes all data for a specific library from the backend when a user removes it from sync.
  * This includes all items, attachments, and sync logs associated with the library.
  *
- * @param libraryId The ID of the Zotero library to delete.
+ * @param libraryIds The IDs of the Zotero libraries to delete.
  */
-export async function deleteLibraryDataFromBackend(libraryId: number): Promise<void> {
+export async function scheduleLibraryDeletion(libraryIds: number[]): Promise<void> {
     const syncSessionId = uuidv4();
-    const library = Zotero.Libraries.get(libraryId);
-    const libraryName = library ? library.name : `ID ${libraryId}`;
-    logger(`Beaver Sync '${syncSessionId}': Deleting all data for library '${libraryName}' from backend.`, 2);
+    logger(`Beaver Sync '${syncSessionId}': Deleting all data for libraries '${libraryIds.join(', ')}' from backend.`, 2);
 
     const userId = store.get(userIdAtom);
     if (!userId) {
-        logger(`Beaver Sync '${syncSessionId}': No user found. Aborting deletion for library '${libraryName}'.`, 1);
+        logger(`Beaver Sync '${syncSessionId}': No user found. Aborting deletion for libraries '${libraryIds.join(', ')}'.`, 1);
         store.set(addPopupMessageAtom, {
             type: 'error',
             title: 'Deletion Failed',
-            text: `Could not delete library '${libraryName}' because no user is logged in.`,
+            text: `Could not delete libraries '${libraryIds.join(', ')}' because no user is logged in.`,
             expire: true,
         });
         return;
     }
 
     try {
-        updateSyncStatus(libraryId, { status: 'in_progress', libraryName });
-
         // 1. Delete all library data from backend
-        await syncService.deleteAllLibraryData(libraryId);
-        logger(`Beaver Sync '${syncSessionId}': Successfully deleted library data from backend for '${libraryName}'.`, 3);
+        await syncService.scheduleLibraryDeletion(libraryIds);
+        logger(`Beaver Sync '${syncSessionId}': Successfully scheduled deletion of libraries data from backend'.`, 3);
 
         // 2. Delete local sync logs for the library
-        await Zotero.Beaver.db.deleteSyncLogsForLibrary(userId, libraryId);
-        logger(`Beaver Sync '${syncSessionId}': Successfully deleted local sync logs for '${libraryName}'.`, 3);
-
-        logger(`Beaver Sync '${syncSessionId}': Completed deletion process for library '${libraryName}'. Server background process still running.`, 2);
-        updateSyncStatus(libraryId, { status: 'completed', itemCount: 0, syncedCount: 0 });
+        await Zotero.Beaver.db.deleteSyncLogsForLibraryIds(userId, libraryIds);
+        logger(`Beaver Sync '${syncSessionId}': Successfully deleted local sync logs for libraries '${libraryIds.join(', ')}'.`, 3);
 
     } catch (error: any) {
-        logger(`Beaver Sync '${syncSessionId}': Failed to delete data for library '${libraryName}': ${error.message}`, 1);
+        logger(`Beaver Sync '${syncSessionId}': Failed to delete data for libraries '${libraryIds.join(', ')}': ${error.message}`, 1);
         Zotero.logError(error);
-        updateSyncStatus(libraryId, { status: 'failed' });
-        store.set(addPopupMessageAtom, {
-            type: 'error',
-            title: 'Deletion Failed',
-            text: `An error occurred while deleting data for library '${libraryName}'. Please try again.`,
-            expire: true,
-        });
     }
 }
 
