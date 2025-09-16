@@ -41,10 +41,15 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         const lib = Zotero.Libraries.get(libraryID);
         if (!lib) return;
 
-        const confirmed = Zotero.getMainWindow().confirm(
-            `Sync “${lib?.name}” with Beaver?\n\nWe'll import your Zotero data, upload attachments, and index everything for search and AI features.`
-        );
-        if (!confirmed) return;
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: 'Sync Library with Beaver?',
+            text: `Sync "${lib.name}" with Beaver?\n\nWe'll import your Zotero data, upload attachments, and index everything for search and AI features.`,
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+        if (buttonIndex !== 0) return;
 
         // Add the library to the sync libraries
         const newSyncLibraryIds = [...syncLibraryIds, libraryID];

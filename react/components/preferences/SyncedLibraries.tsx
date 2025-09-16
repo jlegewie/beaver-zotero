@@ -153,10 +153,16 @@ const SyncedLibraries: React.FC = () => {
         if (isDeleting[libraryID]) return;
         const lib = Zotero.Libraries.get(libraryID);
         if (!lib) return;
-        const confirmed = Zotero.getMainWindow().confirm(
-            `Do you want to remove "${lib?.name || 'this library'}" from syncing? This will delete all associated data from Beaver.\n\nRemoving a library will NOT free up pages for full-document search.`
-        );
-        if (!confirmed) return;
+
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: 'Remove Library from Syncing?',
+            text: `Do you want to remove "${lib.name || 'this library'}" from syncing? This will delete all associated data from Beaver.\n\nRemoving a library will NOT free up pages for full-document search.`,
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+        if (buttonIndex !== 0) return;
 
         setIsDeleting((s) => ({ ...s, [libraryID]: true }));
         try {
