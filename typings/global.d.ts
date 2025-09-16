@@ -288,6 +288,24 @@ declare namespace Zotero {
             gzip(textContent: string): Promise<string>;
         }
     }
+
+    interface Prompt {
+        confirm(options: {
+            window: any;
+            title: string;
+            text: string;
+            button0?: string;
+            button1?: string;
+            button2?: string;
+            defaultButton?: number;
+        }): number;
+
+        BUTTON_TITLE_YES: string;
+        BUTTON_TITLE_NO: string;
+        BUTTON_TITLE_CANCEL: string;
+        BUTTON_TITLE_OK: string;
+    }
+    const Prompt: Prompt;
 }
 
 declare namespace Zotero {
