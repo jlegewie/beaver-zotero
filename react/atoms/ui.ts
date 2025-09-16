@@ -18,11 +18,8 @@ export const isErrorReportSendingAtom = atom(false);
 // Skipped Files Dialog
 export const isSkippedFilesDialogVisibleAtom = atom(false);
 
-// Library Selection Dialog
-export const isLibrarySelectionDialogVisibleAtom = atom(false);
-
 // Active dialog
-export type DialogType = 'errorReport' | 'skippedFiles' | 'librarySelection' | null;
+export type DialogType = 'errorReport' | 'skippedFiles' | null;
 
 export const activeDialogAtom = atom<DialogType>((get) => {
     if (get(isErrorReportDialogVisibleAtom)) {
@@ -30,9 +27,6 @@ export const activeDialogAtom = atom<DialogType>((get) => {
     }
     if (get(isSkippedFilesDialogVisibleAtom)) {
         return 'skippedFiles';
-    }
-    if (get(isLibrarySelectionDialogVisibleAtom)) {
-        return 'librarySelection';
     }
     return null;
 });

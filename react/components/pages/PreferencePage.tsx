@@ -18,7 +18,7 @@ import ConsentToggle from "../preferences/ConsentToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
-import { isLibrarySelectionDialogVisibleAtom } from "../../atoms/ui";
+import SyncedLibraries from "../preferences/SyncedLibraries";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -29,7 +29,6 @@ const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
     const logout = useSetAtom(logoutAtom);
-    const setIsLibrarySelectionDialogVisible = useSetAtom(isLibrarySelectionDialogVisibleAtom);
 
     // --- User profile ---
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
@@ -147,10 +146,6 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
-
-    const handleLibrarySelection = () => {
-        setIsLibrarySelectionDialogVisible(true);
-    };
 
     // --- Sync Handler ---
     const handleSync = useCallback(async () => {
@@ -396,13 +391,6 @@ const PreferencePage: React.FC = () => {
                 <div className="display-flex flex-row items-center gap-4">
                     <Button 
                         variant="outline" 
-                        icon={LibraryIcon}
-                        onClick={handleLibrarySelection}
-                    >
-                        Select Libraries
-                    </Button>
-                    <Button 
-                        variant="outline" 
                         icon={syncButtonProps.icon}
                         iconClassName={syncButtonProps.iconClassName}
                         onClick={handleSync}
@@ -420,10 +408,11 @@ const PreferencePage: React.FC = () => {
                         {verifyButtonProps.text}
                     </Button>
                 </div>
-                <div className="display-flex flex-row items-center gap-3">
+                {/* <div className="display-flex flex-row items-center gap-3">
                     <div className="font-color-secondary">Last synced:</div>
                     <div className="font-color-secondary">{lastSyncedText}</div>
-                </div>
+                </div> */}
+                <SyncedLibraries />
 
                 {/* Sync with Zotero Toggle */}
                 <div className="mt-2">

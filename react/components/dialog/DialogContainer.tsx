@@ -4,7 +4,6 @@ import {
     activeDialogAtom,
     isErrorReportDialogVisibleAtom,
     isSkippedFilesDialogVisibleAtom,
-    isLibrarySelectionDialogVisibleAtom,
     errorReportTextAtom,
     isErrorReportSendingAtom,
     DialogType,
@@ -16,7 +15,6 @@ import LibrarySelectionDialog from './LibrarySelectionDialog';
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
     skippedFiles: SkippedFilesDialog,
-    librarySelection: LibrarySelectionDialog,
 };
 
 const DialogContainer: React.FC = () => {
@@ -25,7 +23,6 @@ const DialogContainer: React.FC = () => {
     const setIsErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const setErrorReportText = useSetAtom(errorReportTextAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
-    const setIsLibrarySelectionDialogVisible = useSetAtom(isLibrarySelectionDialogVisibleAtom);
 
     const handleClose = () => {
         if (activeDialog === 'errorReport') {
@@ -34,8 +31,6 @@ const DialogContainer: React.FC = () => {
             setErrorReportText('');
         } else if (activeDialog === 'skippedFiles') {
             setIsSkippedFilesDialogVisible(false);
-        } else if (activeDialog === 'librarySelection') {
-            setIsLibrarySelectionDialogVisible(false);
         }
     };
 
