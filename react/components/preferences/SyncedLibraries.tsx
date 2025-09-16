@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, PlusSignIcon } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, PlusSignIcon, TickIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { scheduleLibraryDeletion, syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -33,6 +33,7 @@ const SyncedLibraries: React.FC = () => {
 
     const [lastSynced, setLastSynced] = useState<LastSyncedMap>({});
     const [isSyncing, setIsSyncing] = useState<Record<number, boolean>>({});
+    const [isSyncingComplete, setIsSyncingComplete] = useState<Record<number, boolean>>({});
     const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
 
     const libraries = useMemo(() => {
@@ -105,6 +106,10 @@ const SyncedLibraries: React.FC = () => {
             Zotero.logError(e as Error);
         } finally {
             setIsSyncing((s) => ({ ...s, [libraryID]: false }));
+            setIsSyncingComplete((s) => ({ ...s, [libraryID]: true }));
+            setTimeout(() => {
+                setIsSyncingComplete((s) => ({ ...s, [libraryID]: false }));
+            }, 2000);
         }
     }, [isSyncing, refreshOne]);
 
@@ -174,6 +179,7 @@ const SyncedLibraries: React.FC = () => {
                     libraries.map((lib, index) => {
                         const syncing = isSyncing[lib.libraryID];
                         const deleting = isDeleting[lib.libraryID];
+                        const syncingComplete = !!isSyncingComplete[lib.libraryID];
                         return (
                             <div
                                 key={lib.libraryID}
@@ -189,26 +195,29 @@ const SyncedLibraries: React.FC = () => {
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
                                         <div className="text-sm font-color-tertiary">
-                                            {lastSynced[lib.libraryID] ? `Indexed ${lastSynced[lib.libraryID]}` : 'Never'}
+                                            {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
                                         </div>
                                     </div>
                                 </div>
-                                <div className="display-flex flex-row items-center gap-2">
+                                <div className="display-flex flex-row items-center gap-4 mr-1">
                                     <IconButton
                                         onClick={() => handleSyncOne(lib.libraryID)}
+                                        variant="ghost-secondary"
                                         ariaLabel="Sync Library"
                                         disabled={!!syncing || !!deleting}
                                         title="Sync"
-                                        icon={SyncIcon}
-                                        loading={syncing}
+                                        icon={!syncingComplete ? SyncIcon : TickIcon}
+                                        iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
+                                        className="scale-11"
                                     />
                                     <IconButton
                                         onClick={() => handleDeleteOne(lib.libraryID)}
+                                        variant="ghost-secondary"
                                         ariaLabel="Remove Library"
                                         disabled={!!deleting || !!syncing}
                                         title="Delete"
                                         icon={DeleteIcon}
-                                        loading={deleting}
+                                        className="scale-11"
                                     />
                                 </div>
                             </div>
