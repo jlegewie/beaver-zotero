@@ -38,6 +38,7 @@ const SyncedLibraries: React.FC = () => {
 
     const libraries = useMemo(() => {
         return syncLibraryIds
+            .sort((a, b) => a - b)
             .map((id) => Zotero.Libraries.get(id))
             .filter((lib): lib is Zotero.Library => !!lib);
     }, [syncLibraryIds]);
@@ -118,7 +119,7 @@ const SyncedLibraries: React.FC = () => {
         const lib = Zotero.Libraries.get(libraryID);
         if (!lib) return;
         const confirmed = Zotero.getMainWindow().confirm(
-            `Remove "${lib?.name || 'this library'}" from syncing?\n\nThis will delete all associated data from Beaver.`
+            `Do you want to remove "${lib?.name || 'this library'}" from syncing? This will delete all associated data from Beaver.\n\nRemoving a library will NOT free up pages for full-document search.`
         );
         if (!confirmed) return;
 
