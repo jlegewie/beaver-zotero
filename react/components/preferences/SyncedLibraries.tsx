@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, DatabaseIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -13,6 +13,7 @@ import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom } from '../../atoms/sync';
 import { CancelIcon, SpinnerIcon } from '../status/icons';
+import Button from '../ui/Button';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -196,7 +197,18 @@ const SyncedLibraries: React.FC = () => {
                     <Icon icon={LibraryIcon} className="font-color-secondary scale-11" />
                     <div className="font-color-secondary">Synced Libraries</div>
                 </div>
-                <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length} />
+                <div className="display-flex flex-row items-center gap-3">
+                    {/* <Button
+                        variant="outline" 
+                        icon={DatabaseIcon}
+                        // iconClassName={verifyButtonProps.iconClassName}
+                        // onClick={handleVerifySync}
+                        // disabled={verifyButtonProps.disabled}
+                    >
+                        Verify Data
+                    </Button> */}
+                    <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length} />
+                </div>
             </div>
 
             {/* List */}
