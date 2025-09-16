@@ -25,6 +25,11 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
     const [libraryStats, setLibraryStats] = useState<Record<number, LibraryStatistics>>({});
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
+    const handleOnClose = () => {
+        setIsMenuOpen(false);
+        setSearchQuery('');
+    };
+
     const handleAddLibrary = useCallback(async (libraryID: number) => {
         logger(`AddLibraryButton: Adding library ${libraryID}`);
         if (!profileWithPlan) {
@@ -58,7 +63,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
             logger(`AddLibraryButton: Failed to add library ${libraryID}: ${error}`, 1);
             Zotero.logError(error as Error);
         } finally {
-            setIsMenuOpen(false);
+            handleOnClose();
         }
     }, [profileWithPlan, setProfileWithPlan, syncLibraryIds]);
 
@@ -143,7 +148,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
-                onClose={() => setIsMenuOpen(false)}
+                onClose={handleOnClose}
                 position={menuPosition}
                 useFixedPosition={true}
                 verticalPosition="below"
