@@ -4,6 +4,7 @@ import { deletionJobsAtom, DeletionJob, DeletionStatus } from '../atoms/sync';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { scheduleLibraryDeletion } from '../../src/utils/sync';
 import { syncService, DeletionStatusRequestItem, DeletionStatusResponse } from '../../src/services/syncService';
+import { logger } from '../../src/utils/logger';
 
 const PREF_KEY = 'deletionJobs';
 
@@ -27,6 +28,11 @@ function writeJobsPref(jobs: Record<number, DeletionJob>) {
 export function useLibraryDeletions() {
     const [jobs, setJobs] = useAtom(deletionJobsAtom);
     const timerRef = useRef<number | null>(null);
+    const jobsRef = useRef(jobs);
+
+    useEffect(() => {
+        jobsRef.current = jobs;
+    }, [jobs]);
 
     // Hydrate once
     useEffect(() => {
@@ -122,14 +128,20 @@ export function useLibraryDeletions() {
 
     // Poller
     const pollOnce = useCallback(async () => {
-        const requests: DeletionStatusRequestItem[] = activeJobs
+        const currentJobs = Object.values(jobsRef.current)
+            .filter(j => j.status !== 'completed' && j.status !== 'failed');
+
+        const requests: DeletionStatusRequestItem[] = currentJobs
             .filter(j => !!j.sessionId)
             .map(j => ({ library_id: j.libraryID, session_id: j.sessionId! }));
+
         if (requests.length === 0) return;
+
         let results: DeletionStatusResponse[] = [];
         try {
             results = await syncService.getLibraryDeletionStatus(requests);
-        } catch {
+        } catch (error) {
+            logger(`useLibraryDeletions: Failed to fetch deletion status: ${error}`, 1);
             return;
         }
 
@@ -148,10 +160,12 @@ export function useLibraryDeletions() {
             }
             return next;
         });
-    }, [activeJobs, setJobs]);
+    }, [setJobs]);
 
     useEffect(() => {
+        // Run once on mount to catch up
         void pollOnce();
+
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = setInterval(pollOnce, 20000) as unknown as number; // 20s
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
