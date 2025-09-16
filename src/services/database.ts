@@ -782,12 +782,17 @@ export class BeaverDB {
     /**
      * Deletes all sync log records for a specific library.
      * @param user_id The user_id to filter by
-     * @param library_id The library_id to delete logs for
+     * @param library_ids The library_ids to delete logs for
      */
-    public async deleteSyncLogsForLibrary(user_id: string, library_id: number): Promise<void> {
+    public async deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void> {
+        if (library_ids.length === 0) {
+            return;
+        }
+
+        const placeholders = library_ids.map(() => '?').join(',');
         await this.conn.queryAsync(
-            `DELETE FROM sync_logs WHERE user_id = ? AND library_id = ?`,
-            [user_id, library_id]
+            `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
+            [user_id, ...library_ids]
         );
     }
 

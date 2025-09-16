@@ -210,7 +210,7 @@ declare namespace Zotero {
              * @param user_id The user_id to filter by
              * @param library_id The library_id to delete logs for
              */
-            deleteSyncLogsForLibrary(user_id: string, library_id: number): Promise<void>;
+            deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void>;
 
         }
 
