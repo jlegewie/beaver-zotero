@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -46,6 +46,7 @@ const PreferencePage: React.FC = () => {
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
+    const profileBalance = useAtomValue(profileBalanceAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -318,12 +319,18 @@ const PreferencePage: React.FC = () => {
                 <div className="display-flex flex-col gap-3">
                     <div className="display-flex flex-row items-center gap-2">
                         <div className="font-color-secondary">Signed in as:</div>
-                        <div className="font-semibold font-color-primary">{user.email}</div>
+                        <div className="font-color-primary">{user.email}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-2">
                         <div className="font-color-secondary">Plan:</div>
-                        <div className="font-semibold font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
+                        <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
+                    {profileBalance.pagesRemaining && 
+                        <div className="display-flex flex-row items-center gap-2">
+                            <div className="font-color-secondary">Remaining Page Balance:</div>
+                            <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
+                        </div>
+                    }
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
                             variant="outline"
