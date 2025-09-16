@@ -214,7 +214,16 @@ const PreferencePage: React.FC = () => {
             ? 'Are you sure you want to enable syncing with Zotero? This will build on Zotero sync for multi-device support and improved sync.'
             : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device.';
         
-        if (confirm(message)) {
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: checked ? 'Enable Coordinate with Zotero Sync?' : 'Disable Coordinate with Zotero Sync?',
+            text: message,
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+
+        if (buttonIndex === 0) { // If "Yes" is clicked
             try {
                 logger(`User confirmed to ${action} Zotero sync. New value: ${checked}`);
                 await accountService.updatePreference('use_zotero_sync', checked);
