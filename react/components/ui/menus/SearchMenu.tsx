@@ -66,6 +66,8 @@ export interface SearchMenuProps {
     placeholder: string;
     /** Whether to close the menu when an item is selected */
     closeOnSelect?: boolean;
+    /** Minimum number of items for search bar to appear */
+    minItemsForSearch?: number;
 }
 
 /**
@@ -88,7 +90,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     placeholder,
     closeOnSelect = true,
     searchQuery,
-    setSearchQuery
+    setSearchQuery,
+    minItemsForSearch
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
@@ -451,16 +454,20 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     </div>
                     
                     {/* Search input at the bottom, ensure it doesn't shrink */}
-                    <div className="flex-shrink-0"> 
-                        {textInput}
-                    </div>
+                    {!displayOrderMenuItems || displayOrderMenuItems.length > (minItemsForSearch || 0) && (
+                        <div className="flex-shrink-0"> 
+                            {textInput}
+                        </div>
+                    )}
                 </>
             ) : (
                 <>
                     {/* Search input at the top, ensure it doesn't shrink */}
-                    <div className="flex-shrink-0">
-                        {textInput}
-                    </div>
+                    {!displayOrderMenuItems || displayOrderMenuItems.length > (minItemsForSearch || 0) && (
+                        <div className="flex-shrink-0">
+                            {textInput}
+                        </div>
+                    )}
                     
                     {/* Menu items take remaining space and scroll */}
                     <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
