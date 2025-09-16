@@ -198,6 +198,7 @@ const SyncedLibraries: React.FC = () => {
                         const syncing = isSyncing[lib.libraryID];
                         const deleting = isDeleting[lib.libraryID];
                         const syncingComplete = !!isSyncingComplete[lib.libraryID];
+                        const isDeletingNow = jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing');
                         return (
                             <div
                                 key={lib.libraryID}
@@ -212,19 +213,21 @@ const SyncedLibraries: React.FC = () => {
                                     </span>
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
-                                        <div className="text-sm font-color-tertiary">
-                                            {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
-                                        </div>
+                                        {!isDeletingNow &&
+                                            <div className="text-sm font-color-tertiary">
+                                                {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
+                                            </div>
+                                        }
                                     </div>
-
+                                    
                                 </div>
                                 <div className="display-flex flex-row items-center gap-4 mr-1">
-                                    {jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing') ? (
+                                    {isDeletingNow ? (
                                         <div className="display-flex flex-row items-center gap-3">
-                                            <Icon icon={SyncIcon} className="animate-spin font-color-tertiary" />
                                             <span className="font-color-tertiary">
                                                 {jobs[lib.libraryID].status === 'queued' ? 'Queued…' : 'Deleting…'}
                                             </span>
+                                            <Icon icon={SyncIcon} className="animate-spin font-color-tertiary" />
                                         </div>
                                     ) : (
                                         <>
