@@ -115,6 +115,18 @@ export interface SyncDataResponse {
     has_more: boolean;
 }
 
+export interface ScheduleLibraryDeletionRequest {
+    library_ids: number[];
+}
+
+export interface DeleteLibraryMessage {
+    msg_id: number;
+    id: string; // UUID as a string
+    user_id: string;
+    library_id: number;
+    requested_at: string; // datetime will be a string
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -190,12 +202,15 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Deletes all data for a given library from the backend.
-     * @param libraryId The Zotero library ID
-     * @returns Promise that resolves when deletion is complete
+     * Schedules the deletion of one or more libraries.
+     * @param libraryIds An array of Zotero library IDs to delete.
+     * @returns A promise that resolves with an array of deletion messages.
      */
-    async deleteAllLibraryData(libraryId: number): Promise<void> {
-        return this.delete(`/api/v1/sync/libraries/${libraryId}`);
+    async scheduleLibraryDeletion(libraryIds: number[]): Promise<DeleteLibraryMessage[]> {
+        const payload: ScheduleLibraryDeletionRequest = {
+            library_ids: libraryIds,
+        };
+        return this.post<DeleteLibraryMessage[]>('/api/v1/sync/libraries/schedule-deletion', payload);
     }
 
     /**
