@@ -11,6 +11,8 @@ import { logger } from '../../../src/utils/logger';
 import IconButton from '../ui/IconButton';
 import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
+import { syncStatusAtom } from '../../atoms/sync';
+import { CancelIcon, SpinnerIcon } from '../status/icons';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -31,6 +33,7 @@ const SyncedLibraries: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncStatusMap = useAtomValue(syncStatusAtom);
 
     const [lastSynced, setLastSynced] = useState<LastSyncedMap>({});
     const [isSyncing, setIsSyncing] = useState<Record<number, boolean>>({});
@@ -192,6 +195,14 @@ const SyncedLibraries: React.FC = () => {
                         const deleting = isDeleting[lib.libraryID];
                         const syncingComplete = !!isSyncingComplete[lib.libraryID];
                         const isDeletingNow = jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing');
+
+                        const s = syncStatusMap[lib.libraryID];
+                        const inProgressInitial = !!s && s.status === 'in_progress' && s.syncType === 'initial';
+                        const failedInitial = !!s && s.status === 'failed' && s.syncType === 'initial';
+                        const percent = s && s.itemCount && s.itemCount > 0
+                            ? Math.min(100, Math.round(((s.syncedCount || 0) / s.itemCount) * 100))
+                            : undefined;
+
                         return (
                             <div
                                 key={lib.libraryID}
@@ -206,11 +217,24 @@ const SyncedLibraries: React.FC = () => {
                                     </span>
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
-                                        {!isDeletingNow &&
-                                            <div className="text-sm font-color-tertiary">
-                                                {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
-                                            </div>
-                                        }
+
+                                        {!isDeletingNow && (
+                                            inProgressInitial ? (
+                                                <div className="display-flex flex-row items-center gap-2 text-sm font-color-tertiary">
+                                                    <span className="inline-flex items-center">{SpinnerIcon}</span>
+                                                    <span>Syncing{percent !== undefined ? ` • ${percent}%` : ''}</span>
+                                                </div>
+                                            ) : failedInitial ? (
+                                                <div className="display-flex flex-row items-center gap-2 text-sm font-color-red">
+                                                    {CancelIcon}
+                                                    <span>Sync failed</span>
+                                                </div>
+                                            ) : (
+                                                <div className="text-sm font-color-tertiary">
+                                                    {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
+                                                </div>
+                                            )
+                                        )}
                                     </div>
                                     
                                 </div>
