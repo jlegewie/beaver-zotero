@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, LibraryIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from "../../atoms/profile";
@@ -146,37 +146,6 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [customPrompts.length, saveCustomPromptsToPrefs]);
-
-    // --- Sync Handler ---
-    const handleSync = useCallback(async () => {
-        if (syncStatus === 'running') return;
-        
-        setSyncStatus('running');
-        logger('handleSync: Starting full sync');
-        
-        try {
-            // Import the sync function
-            const { syncZoteroDatabase, syncingItemFilter } = await import('../../../src/utils/sync');
-            
-            // Run full sync for all sync libraries
-            await syncZoteroDatabase(syncLibraryIds, syncingItemFilter);
-            
-            logger('Full sync completed successfully');
-            setSyncStatus('completed');
-            // Refresh last synced info
-            await loadLastSynced();
-            
-            // Reset to idle after 2 seconds
-            setTimeout(() => {
-                setSyncStatus('idle');
-            }, 2000);
-            
-        } catch (error: any) {
-            logger(`Full sync failed: ${error.message}`, 1);
-            Zotero.logError(error);
-            setSyncStatus('idle');
-        }
-    }, [syncLibraryIds, syncStatus]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -388,16 +357,11 @@ const PreferencePage: React.FC = () => {
             </div> */}
 
             <div className="display-flex flex-col gap-3">
+                {/* Synced Libraries */}
+                <SyncedLibraries />
+
+                {/* Verify Data Button */}
                 <div className="display-flex flex-row items-center gap-4">
-                    <Button 
-                        variant="outline" 
-                        icon={syncButtonProps.icon}
-                        iconClassName={syncButtonProps.iconClassName}
-                        onClick={handleSync}
-                        disabled={syncButtonProps.disabled}
-                    >
-                        {syncButtonProps.text}
-                    </Button>
                     <Button 
                         variant="outline" 
                         icon={verifyButtonProps.icon}
@@ -408,11 +372,6 @@ const PreferencePage: React.FC = () => {
                         {verifyButtonProps.text}
                     </Button>
                 </div>
-                {/* <div className="display-flex flex-row items-center gap-3">
-                    <div className="font-color-secondary">Last synced:</div>
-                    <div className="font-color-secondary">{lastSyncedText}</div>
-                </div> */}
-                <SyncedLibraries />
 
                 {/* Sync with Zotero Toggle */}
                 <div className="mt-2">
