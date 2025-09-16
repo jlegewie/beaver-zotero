@@ -1,4 +1,4 @@
-import { syncService, SyncDataResponse } from '../services/syncService';
+import { syncService, DeleteLibraryTask } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
 import { calculateObjectHash } from './hash';
 import { logger } from './logger';
@@ -835,7 +835,7 @@ export async function syncZoteroDatabase(
  *
  * @param libraryIds The IDs of the Zotero libraries to delete.
  */
-export async function scheduleLibraryDeletion(libraryIds: number[]): Promise<void> {
+export async function scheduleLibraryDeletion(libraryIds: number[]): Promise<DeleteLibraryTask[]> {
     const syncSessionId = uuidv4();
     logger(`Beaver Sync '${syncSessionId}': Deleting all data for libraries '${libraryIds.join(', ')}' from backend.`, 2);
 
@@ -848,21 +848,25 @@ export async function scheduleLibraryDeletion(libraryIds: number[]): Promise<voi
             text: `Could not delete libraries '${libraryIds.join(', ')}' because no user is logged in.`,
             expire: true,
         });
-        return;
+        return [];
     }
 
     try {
         // 1. Delete all library data from backend
-        await syncService.scheduleLibraryDeletion(libraryIds);
+        const tasks = await syncService.scheduleLibraryDeletion(libraryIds);
         logger(`Beaver Sync '${syncSessionId}': Successfully scheduled deletion of libraries data from backend'.`, 3);
 
         // 2. Delete local sync logs for the library
         await Zotero.Beaver.db.deleteSyncLogsForLibraryIds(userId, libraryIds);
         logger(`Beaver Sync '${syncSessionId}': Successfully deleted local sync logs for libraries '${libraryIds.join(', ')}'.`, 3);
 
+        // Return tasks to caller
+        return tasks;
+
     } catch (error: any) {
         logger(`Beaver Sync '${syncSessionId}': Failed to delete data for libraries '${libraryIds.join(', ')}': ${error.message}`, 1);
         Zotero.logError(error);
+        return [];
     }
 }
 
