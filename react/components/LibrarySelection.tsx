@@ -116,7 +116,7 @@ const LibrarySelection: React.FC<LibrarySelectionProps> = ({
         <div className="display-flex flex-col flex-1 min-h-0 gap-3">
 
             {/* Library list */}
-            <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '50px', maxHeight: '300px', overflowY: 'auto' }}>
+            <div className="display-flex flex-col gap-1 border-popup rounded-md p-2" style={{ minHeight: '108px', maxHeight: '300px', overflowY: 'auto' }}>
                 {libraries.map((library) => {
                     // Find detailed statistics for this library if available
                     const statistics = libraryStatistics.find(stats => stats.libraryID === library.libraryID);
