@@ -401,11 +401,13 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     };
 
     const textInput = (
-        // <div className="display-flex flex-row items-center gap-2">
-        //     <Icon icon={SearchIcon} size={14} className="font-color-secondary flex-shrink-0"/>
-        //     {textInput}
-        // </div>
-        <div className="display-flex flex-row items-center gap-05 p-1 mt-1 border-top-quinary">
+        <div 
+            className={`display-flex flex-row items-center gap-05 p-1 ${
+                verticalPosition === 'above' 
+                    ? 'mt-1 border-top-quinary' 
+                    : 'mb-1 border-bottom-quinary'
+            }`}
+        >
             <Icon icon={SearchIcon} size={14} className="font-color-tertiary flex-shrink-0"/>
             <input
                 ref={inputRef}
