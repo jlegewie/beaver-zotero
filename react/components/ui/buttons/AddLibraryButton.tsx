@@ -113,6 +113,10 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         fetchLibrariesAndStats();
     }, [isMenuOpen, syncLibraryIds, searchQuery, createMenuItem]);
 
+    const handleSearch = async (query: string) => {
+        setSearchQuery(query);
+    };
+
     const handleButtonClick = () => {
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
@@ -145,7 +149,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 verticalPosition="below"
                 positionAdjustment={{y: 18}}
                 width="220px"
-                onSearch={() => {}} // Search is handled in useEffect
+                onSearch={handleSearch}
                 noResultsText="No libraries found"
                 placeholder="Search libraries"
                 closeOnSelect={true}
