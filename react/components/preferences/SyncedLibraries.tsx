@@ -3,11 +3,13 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, Spinner } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, PlusSignIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { scheduleLibraryDeletion, syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
+import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -147,21 +149,21 @@ const SyncedLibraries: React.FC = () => {
     }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting]);
 
     return (
-        <div className="display-flex flex-col gap-2">
+        <div className="display-flex flex-col gap-3">
             {/* Header */}
             <div className="display-flex flex-row items-center justify-between">
                 <div className="display-flex flex-row items-center gap-2">
                     <Icon icon={LibraryIcon} className="font-color-secondary" />
                     <div className="font-color-secondary">Synced Libraries</div>
                 </div>
-                <button
-                    type="button"
-                    className="variant-outline"
+                <Button
+                    variant="outline"
+                    icon={PlusSignIcon}
                     onClick={() => console.log('+ Add Library')}
                     aria-label="Add Library"
                 >
-                    + Add Library
-                </button>
+                    Add Library
+                </Button>
             </div>
 
             {/* List */}
@@ -169,55 +171,45 @@ const SyncedLibraries: React.FC = () => {
                 {libraries.length === 0 ? (
                     <div className="p-2 text-sm font-color-tertiary">No libraries selected yet.</div>
                 ) : (
-                    libraries.map((lib) => {
+                    libraries.map((lib, index) => {
                         const syncing = isSyncing[lib.libraryID];
                         const deleting = isDeleting[lib.libraryID];
                         return (
                             <div
                                 key={lib.libraryID}
-                                className="display-flex flex-row items-center justify-between p-2 border-top-quinary hover:bg-senary"
+                                className={`display-flex flex-row items-center justify-between p-2 ${index > 0 ? 'border-top-quinary' : ''}`}
                             >
                                 <div className="display-flex flex-row items-start gap-2 min-w-0">
-                                    <span className="scale-90">
+                                    <span className="scale-90 -mt-010">
                                         <CSSIcon
                                             name={lib.isGroup ? 'library-group' : 'library'}
                                             className="icon-16 font-color-secondary"
                                         />
                                     </span>
-                                    <div className="display-flex flex-col min-w-0">
+                                    <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
-                                        <div className="text-xs font-color-tertiary">
+                                        <div className="text-sm font-color-tertiary">
                                             {lastSynced[lib.libraryID] ? `Indexed ${lastSynced[lib.libraryID]}` : 'Never'}
                                         </div>
                                     </div>
                                 </div>
                                 <div className="display-flex flex-row items-center gap-2">
-                                    <button
-                                        className="icon-button"
+                                    <IconButton
                                         onClick={() => handleSyncOne(lib.libraryID)}
-                                        aria-label="Sync Library"
+                                        ariaLabel="Sync Library"
                                         disabled={!!syncing || !!deleting}
                                         title="Sync"
-                                    >
-                                        {syncing ? (
-                                            <Icon icon={SyncIcon} className="animate-spin font-color-secondary" />
-                                        ) : (
-                                            <Icon icon={SyncIcon} className="font-color-secondary" />
-                                        )}
-                                    </button>
-                                    <button
-                                        className="icon-button"
+                                        icon={SyncIcon}
+                                        loading={syncing}
+                                    />
+                                    <IconButton
                                         onClick={() => handleDeleteOne(lib.libraryID)}
-                                        aria-label="Remove Library"
+                                        ariaLabel="Remove Library"
                                         disabled={!!deleting || !!syncing}
                                         title="Delete"
-                                    >
-                                        {deleting ? (
-                                            <Icon icon={Spinner} className="animate-spin font-color-secondary" />
-                                        ) : (
-                                            <Icon icon={DeleteIcon} className="font-color-secondary" />
-                                        )}
-                                    </button>
+                                        icon={DeleteIcon}
+                                        loading={deleting}
+                                    />
                                 </div>
                             </div>
                         );
