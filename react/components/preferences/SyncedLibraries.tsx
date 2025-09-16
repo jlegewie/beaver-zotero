@@ -8,9 +8,9 @@ import { accountService } from '../../../src/services/accountService';
 import { syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
-import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
+import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -179,14 +179,7 @@ const SyncedLibraries: React.FC = () => {
                     <Icon icon={LibraryIcon} className="font-color-secondary" />
                     <div className="font-color-secondary">Synced Libraries</div>
                 </div>
-                <Button
-                    variant="outline"
-                    icon={PlusSignIcon}
-                    onClick={() => console.log('+ Add Library')}
-                    aria-label="Add Library"
-                >
-                    Add Library
-                </Button>
+                <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length} />
             </div>
 
             {/* List */}
