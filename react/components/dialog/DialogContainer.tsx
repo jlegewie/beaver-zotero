@@ -66,7 +66,7 @@ const DialogContainer: React.FC = () => {
                 className="absolute inset-0 opacity-80 bg-quaternary"
             />
             {/* Dialog container */}
-            <div className="absolute inset-0 display-flex items-center justify-center">
+            <div className="absolute inset-0 display-flex items-center justify-center shadow-lg">
                 <DialogContent />
             </div>
         </div>
