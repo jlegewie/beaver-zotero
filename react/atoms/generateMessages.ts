@@ -11,6 +11,7 @@ import {
     currentThreadIdAtom,
     addOrUpdateMessageAtom,
     addOrUpdateToolcallAtom,
+    upsertToolcallAnnotationAtom,
     addToolCallResponsesToToolAttachmentsAtom,
     cancellerHolder,
     isCancellableAtom,
@@ -40,6 +41,7 @@ import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTy
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
+import { toToolAnnotationResult } from '../types/chat/toolAnnotations';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -602,7 +604,22 @@ async function _processChatCompletionViaBackend(
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
-                set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+    set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+            },
+            onAnnotation: (messageId: string, toolcallId: string, rawAnnotation: any) => {
+                try {
+                    const annotation = toToolAnnotationResult(rawAnnotation);
+                    logger(
+                        `event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${annotation.id}`,
+                        1
+                    );
+                    set(upsertToolcallAnnotationAtom, { messageId, toolcallId, annotation });
+                } catch (error) {
+                    logger(
+                        `event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`,
+                        1
+                    );
+                }
             },
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);

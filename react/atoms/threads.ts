@@ -10,6 +10,63 @@ import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
+import {
+    AnnotationValidationSummary,
+    ToolAnnotationResult,
+    isAnnotationTool,
+    mergeAnnotations,
+    toAnnotationValidationSummary,
+} from "../types/chat/toolAnnotations";
+
+function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
+    const mergedResponse = toolcall.response
+        ? {
+              ...existing?.response,
+              ...toolcall.response,
+              metadata: toolcall.response.metadata ?? existing?.response?.metadata,
+          }
+        : existing?.response;
+
+    const normalized: ToolCall = {
+        ...existing,
+        ...toolcall,
+        response: mergedResponse,
+    };
+
+    if (isAnnotationTool(toolcall.function?.name)) {
+        const rawMetadata = toolcall.response?.metadata ?? existing?.response?.metadata;
+        if (rawMetadata) {
+            const summary = toAnnotationValidationSummary(rawMetadata as any);
+            const mergedAnnotations = mergeAnnotations(existing?.annotations, summary.annotations);
+            normalized.annotations = mergedAnnotations;
+            normalized.annotationSummary = {
+                ...summary,
+                annotations: mergedAnnotations,
+            } as AnnotationValidationSummary;
+        } else if (existing?.annotations && (!normalized.annotations || normalized.annotations.length === 0)) {
+            normalized.annotations = [...existing.annotations];
+            if (existing.annotationSummary && !normalized.annotationSummary) {
+                normalized.annotationSummary = {
+                    ...existing.annotationSummary,
+                    annotations: [...existing.annotations],
+                };
+            }
+        }
+    }
+
+    return normalized;
+}
+
+function normalizeToolCalls(
+    incoming: ToolCall[] | undefined | null,
+    existing?: ToolCall[]
+): ToolCall[] | undefined {
+    if (!incoming) return existing;
+    return incoming.map((toolcall) => {
+        const current = existing?.find((tc) => tc.id === toolcall.id);
+        return normalizeToolCallWithExisting(toolcall, current);
+    });
+}
 
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -301,8 +358,10 @@ export const addOrUpdateMessageAtom = atom(
                     ? {
                         ...m,
                         ...(message.content && { content: message.content }),
-                        ...(message.tool_calls && { tool_calls: message.tool_calls }),
-                        ...(message.status && { status: message.status })
+                        ...(message.status && { status: message.status }),
+                        ...(message.tool_calls && {
+                            tool_calls: normalizeToolCalls(message.tool_calls, m.tool_calls) || m.tool_calls
+                        })
                     }
                     : m
             ));
@@ -315,14 +374,35 @@ export const addOrUpdateMessageAtom = atom(
                     // Insert before the specified message
                     set(threadMessagesAtom, [
                         ...currentMessages.slice(0, insertIndex),
-                        message,
+                        {
+                            ...message,
+                            ...(message.tool_calls && {
+                                tool_calls: normalizeToolCalls(message.tool_calls)
+                            })
+                        },
                         ...currentMessages.slice(insertIndex)
                     ]);
                 } else {
-                    set(threadMessagesAtom, [...currentMessages, message]);
+                    set(threadMessagesAtom, [
+                        ...currentMessages,
+                        {
+                            ...message,
+                            ...(message.tool_calls && {
+                                tool_calls: normalizeToolCalls(message.tool_calls)
+                            })
+                        }
+                    ]);
                 }
             } else {
-                set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
+                set(threadMessagesAtom, [
+                    ...get(threadMessagesAtom),
+                    {
+                        ...message,
+                        ...(message.tool_calls && {
+                            tool_calls: normalizeToolCalls(message.tool_calls)
+                        })
+                    }
+                ]);
             }
         }
     }
@@ -338,15 +418,152 @@ export const addOrUpdateToolcallAtom = atom(
                     const existingToolCallIndex = toolCalls.findIndex(tc => tc.id === toolcallId);
 
                     if (existingToolCallIndex !== -1) {
-                        // Replace existing tool call
-                        toolCalls[existingToolCallIndex] = toolcall;
+                        const existingToolCall = toolCalls[existingToolCallIndex];
+                        toolCalls[existingToolCallIndex] = normalizeToolCallWithExisting(
+                            toolcall,
+                            existingToolCall
+                        );
                     } else {
-                        // Append new tool call
-                        toolCalls.push(toolcall);
+                        toolCalls.push(normalizeToolCallWithExisting(toolcall));
                     }
                     return { ...message, tool_calls: toolCalls };
                 }
                 return message;
+            })
+        );
+    }
+);
+
+export const upsertToolcallAnnotationAtom = atom(
+    null,
+    (
+        get,
+        set,
+        {
+            messageId,
+            toolcallId,
+            annotation,
+        }: { messageId: string; toolcallId: string; annotation: ToolAnnotationResult }
+    ) => {
+        set(threadMessagesAtom, (prevMessages) =>
+            prevMessages.map((message) => {
+                if (message.id !== messageId) return message;
+                const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
+                const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
+                if (toolCallIndex === -1) return message;
+
+                const existingToolcall = toolCalls[toolCallIndex];
+                const existingAnnotations = existingToolcall.annotations || [];
+                const mergedAnnotations = mergeAnnotations(existingAnnotations, [annotation]);
+
+                toolCalls[toolCallIndex] = {
+                    ...existingToolcall,
+                    annotations: mergedAnnotations,
+                };
+
+                return {
+                    ...message,
+                    tool_calls: toolCalls,
+                };
+            })
+        );
+    }
+);
+
+export const updateToolcallAnnotationAtom = atom(
+    null,
+    (
+        get,
+        set,
+        {
+            messageId,
+            toolcallId,
+            annotationId,
+            updates,
+        }: {
+            messageId: string;
+            toolcallId: string;
+            annotationId: string;
+            updates: Partial<ToolAnnotationResult>;
+        }
+    ) => {
+        set(threadMessagesAtom, (prevMessages) =>
+            prevMessages.map((message) => {
+                if (message.id !== messageId) return message;
+                const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
+                const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
+                if (toolCallIndex === -1) return message;
+
+                const existingToolcall = toolCalls[toolCallIndex];
+                if (!existingToolcall.annotations) return message;
+
+                const updatedAnnotations = existingToolcall.annotations.map((annotation) =>
+                    annotation.id === annotationId
+                        ? {
+                              ...annotation,
+                              ...updates,
+                          }
+                        : annotation
+                );
+
+                toolCalls[toolCallIndex] = {
+                    ...existingToolcall,
+                    annotations: updatedAnnotations,
+                    ...(existingToolcall.annotationSummary && {
+                        annotationSummary: {
+                            ...existingToolcall.annotationSummary,
+                            annotations: updatedAnnotations,
+                        },
+                    }),
+                };
+
+                return {
+                    ...message,
+                    tool_calls: toolCalls,
+                };
+            })
+        );
+    }
+);
+
+export const setToolcallAnnotationSummaryAtom = atom(
+    null,
+    (
+        get,
+        set,
+        {
+            messageId,
+            toolcallId,
+            summary,
+        }: {
+            messageId: string;
+            toolcallId: string;
+            summary: AnnotationValidationSummary;
+        }
+    ) => {
+        set(threadMessagesAtom, (prevMessages) =>
+            prevMessages.map((message) => {
+                if (message.id !== messageId) return message;
+                const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
+                const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
+                if (toolCallIndex === -1) return message;
+
+                const existingToolcall = toolCalls[toolCallIndex];
+                const mergedAnnotations = mergeAnnotations(existingToolcall.annotations, summary.annotations);
+
+                toolCalls[toolCallIndex] = {
+                    ...existingToolcall,
+                    annotations: mergedAnnotations,
+                    annotationSummary: {
+                        ...summary,
+                        annotations: mergedAnnotations,
+                    },
+                };
+
+                return {
+                    ...message,
+                    tool_calls: toolCalls,
+                };
             })
         );
     }

@@ -1,6 +1,10 @@
 import { ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 import { CitationMetadata } from "../citations";
+import {
+    AnnotationValidationSummary,
+    ToolAnnotationResult,
+} from './toolAnnotations';
 
 export interface ThreadModel {
     id: string;
@@ -29,6 +33,8 @@ export interface ToolCall {
     response?: ToolCallResponse;
     label?: string;
     status?: 'in_progress' | 'completed' | 'error';
+    annotations?: ToolAnnotationResult[];
+    annotationSummary?: AnnotationValidationSummary;
 }
 
 export interface UsageModel {

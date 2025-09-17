@@ -60,6 +60,14 @@ export interface SSECallbacks {
     onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
 
     /**
+     * Handles "annotation" event when annotation data is streamed
+     * @param messageId ID of the assistant message
+     * @param toolcallId ID of the tool call
+     * @param annotation Raw annotation payload
+     */
+    onAnnotation: (messageId: string, toolcallId: string, annotation: any) => void;
+
+    /**
      * Handles "citation_metadata" event when a citation metadata is received
      * @param messageId ID of the assistant message
      * @param citationMetadata The citation metadata object
@@ -206,7 +214,18 @@ export class ChatService extends ApiService {
         callbacks: SSECallbacks,
         setCanceller?: (canceller: () => void) => void
     ): Promise<void> {
-        const { onThread, onDelta, onMessage, onToolcall, onCitationMetadata, onComplete, onDone, onError, onWarning } = callbacks;
+        const {
+            onThread,
+            onDelta,
+            onMessage,
+            onToolcall,
+            onAnnotation,
+            onCitationMetadata,
+            onComplete,
+            onDone,
+            onError,
+            onWarning,
+        } = callbacks;
 
         const endpoint = `${this.baseUrl}/api/v1/chat/completions`;
         
@@ -243,6 +262,7 @@ export class ChatService extends ApiService {
                                     onDelta,
                                     onMessage,
                                     onToolcall,
+                                    onAnnotation,
                                     onCitationMetadata,
                                     onComplete,
                                     onDone,
@@ -303,6 +323,7 @@ export class ChatService extends ApiService {
             onDelta,
             onMessage,
             onToolcall,
+            onAnnotation,
             onCitationMetadata,
             onComplete,
             onDone,
@@ -313,6 +334,7 @@ export class ChatService extends ApiService {
             onDelta: (messageId: string, delta: string, type: DeltaType) => void;
             onMessage: (data: MessageModel) => void;
             onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
+            onAnnotation: (messageId: string, toolcallId: string, annotation: any) => void;
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => void;
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
@@ -374,6 +396,15 @@ export class ChatService extends ApiService {
                 if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolcall) {
                     const toolcall = JSON.parse(parsedData.toolcall) as ToolCall;
                     onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
+                }
+                break;
+            case 'annotation':
+                if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.annotation) {
+                    const annotation =
+                        typeof parsedData.annotation === 'string'
+                            ? JSON.parse(parsedData.annotation)
+                            : parsedData.annotation;
+                    onAnnotation(parsedData.messageId, parsedData.toolcallId, annotation);
                 }
                 break;
             case 'citation_metadata':
