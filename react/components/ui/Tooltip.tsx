@@ -64,6 +64,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     
     const anchorRef = useRef<HTMLDivElement | null>(null);
     const tooltipRef = useRef<HTMLDivElement | null>(null);
+    const isPointerOverAnchor = useRef<boolean>(false);
     
     // Add a ref to track if the click occurred on the anchor
     const anchorClicked = useRef<boolean>(false);
@@ -171,17 +172,39 @@ const Tooltip: React.FC<TooltipProps> = ({
         if (disabled) return;
         // Don't show tooltip if content is empty
         if (content === null || content === undefined || content === '') return;
+        isPointerOverAnchor.current = true;
         setIsOpen(true);
     };
-    
+
     const handleMouseLeave = () => {
+        isPointerOverAnchor.current = false;
         setIsOpen(false);
     };
-    
+
     // Add a click handler to mark when anchor is clicked
     const handleAnchorClick = () => {
         anchorClicked.current = true;
     };
+
+    // Ensure tooltip stays visible when the anchor remains hovered across rerenders
+    useEffect(() => {
+        if (disabled) return;
+
+        const anchorEl = anchorRef.current;
+        if (!anchorEl) return;
+
+        const isHovering = anchorEl.matches(':hover');
+        isPointerOverAnchor.current = isHovering;
+
+        if (
+            isHovering &&
+            content !== null &&
+            content !== undefined &&
+            content !== ''
+        ) {
+            setIsOpen(true);
+        }
+    }, [disabled, content]);
     
     // Wrap children to add mouse event handlers
     const wrappedChildren = (
