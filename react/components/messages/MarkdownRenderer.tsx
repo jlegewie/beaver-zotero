@@ -13,7 +13,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive']
+        citation: ['id', 'cid', 'sid', 'key', 'consecutive']
     }
 });
 
@@ -124,7 +124,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             components={{
                 // @ts-expect-error - Custom component not in ReactMarkdown types
                 citation: ({node, ...props}: any) => {
-                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
+                    const key = `${props.cid || ''}-${props.id || ''}`;
+                    return <ZoteroCitation key={key} {...props} exportRendering={exportRendering} />;
                 }
             }}
         >
