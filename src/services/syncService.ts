@@ -115,6 +115,33 @@ export interface SyncDataResponse {
     has_more: boolean;
 }
 
+export interface ScheduleLibraryDeletionRequest {
+    library_ids: number[];
+}
+
+export interface DeleteLibraryTask {
+    msg_id: number;
+    session_id: string; // UUID as a string
+    user_id: string;
+    library_id: number;
+    requested_at: string; // datetime will be a string
+}
+
+export type DeletionBackendStatus = 'processing' | 'completed';
+export interface DeletionStatusRequestItem {
+    library_id: number;
+    session_id: string; // UUID
+}
+export interface DeletionStatusRequest {
+    jobs: DeletionStatusRequestItem[];
+}
+export interface DeletionStatusResponse {
+    session_id: string;
+    library_id: number;
+    status: DeletionBackendStatus;
+    updated_at?: string;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -187,6 +214,28 @@ export class SyncService extends ApiService {
             library_id: libraryId,
             zotero_keys: zoteroKeys
         });
+    }
+
+    /**
+     * Schedules the deletion of one or more libraries.
+     * @param libraryIds An array of Zotero library IDs to delete.
+     * @returns A promise that resolves with an array of deletion messages.
+     */
+    async scheduleLibraryDeletion(libraryIds: number[]): Promise<DeleteLibraryTask[]> {
+        const payload: ScheduleLibraryDeletionRequest = {
+            library_ids: libraryIds,
+        };
+        return this.post<DeleteLibraryTask[]>('/api/v1/sync/libraries/schedule-deletion', payload);
+    }
+
+    /**
+     * Gets the status of one or more deletion jobs.
+     * @param jobs An array of deletion job IDs to check.
+     * @returns A promise that resolves with an array of deletion status responses.
+     */
+    async getLibraryDeletionStatus(jobs: DeletionStatusRequestItem[]): Promise<DeletionStatusResponse[]> {
+        const payload: DeletionStatusRequest = { jobs };
+        return this.post<DeletionStatusResponse[]>('/api/v1/sync/libraries/deletion-status', payload);
     }
 
     /**

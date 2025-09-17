@@ -47,24 +47,21 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [messageContent]);
     
     const handleSubmit = async (
-        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>,
-        isLibrarySearch: boolean = false
+        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
     ) => {
         e.preventDefault();
-        chatCompletion(messageContent, isCommandPressed || isLibrarySearch);
+        chatCompletion(messageContent);
     };
 
     const chatCompletion = async (
-        query: string,
-        isLibrarySearch: boolean = false
+        query: string
     ) => {
         if (isStreaming || query.length === 0) return;
 
         // Generate response
         generateResponse({
             content: query,
-            sources: currentSources,
-            isLibrarySearch: isLibrarySearch
+            sources: currentSources
         });
 
         logger(`Chat completion: ${query}`);
@@ -115,7 +112,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         const customPrompt = customPrompts[i - 1];
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentSources.length}`);
         if (customPrompt && (!customPrompt.requiresAttachment || currentSources.length > 0)) {
-            chatCompletion(customPrompt.text, customPrompt.librarySearch);
+            chatCompletion(customPrompt.text);
         }
     }
 
@@ -201,7 +198,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
                                 // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
                                 className="mr-1"
-                                onClick={(e) => handleSubmit(e as any, true)}
+                                onClick={(e) => handleSubmit(e as any)}
                                 disabled={isStreaming || messageContent.length === 0 || !selectedModel}
                             >
                                 Library Search

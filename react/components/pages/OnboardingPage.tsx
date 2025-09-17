@@ -30,7 +30,7 @@ const OnboardingPage: React.FC = () => {
     const isUploadProcessed = useAtomValue(isUploadProcessedAtom);
 
     // Track selected libraries
-    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([]);
+    const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
 
     // Sync toggle state
@@ -60,11 +60,9 @@ const OnboardingPage: React.FC = () => {
         setUseZoteroSync(syncEnabled);
     }, []);
 
-    // Handle library selection change
-    const handleLibrarySelectionChange = (libraryIds: number[]) => {
-        setSelectedLibraryIds(libraryIds);
-        setIsLibrarySelectionValid(libraryIds.length > 0);
-    };
+    useEffect(() => {
+        setIsLibrarySelectionValid(selectedLibraryIds.length > 0);
+    }, [selectedLibraryIds]);
 
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
@@ -113,6 +111,7 @@ const OnboardingPage: React.FC = () => {
                     if (!library) return null;
                     return {
                         library_id: library.libraryID,
+                        group_id: library.isGroup ? library.id : null,
                         name: library.name,
                         is_group: library.isGroup,
                         type: library.libraryType,
@@ -120,7 +119,7 @@ const OnboardingPage: React.FC = () => {
                     } as ZoteroLibrary;
                 })
                 .filter(library => library !== null);
-            
+            logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
             await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync, consentToShare);
 
             // Update local state
@@ -201,10 +200,10 @@ const OnboardingPage: React.FC = () => {
     const getHeaderMessage = () => {
         if (!hasAuthorizedAccess) {
             // Step 1: Library Selection & Authorization
-            return "Beaver syncs your Zotero libraries, uploads your PDFs and attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link this Zotero account to your Beaver account.";
+            return "Beaver syncs your Zotero data, uploads attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link your Zotero and Beaver account.";
         } else {
             // Step 2: Syncing Process
-            return "We're now syncing your Zotero library and processing your files. This usually takes 20-60 minutes, depending on your library size and server load.\n\nYou can safely close Beaver and return later - just make sure Zotero stays open so syncing can continue in the background.";
+            return "We're now syncing your Zotero library and processing your files. This usually takes 20-60 minutes, depending on your library size and server load.\n\nYou can safely close Beaver and return later. Just make sure Zotero stays open so syncing can continue in the background.";
         }
     };
     
@@ -229,7 +228,8 @@ const OnboardingPage: React.FC = () => {
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
                     <AuthorizeLibraryAccess
-                        onSelectionChange={handleLibrarySelectionChange}
+                        selectedLibraryIds={selectedLibraryIds}
+                        setSelectedLibraryIds={setSelectedLibraryIds}
                         libraryStatistics={libraryStatistics}
                         setLibraryStatistics={setLibraryStatistics}
                         disableSyncToggle={!isLibrarySynced(1)}
@@ -267,7 +267,7 @@ const OnboardingPage: React.FC = () => {
             <div className="p-4 border-top-quinary">
                 {/* Library selection button */}
                 {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-row items-center">
+                    <div className="display-flex flex-row items-center gap-1">
                         <div className="font-color-secondary text-sm">
                             {`By continuing, you agree to our `}
                             <a 

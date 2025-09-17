@@ -21,6 +21,7 @@ export interface ChatCompletionRequestBody {
     messages: MessageData[];
     thread_id?: string;
     assistant_message_id?: string;
+    library_ids?: number[] | null;
     user_api_key?: string;
     model_id?: string;
     custom_instructions?: string;

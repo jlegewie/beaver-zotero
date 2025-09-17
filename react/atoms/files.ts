@@ -43,6 +43,51 @@ export const errorMapping = {
     "unexpected_error": "Unexpected error"
 }
 
+export const errorMappingOverview = {
+    // Queue failed
+    "queue_failed": "Files with processing errors",
+    "queue_failed_invalid_user": "Files with processing errors",
+    "queue_failed_invalid_page_count": "Files unable to read",
+    "queue_failed_database_error": "Files with processing errors",
+    
+    // Plan limits
+    "plan_limit_unsupported_file": "Files with unsupported file type",
+    "plan_limit_max_pages": "Files over the per-file page limit",
+    "plan_limit_max_pages_ocr": "Files over the OCR page limit",
+    "plan_limit_insufficient_balance": "Files exceed your page balance",
+    "plan_limit_file_size": "Files over the per-file size limit",
+    
+    // File errors
+    "encrypted": "Password-protected files",
+    "no_text_layer": "Scanned PDFs that need OCR",
+    "insufficient_text": "Files with too little readable text",
+    "file_missing": "Files not found",
+    "ocr_failed": "Files where OCR failed",
+
+    "download_failed": "Files with processing errors",
+    "preprocessing_failed": "Files with processing errors",
+    "conversion_failed": "Files with processing errors",
+    "opening_failed": "Files with processing errors",
+    "upload_failed": "Files with processing errors",
+    "chunk_failed": "Files with processing errors",
+    "embedding_failed": "Files with processing errors",
+    "db_update_failed": "Files with processing errors",
+    "max_retries": "Files with processing errors",
+    "timeout": "Files with processing errors",
+    "unexpected_error": "Files with processing errors"
+}
+
+export const errorMappingHintAtom = atom((get) => {
+    const planFeatures = get(planFeaturesAtom);
+    return {
+        "plan_limit_max_pages": `${planFeatures.maxPageCount} pages max per file`,
+        "plan_limit_file_size": `${planFeatures.uploadFileSizeLimit}MB max per file`,
+        "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
+        "plan_limit_insufficient_balance": "Full-document search limited to 75k pages for Beta. You can still add files manually.",
+        "no_text_layer": "Supported in the future",
+    };
+});
+
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
@@ -50,27 +95,41 @@ export const errorCodeStatsIsLoadingAtom = atom<boolean>(false);
 export const errorCodeStatsErrorAtom = atom<string | null>(null);
 export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number; processingTier: ProcessingTier } | null>(null);
 
-// Aggregated error messages for failed and skipped files
-export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, number>>((get) => {
+// Type for aggregated error messages
+export type AggregatedErrorMessage = {
+    code: string;
+    message: string;
+    count: number;
+};
+
+// Aggregated error messages for failed files
+export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, AggregatedErrorMessage>>((get) => {
     const errorCodeStats = get(errorCodeStatsAtom);
     if (!errorCodeStats) return {};
-    const aggregatedStats: Record<string, number> = {};
+    const aggregatedStats: Record<string, AggregatedErrorMessage> = {};
     for (const errorCodeStat of errorCodeStats) {
         if(errorCodeStat.status !== "failed_user" && errorCodeStat.status !== "failed_system") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
-        aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
+        if (!aggregatedStats[errorCodeStat.error_code]) {
+            aggregatedStats[errorCodeStat.error_code] = { code: errorCodeStat.error_code, message, count: 0 };
+        }
+        aggregatedStats[errorCodeStat.error_code].count += errorCodeStat.count;
     }
     return aggregatedStats;
 });
 
-export const aggregatedErrorMessagesForPlanLimitFilesAtom = atom<Record<string, number>>((get) => {
+// Aggregated error messages for skipped files
+export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, AggregatedErrorMessage>>((get) => {
     const errorCodeStats = get(errorCodeStatsAtom);
     if (!errorCodeStats) return {};
-    const aggregatedStats: Record<string, number> = {};
+    const aggregatedStats: Record<string, AggregatedErrorMessage> = {};
     for (const errorCodeStat of errorCodeStats) {
-        if(errorCodeStat.status !== "plan_limit") continue;
+        if(errorCodeStat.status !== "plan_limit" && errorCodeStat.status !== "unsupported_file") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
-        aggregatedStats[message] = (aggregatedStats[message] || 0) + errorCodeStat.count;
+        if (!aggregatedStats[errorCodeStat.error_code]) {
+            aggregatedStats[errorCodeStat.error_code] = { code: errorCodeStat.error_code, message, count: 0 };
+        }
+        aggregatedStats[errorCodeStat.error_code].count += errorCodeStat.count;
     }
     return aggregatedStats;
 });

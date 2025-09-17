@@ -66,6 +66,8 @@ export interface SearchMenuProps {
     placeholder: string;
     /** Whether to close the menu when an item is selected */
     closeOnSelect?: boolean;
+    /** Minimum number of items for search bar to appear */
+    minItemsForSearch?: number;
 }
 
 /**
@@ -88,7 +90,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     placeholder,
     closeOnSelect = true,
     searchQuery,
-    setSearchQuery
+    setSearchQuery,
+    minItemsForSearch
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
@@ -287,27 +290,29 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             // Focus the input
             inputRef.current?.focus();
 
-            // If we have items, highlight first or last depending on direction
-            if (menuItems.length > 0) {
+            const displayOrderMenuItems = verticalPosition === 'above' 
+                ? [...menuItems].reverse() 
+                : menuItems;
+
+            if (displayOrderMenuItems.length > 0) {
                 let initialIndex = -1;
                 
                 if (verticalPosition === 'above') {
-                    // Start from the bottom (last in normal order)
-                    initialIndex = menuItems.length - 1;
-                    // Skip any group headers
-                    while (initialIndex >= 0 && menuItems[initialIndex].isGroupHeader) {
+                    // For 'above', we want the bottom-most item, which is the last in the displayed list.
+                    initialIndex = displayOrderMenuItems.length - 1;
+                    while (initialIndex >= 0 && displayOrderMenuItems[initialIndex].isGroupHeader) {
                         initialIndex--;
                     }
                 } else {
-                    // Start from the top (first in normal order)
+                    // For 'below', we want the top-most item, which is the first in the displayed list.
                     initialIndex = 0;
-                    // Skip any group headers
-                    while (initialIndex < menuItems.length && menuItems[initialIndex].isGroupHeader) {
+                    while (initialIndex < displayOrderMenuItems.length && displayOrderMenuItems[initialIndex].isGroupHeader) {
                         initialIndex++;
                     }
                 }
                 
-                setFocusedIndex(initialIndex >= 0 ? initialIndex : -1);
+                const isValidIndex = initialIndex >= 0 && initialIndex < displayOrderMenuItems.length;
+                setFocusedIndex(isValidIndex ? initialIndex : -1);
             } else {
                 setFocusedIndex(-1);
             }
@@ -359,7 +364,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 tabIndex={focusedIndex === index ? 0 : -1}
                 className={`
                     display-flex items-center gap-2 px-2 py-15 transition user-select-none cursor-pointer
-                    ${(focusedIndex === index || hoveredIndex === index) ? 'bg-quinary' : ''}
+                    ${(hoveredIndex >= 0 ? hoveredIndex === index : focusedIndex === index) ? 'bg-quinary' : ''}
                 `}
                 style={{ maxWidth: '100%', minWidth: 0 }}
                 onClick={(e) => {
@@ -374,9 +379,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     }
                 }}
                 onMouseLeave={() => {
-                    if (hoveredIndex === index) {
-                        setHoveredIndex(-1);
-                    }
+                    setHoveredIndex(-1);
                 }}
                 onFocus={() => {
                     if (!item.isGroupHeader) {
@@ -399,11 +402,13 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     };
 
     const textInput = (
-        // <div className="display-flex flex-row items-center gap-2">
-        //     <Icon icon={SearchIcon} size={14} className="font-color-secondary flex-shrink-0"/>
-        //     {textInput}
-        // </div>
-        <div className="display-flex flex-row items-center gap-05 p-1 mt-1 border-top-quinary">
+        <div 
+            className={`display-flex flex-row items-center gap-05 p-1 ${
+                verticalPosition === 'above' 
+                    ? 'mt-1 border-top-quinary' 
+                    : 'mb-1 border-bottom-quinary'
+            }`}
+        >
             <Icon icon={SearchIcon} size={14} className="font-color-tertiary flex-shrink-0"/>
             <input
                 ref={inputRef}
@@ -449,16 +454,20 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     </div>
                     
                     {/* Search input at the bottom, ensure it doesn't shrink */}
-                    <div className="flex-shrink-0"> 
-                        {textInput}
-                    </div>
+                    {!displayOrderMenuItems || displayOrderMenuItems.length > (minItemsForSearch || 0) && (
+                        <div className="flex-shrink-0"> 
+                            {textInput}
+                        </div>
+                    )}
                 </>
             ) : (
                 <>
                     {/* Search input at the top, ensure it doesn't shrink */}
-                    <div className="flex-shrink-0">
-                        {textInput}
-                    </div>
+                    {!displayOrderMenuItems || displayOrderMenuItems.length > (minItemsForSearch || 0) && (
+                        <div className="flex-shrink-0">
+                            {textInput}
+                        </div>
+                    )}
                     
                     {/* Menu items take remaining space and scroll */}
                     <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">

@@ -33,6 +33,7 @@ export interface PlanFeatures {
     processingTier: ProcessingTier;
     maxUserAttachments: number;
     uploadFileSizeLimit: number;
+    maxPageCount: number;
 }
 
 export interface ProfileBalance {

@@ -1,16 +1,17 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { CheckmarkIcon, SpinnerIcon, CheckmarkIconGrey, AlertIcon as AlertIconIcon } from "./icons";
-import { AlertIcon, InformationCircleIcon } from "../icons/icons";
+import { AlertIcon, ArrowDownIcon, ArrowRightIcon, Icon, InformationCircleIcon } from "../icons/icons";
 import { ProgressBar } from "./ProgressBar";
 import { fileStatusSummaryAtom } from "../../atoms/files";
 import { fileUploaderBackoffUntilAtom } from "../../atoms/sync";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
-import { SkippedProcessingTooltipContent } from "./SkippedProcessingTooltipContent";
+import { SkippedFilesSummary } from "./SkippedFilesSummary";
 import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
 import { planFeaturesAtom } from "../../atoms/profile";
+import Button from "../ui/Button";
 
 interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
@@ -56,6 +57,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const planFeatures = useAtomValue(planFeaturesAtom);
     const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
     const timeRemaining = useTimeRemaining(backoffUntil);
+    const [showSkippedFiles, setShowSkippedFiles] = useState(false);
 
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
 
@@ -127,6 +129,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
 
     const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
 
+    const skippedFilesCount = fileStats.planLimitProcessingCount;
+
     return (
         <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">
             <div className="display-flex flex-row gap-4">
@@ -195,7 +199,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
             )}
 
             {/* Failed and skipped processing (only shown if the user has a processing tier) */}
-            {processingTier !== 'none' && connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || fileStats.planLimitProcessingCount > 0) && (
+            {processingTier !== 'none' && connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || skippedFilesCount > 0) && (
                 <div className="display-flex flex-col gap-3">
                     {/* Failed processing */}
                     {fileStats.failedProcessingCount > 0 && (
@@ -211,16 +215,29 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                     )}
 
                     {/* Skipped files (combined from upload and processing) */}
-                    {fileStats.planLimitProcessingCount > 0 && (
-                        <PaginatedFailedProcessingList
-                            statuses={["plan_limit"]}
-                            count={fileStats.planLimitProcessingCount}
-                            title={`Skipped file${fileStats.planLimitProcessingCount > 1 ? 's' : ''}`}
-                            tooltipTitle="Reasons"
-                            tooltipContent={<SkippedProcessingTooltipContent />}
-                            icon={InformationCircleIcon}
-                            textColorClassName="font-color-secondary"
-                        />
+                    {skippedFilesCount > 0 && (
+                        <div className="display-flex flex-col gap-4 min-w-0">
+                            <div className="display-flex flex-row gap-4 min-w-0">
+                                <div className="flex-shrink-0">
+                                    <Icon icon={InformationCircleIcon} className={`scale-12 mt-15 font-color-secondary`} />
+                                </div>
+                                <div className="display-flex flex-col items-start gap-3 w-full min-w-0">
+                                    <div className="display-flex flex-row items-start gap-3 w-full">
+                                        <Button
+                                            variant="ghost"
+                                            onClick={() => setShowSkippedFiles(prev => !prev)}
+                                            rightIcon={showSkippedFiles ? ArrowDownIcon : ArrowRightIcon}
+                                            iconClassName={`mr-0 mt-015 scale-12 font-color-secondary`}
+                                        >
+                                            <span className={`text-base font-color-secondary`} style={{ marginLeft: '-3px' }}>
+                                                {skippedFilesCount.toLocaleString()} Skipped file{skippedFilesCount > 1 ? 's' : ''}
+                                            </span>
+                                        </Button>
+                                    </div>
+                                    {showSkippedFiles && <SkippedFilesSummary />}
+                                </div>
+                            </div>
+                        </div>
                     )}
                 </div>
             )}

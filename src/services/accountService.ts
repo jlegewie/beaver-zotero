@@ -33,6 +33,11 @@ interface OnboardingRequest {
 }
 
 
+interface SyncLibrariesRequest {
+    libraries: ZoteroLibrary[];
+}
+
+
 interface PreferenceRequest {
     preference: "consent_to_share" | "use_zotero_sync";
     value: boolean;
@@ -170,6 +175,17 @@ export class AccountService extends ApiService {
             preference,
             value
         } as PreferenceRequest);
+    }
+
+    /**
+     * Updates the user's sync libraries
+     * @param libraries The libraries to sync
+     * @returns Promise with the response message
+     */
+    async updateSyncLibraries(libraries: ZoteroLibrary[]): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/update-sync-libraries', {
+            libraries,
+        } as SyncLibrariesRequest);
     }
 
     /**

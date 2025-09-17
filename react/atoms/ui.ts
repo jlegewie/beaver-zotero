@@ -15,6 +15,22 @@ export const isErrorReportDialogVisibleAtom = atom(false);
 export const errorReportTextAtom = atom('');
 export const isErrorReportSendingAtom = atom(false);
 
+// Skipped Files Dialog
+export const isSkippedFilesDialogVisibleAtom = atom(false);
+
+// Active dialog
+export type DialogType = 'errorReport' | 'skippedFiles' | null;
+
+export const activeDialogAtom = atom<DialogType>((get) => {
+    if (get(isErrorReportDialogVisibleAtom)) {
+        return 'errorReport';
+    }
+    if (get(isSkippedFilesDialogVisibleAtom)) {
+        return 'skippedFiles';
+    }
+    return null;
+});
+
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 

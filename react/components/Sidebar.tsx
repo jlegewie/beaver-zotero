@@ -3,10 +3,10 @@ import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./messages/MessagesArea"
 import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
-import { useAtomValue, useAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { isPreferencePageVisibleAtom, userScrolledAtom } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, userScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -16,7 +16,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
 import PopupMessageContainer from './ui/popup/PopupMessageContainer';
-import ErrorReportDialog from './ErrorReportDialog';
+import DialogContainer from './dialog/DialogContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
 
@@ -27,6 +27,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const threadMessages = useAtomValue(threadMessagesAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
@@ -38,6 +39,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             scrollToBottom(messagesContainerRef, false);
         }
     }, [threadId]);
+
+    useEffect(() => {
+        setIsSkippedFilesDialogVisible(false);
+    }, []);
     
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
@@ -52,7 +57,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <LoginPage emailInputRef={loginEmailRef} />
-                <ErrorReportDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -63,7 +68,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <OnboardingPage />
-                <ErrorReportDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -74,7 +79,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header />
                 <DeviceAuthorizationPage />
-                <ErrorReportDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -85,7 +90,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
                 <Header settingsPage={true}/>
                 <PreferencePage />
-                <ErrorReportDialog />
+                <DialogContainer />
             </div>
         );
     }
@@ -117,8 +122,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
                 </DragDropWrapper>
             </div>
 
-            {/* Error Report Dialog */}
-            <ErrorReportDialog />
+            {/* Dialog Container */}
+            <DialogContainer />
         </div>
     );
 };
