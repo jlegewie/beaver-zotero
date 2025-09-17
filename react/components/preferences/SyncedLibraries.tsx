@@ -217,7 +217,7 @@ const SyncedLibraries: React.FC = () => {
             </div>
 
             {/* List */}
-            <div className="display-flex flex-col rounded-md border-popup p-1">
+            <div className="display-flex flex-col rounded-md border-popup">
                 {libraries.length === 0 ? (
                     <div className="p-2 text-sm font-color-tertiary">No libraries selected yet.</div>
                 ) : (
@@ -237,7 +237,7 @@ const SyncedLibraries: React.FC = () => {
                         return (
                             <div
                                 key={lib.libraryID}
-                                className={`display-flex flex-row items-center justify-between p-2 ${index > 0 ? 'border-top-quinary' : ''}`}
+                                className={`display-flex flex-row items-center justify-between p-3 ${index > 0 ? 'border-top-quinary' : ''}`}
                             >
                                 <div className="display-flex flex-row items-start gap-2 min-w-0">
                                     <span className="scale-90 -mt-010">
