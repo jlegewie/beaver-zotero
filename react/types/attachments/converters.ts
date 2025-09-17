@@ -36,7 +36,7 @@ export function toAnnotation(item: Zotero.Item): Annotation | null {
         color: item.annotationColor,
         page_label: item.annotationPageLabel,
         position: position,
-        date_modified: new Date(item.dateModified + 'Z').toISOString(), // Convert UTC SQL datetime format to ISO string
+        date_modified: Zotero.Date.sqlToISO8601(item.dateModified), // Convert UTC SQL datetime format to ISO string
     } as Annotation;
 }
 
