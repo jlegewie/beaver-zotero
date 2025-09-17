@@ -10,7 +10,6 @@ import {
 } from '../../atoms/ui';
 import ErrorReportDialog from './ErrorReportDialog';
 import SkippedFilesDialog from './SkippedFilesDialog';
-import LibrarySelectionDialog from './LibrarySelectionDialog';
 
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
