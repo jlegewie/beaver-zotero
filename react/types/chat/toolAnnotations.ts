@@ -17,10 +17,6 @@ export interface ToolAnnotationNotePosition {
     x: number;
     /** Absolute Y coordinate in PDF points. */
     y: number;
-    /** Normalized X coordinate [0, 1]. */
-    normalizedX: number;
-    /** Normalized Y coordinate [0, 1]. */
-    normalizedY: number;
 }
 
 export interface ToolAnnotationHighlightLocation {
@@ -61,6 +57,8 @@ export interface ToolAnnotationResult {
     createdAt?: number;
     /** Identifies whether the annotation originated from streaming or summary metadata. */
     origin?: 'stream' | 'summary';
+    /** Persisted Zotero annotation item ID when known. */
+    zoteroItemId?: number;
 }
 
 export interface AnnotationValidationSummary {
@@ -174,14 +172,6 @@ function normalizeNotePosition(raw: any): ToolAnnotationNotePosition | undefined
 
     const x = typeof notePosition.x === 'number' ? notePosition.x : Number(notePosition.x ?? 0);
     const y = typeof notePosition.y === 'number' ? notePosition.y : Number(notePosition.y ?? 0);
-    const normalizedX =
-        typeof notePosition.normalizedX === 'number'
-            ? notePosition.normalizedX
-            : Number(notePosition.normalized_x ?? 0);
-    const normalizedY =
-        typeof notePosition.normalizedY === 'number'
-            ? notePosition.normalizedY
-            : Number(notePosition.normalized_y ?? 0);
 
     const side = rawSide === 'left' ? 'left' : 'right';
 
@@ -189,9 +179,7 @@ function normalizeNotePosition(raw: any): ToolAnnotationNotePosition | undefined
         pageIndex,
         side,
         x,
-        y,
-        normalizedX: Number.isNaN(normalizedX) ? 0 : normalizedX,
-        normalizedY: Number.isNaN(normalizedY) ? 0 : normalizedY,
+        y
     };
 }
 

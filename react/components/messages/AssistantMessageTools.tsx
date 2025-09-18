@@ -60,7 +60,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     }, [annotation, isBusy, onClick]);
 
     const handleDelete = useCallback(
-        (event: React.MouseEvent) => {
+        (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
             onDelete(annotation);
