@@ -190,7 +190,7 @@ export function isLibrarySynced(libraryID: number): boolean {
     }
 }
 
-function isLibrarySkipped(library: Zotero.Library): boolean {
+export function isLibrarySkipped(library: Zotero.Library): boolean {
     try {
         const pref = 'sync.librariesToSkip';
         const librariesToSkip = (Zotero.Prefs.get(pref) || []) as string[];
