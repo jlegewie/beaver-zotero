@@ -188,6 +188,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                 verticalPosition="below"
                 positionAdjustment={{ y: 18 }}
                 width="220px"
+                maxHeight="260px"
                 onSearch={() => {}}
                 noResultsText="No libraries found"
                 placeholder="Search libraries"

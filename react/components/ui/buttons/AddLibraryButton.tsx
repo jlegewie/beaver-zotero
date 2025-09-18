@@ -169,6 +169,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 verticalPosition="below"
                 positionAdjustment={{y: 18}}
                 width="220px"
+                maxHeight="260px"
                 onSearch={handleSearch}
                 noResultsText="No libraries found"
                 placeholder="Search libraries"
