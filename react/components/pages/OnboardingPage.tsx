@@ -249,13 +249,7 @@ const OnboardingPage: React.FC = () => {
                             {/* Syncing your library */}
                             <DatabaseSyncStatus />
 
-                            {(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') && (
-                                <div className="p-2 font-color-tertiary display-flex flex-row gap-3 items-start">
-                                    <Icon icon={AlertIcon} className="scale-12 mt-020"/>
-                                    {/* TODO: Retry button */}
-                                    <div>No connection. Please reconnect to continue with the onboarding process.</div>
-                                </div>
-                            )}
+                            {/* File status display */}
                             <FileStatusDisplay connectionStatus={connectionStatus}/>
                         </div>
 
