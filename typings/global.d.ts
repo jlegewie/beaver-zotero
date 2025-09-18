@@ -289,6 +289,10 @@ declare namespace Zotero {
         }
     }
 
+    interface Exception {
+        UnloadedDataException: new (...args: any[]) => Error;
+    }
+
     interface Prompt {
         confirm(options: {
             window: any;
@@ -305,6 +309,7 @@ declare namespace Zotero {
         BUTTON_TITLE_CANCEL: string;
         BUTTON_TITLE_OK: string;
     }
+    const Exception: Exception;
     const Prompt: Prompt;
 }
 
