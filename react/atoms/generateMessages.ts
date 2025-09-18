@@ -604,7 +604,7 @@ async function _processChatCompletionViaBackend(
             },
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
-    set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+                set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
             onAnnotation: (messageId: string, toolcallId: string, rawAnnotation: any) => {
                 try {
