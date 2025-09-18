@@ -145,8 +145,10 @@ interface AnnotationToolCallDisplayProps {
 }
 
 const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCall }) => {
-    const [resultsVisible, setResultsVisible] = useState(true);
+    const [resultsVisible, setResultsVisible] = useState(false); // Changed from true to false
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
+    const [isButtonHovered, setIsButtonHovered] = useState(false); // Added for hover state
+    const [loadingDots, setLoadingDots] = useState(1); // Added for loading animation
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
     const annotations = toolCall.annotations || [];
@@ -156,9 +158,28 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const invalidAnnotations = summary?.invalidAnnotations ?? annotations.filter((annotation) => !annotation.isValid).length;
     const hasErrors = invalidAnnotations > 0 || annotations.some((annotation) => annotation.applicationError);
 
+    // Added loading dots animation for in_progress state
+    useEffect(() => {
+        let interval: NodeJS.Timeout | undefined;
+        if (toolCall.status === 'in_progress') {
+            setLoadingDots(1); 
+            interval = setInterval(() => {
+                setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
+            }, 250);
+        } else {
+            setLoadingDots(1); 
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [toolCall.status]);
+
     const toggleResults = useCallback(() => {
-        setResultsVisible((prev) => !prev);
-    }, []);
+        // Only allow toggling if completed and has annotations
+        if (toolCall.status === 'completed' && totalAnnotations > 0) {
+            setResultsVisible((prev) => !prev);
+        }
+    }, [toolCall.status, totalAnnotations]);
 
     const markAnnotationState = useCallback(
         (annotationId: string, updates: Partial<ToolAnnotationResult>) => {
@@ -356,6 +377,39 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         return TickIcon;
     }, [toolCall.status, hasErrors]);
 
+    // Updated icon logic to match regular tool calls
+    const getIcon = () => {
+        if (toolCall.status === 'in_progress') return Spinner;
+        if (toolCall.status === 'error') return AlertIcon;
+        if (toolCall.status === 'completed') {
+            if (resultsVisible) return ArrowDownIcon;
+            if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
+            return hasErrors ? AlertIcon : TickIcon;
+        }
+        return TickIcon;
+    };
+
+    // Updated button text logic to match regular tool calls
+    const getButtonText = () => {
+        const label = toolCall.label || 'Annotation tool';
+        if (toolCall.status === 'error') {
+            return `${label}: Unexpected error`;
+        }
+        if (toolCall.status === 'in_progress') {
+            return `${label}${''.padEnd(loadingDots, '.')}`;
+        }
+        if (toolCall.status === 'completed') {
+            if (totalAnnotations === 0) return `${label}: No annotations`;
+            return `${label} (${validAnnotations}/${totalAnnotations} valid)`;
+        }
+        return label;
+    };
+
+    // Updated logic for when results can be toggled and button is disabled
+    const hasAnnotationsToShow = totalAnnotations > 0;
+    const canToggleResults = toolCall.status === 'completed' && hasAnnotationsToShow;
+    const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
+
     return (
         <div
             id={`tool-${toolCall.id}`}
@@ -364,27 +418,30 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             <Button
                 variant="ghost-secondary"
                 onClick={toggleResults}
-                className={`text-base scale-105 w-full min-w-0 align-start text-left ${toolCall.status === 'in_progress' ? 'disabled-but-styled' : ''} ${hasErrors ? 'font-color-warning' : ''}`}
-                disabled={toolCall.status === 'in_progress'}
+                onMouseEnter={() => setIsButtonHovered(true)}
+                onMouseLeave={() => setIsButtonHovered(false)}
+                className={`
+                    text-base scale-105 w-full min-w-0 align-start text-left
+                    ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
+                    ${toolCall.status === 'error' ? 'font-color-warning' : ''}
+                `}
+                style={{ padding: '2px 6px', maxHeight: 'none'}}
+                disabled={isButtonDisabled && !canToggleResults}
             >
                 <div className="display-flex flex-row px-3 gap-2">
                     <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        <Icon icon={statusIcon} />
+                        <Icon icon={getIcon()} />
                     </div>
                     <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        {buttonText}
+                        {getButtonText()}
                     </div>
                 </div>
             </Button>
 
-            {resultsVisible && (
+            {/* Only show annotations when expanded and completed */}
+            {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
                 <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}> 
                     <div className="display-flex flex-col gap-1">
-                        {annotations.length === 0 && (
-                            <div className="px-3 py-2 text-sm font-color-tertiary">
-                                Waiting for annotations…
-                            </div>
-                        )}
                         {annotations.map((annotation) => (
                             <AnnotationListItem
                                 key={annotation.id}
