@@ -191,7 +191,7 @@ export const updateReaderAttachmentAtom = atom(
             return;
         }
         // Get reader item
-        const item = Zotero.Items.get(reader.itemID);
+        const item = await Zotero.Items.getAsync(reader.itemID);
         if (item) {
             logger(`Updating reader attachment to ${item.key}`);
             set(currentReaderAttachmentAtom, await createSourceFromItem(item, false, [], "reader"));

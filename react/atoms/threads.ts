@@ -109,7 +109,7 @@ export const newThreadAtom = atom(
             set(updateSourcesFromZoteroSelectionAtom);
         }
         if (!isLibraryTab) {
-            set(updateReaderAttachmentAtom);
+            await set(updateReaderAttachmentAtom);
         }
         set(userScrolledAtom, false);
     }

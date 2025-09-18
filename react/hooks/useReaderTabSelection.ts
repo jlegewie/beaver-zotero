@@ -73,7 +73,7 @@ export function useReaderTabSelection() {
     }, []);
 
     // Function to set up listeners and state for a given reader
-    const setupReader = useCallback((reader: any) => {
+    const setupReader = useCallback(async (reader: any) => {
         if (!reader) {
             logger("useReaderTabSelection:setupReader: No reader provided.");
             setReaderTextSelection(null);
@@ -92,7 +92,11 @@ export function useReaderTabSelection() {
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
         // Update reader attachment for the new reader
-        updateReaderAttachment(reader);
+        try {
+            await updateReaderAttachment(reader);
+        } catch (error) {
+            logger(`useReaderTabSelection:setupReader: Failed to update reader attachment for ${reader.itemID}: ${error instanceof Error ? error.message : String(error)}`);
+        }
 
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, () => {
@@ -131,14 +135,19 @@ export function useReaderTabSelection() {
         logger("useReaderTabSelection: Hook mounted");
 
         // Initial setup: Get the current reader and set it up
-        const initialReader = getCurrentReader(window);
-        if (initialReader) {
-            logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
-            setupReader(initialReader);
-        } else {
-             logger("useReaderTabSelection: No active reader on mount.");
-             setReaderTextSelection(null); // Ensure selection is null if no reader
-        }
+        const initializeReader = async () => {
+            const initialReader = getCurrentReader(window);
+            if (initialReader) {
+                logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
+                await setupReader(initialReader);
+            } else {
+                logger("useReaderTabSelection: No active reader on mount.");
+                setReaderTextSelection(null); // Ensure selection is null if no reader
+            }
+        };
+        initializeReader().catch(error => {
+            logger(`useReaderTabSelection: Error during initial reader setup: ${error instanceof Error ? error.message : String(error)}`);
+        });
 
         // Set up tab change listener
         const readerObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
@@ -156,7 +165,7 @@ export function useReaderTabSelection() {
                             // Clean up temporary annotations from the previous reader
                             await BeaverTemporaryAnnotations.cleanupAll(currentReaderRef.current as ZoteroReader);
                             
-                            setupReader(newReader);
+                            await setupReader(newReader);
                         } else if (!newReader) {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
                             // If we somehow switch to a reader tab but can't get the instance, clear state
