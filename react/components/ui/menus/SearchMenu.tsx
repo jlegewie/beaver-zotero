@@ -454,7 +454,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     </div>
                     
                     {/* Search input at the bottom, ensure it doesn't shrink */}
-                    {!displayOrderMenuItems || menuItems.length > (minItemsForSearch || 0) && (
+                    {menuItems.length > (minItemsForSearch || 0) && (
                         <div className="flex-shrink-0"> 
                             {textInput}
                         </div>
@@ -463,7 +463,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             ) : (
                 <>
                     {/* Search input at the top, ensure it doesn't shrink */}
-                    {!displayOrderMenuItems || menuItems.length > (minItemsForSearch || 0) && (
+                    {menuItems.length > (minItemsForSearch || 0) && (
                         <div className="flex-shrink-0">
                             {textInput}
                         </div>
