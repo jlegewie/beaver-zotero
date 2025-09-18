@@ -60,7 +60,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     }
 
     // Handle drag events
-    const handleDragOver = async (e: React.DragEvent<HTMLDivElement>) => {
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
         
@@ -104,7 +104,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     
                     // Set icon based on first item
                     if (ids.length > 0) {
-                        const item = await Zotero.Items.getAsync(ids[0]);
+                        const item = Zotero.Items.get(ids[0]);
                         if (item) {
                             const iconName = item.getItemTypeIconName();
                             setObjectIcon(iconName || ZOTERO_ICONS.ATTACHMENTS);
@@ -119,7 +119,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
     };
 
-    const handleDragEnter = async (e: React.DragEvent<HTMLDivElement>) => {
+    const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
         
@@ -155,7 +155,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     
                     // Set icon based on first item
                     if (ids.length > 0) {
-                        const item = await Zotero.Items.getAsync(ids[0]);
+                        const item = Zotero.Items.get(ids[0]);
                         if (item) {
                             const iconName = item.getItemTypeIconName();
                             setObjectIcon(iconName || ZOTERO_ICONS.ATTACHMENTS);
@@ -212,7 +212,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
             console.log('annotationData', annotationData[0])
             for (const data of annotationData) {
-                const attachment = await Zotero.Items.getAsync(data.attachmentItemID);
+                const attachment = Zotero.Items.get(data.attachmentItemID);
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.libraryID, data.id);
                 // Skip if item is not an annotation or has an invalid annotation type
                 if(!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
