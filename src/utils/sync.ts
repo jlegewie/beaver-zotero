@@ -988,7 +988,13 @@ async function getItemsToSync(
     let items: Zotero.Item[] = [];
     // let collections: Zotero.Collection[] = [];
     if (isInitialSync) {
-        items = await Zotero.Items.getAll(libraryID, false, false, false);
+        const itemIds = await getRegularAndAttachmentIDs(libraryID, false);
+        items = await Zotero.Items.getAsync(itemIds);
+        try {
+            await Zotero.Items.loadAll(libraryID);
+        } catch (e) {
+            // Ignore benign "already loaded" errors.
+        }
         // collections = await getAllCollections(libraryID);
     } else if (lastSyncVersion !== null && syncMethod === 'version') {
         items = await getItemsSinceVersion(libraryID, lastSyncVersion);
@@ -999,6 +1005,24 @@ async function getItemsToSync(
         // collections = await getModifiedCollections(libraryID, lastSyncDate);
     } else {
         throw new Error(`Beaver Sync: Invalid sync state: ${syncMethod} ${lastSyncDate} ${lastSyncVersion}`);
+    }
+
+    // For incremental syncs, load data only for the specific items
+    if (!isInitialSync && items.length > 0) {
+        const loadPromises = items
+            .map(async (item) => {
+                try {
+                    await item.loadAllData();
+                    return item;
+                } catch (e) {
+                    logger(`Beaver Sync: Failed to load data for item ${libraryID}-${item.key}. Skipping.`, 2);
+                    return null;
+                }
+            });
+        
+        const settledItems = await Promise.all(loadPromises);
+        // Filter out any items that failed to load.
+        items = settledItems.filter(Boolean) as Zotero.Item[];
     }
     
     // Get items to upsert: Included by filter function
@@ -1117,3 +1141,24 @@ async function getAllCollections(libraryID: number): Promise<Zotero.Collection[]
         .map(id => Zotero.Collections.get(id))
         .filter(c => c.libraryID === libraryID && !c.deleted);
 }
+
+
+/**
+ * Retrieves all non-note and non-annotation item IDs from a library.
+ *
+ * @param {number} libraryID The ID of the Zotero library.
+ * @returns {Promise<number[]>} A promise that resolves to an array of item IDs.
+ */
+async function getRegularAndAttachmentIDs(libraryID: number, includeDeleted = false): Promise<number[]> {
+    const noteItemTypeID = Zotero.ItemTypes.getID('note');
+    const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
+    
+    var params = [libraryID, noteItemTypeID, annotationItemTypeID];
+    var sql = `SELECT A.itemID FROM items A WHERE A.libraryID = ? AND A.itemTypeID NOT IN (?, ?)`;
+    
+    if (!includeDeleted) {
+        sql += " AND A.itemID NOT IN (SELECT itemID FROM deletedItems)";
+    }
+    
+    return await Zotero.DB.columnQueryAsync(sql, params);
+};
