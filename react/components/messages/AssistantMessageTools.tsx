@@ -79,7 +79,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         'display-flex',
         'flex-col',
         'gap-1',
-        'border-top-quinary',
+        // 'border-top-quinary',
         'cursor-pointer',
         'rounded-sm',
     ];
@@ -94,9 +94,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     return (
         <div className={baseClasses.join(' ')} onClick={handleClick}>
             <div className="display-flex flex-row items-center gap-2">
-                <ZoteroIcon icon={icon} size={16} className="flex-shrink-0" />
+                <ZoteroIcon icon={icon} size={12} className="flex-shrink-0 font-color-secondary" />
                 <div className="flex-1 min-w-0">
-                    <div className={`truncate text-sm ${annotation.isDeleted ? 'font-color-tertiary line-through' : 'font-color-primary'}`}>
+                    <div className={`truncate text-sm ${annotation.isDeleted ? 'font-color-tertiary line-through' : 'font-color-secondary'}`}>
                         {annotation.title || 'Annotation'}
                     </div>
                 </div>
@@ -439,11 +439,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                                 onDelete={handleDelete}
                             />
                         ))}
-                        {toolCall.response?.content && (
-                            <div className="px-3 pb-1 text-xs font-color-secondary">
-                                {toolCall.response.content}
-                            </div>
-                        )}
                     </div>
                 </div>
             )}
