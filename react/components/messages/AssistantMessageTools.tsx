@@ -116,20 +116,6 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                     </Button>
                 </div>
             </div>
-            <div className="text-xs font-color-tertiary truncate">{secondaryText}</div>
-            {(annotation.applicationError || (annotation.errors && annotation.errors.length > 0)) && (
-                <div className="text-xs font-color-warning">
-                    {annotation.applicationError || annotation.errors?.join('; ')}
-                </div>
-            )}
-            {annotation.missingSentenceIds && annotation.missingSentenceIds.length > 0 && (
-                <div className="text-xs font-color-warning">
-                    Missing sentences: {annotation.missingSentenceIds.join(', ')}
-                </div>
-            )}
-            {annotation.isDeleted && (
-                <div className="text-xs font-color-tertiary">Annotation deleted from PDF</div>
-            )}
             {annotation.pendingAttachmentOpen && !annotation.isApplied && !annotation.isDeleted && (
                 <div className="text-xs font-color-tertiary">
                     Open the attachment to place this annotation
@@ -377,16 +363,18 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         return TickIcon;
     }, [toolCall.status, hasErrors]);
 
-    // Updated icon logic to match regular tool calls
+    // Updated icon logic to return JSX elements directly
     const getIcon = () => {
-        if (toolCall.status === 'in_progress') return Spinner;
-        if (toolCall.status === 'error') return AlertIcon;
+        
+        if (toolCall.status === 'in_progress') return <Icon icon={Spinner} />;
+        if (toolCall.status === 'error') return <Icon icon={AlertIcon} />;
         if (toolCall.status === 'completed') {
-            if (resultsVisible) return ArrowDownIcon;
-            if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
-            return hasErrors ? AlertIcon : TickIcon;
+            if (resultsVisible) return <Icon icon={ArrowDownIcon} />;
+            if (isButtonHovered && totalAnnotations > 0) return <Icon icon={ArrowRightIcon} />;
+            if (validAnnotations == 0) return <Icon icon={AlertIcon} />;
+            return hasErrors ? <Icon icon={AlertIcon} /> : <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
         }
-        return TickIcon;
+        return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
     };
 
     // Updated button text logic to match regular tool calls
@@ -400,7 +388,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         }
         if (toolCall.status === 'completed') {
             if (totalAnnotations === 0) return `${label}: No annotations`;
-            return `${label} (${validAnnotations}/${totalAnnotations} valid)`;
+            return `${totalAnnotations} ${label}`;
         }
         return label;
     };
@@ -430,7 +418,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             >
                 <div className="display-flex flex-row px-3 gap-2">
                     <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        <Icon icon={getIcon()} />
+                        {getIcon()}
                     </div>
                     <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
                         {getButtonText()}
