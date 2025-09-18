@@ -1,6 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
+import { RawToolAnnotationResult } from '../../react/types/chat/toolAnnotations';
 import { ProviderType } from '../../react/atoms/models';
 import { CitationMetadata } from '../../react/types/citations';
 
@@ -65,7 +66,7 @@ export interface SSECallbacks {
      * @param toolcallId ID of the tool call
      * @param annotation Raw annotation payload
      */
-    onAnnotation: (messageId: string, toolcallId: string, annotation: any) => void;
+    onAnnotation: (messageId: string, toolcallId: string, annotation: RawToolAnnotationResult) => void;
 
     /**
      * Handles "citation_metadata" event when a citation metadata is received
@@ -404,7 +405,11 @@ export class ChatService extends ApiService {
                         typeof parsedData.annotation === 'string'
                             ? JSON.parse(parsedData.annotation)
                             : parsedData.annotation;
-                    onAnnotation(parsedData.messageId, parsedData.toolcallId, annotation);
+                    onAnnotation(
+                        parsedData.messageId,
+                        parsedData.toolcallId,
+                        annotation as RawToolAnnotationResult
+                    );
                 }
                 break;
             case 'citation_metadata':

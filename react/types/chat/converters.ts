@@ -2,9 +2,9 @@ import { MessageModel, ToolCall } from './apiTypes';
 import { ChatMessage } from '../chat/uiTypes';
 import { SourceAttachment, MessageAttachment } from '../attachments/apiTypes';
 import {
+    annotationsFromMetadata,
     isAnnotationTool,
     mergeAnnotations,
-    toAnnotationValidationSummary,
 } from './toolAnnotations';
 
 // export function toMessageUI(message: Message): MessageUI {
@@ -27,14 +27,12 @@ export function toMessageUI(message: MessageModel): ChatMessage {
 
             if (isAnnotationTool(toolcall.function?.name)) {
                 const rawMetadata = toolcall.response?.metadata;
-                if (rawMetadata) {
-                    const summary = toAnnotationValidationSummary(rawMetadata);
-                    const mergedAnnotations = mergeAnnotations(toolcall.annotations, summary.annotations);
+                const metadataAnnotations = annotationsFromMetadata(rawMetadata, 'summary');
+                if (metadataAnnotations.length > 0) {
+                    const mergedAnnotations = mergeAnnotations(toolcall.annotations, metadataAnnotations);
                     normalized.annotations = mergedAnnotations;
-                    normalized.annotationSummary = {
-                        ...summary,
-                        annotations: mergedAnnotations,
-                    };
+                } else if (toolcall.annotations && toolcall.annotations.length > 0) {
+                    normalized.annotations = [...toolcall.annotations];
                 }
             }
 

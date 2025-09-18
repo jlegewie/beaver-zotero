@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { ToolCall } from '../../types/chat/apiTypes';
@@ -13,7 +13,6 @@ import {
     Icon,
     CheckmarkCircleIcon,
     CancelIcon,
-    TickIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
@@ -69,10 +68,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     );
 
     const icon = annotation.annotationType === 'note' ? ZOTERO_ICONS.ANNOTATE_NOTE : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
-    const statusIcon = annotation.isValid && !annotation.isDeleted ? CheckmarkCircleIcon : AlertIcon;
-    const statusIconColor = annotation.isValid && !annotation.isDeleted ? 'font-color-secondary' : 'font-color-warning';
-    const secondaryText = annotation.comment || 'No comment provided';
-
+    const hasApplicationError = Boolean(annotation.applicationError) && !annotation.isDeleted;
+    const statusIcon = !hasApplicationError && !annotation.isDeleted ? CheckmarkCircleIcon : AlertIcon;
+    const statusIconColor = !hasApplicationError && !annotation.isDeleted ? 'font-color-secondary' : 'font-color-warning';
     const baseClasses = [
         'px-3',
         'py-2',
@@ -138,11 +136,13 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
     const annotations = toolCall.annotations || [];
-    const summary = toolCall.annotationSummary;
-    const totalAnnotations = summary?.totalAnnotations ?? annotations.length;
-    const validAnnotations = summary?.validAnnotations ?? annotations.filter((annotation) => annotation.isValid).length;
-    const invalidAnnotations = summary?.invalidAnnotations ?? annotations.filter((annotation) => !annotation.isValid).length;
-    const hasErrors = invalidAnnotations > 0 || annotations.some((annotation) => annotation.applicationError);
+    const totalAnnotations = annotations.length;
+    const appliedAnnotations = annotations.filter((annotation) => annotation.isApplied && !annotation.isDeleted).length;
+    const pendingAnnotations = annotations.filter(
+        (annotation) => annotation.pendingAttachmentOpen && !annotation.isDeleted
+    ).length;
+    const deletedAnnotations = annotations.filter((annotation) => annotation.isDeleted).length;
+    const hasErrors = annotations.some((annotation) => annotation.applicationError && !annotation.isDeleted);
 
     // Added loading dots animation for in_progress state
     useEffect(() => {
@@ -189,8 +189,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 if (annotation.isApplied) continue;
                 if (annotation.pendingAttachmentOpen) continue;
                 if (annotation.applicationError) continue;
-                if (!annotation.isValid) continue;
-
                 if (annotation.origin === 'summary') {
                     const existingKey = await resolveExistingAnnotationKey(annotation);
                     if (cancelled) return;
@@ -346,33 +344,16 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         [markAnnotationState]
     );
 
-    const buttonText = useMemo(() => {
-        const label = toolCall.label || 'Annotation tool';
-        if (toolCall.status === 'in_progress') {
-            return `${label}…`;
-        }
-        if (totalAnnotations > 0) {
-            return `${label} (${validAnnotations}/${totalAnnotations} valid)`;
-        }
-        return label;
-    }, [toolCall.label, toolCall.status, totalAnnotations, validAnnotations]);
-
-    const statusIcon = useMemo(() => {
-        if (toolCall.status === 'in_progress') return Spinner;
-        if (hasErrors) return AlertIcon;
-        return TickIcon;
-    }, [toolCall.status, hasErrors]);
-
     // Updated icon logic to return JSX elements directly
     const getIcon = () => {
-        
         if (toolCall.status === 'in_progress') return <Icon icon={Spinner} />;
         if (toolCall.status === 'error') return <Icon icon={AlertIcon} />;
         if (toolCall.status === 'completed') {
             if (resultsVisible) return <Icon icon={ArrowDownIcon} />;
             if (isButtonHovered && totalAnnotations > 0) return <Icon icon={ArrowRightIcon} />;
-            if (validAnnotations == 0) return <Icon icon={AlertIcon} />;
-            return hasErrors ? <Icon icon={AlertIcon} /> : <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+            if (totalAnnotations === 0) return <Icon icon={AlertIcon} />;
+            if (hasErrors || deletedAnnotations === totalAnnotations) return <Icon icon={AlertIcon} />;
+            return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
         }
         return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
     };
@@ -388,7 +369,26 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         }
         if (toolCall.status === 'completed') {
             if (totalAnnotations === 0) return `${label}: No annotations`;
-            return `${totalAnnotations} ${label}`;
+
+            const parts: string[] = [];
+            if (appliedAnnotations > 0) {
+                parts.push(`${appliedAnnotations}/${totalAnnotations} applied`);
+            } else {
+                parts.push(
+                    `${totalAnnotations} ${totalAnnotations === 1 ? 'annotation' : 'annotations'}`
+                );
+            }
+            if (pendingAnnotations > 0) {
+                parts.push(`${pendingAnnotations} pending`);
+            }
+            if (deletedAnnotations > 0) {
+                parts.push(`${deletedAnnotations} deleted`);
+            }
+            if (hasErrors) {
+                parts.push('check reader');
+            }
+
+            return `${label}: ${parts.join(', ')}`;
         }
         return label;
     };

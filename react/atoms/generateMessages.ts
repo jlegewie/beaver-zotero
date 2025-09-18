@@ -41,7 +41,7 @@ import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTy
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
-import { toToolAnnotationResult } from '../types/chat/toolAnnotations';
+import { RawToolAnnotationResult, toToolAnnotationResult } from '../types/chat/toolAnnotations';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -606,7 +606,7 @@ async function _processChatCompletionViaBackend(
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
-            onAnnotation: (messageId: string, toolcallId: string, rawAnnotation: any) => {
+            onAnnotation: (messageId: string, toolcallId: string, rawAnnotation: RawToolAnnotationResult) => {
                 try {
                     const annotation = toToolAnnotationResult(rawAnnotation);
                     logger(

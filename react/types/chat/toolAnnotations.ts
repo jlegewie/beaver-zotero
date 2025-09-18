@@ -29,14 +29,13 @@ export interface ToolAnnotationResult {
     annotationType: ToolAnnotationType;
     libraryId: number;
     attachmentKey: string;
+    /** Raw zotero key as provided by the backend. */
+    zoteroKey?: string;
     title: string;
     comment: string;
-    color?: ToolAnnotationColor;
-    rawSentenceIds?: string;
+    color?: ToolAnnotationColor | null;
+    rawSentenceIds?: string | null;
     sentenceIds: string[];
-    missingSentenceIds: string[];
-    isValid: boolean;
-    errors: string[];
     highlightLocations?: ToolAnnotationHighlightLocation[];
     notePosition?: ToolAnnotationNotePosition;
     /**
@@ -61,18 +60,6 @@ export interface ToolAnnotationResult {
     zoteroItemId?: number;
 }
 
-export interface AnnotationValidationSummary {
-    annotationType: ToolAnnotationType;
-    libraryId: number;
-    attachmentKey: string;
-    explanation?: string;
-    totalAnnotations: number;
-    validAnnotations: number;
-    invalidAnnotations: number;
-    allValid: boolean;
-    annotations: ToolAnnotationResult[];
-}
-
 export interface AnnotationStreamEvent {
     event: 'annotation';
     messageId: string;
@@ -82,10 +69,6 @@ export interface AnnotationStreamEvent {
 
 export type RawToolAnnotationResult = Partial<Record<string, any>> & {
     id: string;
-};
-
-export type RawAnnotationValidationSummary = Partial<Record<string, any>> & {
-    annotations?: RawToolAnnotationResult[];
 };
 
 export function isAnnotationTool(functionName: string | undefined): boolean {
@@ -124,14 +107,19 @@ function normalizeBoundingBox(raw: any): BoundingBox | null {
 }
 
 function normalizeHighlightLocations(raw: any): ToolAnnotationHighlightLocation[] | undefined {
-    const locations = raw?.highlightLocations ?? raw?.highlight_locations;
+    const locations = raw?.highlightLocations ?? raw?.highlight_locations ?? raw?.locations;
     if (!Array.isArray(locations) || locations.length === 0) {
         return undefined;
     }
 
     return locations
         .map((loc: any) => {
-            const rawPageIndex = loc?.pageIndex ?? loc?.page_index ?? loc?.pageIdx ?? loc?.page_idx;
+            const rawPageIndex =
+                loc?.pageIndex ??
+                loc?.page_index ??
+                loc?.pageIdx ??
+                loc?.page_idx ??
+                loc?.page;
             if (rawPageIndex === undefined || rawPageIndex === null) {
                 return null;
             }
@@ -140,7 +128,12 @@ function normalizeHighlightLocations(raw: any): ToolAnnotationHighlightLocation[
                 return null;
             }
 
-            const rawBoxes = loc?.boxes ?? loc?.boundingBoxes ?? loc?.bboxes ?? [];
+            const rawBoxes =
+                loc?.boxes ??
+                loc?.boundingBoxes ??
+                loc?.bboxes ??
+                loc?.rects ??
+                [];
             const boxes = Array.isArray(rawBoxes)
                 ? (rawBoxes
                       .map(normalizeBoundingBox)
@@ -159,9 +152,9 @@ function normalizeNotePosition(raw: any): ToolAnnotationNotePosition | undefined
     const notePosition = raw?.notePosition ?? raw?.note_position;
     if (!notePosition) return undefined;
 
-    const rawPageIndex = notePosition.pageIndex ?? notePosition.page_index;
+    const rawPageIndex = notePosition.pageIndex ?? notePosition.page_index ?? notePosition.page_idx;
     const rawSide = notePosition.side;
-    if (rawPageIndex === undefined || !rawSide) {
+    if (rawPageIndex === undefined || rawPageIndex === null || !rawSide) {
         return undefined;
     }
 
@@ -179,7 +172,7 @@ function normalizeNotePosition(raw: any): ToolAnnotationNotePosition | undefined
         pageIndex,
         side,
         x,
-        y
+        y,
     };
 }
 
@@ -202,81 +195,100 @@ function normalizeSentenceIdList(value: any): string[] {
     return [];
 }
 
-function normalizeErrors(value: any): string[] {
-    if (!value) return [];
-    if (Array.isArray(value)) {
-        return value.filter((error): error is string => typeof error === 'string');
-    }
-    if (typeof value === 'string') {
-        return [value];
-    }
-    return [];
-}
-
 export function toToolAnnotationResult(
     raw: RawToolAnnotationResult,
     origin: 'stream' | 'summary' = 'stream'
 ): ToolAnnotationResult {
     const annotationType = toToolAnnotationType(raw);
-    const libraryId = raw.libraryId ?? raw.library_id;
-    const attachmentKey = raw.attachmentKey ?? raw.attachment_key;
+    const libraryIdRaw = raw.libraryId ?? raw.library_id;
+    const attachmentKeyRaw = raw.attachmentKey ?? raw.attachment_key ?? raw.zotero_key;
+    const zoteroKeyRaw = raw.zoteroKey ?? raw.zotero_key ?? raw.attachmentKey ?? raw.attachment_key;
 
     const sentenceIds = normalizeSentenceIdList(raw.sentenceIds ?? raw.sentence_ids);
-    const missingSentenceIds = normalizeSentenceIdList(
-        raw.missingSentenceIds ?? raw.missing_sentence_ids
-    );
+    const highlightLocations = annotationType === 'highlight' ? normalizeHighlightLocations(raw) : undefined;
+    const notePosition = annotationType === 'note' ? normalizeNotePosition(raw) : undefined;
 
-    const highlightLocations = normalizeHighlightLocations(raw);
-    const notePosition = normalizeNotePosition(raw);
+    const createdAtRaw = raw.createdAt ?? raw.created_at;
+    const parsedCreatedAt =
+        typeof createdAtRaw === 'number'
+            ? createdAtRaw
+            : typeof createdAtRaw === 'string'
+            ? Date.parse(createdAtRaw)
+            : undefined;
+    const createdAt = Number.isFinite(parsedCreatedAt) ? (parsedCreatedAt as number) : Date.now();
 
-    const result: ToolAnnotationResult = {
+    return {
         id: raw.id,
         annotationType,
-        libraryId: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-        attachmentKey: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
+        libraryId: typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw ?? 0),
+        attachmentKey: typeof attachmentKeyRaw === 'string' ? attachmentKeyRaw : String(attachmentKeyRaw ?? ''),
+        zoteroKey: typeof zoteroKeyRaw === 'string' ? zoteroKeyRaw : undefined,
         title: raw.title ?? '',
         comment: raw.comment ?? '',
-        color: raw.color ?? raw.highlight_color,
-        rawSentenceIds: raw.rawSentenceIds ?? raw.raw_sentence_ids,
+        color: (raw.color ?? raw.highlight_color) ?? null,
+        rawSentenceIds: raw.rawSentenceIds ?? raw.raw_sentence_ids ?? null,
         sentenceIds,
-        missingSentenceIds,
-        isValid: Boolean(raw.isValid ?? raw.is_valid ?? true),
-        errors: normalizeErrors(raw.errors),
         highlightLocations,
         notePosition,
         isApplied: Boolean(raw.isApplied ?? false),
-        zoteroAnnotationKey: raw.zoteroAnnotationKey,
-        applicationError: raw.applicationError ?? null,
+        zoteroAnnotationKey: raw.zoteroAnnotationKey ?? raw.zotero_annotation_key,
+        applicationError: raw.applicationError ?? raw.application_error ?? null,
         isDeleted: Boolean(raw.isDeleted ?? false),
         pendingAttachmentOpen: Boolean(raw.pendingAttachmentOpen ?? false),
-        createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+        createdAt,
         origin,
+        zoteroItemId:
+            typeof raw.zoteroItemId === 'number'
+                ? raw.zoteroItemId
+                : typeof raw.zotero_item_id === 'number'
+                ? raw.zotero_item_id
+                : undefined,
     };
-
-    return result;
 }
 
-export function toAnnotationValidationSummary(
-    raw: RawAnnotationValidationSummary
-): AnnotationValidationSummary {
-    const libraryId = raw.libraryId ?? raw.library_id;
-    const attachmentKey = raw.attachmentKey ?? raw.attachment_key;
-    const annotationType = toToolAnnotationType(raw);
-    const annotations = Array.isArray(raw.annotations)
-        ? raw.annotations.map((annotation) => toToolAnnotationResult(annotation, 'summary'))
-        : [];
+function normalizeRawAnnotations(value: any): RawToolAnnotationResult[] {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return value.filter((candidate): candidate is RawToolAnnotationResult =>
+            typeof candidate === 'object' && candidate !== null && typeof candidate.id === 'string'
+        );
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return normalizeRawAnnotations(parsed);
+        } catch (_error) {
+            return [];
+        }
+    }
+    if (typeof value === 'object') {
+        const candidate = value as RawToolAnnotationResult;
+        if (typeof candidate.id === 'string') {
+            return [candidate];
+        }
+    }
+    return [];
+}
 
-    return {
-        annotationType,
-        libraryId: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-        attachmentKey: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
-        explanation: raw.explanation,
-        totalAnnotations: Number(raw.totalAnnotations ?? raw.total_annotations ?? annotations.length),
-        validAnnotations: Number(raw.validAnnotations ?? raw.valid_annotations ?? 0),
-        invalidAnnotations: Number(raw.invalidAnnotations ?? raw.invalid_annotations ?? 0),
-        allValid: Boolean(raw.allValid ?? raw.all_valid ?? false),
-        annotations,
-    };
+export function annotationsFromMetadata(
+    metadata: unknown,
+    origin: 'stream' | 'summary' = 'summary'
+): ToolAnnotationResult[] {
+    if (!metadata) return [];
+
+    const rawAnnotations = Array.isArray(metadata)
+        ? normalizeRawAnnotations(metadata)
+        : normalizeRawAnnotations((metadata as any)?.annotations ?? (metadata as any)?.annotation_results);
+
+    return rawAnnotations
+        .map((raw) => {
+            try {
+                return toToolAnnotationResult(raw, origin);
+            } catch (_error) {
+                return null;
+            }
+        })
+        .filter((annotation): annotation is ToolAnnotationResult => annotation !== null);
 }
 
 export function mergeAnnotations(

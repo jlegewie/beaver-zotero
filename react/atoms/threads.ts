@@ -11,11 +11,10 @@ import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
 import {
-    AnnotationValidationSummary,
     ToolAnnotationResult,
+    annotationsFromMetadata,
     isAnnotationTool,
     mergeAnnotations,
-    toAnnotationValidationSummary,
 } from "../types/chat/toolAnnotations";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
@@ -35,22 +34,12 @@ function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall):
 
     if (isAnnotationTool(toolcall.function?.name)) {
         const rawMetadata = toolcall.response?.metadata ?? existing?.response?.metadata;
-        if (rawMetadata) {
-            const summary = toAnnotationValidationSummary(rawMetadata as any);
-            const mergedAnnotations = mergeAnnotations(existing?.annotations, summary.annotations);
-            normalized.annotations = mergedAnnotations;
-            normalized.annotationSummary = {
-                ...summary,
-                annotations: mergedAnnotations,
-            } as AnnotationValidationSummary;
-        } else if (existing?.annotations && (!normalized.annotations || normalized.annotations.length === 0)) {
-            normalized.annotations = [...existing.annotations];
-            if (existing.annotationSummary && !normalized.annotationSummary) {
-                normalized.annotationSummary = {
-                    ...existing.annotationSummary,
-                    annotations: [...existing.annotations],
-                };
-            }
+        const metadataAnnotations = annotationsFromMetadata(rawMetadata, 'summary');
+        const baseAnnotations = normalized.annotations ?? existing?.annotations;
+        if (metadataAnnotations.length > 0) {
+            normalized.annotations = mergeAnnotations(baseAnnotations, metadataAnnotations);
+        } else if (baseAnnotations && baseAnnotations.length > 0) {
+            normalized.annotations = [...baseAnnotations];
         }
     }
 
@@ -509,55 +498,6 @@ export const updateToolcallAnnotationAtom = atom(
                 toolCalls[toolCallIndex] = {
                     ...existingToolcall,
                     annotations: updatedAnnotations,
-                    ...(existingToolcall.annotationSummary && {
-                        annotationSummary: {
-                            ...existingToolcall.annotationSummary,
-                            annotations: updatedAnnotations,
-                        },
-                    }),
-                };
-
-                return {
-                    ...message,
-                    tool_calls: toolCalls,
-                };
-            })
-        );
-    }
-);
-
-export const setToolcallAnnotationSummaryAtom = atom(
-    null,
-    (
-        get,
-        set,
-        {
-            messageId,
-            toolcallId,
-            summary,
-        }: {
-            messageId: string;
-            toolcallId: string;
-            summary: AnnotationValidationSummary;
-        }
-    ) => {
-        set(threadMessagesAtom, (prevMessages) =>
-            prevMessages.map((message) => {
-                if (message.id !== messageId) return message;
-                const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
-                const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
-                if (toolCallIndex === -1) return message;
-
-                const existingToolcall = toolCalls[toolCallIndex];
-                const mergedAnnotations = mergeAnnotations(existingToolcall.annotations, summary.annotations);
-
-                toolCalls[toolCallIndex] = {
-                    ...existingToolcall,
-                    annotations: mergedAnnotations,
-                    annotationSummary: {
-                        ...summary,
-                        annotations: mergedAnnotations,
-                    },
                 };
 
                 return {
