@@ -176,7 +176,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
-                minItemsForSearch={5}
+                showSearchInput={true}
             />
         </>
     );

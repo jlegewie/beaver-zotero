@@ -150,6 +150,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
                 closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
+                showSearchInput={allLibraries.length > 5}
             />
         </>
     );

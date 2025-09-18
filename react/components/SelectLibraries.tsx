@@ -76,12 +76,17 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
             .sort((a, b) => a.libraryID - b.libraryID);
     }, [allLibraries, selectedLibraryIds]);
     
+    const unselectedLibraries = useMemo(() => {
+        return allLibraries.filter(lib => !selectedLibraryIds.includes(lib.libraryID));
+    }, [allLibraries, selectedLibraryIds]);
+
     const availableLibraries = useMemo(() => {
+        if (!searchQuery) {
+            return unselectedLibraries;
+        }
         const lowerCaseQuery = searchQuery.toLowerCase();
-        return allLibraries
-            .filter(lib => !selectedLibraryIds.includes(lib.libraryID))
-            .filter(lib => lib.name.toLowerCase().includes(lowerCaseQuery));
-    }, [allLibraries, selectedLibraryIds, searchQuery]);
+        return unselectedLibraries.filter(lib => lib.name.toLowerCase().includes(lowerCaseQuery));
+    }, [unselectedLibraries, searchQuery]);
 
     const addLibraryMenuItems = useMemo((): SearchMenuItem[] => {
         return availableLibraries.map(lib => {
@@ -195,7 +200,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                 closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
-                minItemsForSearch={5}
+                showSearchInput={unselectedLibraries.length > 5}
             />
         </div>
     );
