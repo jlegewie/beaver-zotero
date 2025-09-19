@@ -4,7 +4,7 @@ import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorC
 import { currentMessageContentAtom, currentSourcesAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom, readerTextSelectionAtom, removedItemKeysCache } from "../atoms/input"
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
-import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, isSyncCompleteAtom } from "../atoms/sync"
+import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
@@ -61,7 +61,7 @@ export const atomRegistry = {
     syncing: syncingAtom,
     syncError: syncErrorAtom,
     syncStatusSummary: syncStatusSummaryAtom,
-    isSyncComplete: isSyncCompleteAtom,
+    overallSyncStatus: overallSyncStatusAtom,
 
     // Threads
     userAttachments: userAttachmentsAtom,

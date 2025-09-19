@@ -3,7 +3,7 @@ import { Spinner, ArrowRightIcon, Icon, AlertIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
-import { isSyncCompleteAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
+import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
 import { hasAuthorizedAccessAtom } from '../../atoms/profile';
 import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
@@ -44,7 +44,7 @@ const OnboardingPage: React.FC = () => {
 
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
-    const isSyncComplete = useAtomValue(isSyncCompleteAtom);
+    const overallSyncStatus = useAtomValue(overallSyncStatusAtom);
     
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
@@ -162,7 +162,23 @@ const OnboardingPage: React.FC = () => {
                 
         // Set completing onboarding to true
         setIsCompletingOnboarding(true);
-        try {            
+
+        if (overallSyncStatus === 'partially_completed') {
+            const buttonIndex = Zotero.Prompt.confirm({
+                window: Zotero.getMainWindow(),
+                title: "Complete Onboarding?",
+                text: "Are you sure you want to complete onboarding?\n\nLibraries with errors will not be synced with Beaver.",
+                button0: Zotero.Prompt.BUTTON_TITLE_YES,
+                button1: Zotero.Prompt.BUTTON_TITLE_NO,
+                defaultButton: 1,
+            });
+
+            if (buttonIndex === 1) {
+                setIsCompletingOnboarding(false);
+                return;
+            }
+        }
+        try {
             // Call the service to complete onboarding
             await accountService.completeOnboarding(profileWithPlan.plan.processing_tier);
 
@@ -192,8 +208,10 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getFooterMessage = () => {
-        if (!isSyncComplete) {
-            return "Waiting for initial syncing process to complete.";
+        if (overallSyncStatus === 'in_progress') {
+            return "Initial syncing in progress.";
+        } else if (overallSyncStatus === 'failed') {
+            return `Initial syncing failed. Please retry syncing or contact support.`;
         } else if (!isUploadProcessed) {
             return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
         } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
@@ -313,7 +331,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadProcessed || !isSyncComplete || isCompletingOnboarding}
+                            disabled={!isUploadProcessed || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete

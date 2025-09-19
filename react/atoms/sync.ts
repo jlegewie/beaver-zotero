@@ -40,7 +40,7 @@ export const syncErrorAtom = atom(
 export const syncStatusSummaryAtom = atom(
     (get) => {
         const syncStatus = get(syncStatusAtom);
-        const libraryIds = Object.keys(syncStatus).map(id => Number(id));
+        const libraryIds = Object.keys(syncStatus).map(Number);
 
         if (libraryIds.length === 0) return {
             totalItems: 0,
@@ -78,14 +78,25 @@ export const syncStatusSummaryAtom = atom(
     }
 );
 
-export const isSyncValidAtom = atom<boolean>((get) => {
-    const librarySyncProgress = get(syncStatusSummaryAtom);
-    return librarySyncProgress.syncValid ?? false;
+export const failedSyncLibraryIdsAtom = atom<number[]>((get) => {
+    const syncStatus = get(syncStatusAtom);
+    return Object.values(syncStatus).filter(status => status.status === 'failed').map(status => status.libraryID);
 });
 
-export const isSyncCompleteAtom = atom<boolean>((get) => {
-    const librarySyncProgress = get(syncStatusSummaryAtom);
-    return librarySyncProgress.completed && !librarySyncProgress.anyFailed;
+export const overallSyncStatusAtom = atom<'in_progress' | 'completed' | 'partially_completed' | 'failed'>((get) => {
+    const syncStatus = get(syncStatusAtom);
+    const syncStatuses = Object.values(syncStatus);
+    const libraryIds = Object.keys(syncStatus).map(Number);
+    // In progress and completed
+    if(syncStatuses.some(status => status.status === 'in_progress')) return 'in_progress';
+    if(syncStatuses.every(status => status.status === 'completed')) return 'completed';
+    if(syncStatuses.every(status => status.status === 'failed')) return 'failed';
+    // Failed if the main library is failed
+    if(libraryIds.includes(1) && syncStatus[1].status === 'failed') return 'failed';
+    // Partially completed (Completed with errors)
+    const allCompletedOrFailed = syncStatuses.every(status => status.status === 'completed' || status.status === 'failed');
+    if (allCompletedOrFailed) return 'partially_completed';
+    return 'in_progress';
 });
 
 
