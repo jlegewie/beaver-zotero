@@ -214,7 +214,7 @@ const SyncedLibraries: React.FC = () => {
                     >
                         Verify Data
                     </Button> */}
-                    <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length} />
+                    <AddLibraryButton disabled={libraries.length === Zotero.Libraries.getAll().length || !syncWithZotero} />
                 </div>
             </div>
 
