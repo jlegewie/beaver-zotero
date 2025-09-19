@@ -10,6 +10,7 @@ import { logger } from '../../src/utils/logger';
 
 interface ApplyAnnotationSuccess {
     status: 'applied';
+    libraryId: number;
     zoteroAnnotationKey: string;
 }
 
@@ -279,6 +280,7 @@ export async function applyAnnotation(
         const annotationId = await createAnnotation(reader as ZoteroReader, annotation);
         return {
             status: 'applied',
+            libraryId: annotation.libraryId,
             zoteroAnnotationKey: annotationId,
         };
     } catch (error: any) {
@@ -337,19 +339,6 @@ export async function openAttachmentForAnnotation(
     }
 
     return reader;
-}
-
-export async function navigateToAnnotation(
-    annotationKey: string
-): Promise<void> {
-    const reader = getCurrentReader();
-    if (!reader) return;
-
-    try {
-        await (reader as any)._internalReader.navigate({ annotationId: annotationKey });
-    } catch (error) {
-        logger(`navigateToAnnotation failed: ${error}`, 1);
-    }
 }
 
 export async function resolveExistingAnnotationKey(
