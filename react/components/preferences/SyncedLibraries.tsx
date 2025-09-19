@@ -233,7 +233,7 @@ const SyncedLibraries: React.FC = () => {
                         if (!isValid && lib.isGroup && !syncWithZotero) {
                             invalidTooltip = 'Group libraries can only be synced when "Coordinate with Zotero Sync" is enabled';
                         } else if (!isValid && lib.isGroup && !isLibrarySynced(lib.libraryID)) {
-                            invalidTooltip = 'This library is excluded from Zotero Sync. Enable it in Preferences → Sync → Choose Libraries… to sync it with Beaver';
+                            invalidTooltip = 'This library is excluded from Zotero Sync. Enable it in Preferences → Sync → Choose Libraries… to sync it with Beaver or remove it here.';
                         }
 
                         const s = syncStatusMap[lib.libraryID];
