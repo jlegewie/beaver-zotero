@@ -58,7 +58,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                 />
 
                 <div className="display-flex flex-col gap-05">
-                    <div className="display-flex flex-col gap-1 items-start">
+                    <div className="display-flex flex-col items-start">
                         <div className="display-flex flex-row gap-2 items-center">
                             <div className="font-color-primary text-base">
                                 {title}
