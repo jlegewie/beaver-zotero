@@ -18,6 +18,7 @@ import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zot
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 import FileStatusDisplay from "../status/FileStatusDisplay";
+import { isLibraryValidForSync } from "../../../src/utils/sync";
 
 
 const OnboardingPage: React.FC = () => {
@@ -32,6 +33,7 @@ const OnboardingPage: React.FC = () => {
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
+    const [validLibraryIds, setValidLibraryIds] = useState<number[]>([]);
 
     // Sync toggle state
     const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
@@ -61,8 +63,13 @@ const OnboardingPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        setIsLibrarySelectionValid(selectedLibraryIds.length > 0);
-    }, [selectedLibraryIds]);
+        const validIds = selectedLibraryIds.filter(id => {
+            const library = Zotero.Libraries.get(id);
+            return isLibraryValidForSync(library, useZoteroSync);
+        });
+        setValidLibraryIds(validIds);
+        setIsLibrarySelectionValid(validIds.length > 0);
+    }, [selectedLibraryIds, useZoteroSync]);
 
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
@@ -75,14 +82,14 @@ const OnboardingPage: React.FC = () => {
 
     // Handle authorization
     const handleAuthorize = async () => {
-        if (selectedLibraryIds.length === 0 || isAuthorizing) return;
+        if (validLibraryIds.length === 0 || isAuthorizing) return;
         if (!profileWithPlan) return;
         
         setIsAuthorizing(true);
         try {
             // Create a map of library IDs to library sync status
             const selectedLibraries = Object.fromEntries(
-                selectedLibraryIds
+                validLibraryIds
                     .map(id => {
                         const library = libraryStatistics.find(library => library.libraryID === id);
                         return [
@@ -105,7 +112,7 @@ const OnboardingPage: React.FC = () => {
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
             
             // Call the service to authorize access
-            const libraries = selectedLibraryIds
+            const libraries = validLibraryIds
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
                     if (!library) return null;
