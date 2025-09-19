@@ -377,10 +377,10 @@ const PreferencePage: React.FC = () => {
                 <SyncedLibraries />
 
                 {/* Verify Data Button */}
-                <div className="display-flex flex-row items-center gap-4">
+                <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
                     <Button 
                         variant="outline" 
-                        icon={verifyButtonProps.icon}
+                        rightIcon={verifyButtonProps.icon}
                         iconClassName={verifyButtonProps.iconClassName}
                         onClick={handleVerifySync}
                         disabled={verifyButtonProps.disabled}
