@@ -5,6 +5,7 @@ import IconButton from './ui/IconButton';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './ui/menus/SearchMenu';
 import { isLibrarySynced } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
+import { isLibraryValidForSync } from '../../src/utils/sync';
 
 interface SelectLibrariesProps {
     selectedLibraryIds: number[];
@@ -34,14 +35,14 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
     useEffect(() => {
         const loadLibraries = async () => {
             const libs = await Zotero.Libraries.getAll();
-            const userLibs = libs
+            const libsFiltered = libs
                 .filter(library => library.libraryType === 'user' || library.libraryType === "group")
                 .map(library => ({
                     libraryID: library.libraryID,
                     name: library.name,
                     isGroup: library.isGroup
                 }));
-            setAllLibraries(userLibs);
+            setAllLibraries(libsFiltered);
         };
         loadLibraries();
     }, []);
@@ -152,7 +153,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                 ) : (
                     selectedLibraries.map((lib, index) => {
                         const stats = libraryStatistics.find(s => s.libraryID === lib.libraryID);
-                        const isValid = !lib.isGroup || (lib.isGroup && useZoteroSync && isLibrarySynced(lib.libraryID));
+                        const isValid = isLibraryValidForSync(lib, useZoteroSync);
                         let invalidTooltip = '';
                         if (!isValid && lib.isGroup && !useZoteroSync) {
                             invalidTooltip = 'Group libraries can only be synced when "Coordinate with Zotero Sync" is enabled';

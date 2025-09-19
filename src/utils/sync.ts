@@ -13,6 +13,15 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 
+
+export const isLibraryValidForSync = (
+    library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
+    useZoteroSync: boolean
+): boolean => {
+    if (!library) return false;
+    return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
+};
+
 /**
  * Interface for item filter function
  */
