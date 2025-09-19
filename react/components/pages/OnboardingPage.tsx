@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Spinner, ArrowRightIcon, Icon, AlertIcon } from "../icons/icons";
+import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
-import { hasAuthorizedAccessAtom } from '../../atoms/profile';
+import { hasAuthorizedAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
 import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
@@ -19,6 +19,7 @@ import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
+import { store } from "../../store";
 
 
 const OnboardingPage: React.FC = () => {
@@ -179,8 +180,26 @@ const OnboardingPage: React.FC = () => {
             }
         }
         try {
+            // Get updated libraries
+            let updatedLibraries = undefined;
+            if (overallSyncStatus === 'partially_completed') {
+                const syncStatus = store.get(syncStatusAtom)
+                const completedLibraryIds = Object.values(syncStatus)
+                    .filter(library => library.status === 'completed')
+                    .map(library => library.libraryID);
+                updatedLibraries = store.get(syncLibrariesAtom).filter(library => completedLibraryIds.includes(library.library_id));
+            }
+            
             // Call the service to complete onboarding
-            await accountService.completeOnboarding(profileWithPlan.plan.processing_tier);
+            await accountService.completeOnboarding(profileWithPlan.plan.processing_tier, overallSyncStatus, updatedLibraries);
+
+            // Update local state with updated libraries if they were updated
+            if (updatedLibraries) {
+                setProfileWithPlan({
+                    ...profileWithPlan,
+                    libraries: updatedLibraries
+                });
+            }
 
             // Show indexing complete message if indexing is not complete
             if (fileStatusSummary.progress < 100) setPref("showIndexingCompleteMessage", true);
