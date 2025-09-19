@@ -226,10 +226,16 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                                     
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
-                                        <div className="text-sm font-color-tertiary">
-                                            {isLoading && !stats ? 'Loading...' : 
-                                             stats ? `${stats.itemCount.toLocaleString()} items, ${stats.attachmentCount.toLocaleString()} attachments` : '...'}
-                                        </div>
+                                        {isValid ? (
+                                            <div className="text-sm font-color-tertiary">
+                                                {isLoading && !stats
+                                                    ? 'Loading...'
+                                                    : stats ? `${stats.itemCount.toLocaleString()} items, ${stats.attachmentCount.toLocaleString()} attachments` : '...'
+                                                }
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm font-color-tertiary">Not synced with Zotero</div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="display-flex flex-row items-center gap-4 mr-1">
