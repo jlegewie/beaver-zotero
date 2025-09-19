@@ -7,6 +7,7 @@ export const fileUploaderBackoffUntilAtom = atom<number | null>(null);
 
 export type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
+export type OverallSyncStatus = 'in_progress' | 'completed' | 'partially_completed' | 'failed';
 export type SyncMethod = 'version' | 'date_modified';
 
 // Library sync tracking
@@ -83,7 +84,7 @@ export const failedSyncLibraryIdsAtom = atom<number[]>((get) => {
     return Object.values(syncStatus).filter(status => status.status === 'failed').map(status => status.libraryID);
 });
 
-export const overallSyncStatusAtom = atom<'in_progress' | 'completed' | 'partially_completed' | 'failed'>((get) => {
+export const overallSyncStatusAtom = atom<OverallSyncStatus>((get) => {
     const syncStatus = get(syncStatusAtom);
     const syncStatuses = Object.values(syncStatus);
     const libraryIds = Object.keys(syncStatus).map(Number);
