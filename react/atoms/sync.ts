@@ -56,15 +56,32 @@ export const syncStatusSummaryAtom = atom(
         const completed = libraryIds.length > 0 && libraryIds.every(id => syncStatus[id].status === 'completed');
         const anyFailed = libraryIds.some(id => syncStatus[id].status === 'failed');
 
+        // Determine if the sync is valid
+        // 1. If the main library is included, the sync is valid if the main library is completed and all other libraries are completed or failed
+        // 2. If the main library is not included, the sync is valid if at least one library is completed and all other libraries are completed or failed
+        let syncValid = false;
+        const allCompletedOrFailed = libraryIds.every(id => syncStatus[id].status === 'completed' || syncStatus[id].status === 'failed');
+        if (libraryIds.includes(1)) {
+            syncValid = syncStatus[1].status === 'completed' && allCompletedOrFailed;
+        } else {
+            syncValid = libraryIds.some(id => syncStatus[id].status === 'completed') && allCompletedOrFailed;
+        }
+
         return {
             totalItems,
             syncedItems,
             progress,
             completed,
-            anyFailed
+            anyFailed,
+            syncValid
         };
     }
 );
+
+export const isSyncValidAtom = atom<boolean>((get) => {
+    const librarySyncProgress = get(syncStatusSummaryAtom);
+    return librarySyncProgress.syncValid ?? false;
+});
 
 export const isSyncCompleteAtom = atom<boolean>((get) => {
     const librarySyncProgress = get(syncStatusSummaryAtom);
