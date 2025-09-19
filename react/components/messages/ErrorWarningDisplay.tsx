@@ -130,7 +130,12 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessa
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const removeWarningFromMessage = useSetAtom(removeWarningFromMessageAtom);
     const removeMessage = useSetAtom(removeMessageAtom);
-    const showSettingsIcon = warning.type === 'user_key_failed_unexpected' || warning.type === 'user_key_rate_limit_exceeded' || warning.type === 'user_key_failed';
+    const showSettingsIcon = (
+        warning.type === 'user_key_failed_unexpected' || 
+        warning.type === 'user_key_rate_limit_exceeded' || 
+        warning.type === 'user_key_failed' ||
+        warning.type === 'low_credits'
+    );
     
     return (
         <div
@@ -142,13 +147,6 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessa
                     <div className="display-flex flex-row gap-2 items-start">
                         <div className="text-base">{warning.message}</div>
                         <div className="flex-1"/>
-                        {showSettingsIcon &&
-                            <Button variant="outline" className="scale-90 mt-020" rightIcon={KeyIcon} onClick={() => {
-                                setIsPreferencePageVisible(true);
-                            }}>
-                                API Key
-                            </Button>
-                        }
                         <IconButton
                             variant="ghost-secondary"
                             icon={CancelIcon}
@@ -165,6 +163,16 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessa
                     </div>
                 </div>
             </div>
+            {showSettingsIcon &&
+                <div className="display-flex flex-row gap-3 items-start mr-1">
+                    <div className="flex-1"/>
+                    <Button variant="outline" className="scale-90 mt-020" rightIcon={KeyIcon} onClick={() => {
+                        setIsPreferencePageVisible(true);
+                    }}>
+                        API Key
+                    </Button>
+                </div>
+            }
             {warning.attachments && (
                 <div className="display-flex flex-col -ml-15">
                     {warning.type === 'missing_attachments' && warning.attachments && (
