@@ -178,7 +178,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                                     ) : (
                                         <Icon
                                             icon={AlertIcon}
-                                            className="scale-13 font-color-secondary mt-020 mr-1"
+                                            className="scale-12 font-color-secondary mt-020 ml-05 mr-015"
                                             aria-label={invalidTooltip}
                                         />
                                     )}
