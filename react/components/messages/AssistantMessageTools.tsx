@@ -12,8 +12,10 @@ import {
     ViewIcon,
     Icon,
     DeleteIcon,
+    PlusSignIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
 import { isAnnotationTool, ToolAnnotationResult } from '../../types/chat/toolAnnotations';
 import {
@@ -110,15 +112,15 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                     </div>
                 </div>
                 <div className="display-flex flex-row items-center gap-2">
-                    <Button
-                        variant="ghost"
+                    <IconButton
+                        variant="ghost-secondary"
                         onClick={handleDelete}
                         disabled={isBusy}
                         className="p-1"
                         title={annotation.isDeleted ? 'Annotation deleted' : 'Delete annotation from PDF'}
-                    >
-                        {isBusy ? <Spinner /> : <Icon icon={DeleteIcon} />}
-                    </Button>
+                        icon={annotation.isDeleted ? PlusSignIcon : DeleteIcon}
+                        loading={isBusy}
+                    />
                 </div>
             </div>
             {annotation.pendingAttachmentOpen && !annotation.isApplied && !annotation.isDeleted && (
