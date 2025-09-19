@@ -213,7 +213,7 @@ const PreferencePage: React.FC = () => {
         const action = checked ? 'enable' : 'disable';
         const message = checked 
             ? 'Are you sure you want to enable syncing with Zotero? This will build on Zotero sync for multi-device support and improved sync.'
-            : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device.';
+            : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device and group libraries will not be synced with Beaver anymore.';
         
         const buttonIndex = Zotero.Prompt.confirm({
             window: Zotero.getMainWindow(),
