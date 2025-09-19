@@ -230,7 +230,7 @@ const OnboardingPage: React.FC = () => {
         if (overallSyncStatus === 'in_progress') {
             return "Initial syncing in progress.";
         } else if (overallSyncStatus === 'failed') {
-            return `Initial syncing failed. Please retry syncing or contact support.`;
+            return `Initial syncing failed. Please retry or contact support.`;
         } else if (!isUploadProcessed) {
             return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
         } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
