@@ -354,36 +354,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Updated button text logic to match regular tool calls
     const getButtonText = () => {
-        const label = toolCall.label || 'Annotation tool';
-        if (toolCall.status === 'error') {
-            return `${label}: Unexpected error`;
-        }
-        if (toolCall.status === 'in_progress') {
-            return `${label}${''.padEnd(loadingDots, '.')}`;
-        }
-        if (toolCall.status === 'completed') {
-            if (totalAnnotations === 0) return `${label}: No annotations`;
-
-            const parts: string[] = [];
-            if (appliedAnnotations > 0) {
-                parts.push(`${appliedAnnotations}/${totalAnnotations} applied`);
-            } else {
-                parts.push(
-                    `${totalAnnotations} ${totalAnnotations === 1 ? 'annotation' : 'annotations'}`
-                );
-            }
-            if (pendingAnnotations > 0) {
-                parts.push(`${pendingAnnotations} pending`);
-            }
-            if (deletedAnnotations > 0) {
-                parts.push(`${deletedAnnotations} deleted`);
-            }
-            if (hasErrors) {
-                parts.push('check reader');
-            }
-
-            return `${label}: ${parts.join(', ')}`;
-        }
+        const label = `${appliedAnnotations} ${toolCall.label || 'Annotations'}`;
         return label;
     };
 
