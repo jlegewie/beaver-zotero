@@ -5,6 +5,7 @@ import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { FullModelConfig } from '../../react/atoms/models';
 import { ZoteroLibrary } from '../../react/types/zotero';
+import { OverallSyncStatus } from '../../react/atoms/sync';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
@@ -157,9 +158,15 @@ export class AccountService extends ApiService {
      * @param processingTier The processing tier to set for the user
      * @returns Promise with the response message
      */
-    async completeOnboarding(processingTier: ProcessingTier): Promise<{ message: string }> {
+    async completeOnboarding(
+        processingTier: ProcessingTier,
+        overallSyncStatus: OverallSyncStatus,
+        libraries?: ZoteroLibrary[]
+    ): Promise<{ message: string }> {
         return this.post<{ message: string }>('/api/v1/account/complete-onboarding', {
-            processing_tier: processingTier
+            processing_tier: processingTier,
+            sync_status: overallSyncStatus,
+            libraries: libraries
         } as OnboardingRequest);
     }
 
