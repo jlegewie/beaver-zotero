@@ -818,7 +818,8 @@ export async function syncZoteroDatabase(
                     type: 'warning',
                     title: 'Unable to Complete Sync with Beaver',
                     text: `The library '${libraryName}' is not synced with Zotero so Beaver cannot sync it. Remove the library from Beaver or add the library to Zotero sync.`,
-                    expire: true
+                    expire: true,
+                    showSettingsButton: true
                 });
                 continue;
             }
