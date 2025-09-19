@@ -155,9 +155,9 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                         const isValid = !lib.isGroup || (lib.isGroup && useZoteroSync && isLibrarySynced(lib.libraryID));
                         let invalidTooltip = '';
                         if (!isValid && lib.isGroup && !useZoteroSync) {
-                            invalidTooltip = 'Group libraries require "Coordinate with Zotero Sync"';
+                            invalidTooltip = 'Group libraries can only be synced when "Coordinate with Zotero Sync" is enabled';
                         } else if (!isValid && lib.isGroup && !isLibrarySynced(lib.libraryID)) {
-                            invalidTooltip = 'This library is excluded from Zotero sync. Enable it in Zotero → Preferences → Sync → Choose Libraries…';
+                            invalidTooltip = 'This library is excluded from Zotero Sync. Enable it in Preferences → Sync → Choose Libraries… to sync it with Beaver';
                         }
                         return (
                             <div
@@ -166,12 +166,22 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                                 title={invalidTooltip}
                             >
                                 <div className={`display-flex flex-row items-start gap-2 min-w-0 ${isValid ? '' : 'opacity-50'}`}>
-                                    <span className="scale-90 -mt-010">
-                                        <CSSIcon
-                                            name={lib.isGroup ? 'library-group' : 'library'}
-                                            className="icon-16 font-color-secondary"
+                                    
+                                    {isValid ? (
+                                        <span className="scale-90 -mt-010">
+                                            <CSSIcon
+                                                name={lib.isGroup ? 'library-group' : 'library'}
+                                                className="icon-16 font-color-secondary"
+                                            />
+                                        </span>
+                                    ) : (
+                                        <Icon
+                                            icon={AlertIcon}
+                                            className="scale-13 font-color-secondary mt-020 mr-1"
+                                            aria-label={invalidTooltip}
                                         />
-                                    </span>
+                                    )}
+                                    
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
                                         <div className="text-sm font-color-tertiary">
@@ -181,13 +191,6 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                                     </div>
                                 </div>
                                 <div className="display-flex flex-row items-center gap-4 mr-1">
-                                    {!isValid && (
-                                        <Icon
-                                            icon={AlertIcon}
-                                            className="scale-11 font-color-secondary"
-                                            aria-label={invalidTooltip}
-                                        />
-                                    )}
                                     <IconButton
                                         onClick={() => handleRemoveLibrary(lib.libraryID)}
                                         variant="ghost-secondary"
