@@ -47,23 +47,64 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
         loadLibraries();
     }, []);
 
+    const libraryStatsById = useMemo(() => {
+        const map: Record<number, LibraryStatistics> = {};
+        libraryStatistics.forEach(stat => {
+            if (stat) {
+                map[stat.libraryID] = stat;
+            }
+        });
+        return map;
+    }, [libraryStatistics]);
+
     // Load library statistics
     useEffect(() => {
-        if (allLibraries.length === 0) return;
+        if (allLibraries.length === 0) {
+            return;
+        }
+
+        let isCancelled = false;
+
         const fetchLibraryStatistics = async () => {
+            const missingLibraryIds = allLibraries
+                .map(library => library.libraryID)
+                .filter(libraryID => !libraryStatsById[libraryID]);
+
+            if (missingLibraryIds.length === 0) {
+                setIsLoading(false);
+                return;
+            }
+
             try {
                 setIsLoading(true);
-                const promises = allLibraries.map(library => getLibraryItemCounts(library.libraryID));
-                const stats = await Promise.all(promises);
-                setLibraryStatistics(stats);
+                const fetchedStats = await Promise.all(missingLibraryIds.map(id => getLibraryItemCounts(id)));
+                if (isCancelled) {
+                    return;
+                }
+
+                const mergedStatsById: Record<number, LibraryStatistics> = { ...libraryStatsById };
+                fetchedStats.forEach(stat => {
+                    if (stat) {
+                        mergedStatsById[stat.libraryID] = stat;
+                    }
+                });
+
+                setLibraryStatistics(Object.values(mergedStatsById));
                 setIsLoading(false);
             } catch (error) {
-                logger(`Error fetching library statistics: ${error}`, 1);
-                setIsLoading(false);
+                if (!isCancelled) {
+                    logger(`Error fetching library statistics: ${error}`, 1);
+                    setIsLoading(false);
+                }
             }
         };
+
         fetchLibraryStatistics();
-    }, [allLibraries, setLibraryStatistics]);
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [allLibraries, libraryStatsById, setLibraryStatistics]);
 
     const handleRemoveLibrary = (libraryId: number) => {
         setSelectedLibraryIds(prev => prev.filter(id => id !== libraryId));
