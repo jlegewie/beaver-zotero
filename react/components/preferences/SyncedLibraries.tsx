@@ -2,10 +2,10 @@ import React from 'react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../../atoms/auth';
-import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, DatabaseIcon } from '../icons/icons';
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, AlertIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
-import { syncZoteroDatabase } from '../../../src/utils/sync';
+import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import IconButton from '../ui/IconButton';
@@ -13,6 +13,7 @@ import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom } from '../../atoms/sync';
 import { CancelIcon } from '../status/icons';
+import { isLibrarySynced } from '../../../src/utils/zoteroUtils';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -34,6 +35,7 @@ const SyncedLibraries: React.FC = () => {
     const user = useAtomValue(userAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncStatusMap = useAtomValue(syncStatusAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
     const [lastSynced, setLastSynced] = useState<LastSyncedMap>({});
     const [isSyncing, setIsSyncing] = useState<Record<number, boolean>>({});
@@ -226,6 +228,13 @@ const SyncedLibraries: React.FC = () => {
                         const deleting = isDeleting[lib.libraryID];
                         const syncingComplete = !!isSyncingComplete[lib.libraryID];
                         const isDeletingNow = jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing');
+                        const isValid = isLibraryValidForSync(lib, syncWithZotero);
+                        let invalidTooltip = '';
+                        if (!isValid && lib.isGroup && !syncWithZotero) {
+                            invalidTooltip = 'Group libraries can only be synced when "Coordinate with Zotero Sync" is enabled';
+                        } else if (!isValid && lib.isGroup && !isLibrarySynced(lib.libraryID)) {
+                            invalidTooltip = 'This library is excluded from Zotero Sync. Enable it in Preferences → Sync → Choose Libraries… to sync it with Beaver';
+                        }
 
                         const s = syncStatusMap[lib.libraryID];
                         const inProgressInitial = !!s && s.status === 'in_progress' && s.syncType === 'initial';
@@ -238,14 +247,23 @@ const SyncedLibraries: React.FC = () => {
                             <div
                                 key={lib.libraryID}
                                 className={`display-flex flex-row items-center justify-between p-3 ${index > 0 ? 'border-top-quinary' : ''}`}
+                                title={invalidTooltip}
                             >
-                                <div className="display-flex flex-row items-start gap-2 min-w-0">
-                                    <span className="scale-90 -mt-010">
-                                        <CSSIcon
-                                            name={lib.isGroup ? 'library-group' : 'library'}
-                                            className="icon-16 font-color-secondary"
+                                <div className={`display-flex flex-row items-start gap-2 min-w-0 ${isValid ? '' : 'opacity-50'}`}>
+                                    {isValid ? (
+                                        <span className="scale-90 -mt-010">
+                                            <CSSIcon
+                                                name={lib.isGroup ? 'library-group' : 'library'}
+                                                className="icon-16 font-color-secondary"
+                                            />
+                                        </span>
+                                    ) : (
+                                        <Icon
+                                            icon={AlertIcon}
+                                            className="scale-12 font-color-secondary mt-020 ml-05 mr-015"
+                                            aria-label={invalidTooltip}
                                         />
-                                    </span>
+                                    )}
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
 
@@ -261,7 +279,8 @@ const SyncedLibraries: React.FC = () => {
                                                 </div>
                                             ) : (
                                                 <div className="text-sm font-color-tertiary">
-                                                    {lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
+                                                    {isValid && lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
+                                                    {!isValid && 'Changes will not be synced with Beaver'}
                                                 </div>
                                             )
                                         )}
@@ -286,7 +305,7 @@ const SyncedLibraries: React.FC = () => {
                                                 onClick={() => handleSyncOne(lib.libraryID)}
                                                 variant="ghost-secondary"
                                                 ariaLabel="Sync Library"
-                                                disabled={!!syncing || !!deleting}
+                                                disabled={!!syncing || !!deleting || !isValid}
                                                 title="Sync Library with Beaver"
                                                 icon={!syncingComplete ? SyncIcon : TickIcon}
                                                 iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
