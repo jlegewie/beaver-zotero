@@ -494,7 +494,7 @@ export async function syncItemsToBackend(
     items: SyncItem[],
     syncType: SyncType,
     syncMethod: SyncMethod,
-    onStatusChange?: (libraryID: number, status: SyncStatus) => void,
+    onStatusChange?: (libraryID: number, status: SyncStatus, errorMessage?: string) => void,
     onProgress?: (libraryID: number, processed: number, totalForLibrary: number) => void,
     batchSize: number = 200,
 ) {
@@ -507,6 +507,7 @@ export async function syncItemsToBackend(
     const totalItemsForLibrary = items.length;
     let processedCount = 0;
     let syncFailed = false;
+    let lastError: any = null;
     const syncCompleted = false;
     onStatusChange?.(libraryID, 'in_progress');
     
@@ -673,10 +674,12 @@ export async function syncItemsToBackend(
             if (onProgress) onProgress(libraryID, processedCount, totalItemsForLibrary);
             
         } catch (error: any) {
-            logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${error.message}`, 1);
+            const errorMessage = error?.message ? String(error.message) : 'Sync failed';
+            logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${errorMessage}`, 1);
             Zotero.logError(error);
             syncFailed = true;
-            onStatusChange?.(libraryID, 'failed');
+            lastError = error instanceof Error ? error : new Error(errorMessage);
+            onStatusChange?.(libraryID, 'failed', errorMessage);
             break;
         }
     }
@@ -684,6 +687,8 @@ export async function syncItemsToBackend(
         logger(`Beaver Sync '${syncSessionId}':   All ${totalItemsForLibrary} items requiring sync were processed; marking as complete.`, 3);
         onStatusChange?.(libraryID, 'completed');
         if (onProgress) onProgress(libraryID, totalItemsForLibrary, totalItemsForLibrary);
+    } else {
+        throw lastError instanceof Error ? lastError : new Error('Sync failed');
     }
 }
 
@@ -780,8 +785,14 @@ export async function syncZoteroDatabase(
     };
 
     // On status change callback for this library
-    const onStatusChange = (libraryID: number, status: SyncStatus) => {
-        updateSyncStatus(libraryID, { status });
+    const onStatusChange = (libraryID: number, status: SyncStatus, errorMessage?: string) => {
+        const updates: Partial<LibrarySyncStatus> = { status };
+        if (status === 'failed') {
+            updates.error = errorMessage || 'Sync failed. Try again.';
+        } else {
+            updates.error = undefined;
+        }
+        updateSyncStatus(libraryID, updates);
     };
 
     // Determine sync method
@@ -814,7 +825,11 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             if (syncWithZotero && !isSyncedWithZotero) {
                 logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
-                updateSyncStatus(libraryID, { status: 'failed', syncType: syncType ?? 'incremental' });
+                updateSyncStatus(libraryID, {
+                    status: 'failed',
+                    syncType: syncType ?? 'incremental',
+                    error: `The library '${libraryName}' is not synced with Zotero. Enable it in Zotero preferences or remove it from Beaver.`
+                });
                 store.set(addPopupMessageAtom, {
                     type: 'warning',
                     title: 'Unable to Complete Sync with Beaver',
@@ -914,9 +929,10 @@ export async function syncZoteroDatabase(
             onStatusChange(libraryID, 'completed');
             
         } catch (error: any) {
-            logger(`Beaver Sync '${syncSessionId}': Error syncing library ${libraryID} (${libraryName}): ${error.message}`, 1);
+            const errorMessage = error?.message ? String(error.message) : 'Sync failed';
+            logger(`Beaver Sync '${syncSessionId}': Error syncing library ${libraryID} (${libraryName}): ${errorMessage}`, 1);
             Zotero.logError(error);
-            updateSyncStatus(libraryID, { status: 'failed' });
+            updateSyncStatus(libraryID, { status: 'failed', error: errorMessage });
             // Continue with next library even if one fails
         }
     }

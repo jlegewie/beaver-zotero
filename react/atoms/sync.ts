@@ -18,6 +18,7 @@ export interface LibrarySyncStatus {
     syncedCount?: number;
     status: SyncStatus;
     syncType?: SyncType;
+    error?: string;
 }
 
 // Library-specific sync status atom
