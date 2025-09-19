@@ -43,7 +43,7 @@ const DatabaseStatusButton: React.FC = () => {
     const handleSyncClick = () => {
         if(!isSyncing) {
             logger(`Beaver Sync: User-initiated database sync`)
-            syncZoteroDatabase(syncLibraryIds);
+            syncZoteroDatabase(syncLibraryIds, { resetSyncStatus: true });
         }
     };
     

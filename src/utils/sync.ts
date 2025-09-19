@@ -710,19 +710,38 @@ const updateSyncStatus = (libraryID: number, updates: Partial<LibrarySyncStatus>
     }));
 };
 
+
+interface SyncZoteroDatabaseOptions {
+    filterFunction?: ItemFilterFunction;
+    batchSize?: number;
+    syncType?: SyncType;
+    resetSyncStatus?: boolean;
+}
+
 /**
  * Performs sync for all libraries
- * @param filterFunction Optional function to filter which items to sync
- * @param batchSize Size of item batches to process (default: 50)
+ * @param libraryIds IDs of libraries to sync
+ * @param options Optional options for the sync
+ * @param filterFunction Optional function to filter which items to sync (default: syncingItemFilter)
+ * @param batchSize Optional size of item batches to process (default: 50)
+ * @param syncType Optional type of sync to perform (default: 'incremental')
+ * @param resetSyncStatus Optional whether to reset the sync status for all libraries (default: false)
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
     libraryIds: number[],
-    filterFunction: ItemFilterFunction = syncingItemFilter,
-    batchSize: number = 50,
-    syncType?: SyncType
+    options: SyncZoteroDatabaseOptions = {}
 ): Promise<void> {
     const syncSessionId = uuidv4();
+
+    const {
+        filterFunction = syncingItemFilter,
+        batchSize = 50,
+        syncType,
+        resetSyncStatus = false
+    } = options;
+
+    let derivedSyncType = syncType;
 
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
@@ -730,9 +749,18 @@ export async function syncZoteroDatabase(
 
     logger(`Beaver Sync '${syncSessionId}': Syncing ${librariesToSync.length} libraries with IDs: ${libraryIds.join(', ')}`, 2);
 
+    // Reset sync status for all libraries
+    if (resetSyncStatus) {
+        store.set(syncStatusAtom, {});        
+    }
+
     // Initialize sync status for all libraries
     for (const library of librariesToSync) {
-        updateSyncStatus(library.libraryID, { status: 'in_progress', libraryName: library.name, ...(syncType ? { syncType } : {}) });
+        updateSyncStatus(library.libraryID, {
+            status: 'in_progress',
+            libraryName: library.name,
+            ...(derivedSyncType ? { derivedSyncType } : {})
+        });
     }
 
     // Get user ID
@@ -782,7 +810,7 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             if (syncWithZotero && !isSyncedWithZotero) {
                 logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
-                updateSyncStatus(libraryID, { status: 'failed', syncType: syncType ?? 'incremental' });
+                updateSyncStatus(libraryID, { status: 'failed', syncType: derivedSyncType ?? 'incremental' });
                 store.set(addPopupMessageAtom, {
                     type: 'warning',
                     title: 'Unable to Complete Sync with Beaver',
@@ -824,13 +852,13 @@ export async function syncZoteroDatabase(
             const isInitialSync = syncState === null;
             const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
             const lastSyncVersion = syncState ? syncState.last_sync_version : null;
-            
+            derivedSyncType = isInitialSync ? 'initial' : (syncType ?? 'incremental');
             // TODO: Transition from local to zotero sync library
             // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
 
             // Mark library as in-progress
-            updateSyncStatus(libraryID, { status: 'in_progress', libraryName, syncType: syncType ?? (isInitialSync ? 'initial' : 'incremental') });
+            updateSyncStatus(libraryID, { status: 'in_progress', libraryName, syncType: derivedSyncType });
 
             logger(`Beaver Sync '${syncSessionId}':   Last sync date: ${lastSyncDate}, last sync version: ${lastSyncVersion}`, 3);
 
@@ -860,7 +888,7 @@ export async function syncZoteroDatabase(
                 itemCount,
                 syncedCount: 0,
                 status: 'in_progress',
-                syncType: syncType ?? (isInitialSync ? 'initial' : 'incremental')
+                syncType: derivedSyncType
             } as LibrarySyncStatus;
 
             logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete`, 3);
@@ -874,9 +902,8 @@ export async function syncZoteroDatabase(
 
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
-            if(!syncType) syncType = isInitialSync ? 'initial' : 'incremental';
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
-            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, syncType, syncMethod, onStatusChange, onProgress, batchSize);
+            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, derivedSyncType, syncMethod, onStatusChange, onProgress, batchSize);
 
             onStatusChange(libraryID, 'completed');
             

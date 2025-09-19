@@ -50,7 +50,7 @@ export const DatabaseSyncStatus: React.FC = () => {
             }
             return newStatus;
         });
-        await syncZoteroDatabase(syncLibraryIds);
+        await syncZoteroDatabase(syncLibraryIds, { resetSyncStatus: true });
     };
     
     const getLeftText = (): string => {
