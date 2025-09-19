@@ -46,6 +46,7 @@ interface AnnotationListItemProps {
     isBusy: boolean;
     onClick: (annotation: ToolAnnotationResult) => Promise<void>;
     onDelete: (annotation: ToolAnnotationResult) => Promise<void>;
+    onReAdd: (annotation: ToolAnnotationResult) => Promise<void>;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -56,6 +57,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     isBusy,
     onClick,
     onDelete,
+    onReAdd,
     isHovered,
     onMouseEnter,
     onMouseLeave,
@@ -65,13 +67,17 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         onClick(annotation);
     }, [annotation, isBusy, onClick]);
 
-    const handleDelete = useCallback(
+    const handleAction = useCallback(
         (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
-            onDelete(annotation);
+            if (annotation.isDeleted) {
+                onReAdd(annotation);
+            } else {
+                onDelete(annotation);
+            }
         },
-        [annotation, isBusy, onDelete]
+        [annotation, isBusy, onDelete, onReAdd],
     );
 
     const icon = annotation.annotationType === 'note' ? ZOTERO_ICONS.ANNOTATE_NOTE : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
@@ -114,10 +120,10 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                 <div className="display-flex flex-row items-center gap-2">
                     <IconButton
                         variant="ghost-secondary"
-                        onClick={handleDelete}
+                        onClick={handleAction}
                         disabled={isBusy}
                         className="p-1"
-                        title={annotation.isDeleted ? 'Annotation deleted' : 'Delete annotation from PDF'}
+                        title={annotation.isDeleted ? 'Re-add annotation' : 'Delete annotation from PDF'}
                         icon={annotation.isDeleted ? PlusSignIcon : DeleteIcon}
                         loading={isBusy}
                     />
@@ -354,6 +360,13 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         [markAnnotationState]
     );
 
+    const handleReAddAnnotation = useCallback(
+        async (annotation: ToolAnnotationResult) => {
+            await handleAnnotationClick(annotation);
+        },
+        [handleAnnotationClick],
+    );
+
     // Updated icon logic to return JSX elements directly
     const getIcon = () => {
         if (toolCall.status === 'in_progress') return <Icon icon={Spinner} />;
@@ -418,6 +431,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                                 isBusy={Boolean(busyState[annotation.id])}
                                 onClick={handleAnnotationClick}
                                 onDelete={handleDelete}
+                                onReAdd={handleReAddAnnotation}
                                 isHovered={hoveredAnnotationId === annotation.id}
                                 onMouseEnter={() => setHoveredAnnotationId(annotation.id)}
                                 onMouseLeave={() => setHoveredAnnotationId(null)}
