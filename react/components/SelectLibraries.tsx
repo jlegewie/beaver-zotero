@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { getLibraryItemCounts, LibraryStatistics } from '../../src/utils/libraries';
-import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, LibraryIcon } from './icons/icons';
+import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from './icons/icons';
 import IconButton from './ui/IconButton';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './ui/menus/SearchMenu';
+import { isLibrarySynced } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 
 interface SelectLibrariesProps {
@@ -10,6 +11,7 @@ interface SelectLibrariesProps {
     setSelectedLibraryIds: Dispatch<SetStateAction<number[]>>;
     libraryStatistics: LibraryStatistics[];
     setLibraryStatistics: (statistics: LibraryStatistics[]) => void;
+    useZoteroSync: boolean;
 }
 
 const SelectLibraries: React.FC<SelectLibrariesProps> = ({
@@ -17,6 +19,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
     setSelectedLibraryIds,
     libraryStatistics,
     setLibraryStatistics,
+    useZoteroSync,
 }) => {
     const [allLibraries, setAllLibraries] = useState<{ libraryID: number, name: string, isGroup: boolean }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -133,8 +136,9 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                     className="variant-outline"
                     style={{ paddingRight: '4px', paddingLeft: '4px', marginRight: '1px' }}
                     onClick={handleButtonClick}
-                    disabled={availableLibraries.length === 0}
+                    disabled={availableLibraries.length === 0 || !useZoteroSync}
                     aria-label="Add Library"
+                    title={!useZoteroSync ? 'Group libraries require "Coordinate with Zotero Sync"' : ''}
                 >
                     <Icon icon={PlusSignIcon} className="scale-11" />
                     <span>Add Library</span>
@@ -148,12 +152,20 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                 ) : (
                     selectedLibraries.map((lib, index) => {
                         const stats = libraryStatistics.find(s => s.libraryID === lib.libraryID);
+                        const isValid = !lib.isGroup || (lib.isGroup && useZoteroSync && isLibrarySynced(lib.libraryID));
+                        let invalidTooltip = '';
+                        if (!isValid && lib.isGroup && !useZoteroSync) {
+                            invalidTooltip = 'Group libraries require "Coordinate with Zotero Sync"';
+                        } else if (!isValid && lib.isGroup && !isLibrarySynced(lib.libraryID)) {
+                            invalidTooltip = 'This library is excluded from Zotero sync. Enable it in Zotero → Preferences → Sync → Choose Libraries…';
+                        }
                         return (
                             <div
                                 key={lib.libraryID}
                                 className={`display-flex flex-row items-center justify-between p-3 ${index > 0 ? 'border-top-quinary' : ''}`}
+                                title={invalidTooltip}
                             >
-                                <div className="display-flex flex-row items-start gap-2 min-w-0">
+                                <div className={`display-flex flex-row items-start gap-2 min-w-0 ${isValid ? '' : 'opacity-50'}`}>
                                     <span className="scale-90 -mt-010">
                                         <CSSIcon
                                             name={lib.isGroup ? 'library-group' : 'library'}
@@ -169,6 +181,13 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
                                     </div>
                                 </div>
                                 <div className="display-flex flex-row items-center gap-4 mr-1">
+                                    {!isValid && (
+                                        <Icon
+                                            icon={AlertIcon}
+                                            className="scale-11 font-color-secondary"
+                                            aria-label={invalidTooltip}
+                                        />
+                                    )}
                                     <IconButton
                                         onClick={() => handleRemoveLibrary(lib.libraryID)}
                                         variant="ghost-secondary"

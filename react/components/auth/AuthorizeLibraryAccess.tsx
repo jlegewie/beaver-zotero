@@ -41,6 +41,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 setSelectedLibraryIds={setSelectedLibraryIds}
                 libraryStatistics={libraryStatistics}
                 setLibraryStatistics={setLibraryStatistics}
+                useZoteroSync={useZoteroSync}
             />
 
             {/* Beta Account */}
@@ -72,7 +73,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
             {/* Sync Toggle & Consent Toggle */}
             <div className="flex-1" />
-            <div className="display-flex flex-col gap-3">
+            <div className="display-flex flex-col gap-4">
                 <div className="h-1 border-top-quinary" />
                 <ZoteroSyncToggle 
                     checked={useZoteroSync}
