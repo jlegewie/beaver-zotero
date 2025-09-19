@@ -721,11 +721,11 @@ interface SyncZoteroDatabaseOptions {
 /**
  * Performs sync for all libraries
  * @param libraryIds IDs of libraries to sync
- * @param options Optional options for the sync
- * @param filterFunction Optional function to filter which items to sync (default: syncingItemFilter)
- * @param batchSize Optional size of item batches to process (default: 50)
- * @param syncType Optional type of sync to perform (default: 'incremental')
- * @param resetSyncStatus Optional whether to reset the sync status for all libraries (default: false)
+ * @param options Optional options for the sync:
+ *   @param options.filterFunction Optional function to filter which items to sync (default: syncingItemFilter)
+ *   @param options.batchSize Optional size of item batches to process (default: 50)
+ *   @param options.syncType Optional type of sync to perform (default: 'incremental')
+ *   @param options.resetSyncStatus Optional whether to reset the sync status for all libraries (default: false)
  * @returns Promise resolving when all libraries have been processed
  */
 export async function syncZoteroDatabase(
@@ -759,7 +759,7 @@ export async function syncZoteroDatabase(
         updateSyncStatus(library.libraryID, {
             status: 'in_progress',
             libraryName: library.name,
-            ...(derivedSyncType ? { derivedSyncType } : {})
+            ...(derivedSyncType ? { syncType: derivedSyncType } : {})
         });
     }
 
