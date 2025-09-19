@@ -741,8 +741,6 @@ export async function syncZoteroDatabase(
         resetSyncStatus = false
     } = options;
 
-    let derivedSyncType = syncType;
-
     // Get libraries
     const libraries = Zotero.Libraries.getAll();
     const librariesToSync = libraries.filter((library) => libraryIds.includes(library.libraryID));
@@ -759,7 +757,7 @@ export async function syncZoteroDatabase(
         updateSyncStatus(library.libraryID, {
             status: 'in_progress',
             libraryName: library.name,
-            ...(derivedSyncType ? { syncType: derivedSyncType } : {})
+            ...(syncType ? { syncType } : {})
         });
     }
 
@@ -810,7 +808,7 @@ export async function syncZoteroDatabase(
             const isSyncedWithZotero = isLibrarySynced(libraryID);
             if (syncWithZotero && !isSyncedWithZotero) {
                 logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is not synced with Zotero. Failing sync...`, 2);
-                updateSyncStatus(libraryID, { status: 'failed', syncType: derivedSyncType ?? 'incremental' });
+                updateSyncStatus(libraryID, { status: 'failed', syncType: syncType ?? 'incremental' });
                 store.set(addPopupMessageAtom, {
                     type: 'warning',
                     title: 'Unable to Complete Sync with Beaver',
@@ -852,7 +850,8 @@ export async function syncZoteroDatabase(
             const isInitialSync = syncState === null;
             const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
             const lastSyncVersion = syncState ? syncState.last_sync_version : null;
-            derivedSyncType = isInitialSync ? 'initial' : (syncType ?? 'incremental');
+            
+            const derivedSyncType = isInitialSync ? 'initial' : (syncType ?? 'incremental');
             // TODO: Transition from local to zotero sync library
             // if (syncState && syncState.last_sync_method === 'date_modified' && syncMethod === 'version') { }
             // if (syncState && syncState.last_sync_method === 'version' && syncMethod === 'date_modified') { }
