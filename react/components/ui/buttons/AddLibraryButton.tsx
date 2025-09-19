@@ -5,6 +5,7 @@ import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../../atoms/profile'
 import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
+import { isLibraryValidForSync } from '../../../../src/utils/sync';
 import { logger } from '../../../../src/utils/logger';
 import { accountService } from '../../../../src/services/accountService';
 import { ZoteroLibrary } from '../../../types/zotero';
@@ -84,6 +85,29 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
 
     const createMenuItem = useCallback((library: Zotero.Library): SearchMenuItem => {
         const stats = libraryStats[library.libraryID];
+        const isValid = isLibraryValidForSync(library);
+
+        if (!isValid) {
+            return {
+                label: library.name,
+                onClick: () => {},
+                disabled: true,
+                customContent: (
+                    <div className="display-flex flex-row gap-2 items-center min-w-0 w-full">
+                        <span className="scale-90">
+                            <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16 font-color-secondary" />
+                        </span>
+                        <div className="display-flex flex-col min-w-0 flex-1">
+                            <span className="truncate font-color-primary">{library.name}</span>
+                            <span className="text-sm font-color-tertiary">
+                                Library not synced with Zotero
+                            </span>
+                        </div>
+                    </div>
+                ),
+            };
+        }
+
         return {
             label: library.name,
             onClick: () => handleAddLibrary(library.libraryID),
