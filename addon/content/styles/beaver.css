@@ -437,6 +437,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .user-select-none { user-select: none; }
 [id^="beaver-pane-"] .user-select-text { user-select: text; }
 
+[id^="beaver-pane-"] .line-through { text-decoration: line-through; }
+
 /* Transitions */
 [id^="beaver-pane-"] .transition { transition: all 0.2s ease-in-out; }
 [id^="beaver-pane-"] .transition-colors { transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out; }

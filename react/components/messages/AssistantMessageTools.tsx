@@ -11,8 +11,7 @@ import {
     SearchIcon,
     ViewIcon,
     Icon,
-    CheckmarkCircleIcon,
-    CancelIcon,
+    DeleteIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
@@ -69,11 +68,10 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 
     const icon = annotation.annotationType === 'note' ? ZOTERO_ICONS.ANNOTATE_NOTE : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
     const hasApplicationError = Boolean(annotation.applicationError) && !annotation.isDeleted;
-    const statusIcon = !hasApplicationError && !annotation.isDeleted ? CheckmarkCircleIcon : AlertIcon;
-    const statusIconColor = !hasApplicationError && !annotation.isDeleted ? 'font-color-secondary' : 'font-color-warning';
+    const iconColor = hasApplicationError ? 'font-color-warning' : 'font-color-secondary';
     const baseClasses = [
-        'px-3',
-        'py-2',
+        'px-2',
+        'py-1',
         'display-flex',
         'flex-col',
         'gap-1',
@@ -91,18 +89,14 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 
     return (
         <div className={baseClasses.join(' ')} onClick={handleClick}>
-            <div className="display-flex flex-row items-center gap-2">
-                <ZoteroIcon icon={icon} size={12} className="flex-shrink-0 font-color-secondary" />
+            <div className="display-flex flex-row items-start gap-3">
+                <ZoteroIcon icon={icon} size={13} className={`flex-shrink-0 mt-020 ${iconColor}`} />
                 <div className="flex-1 min-w-0">
-                    <div className={`truncate text-sm ${annotation.isDeleted ? 'font-color-tertiary line-through' : 'font-color-secondary'}`}>
+                    <div className={`${annotation.isDeleted ? 'font-color-tertiary line-through' : 'font-color-secondary'}`}>
                         {annotation.title || 'Annotation'}
                     </div>
                 </div>
                 <div className="display-flex flex-row items-center gap-2">
-                    <Icon
-                        icon={statusIcon}
-                        className={`${statusIconColor} ${annotation.isDeleted ? 'opacity-60' : ''}`}
-                    />
                     <Button
                         variant="ghost"
                         onClick={handleDelete}
@@ -110,7 +104,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         className="p-1"
                         title={annotation.isDeleted ? 'Annotation deleted' : 'Delete annotation from PDF'}
                     >
-                        {isBusy ? <Spinner /> : <Icon icon={CancelIcon} />}
+                        {isBusy ? <Spinner /> : <Icon icon={DeleteIcon} />}
                     </Button>
                 </div>
             </div>
