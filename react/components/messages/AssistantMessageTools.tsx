@@ -44,6 +44,9 @@ interface AnnotationListItemProps {
     isBusy: boolean;
     onClick: (annotation: ToolAnnotationResult) => Promise<void>;
     onDelete: (annotation: ToolAnnotationResult) => Promise<void>;
+    isHovered: boolean;
+    onMouseEnter: () => void;
+    onMouseLeave: () => void;
 }
 
 const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
@@ -51,6 +54,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     isBusy,
     onClick,
     onDelete,
+    isHovered,
+    onMouseEnter,
+    onMouseLeave,
 }) => {
     const handleClick = useCallback(() => {
         if (isBusy) return;
@@ -78,9 +84,11 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         // 'border-top-quinary',
         'cursor-pointer',
         'rounded-sm',
+        'transition',
+        'user-select-none',
     ];
 
-    if (annotation.pendingAttachmentOpen && !annotation.isApplied) {
+    if (isHovered || (annotation.pendingAttachmentOpen && !annotation.isApplied)) {
         baseClasses.push('bg-quinary');
     }
     if (annotation.isDeleted) {
@@ -88,7 +96,12 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     }
 
     return (
-        <div className={baseClasses.join(' ')} onClick={handleClick}>
+        <div
+            className={baseClasses.join(' ')}
+            onClick={handleClick}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
             <div className="display-flex flex-row items-start gap-3">
                 <ZoteroIcon icon={icon} size={13} className={`flex-shrink-0 mt-020 ${iconColor}`} />
                 <div className="flex-1 min-w-0">
@@ -127,6 +140,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
     const [isButtonHovered, setIsButtonHovered] = useState(false); // Added for hover state
     const [loadingDots, setLoadingDots] = useState(1); // Added for loading animation
+    const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
     const annotations = toolCall.annotations || [];
@@ -393,7 +407,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
             {/* Only show annotations when expanded and completed */}
             {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
-                <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}> 
+                <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}>
                     <div className="display-flex flex-col gap-1">
                         {annotations.map((annotation) => (
                             <AnnotationListItem
@@ -402,6 +416,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                                 isBusy={Boolean(busyState[annotation.id])}
                                 onClick={handleAnnotationClick}
                                 onDelete={handleDelete}
+                                isHovered={hoveredAnnotationId === annotation.id}
+                                onMouseEnter={() => setHoveredAnnotationId(annotation.id)}
+                                onMouseLeave={() => setHoveredAnnotationId(null)}
                             />
                         ))}
                     </div>
