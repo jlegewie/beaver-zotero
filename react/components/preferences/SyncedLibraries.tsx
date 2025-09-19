@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue, useStore } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, AlertIcon, CancelCircleIcon } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, CancelCircleIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -262,20 +262,12 @@ const SyncedLibraries: React.FC = () => {
                                 title={invalidTooltip}
                             >
                                 <div className={`display-flex flex-row items-start gap-2 min-w-0 ${isValid ? '' : 'opacity-50'}`}>
-                                    {isValid ? (
-                                        <span className="scale-90 -mt-010">
-                                            <CSSIcon
-                                                name={lib.isGroup ? 'library-group' : 'library'}
-                                                className="icon-16 font-color-secondary"
-                                            />
-                                        </span>
-                                    ) : (
-                                        <Icon
-                                            icon={AlertIcon}
-                                            className="scale-12 font-color-secondary mt-020 ml-05 mr-015"
-                                            aria-label={invalidTooltip}
+                                    <span className="scale-90 -mt-010">
+                                        <CSSIcon
+                                            name={lib.isGroup ? 'library-group' : 'library'}
+                                            className="icon-16 font-color-secondary"
                                         />
-                                    )}
+                                    </span>
                                     <div className="display-flex flex-col min-w-0 gap-1">
                                         <div className="font-color-primary truncate">{lib.name}</div>
 
