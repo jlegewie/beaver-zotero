@@ -1,9 +1,9 @@
 import React from 'react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useStore } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
-import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, AlertIcon } from '../icons/icons';
+import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, AlertIcon, CancelCircleIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -12,7 +12,6 @@ import IconButton from '../ui/IconButton';
 import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom } from '../../atoms/sync';
-import { CancelIcon } from '../status/icons';
 import { isLibrarySynced } from '../../../src/utils/zoteroUtils';
 
 type LastSyncedMap = Record<number, string>;
@@ -36,9 +35,9 @@ const SyncedLibraries: React.FC = () => {
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncStatusMap = useAtomValue(syncStatusAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
+    const store = useStore();
 
     const [lastSynced, setLastSynced] = useState<LastSyncedMap>({});
-    const [isSyncing, setIsSyncing] = useState<Record<number, boolean>>({});
     const [isSyncingComplete, setIsSyncingComplete] = useState<Record<number, boolean>>({});
     const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
 
@@ -121,8 +120,9 @@ const SyncedLibraries: React.FC = () => {
     }, [user?.id]);
 
     const handleSyncOne = useCallback(async (libraryID: number) => {
-        if (isSyncing[libraryID]) return;
-        setIsSyncing((s) => ({ ...s, [libraryID]: true }));
+        const status = syncStatusMap[libraryID];
+        if (status?.status === 'in_progress') return;
+        setIsSyncingComplete((s) => ({ ...s, [libraryID]: false }));
         try {
             logger(`SyncedLibraries: syncing library ${libraryID}`);
             await syncZoteroDatabase([libraryID]);
@@ -131,13 +131,15 @@ const SyncedLibraries: React.FC = () => {
             logger(`SyncedLibraries: sync failed for ${libraryID}: ${String(e)}`, 1);
             Zotero.logError(e as Error);
         } finally {
-            setIsSyncing((s) => ({ ...s, [libraryID]: false }));
-            setIsSyncingComplete((s) => ({ ...s, [libraryID]: true }));
-            setTimeout(() => {
-                setIsSyncingComplete((s) => ({ ...s, [libraryID]: false }));
-            }, 2000);
+            const latestStatus = store.get(syncStatusAtom)[libraryID];
+            if (latestStatus?.status === 'completed') {
+                setIsSyncingComplete((s) => ({ ...s, [libraryID]: true }));
+                setTimeout(() => {
+                    setIsSyncingComplete((s) => ({ ...s, [libraryID]: false }));
+                }, 2000);
+            }
         }
-    }, [isSyncing, refreshOne]);
+    }, [refreshOne, syncStatusMap, store]);
 
     // When an initial sync completes, refresh "Last synced" for that library
     useEffect(() => {
@@ -224,7 +226,6 @@ const SyncedLibraries: React.FC = () => {
                     <div className="p-2 text-sm font-color-tertiary">No libraries selected yet.</div>
                 ) : (
                     libraries.map((lib, index) => {
-                        const syncing = isSyncing[lib.libraryID];
                         const deleting = isDeleting[lib.libraryID];
                         const syncingComplete = !!isSyncingComplete[lib.libraryID];
                         const isDeletingNow = jobs[lib.libraryID] && (jobs[lib.libraryID].status === 'queued' || jobs[lib.libraryID].status === 'processing');
@@ -237,11 +238,22 @@ const SyncedLibraries: React.FC = () => {
                         }
 
                         const s = syncStatusMap[lib.libraryID];
-                        const inProgressInitial = !!s && s.status === 'in_progress' && s.syncType === 'initial';
-                        const failedInitial = !!s && s.status === 'failed' && s.syncType === 'initial';
+                        const isSyncingNow = s?.status === 'in_progress';
+                        const hasSyncError = s?.status === 'failed';
+                        const isInitialSync = s?.syncType === 'initial';
+                        const inProgressInitial = Boolean(isSyncingNow && isInitialSync);
                         const percent = s && s.itemCount && s.itemCount > 0
                             ? Math.min(100, Math.round(((s.syncedCount || 0) / s.itemCount) * 100))
                             : undefined;
+                        let syncErrorMessage = '';
+                        if(hasSyncError) {
+                            syncErrorMessage = isInitialSync
+                                ? 'Initial sync failed. Try again.'
+                                : 'Sync failed. Try again.';
+                            if(!isValid) {
+                                syncErrorMessage = 'Library not synced with Zotero.';
+                            }
+                        }
 
                         return (
                             <div
@@ -272,10 +284,14 @@ const SyncedLibraries: React.FC = () => {
                                                 <div className="text-sm font-color-tertiary">
                                                     {`Syncing${percent !== undefined ? ` • ${percent}%` : ''}`}
                                                 </div>
-                                            ) : failedInitial ? (
-                                                <div className="display-flex flex-row items-center gap-2 text-sm font-color-red">
-                                                    {CancelIcon}
-                                                    <span>Sync failed</span>
+                                            ) : isSyncingNow ? (
+                                                <div className="text-sm font-color-tertiary">
+                                                    Syncing…
+                                                </div>
+                                            ) : hasSyncError ? (
+                                                <div className="display-flex flex-row items-center gap-1 text-sm font-color-red">
+                                                    <Icon icon={CancelCircleIcon} className="font-color-red scale-11" />
+                                                    <span>{syncErrorMessage}</span>
                                                 </div>
                                             ) : (
                                                 <div className="text-sm font-color-tertiary">
@@ -305,17 +321,17 @@ const SyncedLibraries: React.FC = () => {
                                                 onClick={() => handleSyncOne(lib.libraryID)}
                                                 variant="ghost-secondary"
                                                 ariaLabel="Sync Library"
-                                                disabled={!!syncing || !!deleting || !isValid}
+                                                disabled={isSyncingNow || !!deleting || !isValid}
                                                 title="Sync Library with Beaver"
                                                 icon={!syncingComplete ? SyncIcon : TickIcon}
-                                                iconClassName={syncing && !syncingComplete ? 'animate-spin' : ''}
+                                                iconClassName={isSyncingNow && !syncingComplete ? 'animate-spin' : ''}
                                                 className="scale-11"
                                             />
                                             <IconButton
                                                 onClick={() => handleDeleteOne(lib.libraryID)}
                                                 variant="ghost-secondary"
                                                 ariaLabel="Remove Library from Beaver"
-                                                disabled={!!deleting || !!syncing || syncLibraryIds.length <= 1}
+                                                disabled={!!deleting || isSyncingNow || syncLibraryIds.length <= 1}
                                                 title="Delete Library from Beaver"
                                                 icon={DeleteIcon}
                                                 className="scale-11"
