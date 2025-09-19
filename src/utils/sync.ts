@@ -13,7 +13,12 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 
-
+/**
+ * Checks if a library is valid for sync
+ * @param library Zotero library
+ * @param useZoteroSync Whether to use Zotero sync
+ * @returns True if the library is valid for sync
+ */
 export const isLibraryValidForSync = (
     library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
     useZoteroSync: boolean
