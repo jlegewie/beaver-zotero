@@ -120,7 +120,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                     </div>
                 </div>
                 {(annotation.status === 'applied') && (
-                    <div className="display-flex flex-row items-center gap-2">
+                    <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
                             // onClick={annotation.status === 'applied' ? handleDelete : handleApplyAnnotation}
@@ -133,7 +133,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                     </div>
                 )}
                 {(annotation.status === 'deleted') && (
-                    <div className="display-flex flex-row items-center gap-2">
+                    <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
                             onClick={handleAction}
