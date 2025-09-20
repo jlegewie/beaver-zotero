@@ -123,6 +123,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                     <div className="display-flex flex-row items-center gap-2">
                         <IconButton
                             variant="ghost-secondary"
+                            // onClick={annotation.status === 'applied' ? handleDelete : handleApplyAnnotation}
                             onClick={handleAction}
                             className="p-1"
                             title={
@@ -240,8 +241,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             const result = await applyAnnotation(annotation, reader);
             if (result.updated) {
                 // TODO: batch apply to minimize re-renders
-                console.log('updated annotation', annotation);
-                updateAnnotationState(annotation.id, annotation);
+                updateAnnotationState(annotation.id, result.annotation);
             }
         }
 
@@ -292,14 +292,20 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      */
     const handleAnnotationClick = useCallback(
         async (annotation: ToolAnnotation) => {
-            if (!annotation.zotero_key || annotation.status !== 'applied') return;
-            const annotationItem =
-                await Zotero.Items.getByLibraryAndKeyAsync(
-                    annotation.library_id,
-                    annotation.zotero_key
-                );
-            if (!annotationItem) return;
-            await navigateToAnnotation(annotationItem);
+            // Navigate to annotation if it exists
+            if (annotation.status === 'applied' && annotation.zotero_key) {
+                const annotationItem =
+                    await Zotero.Items.getByLibraryAndKeyAsync(
+                        annotation.library_id,
+                        annotation.zotero_key
+                    );
+                if (!annotationItem) return;
+                await navigateToAnnotation(annotationItem);
+
+            // Re-add annotation if it was deleted
+            } else if (annotation.status === 'deleted') {
+                // await handleReAddAnnotation(annotation);
+            }
         },
         [updateAnnotationState]
     );
@@ -353,12 +359,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine which icon to show based on tool call and UI state
     const getIcon = () => {
-        if (toolCall.status === 'in_progress') return <Icon icon={Spinner} />;
-        if (toolCall.status === 'error' || allErrors) return <Icon icon={AlertIcon} />;
+        if (toolCall.status === 'in_progress') return Spinner;
+        if (toolCall.status === 'error' || allErrors) return AlertIcon;
         if (toolCall.status === 'completed') {
-            if (resultsVisible) return <Icon icon={ArrowDownIcon} />;
-            if (isButtonHovered && totalAnnotations > 0) return <Icon icon={ArrowRightIcon} />;
-            if (totalAnnotations === 0) return <Icon icon={AlertIcon} />;
+            if (resultsVisible) return ArrowDownIcon;
+            if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
+            if (totalAnnotations === 0) return AlertIcon;
             return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
         }
         return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
@@ -377,52 +383,47 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine when to show apply button
     const showApplyButton = toolCall.status === 'completed' && allPending;
+    
 
     return (
         <div
             id={`tool-${toolCall.id}`}
-            className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0 py-1`}
+            className={`${resultsVisible ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
         >
             {/* Main button that shows annotation count and toggles visibility */}
-            <Button
-                variant="ghost-secondary"
-                onClick={toggleResults}
-                onMouseEnter={() => setIsButtonHovered(true)}
-                onMouseLeave={() => setIsButtonHovered(false)}
-                className={`
-                    text-base scale-105 w-full min-w-0 align-start text-left
-                    ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                    ${toolCall.status === 'error' ? 'font-color-warning' : ''}
-                `}
-                style={{ padding: '2px 6px', maxHeight: 'none'}}
-                disabled={isButtonDisabled && !canToggleResults}
-            >
-                <div className="display-flex flex-row px-3 flex-1 gap-2 items-center">
-                    <div className={`display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        {getIcon()}
-                    </div>
-                    <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        {getButtonText()}
-                    </div>
-                    <div className="flex-1"/>
-                    <div className="display-flex">
-                        {showApplyButton && (
-                            <Button
-                                rightIcon={PlayIcon}
-                                iconClassName="-ml-015 mt-015"
-                                variant="ghost-secondary"
-                                onClick={handleApplyAnnotations}
-                            >
-                                Apply
-                            </Button>
-                        )}
-                    </div>
-                </div>
-            </Button>
+            <div className={`display-flex flex-row bg-senary py-15 ${resultsVisible ? 'border-bottom-quinary' : ''}`}>
+                <Button
+                    variant="ghost-secondary"
+                    icon={getIcon()}
+                    onClick={toggleResults}
+                    onMouseEnter={() => setIsButtonHovered(true)}
+                    onMouseLeave={() => setIsButtonHovered(false)}
+                    className={`
+                        text-base scale-105 ml-2
+                        ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
+                        ${toolCall.status === 'error' ? 'font-color-warning' : ''}
+                    `}
+                    disabled={isButtonDisabled && !canToggleResults}
+                >
+                    {getButtonText()}
+                </Button>
+                <div className="flex-1"/>
+                {showApplyButton && (
+                    <Button
+                        rightIcon={PlayIcon}
+                        iconClassName="-ml-015"
+                        className="mr-015"
+                        variant="ghost-secondary"
+                        onClick={handleApplyAnnotations}
+                    >
+                        Apply
+                    </Button>
+                )}
+            </div>
 
             {/* Expandable list of individual annotations */}
             {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
-                <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}>
+                <div className={`py-15 mt-15`}>
                     <div className="display-flex flex-col gap-1">
                         {annotations.map((annotation) => (
                             <AnnotationListItem
