@@ -166,14 +166,16 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
     const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
+    // Toggle results handler
+    // Only allow toggling if completed and has annotations and not all pending
     const toggleResults = useCallback(() => {
-        // Only allow toggling if completed and has annotations
-        if (toolCall.status === 'completed' && totalAnnotations > 0) {
+        if (toolCall.status === 'completed' && totalAnnotations > 0 && !allPending) {
             setResultsVisible((prev) => !prev);
         }
-    }, [toolCall.status, totalAnnotations]);
+    }, [toolCall.status, totalAnnotations, allPending]);
 
-    const markAnnotationState = useCallback(
+    // Update annotation state handler
+    const updateAnnotationState = useCallback(
         (annotationId: string, updates: Partial<ToolAnnotation>) => {
             setAnnotationState({
                 messageId,
@@ -199,7 +201,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     await resolveExistingAnnotationKey(annotation);
                 if (cancelled) return;
                 if (existingKey) {
-                    markAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.id, {
                         status: 'applied',
                         error_message: null,
                         zotero_key: existingKey,
@@ -218,7 +220,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 }
 
                 if (result.status === 'applied') {
-                    markAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.id, {
                         status: 'applied',
                         error_message: null,
                         zotero_key: result.zotero_key,
@@ -226,7 +228,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 } else if (result.status === 'pending') {
                     // Do nothing, wait for user interaction or reader to open
                 } else {
-                    markAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.id, {
                         status: 'error',
                         error_message:
                             result.reason || 'Failed to create annotation',
@@ -241,7 +243,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         return () => {
             cancelled = true;
         };
-    }, [annotations, markAnnotationState]);
+    }, [annotations, updateAnnotationState]);
 
     const handleAnnotationClick = useCallback(
         async (annotation: ToolAnnotation) => {
@@ -261,7 +263,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 logger(
                     `handleAnnotationClick: Existing annotation key found for ${annotation.id} (${existingKey})`
                 );
-                markAnnotationState(annotation.id, {
+                updateAnnotationState(annotation.id, {
                     status: 'applied',
                     error_message: null,
                     zotero_key: existingKey,
@@ -301,7 +303,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 logger(
                     `handleAnnotationClick: Annotation ${annotation.id} is applied`
                 );
-                markAnnotationState(annotation.id, {
+                updateAnnotationState(annotation.id, {
                     status: 'applied',
                     error_message: null,
                     zotero_key: result.zotero_key,
@@ -322,7 +324,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 logger(
                     `handleAnnotationClick: Annotation ${annotation.id} has error, setting error`
                 );
-                markAnnotationState(annotation.id, {
+                updateAnnotationState(annotation.id, {
                     status: 'error',
                     error_message:
                         result.reason || 'Failed to create annotation',
@@ -331,7 +333,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
             setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
         },
-        [markAnnotationState]
+        [updateAnnotationState]
     );
 
     const handleDelete = useCallback(
@@ -342,17 +344,17 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     annotation.status !== 'applied' ||
                     !annotation.zotero_key
                 ) {
-                    markAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.id, {
                         status: 'deleted',
                     });
                 } else {
                     await deleteAnnotationFromReader(annotation);
-                    markAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.id, {
                         status: 'deleted',
                     });
                 }
             } catch (error: any) {
-                markAnnotationState(annotation.id, {
+                updateAnnotationState(annotation.id, {
                     status: 'error',
                     error_message:
                         error?.message || 'Failed to delete annotation',
@@ -364,7 +366,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 }));
             }
         },
-        [markAnnotationState]
+        [updateAnnotationState]
     );
 
     const handleReAddAnnotation = useCallback(
