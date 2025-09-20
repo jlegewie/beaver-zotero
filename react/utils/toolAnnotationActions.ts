@@ -265,6 +265,15 @@ async function createAnnotation(
     }
 }
 
+/**
+ * Applies an annotation to the PDF reader.
+ * 
+ * applyAnnotation attempts to create the annotation in the PDF reader.
+ * Returns status:
+ * - 'applied': Successfully created, includes zotero_key
+ * - 'pending': PDF reader not open/available, needs user interaction
+ * - 'error': Failed to create annotation
+ */
 export async function applyAnnotation(
     annotation: ToolAnnotation
 ): Promise<ApplyAnnotationResult> {

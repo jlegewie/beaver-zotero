@@ -243,18 +243,19 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     continue;
                 }
 
-                // Process pending annotations
+                /**
+                 * Process pending annotations
+                 * 
+                 * applyAnnotation attempts to create the annotation in the PDF reader.
+                 * Returns status:
+                 * - 'applied': Successfully created, includes zotero_key
+                 * - 'pending': PDF reader not open/available, needs user interaction
+                 * - 'error': Failed to create annotation
+                 */
                 if (annotation.status === 'pending') {
-                    // Attempt to create new annotation in the PDF
+                    // Attempt to create new annotation in the PDF reader
                     setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
                     
-                    /**
-                     * applyAnnotation: Attempts to create the annotation in the PDF reader.
-                     * Returns status:
-                     * - 'applied': Successfully created, includes zotero_key
-                     * - 'pending': PDF reader not open/available, needs user interaction
-                     * - 'error': Failed to create annotation
-                     */
                     const result = await applyAnnotation(annotation);
                     
                     if (cancelled) {
