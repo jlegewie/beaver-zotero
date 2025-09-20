@@ -10,9 +10,9 @@ interface ButtonProps {
     /** Button contents */
     children?: React.ReactNode;
     /** Icon to display (optional) */
-    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement;
     /** Icon to display on the right (optional) */
-    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement;
     /** Click handler */
     onClick?: (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => void;
     /** Mouse enter handler */
@@ -85,9 +85,9 @@ const Button: React.FC<ButtonProps> = ({
             type={type}
             style={style}
         >
-            {icon && <Icon icon={icon} className={iconClassName} />}
+            {icon && (React.isValidElement(icon) ? icon : <Icon icon={icon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
             {children}
-            {rightIcon && <Icon icon={rightIcon} className={iconClassName} />}
+            {rightIcon && (React.isValidElement(rightIcon) ? rightIcon : <Icon icon={rightIcon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
             {loading && <Spinner />}
             {loading && loadingText && <span>{loadingText}</span>}
         </button>
