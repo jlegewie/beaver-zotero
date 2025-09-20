@@ -219,26 +219,17 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const handleApplyAnnotations = useCallback(async () => {}, []);
 
     /**
-     * Main annotation processing effect - automatically processes pending annotations
-     * This effect runs whenever annotations change and attempts to:
-     * 1. Check if each annotation already exists in the PDF (validateAppliedAnnotation)
-     * 2. If not, create the annotation in the PDF reader (applyAnnotation)
+     * Validate applied annotations
+     *
+     * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
+     * still exists in Zotero. This handles the case where the annotation was applied
+     * but manually deleted from Zotero by the user.
      */
     useEffect(() => {
-        let cancelled = false;
-
-        /**
-         * Validate applied annotations
-         *
-         * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
-         * still exists in Zotero. This handles the case where the annotation was applied
-         * but manually deleted from Zotero by the user.
-         */
         const validateAppliedAnnotations = async () => {
             const appliedAnnotations = annotations.filter((a: ToolAnnotation) => a.status === 'applied');
             for (const annotation of appliedAnnotations) {
                 const validationResult = await validateAppliedAnnotation(annotation);
-                if (cancelled) return;
 
                 if (validationResult.markAsDeleted) {
                     // Annotation was marked as applied but no longer exists - mark as deleted
@@ -254,11 +245,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         };
 
         validateAppliedAnnotations();
-
-        // Cleanup function to cancel ongoing operations if component unmounts
-        return () => {
-            cancelled = true;
-        };
     }, [annotations, updateAnnotationState]);
 
     /**
