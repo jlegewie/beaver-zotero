@@ -221,7 +221,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      * Handle applying annotations
      * This function is called when the user clicks the apply button
      */
-    const handleApplyAnnotations = useCallback(async () => {
+    const handleApplyAnnotations = useCallback(async (annotationId?: string) => {
         setIsApplyingAnnotations(true);
         // Open attachment if not already open
         if (!isAttachmentOpen) {
@@ -252,6 +252,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             return;
         }
         for (const annotation of annotations) {
+            if (annotationId && annotation.id !== annotationId) continue;
             const result = await applyAnnotation(annotation, reader);
             if (result.updated) {
                 // TODO: batch apply to minimize re-renders
@@ -322,7 +323,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
             // Re-add annotation if it was deleted
             } else if (annotation.status === 'deleted') {
-                // await handleReAddAnnotation(annotation);
+                await handleApplyAnnotations(annotation.id);
             }
         },
         [updateAnnotationState]
@@ -442,7 +443,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         iconClassName="-ml-015"
                         className="mr-015"
                         variant="ghost-secondary"
-                        onClick={handleApplyAnnotations}
+                        onClick={() => handleApplyAnnotations()}
                     >
                         Apply
                     </Button>
