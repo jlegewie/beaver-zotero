@@ -8,20 +8,12 @@ import { getCurrentReader } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 
-interface ApplyAnnotationSuccess {
-    status: 'applied';
-    libraryId: number;
-    zotero_key: string;
-}
 
-interface ApplyAnnotationError {
-    status: 'error';
-    reason: string;
+export type ApplyAnnotationResult = {
+    updated: boolean;
+    error?: string;
+    annotation: ToolAnnotation;
 }
-
-export type ApplyAnnotationResult =
-    | ApplyAnnotationSuccess
-    | ApplyAnnotationError;
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
     red: '#ff6666',
@@ -270,22 +262,40 @@ async function createAnnotation(
  * @returns An object indicating success ('applied') or failure ('error').
  */
 export async function applyAnnotation(
-    reader: ZoteroReader,
-    annotation: ToolAnnotation
+    annotation: ToolAnnotation,
+    reader?: ZoteroReader
 ): Promise<ApplyAnnotationResult> {
-    try {
-        await ensureReaderInitialized(reader);
-        const annotationId = await createAnnotation(reader, annotation);
+    // Get the current reader if not provided
+    reader = reader ?? getCurrentReader() as ZoteroReader | undefined;
+    if (!reader) {
         return {
-            status: 'applied',
-            libraryId: annotation.library_id,
-            zotero_key: annotationId,
+            updated: false,
+            error: 'No reader found',
+            annotation
+        };
+    }
+    await ensureReaderInitialized(reader);
+
+    // Create the annotation
+    try {        
+        const annotationKey = await createAnnotation(reader, annotation);
+        return {
+            updated: true,
+            annotation: {
+                ...annotation,
+                status: 'applied',
+                zotero_key: annotationKey,
+            },
         };
     } catch (error: any) {
         logger(`applyAnnotation error: ${error?.stack || error}`, 1);
         return {
-            status: 'error',
-            reason: error?.message || 'Failed to create annotation',
+            updated: true,
+            error: error?.message || 'Failed to create annotation',
+            annotation: {
+                ...annotation,
+                status: 'error',
+            },
         };
     }
 }
