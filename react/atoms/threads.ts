@@ -455,7 +455,7 @@ export const upsertToolcallAnnotationAtom = atom(
 
 export const updateToolcallAnnotationAtom = atom(
     null,
-    (get, set, { messageId, toolcallId, annotationId, updates }: { messageId: string; toolcallId: string; annotationId: string; updates: Partial<ToolAnnotation> }) => {
+    (get, set, { messageId, toolcallId, annotationId, updates }: { messageId: string; toolcallId: string; annotationId?: string; updates: Partial<ToolAnnotation> }) => {
         set(threadMessagesAtom, (prevMessages) =>
             prevMessages.map((message) => {
                 // Find message and toolcall
@@ -470,7 +470,7 @@ export const updateToolcallAnnotationAtom = atom(
                 const updatedAnnotations = (
                     existingToolcall.annotations as ToolAnnotation[]
                 ).map((annotation) =>
-                    annotation.id === annotationId
+                    annotationId === undefined || annotation.id === annotationId
                         ? {...annotation, ...updates }
                         : annotation
                 );
