@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { ChatMessage } from '../../types/chat/uiTypes';
 import { ToolCall } from '../../types/chat/apiTypes';
 import {
     Spinner,
@@ -21,7 +20,7 @@ import {
     openAttachmentForAnnotation,
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
-import { navigateToAnnotation } from '../../utils/readerUtils';
+import { navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { updateToolcallAnnotationAtom } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
@@ -73,8 +72,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         annotation.annotation_type === 'note'
             ? ZOTERO_ICONS.ANNOTATE_NOTE
             : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
-    const hasApplicationError =
-        Boolean(annotation.error_message) && annotation.status !== 'deleted';
+    const hasApplicationError = Boolean(annotation.error_message) && annotation.status !== 'deleted';
     const iconColor = hasApplicationError
         ? 'font-color-warning'
         : 'font-color-secondary';
@@ -216,7 +214,38 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      * Handle applying annotations
      * This function is called when the user clicks the apply button
      */
-    const handleApplyAnnotations = useCallback(async () => {}, []);
+    const handleApplyAnnotations = useCallback(async () => {
+        // Open attachment if not already open
+        if (!isAttachmentOpen) {
+            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                annotations[0].library_id,
+                annotations[0].attachment_key
+            );
+            if (!attachmentItem) return;
+            // Get the minimum page index of all annotations
+            const pageIndexes = annotations.map((a) => {
+                return a.annotation_type === 'note'
+                    ? a.note_position?.pageIndex
+                    : a.highlight_locations?.[0]?.pageIndex;
+            });
+            const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
+            // Navigate to the minimum page index
+            await navigateToPage(attachmentItem.id, minPageIndex);
+        }
+
+        // Apply annotations
+        const reader = getCurrentReader() as ZoteroReader | undefined;
+        if (!reader) return;
+        for (const annotation of annotations) {
+            const result = await applyAnnotation(annotation, reader);
+            if (result.updated) {
+                // TODO: batch apply to minimize re-renders
+                console.log('updated annotation', annotation);
+                updateAnnotationState(annotation.id, annotation);
+            }
+        }
+
+    }, [isAttachmentOpen, annotations]);
 
     /**
      * Validate applied annotations
