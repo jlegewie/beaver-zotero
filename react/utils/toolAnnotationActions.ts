@@ -14,11 +14,6 @@ interface ApplyAnnotationSuccess {
     zotero_key: string;
 }
 
-interface ApplyAnnotationPending {
-    status: 'pending';
-    reason: 'reader_unavailable' | 'attachment_closed';
-}
-
 interface ApplyAnnotationError {
     status: 'error';
     reason: string;
@@ -26,7 +21,6 @@ interface ApplyAnnotationError {
 
 export type ApplyAnnotationResult =
     | ApplyAnnotationSuccess
-    | ApplyAnnotationPending
     | ApplyAnnotationError;
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
@@ -266,43 +260,22 @@ async function createAnnotation(
 }
 
 /**
- * Applies an annotation to the PDF reader.
- * 
- * applyAnnotation attempts to create the annotation in the PDF reader.
- * Returns status:
- * - 'applied': Successfully created, includes zotero_key
- * - 'pending': PDF reader not open/available, needs user interaction
- * - 'error': Failed to create annotation
+ * Applies an annotation to a given PDF reader instance.
+ *
+ * This function assumes the provided reader is open and corresponds to the
+ * correct attachment for the annotation.
+ *
+ * @param reader - The active ZoteroReader instance.
+ * @param annotation - The annotation to apply.
+ * @returns An object indicating success ('applied') or failure ('error').
  */
 export async function applyAnnotation(
+    reader: ZoteroReader,
     annotation: ToolAnnotation
 ): Promise<ApplyAnnotationResult> {
-    const attachmentItem = await getAttachmentItem(
-        annotation.library_id,
-        annotation.attachment_key
-    );
-    if (!attachmentItem) {
-        return {
-            status: 'error',
-            reason: 'Attachment not found',
-        };
-    }
-
-    const reader = getCurrentReader() as ZoteroReader | null;
-    if (!isReaderForAttachment(reader, attachmentItem)) {
-        return {
-            status: 'pending',
-            reason: 'attachment_closed',
-        };
-    }
-
-    await ensureReaderInitialized(reader as ZoteroReader);
-
     try {
-        const annotationId = await createAnnotation(
-            reader as ZoteroReader,
-            annotation
-        );
+        await ensureReaderInitialized(reader);
+        const annotationId = await createAnnotation(reader, annotation);
         return {
             status: 'applied',
             libraryId: annotation.library_id,

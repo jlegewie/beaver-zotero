@@ -21,12 +21,12 @@ import {
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
-import {
-    updateToolcallAnnotationAtom,
-} from '../../atoms/threads';
+import { updateToolcallAnnotationAtom } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
+import { getCurrentReader } from '../../utils/readerUtils';
+import { ZoteroReader } from '../../utils/annotationUtils';
 
 interface AnnotationListItemProps {
     annotation: ToolAnnotation;
@@ -181,6 +181,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Compute overall state of all annotations
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
+    const allError = annotations.every((annotation) => annotation.status === 'error');
     const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
@@ -192,7 +193,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Helper to update annotation state in global store
     const updateAnnotationState = useCallback(
-        (annotationId: string, updates: Partial<ToolAnnotation>) => {
+        (annotationId: string | undefined, updates: Partial<ToolAnnotation>) => {
             setAnnotationState({
                 messageId,
                 toolcallId: toolCall.id,
@@ -212,81 +213,108 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     useEffect(() => {
         let cancelled = false;
 
-        const applyPendingAnnotations = async () => {
-            for (const annotation of annotations) {
+        /**
+         * Validate applied annotations
+         *
+         * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
+         * still exists in Zotero. This handles the case where the annotation was applied
+         * but manually deleted from Zotero by the user.
+         */
+        const validateAppliedAnnotations = async () => {
+            const appliedAnnotations = annotations.filter((a: ToolAnnotation) => a.status === 'applied');
+            for (const annotation of appliedAnnotations) {
+                const validationResult = await validateAppliedAnnotation(annotation);
                 if (cancelled) return;
-                
-                // Skip annotations that don't need processing
-                if (annotation.status === 'deleted') continue;
-                if (annotation.status === 'error') continue;
 
-                /**
-                 * Validate annotations that are marked as applied
-                 * 
-                 * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
-                 * still exists in Zotero. This handles the case where the annotation was applied
-                 * but manually deleted from Zotero by the user.
-                 */
-                if (annotation.status === 'applied') {
-                    const validationResult = await validateAppliedAnnotation(annotation);
-                    if (cancelled) return;
-                    
-                    if (validationResult.markAsDeleted) {
-                        // Annotation was marked as applied but no longer exists - mark as deleted
-                        updateAnnotationState(annotation.id, {
-                            status: 'deleted',
-                            zotero_key: undefined,
-                            error_message: null,
-                        });
-                    }
-                    // If validationResult.key exists, annotation is still valid - no action needed
-                    continue;
+                if (validationResult.markAsDeleted) {
+                    // Annotation was marked as applied but no longer exists - mark as deleted
+                    updateAnnotationState(annotation.id, {
+                        status: 'deleted',
+                        zotero_key: undefined,
+                        error_message: null,
+                    });
                 }
-
-                /**
-                 * Process pending annotations
-                 * 
-                 * applyAnnotation attempts to create the annotation in the PDF reader.
-                 * Returns status:
-                 * - 'applied': Successfully created, includes zotero_key
-                 * - 'pending': PDF reader not open/available, needs user interaction
-                 * - 'error': Failed to create annotation
-                 */
-                if (annotation.status === 'pending') {
-                    // Attempt to create new annotation in the PDF reader
-                    setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
-                    
-                    const result = await applyAnnotation(annotation);
-                    
-                    if (cancelled) {
-                        setBusyState((prev) => ({
-                            ...prev,
-                            [annotation.id]: false,
-                        }));
-                        return;
-                    }
-
-                    // Update annotation state based on result
-                    if (result.status === 'applied') {
-                        updateAnnotationState(annotation.id, {
-                            status: 'applied',
-                            error_message: null,
-                            zotero_key: result.zotero_key,
-                        });
-                    } else if (result.status === 'pending') {
-                        // Do nothing, wait for user interaction or reader to open
-                    } else {
-                        updateAnnotationState(annotation.id, {
-                            status: 'error',
-                            error_message:
-                                result.reason || 'Failed to create annotation',
-                        });
-                    }
-                    setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
-                }
+                // If validationResult.key exists, annotation is still valid - no action needed
+                continue;
             }
         };
 
+        /**
+         * Apply pending annotations
+         *
+         * applyAnnotation attempts to create the annotation in the PDF reader.
+         * Returns status:
+         * - 'applied': Successfully created, includes zotero_key
+         * - 'error': Failed to create annotation
+         */
+        const applyPendingAnnotations = async () => {
+            const pendingAnnotations = annotations.filter((a: ToolAnnotation) => a.status === 'pending');
+            if (pendingAnnotations.length === 0) return;
+
+            // Validation: Check if all pending annotations have the same attachment key
+            const attachmentKey = pendingAnnotations[0].attachment_key;
+            if (pendingAnnotations.some((a: ToolAnnotation) => a.attachment_key !== attachmentKey)) {
+                // Mark all pending annotations as error
+                updateAnnotationState(undefined, {
+                    status: 'error',
+                    error_message: 'All pending annotations must have the same attachment key',
+                });
+                return;
+            }
+
+            // Get the attachment item for the first pending annotation
+            const firstAnnotation = pendingAnnotations[0];
+            const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
+                firstAnnotation.library_id,
+                firstAnnotation.attachment_key
+            );
+            if (!attachment) {
+                // Mark all pending annotations as error
+                updateAnnotationState(undefined, {
+                    status: 'error',
+                    error_message: 'Attachment not found',
+                });
+                return;
+            }
+
+            // Get the current reader
+            const reader = getCurrentReader() as ZoteroReader | null;
+            const isReaderReady = reader && (reader as any).itemID === attachment.id;
+            if (!isReaderReady) return;
+
+            // Apply each pending annotation
+            for (const annotation of pendingAnnotations) {
+                if (cancelled) return;
+                
+                // Set busy state
+                setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
+                
+                // Attempt to create new annotation in the PDF reader
+                const result = await applyAnnotation(reader as ZoteroReader, annotation);
+
+                if (cancelled) {
+                    setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+                    return;
+                }
+
+                // Update annotation state based on result
+                if (result.status === 'applied') {
+                    updateAnnotationState(annotation.id, {
+                        status: 'applied',
+                        error_message: null,
+                        zotero_key: result.zotero_key,
+                    });
+                } else {
+                    updateAnnotationState(annotation.id, {
+                        status: 'error',
+                        error_message: result.reason || 'Failed to create annotation',
+                    });
+                }
+                setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+            }
+        };
+
+        validateAppliedAnnotations();
         applyPendingAnnotations();
 
         // Cleanup function to cancel ongoing operations if component unmounts
@@ -355,25 +383,40 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             }
 
             // Annotation doesn't exist yet - try to create it
-            const attemptApply = async () => {
-                logger(
-                    `handleAnnotationClick: Attempting to apply annotation ${annotation.id}`
-                );
-                let result = await applyAnnotation(annotation);
-                
-                // If pending (reader not open), open the PDF and try again
-                if (result.status === 'pending') {
-                    logger(
-                        `handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`
-                    );
-                    // openAttachmentForAnnotation: Opens the PDF in Zotero reader
-                    await openAttachmentForAnnotation(annotation);
-                    result = await applyAnnotation(annotation);
-                }
-                return result;
-            };
+            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                annotation.library_id,
+                annotation.attachment_key
+            );
+            if (!attachmentItem) {
+                updateAnnotationState(annotation.id, {
+                    status: 'error',
+                    error_message: 'Attachment not found',
+                });
+                setBusyState((prev) => ({
+                    ...prev,
+                    [annotation.id]: false,
+                }));
+                return;
+            }
 
-            const result = await attemptApply();
+            let reader = getCurrentReader() as ZoteroReader | null;
+            if (!reader || (reader as any).itemID !== attachmentItem.id) {
+                reader = await openAttachmentForAnnotation(annotation);
+            }
+
+            if (!reader) {
+                updateAnnotationState(annotation.id, {
+                    status: 'error',
+                    error_message: 'Could not open PDF reader',
+                });
+                setBusyState((prev) => ({
+                    ...prev,
+                    [annotation.id]: false,
+                }));
+                return;
+            }
+
+            const result = await applyAnnotation(reader, annotation);
 
             // Handle the result of annotation creation
             if (result.status === 'applied') {
@@ -385,7 +428,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     error_message: null,
                     zotero_key: result.zotero_key,
                 });
-                
+
                 // Navigate to the newly created annotation
                 const annotationItem =
                     await Zotero.Items.getByLibraryAndKeyAsync(
@@ -394,11 +437,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     );
                 if (!annotationItem) return;
                 await navigateToAnnotation(annotationItem);
-            } else if (result.status === 'pending') {
-                logger(
-                    `handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`
-                );
-                // The logic to open the attachment is already handled inside attemptApply
             } else {
                 logger(
                     `handleAnnotationClick: Annotation ${annotation.id} has error, setting error`
