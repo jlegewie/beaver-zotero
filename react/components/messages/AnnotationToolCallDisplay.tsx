@@ -167,6 +167,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const [resultsVisible, setResultsVisible] = useState(false);
     
     // Track which individual annotations are currently being processed
+    const [isApplyingAnnotations, setIsApplyingAnnotations] = useState(false);
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
     
     // Track hover states for UI interactions
@@ -217,13 +218,17 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      * This function is called when the user clicks the apply button
      */
     const handleApplyAnnotations = useCallback(async () => {
+        setIsApplyingAnnotations(true);
         // Open attachment if not already open
         if (!isAttachmentOpen) {
             const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
                 annotations[0].library_id,
                 annotations[0].attachment_key
             );
-            if (!attachmentItem) return;
+            if (!attachmentItem) {
+                setIsApplyingAnnotations(false);
+                return;
+            }
             // Get the minimum page index of all annotations
             const pageIndexes = annotations.map((a) => {
                 return a.annotation_type === 'note'
@@ -238,7 +243,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
         // Apply annotations
         const reader = getCurrentReader() as ZoteroReader | undefined;
-        if (!reader) return;
+        if (!reader) {
+            setIsApplyingAnnotations(false);
+            return;
+        }
         for (const annotation of annotations) {
             const result = await applyAnnotation(annotation, reader);
             if (result.updated) {
@@ -249,6 +257,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
         // Show the annotations
         setResultsVisible(true);
+        setIsApplyingAnnotations(false);
 
     }, [isAttachmentOpen, annotations]);
 
@@ -364,7 +373,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine which icon to show based on tool call and UI state
     const getIcon = () => {
-        if (toolCall.status === 'in_progress') return Spinner;
+        if (toolCall.status === 'in_progress' || isApplyingAnnotations) return Spinner;
         if (toolCall.status === 'error' || allErrors) return AlertIcon;
         if (toolCall.status === 'completed') {
             if (resultsVisible) return ArrowDownIcon;
