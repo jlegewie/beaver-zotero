@@ -285,6 +285,7 @@ export async function applyAnnotation(
                 ...annotation,
                 status: 'applied',
                 zotero_key: annotationKey,
+                modified_at: new Date().toISOString(),
             },
         };
     } catch (error: any) {
@@ -295,6 +296,7 @@ export async function applyAnnotation(
             annotation: {
                 ...annotation,
                 status: 'error',
+                modified_at: new Date().toISOString(),
             },
         };
     }
