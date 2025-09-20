@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Button from './Button';
 import { Icon, Spinner, BrainIcon } from '../icons/icons';
 import { MessageStatus } from '../../types/chat/uiTypes';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface GeneratingIndicatorProps {
     status: MessageStatus;
@@ -9,17 +10,7 @@ interface GeneratingIndicatorProps {
 }
 
 const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previousMessageHasToolCalls }) => {
-    const [loadingDots, setLoadingDots] = useState(1);
-
-    useEffect(() => {
-        setLoadingDots(1); 
-        const interval = setInterval(() => {
-            setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
-        }, 250);
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, []);
+    const loadingDots = useLoadingDots(true); // Always animating since this component is only shown when generating
     
     return (
         // Matching style of AssistantMessageTools

@@ -26,6 +26,7 @@ import {
 } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface AnnotationListItemProps {
     annotation: ToolAnnotation;
@@ -153,7 +154,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const [resultsVisible, setResultsVisible] = useState(false);
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-    const [loadingDots, setLoadingDots] = useState(1);
+    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
@@ -164,22 +165,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     // Tool call state
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
     const hasErrors = annotations.some((annotation) => annotation.status === 'error');
-
-    // Added loading dots animation for in_progress state
-    useEffect(() => {
-        let interval: NodeJS.Timeout | undefined;
-        if (toolCall.status === 'in_progress') {
-            setLoadingDots(1); 
-            interval = setInterval(() => {
-                setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
-            }, 250);
-        } else {
-            setLoadingDots(1); 
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [toolCall.status]);
 
     const toggleResults = useCallback(() => {
         // Only allow toggling if completed and has annotations

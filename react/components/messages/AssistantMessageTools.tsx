@@ -15,6 +15,7 @@ import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
 import { isAnnotationTool } from '../../types/chat/toolAnnotations';
 import AnnotationToolCallDisplay from './AnnotationToolCallDisplay';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
@@ -30,23 +31,8 @@ interface ToolCallDisplayProps {
 
 export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ messageId: _messageId, toolCall }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
-    const [loadingDots, setLoadingDots] = useState(1);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-
-    useEffect(() => {
-        let interval: NodeJS.Timeout | undefined;
-        if (toolCall.status === 'in_progress') {
-            setLoadingDots(1); 
-            interval = setInterval(() => {
-                setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
-            }, 250);
-        } else {
-            setLoadingDots(1); 
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [toolCall.status]);
+    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
 
     const numResults = toolCall.response?.attachments?.length ?? 0;
 
