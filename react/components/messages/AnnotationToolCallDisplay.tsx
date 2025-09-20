@@ -117,28 +117,29 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                                 : 'font-color-secondary'
                         }`}
                     >
-                        {annotation.title || 'Annotation'}
+                        {annotation.title + ' (' + annotation.status + ')' || 'Annotation'}
                     </div>
                 </div>
-                <div className="display-flex flex-row items-center gap-2">
-                    <IconButton
-                        variant="ghost-secondary"
-                        onClick={handleAction}
-                        disabled={isBusy}
-                        className="p-1"
-                        title={
-                            annotation.status === 'deleted'
-                                ? 'Re-add annotation'
-                                : 'Delete annotation from PDF'
-                        }
-                        icon={
-                            annotation.status === 'deleted'
-                                ? PlusSignIcon
-                                : DeleteIcon
-                        }
-                        loading={isBusy}
-                    />
-                </div>
+                {(annotation.status === 'applied' || annotation.status === 'deleted') && (
+                    <div className="display-flex flex-row items-center gap-2">
+                        <IconButton
+                            variant="ghost-secondary"
+                            onClick={handleAction}
+                            className="p-1"
+                            title={
+                                annotation.status === 'applied'
+                                    ? 'Delete annotation'
+                                    : 'Apply annotation'
+                            }
+                            icon={
+                                annotation.status === 'applied'
+                                    ? DeleteIcon
+                                    : PlayIcon
+                            }
+                            loading={isBusy}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -192,7 +193,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
     const toggleResults = useCallback(() => {
-        if (toolCall.status === 'completed' && totalAnnotations > 0 && !allPending) {
+        if (toolCall.status === 'completed' && totalAnnotations > 0) {
             setResultsVisible((prev) => !prev);
         }
     }, [toolCall.status, totalAnnotations, allPending]);
