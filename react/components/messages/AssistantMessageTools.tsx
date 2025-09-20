@@ -17,7 +17,7 @@ import {
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
-import { isAnnotationTool, ToolAnnotationResult } from '../../types/chat/toolAnnotations';
+import { isAnnotationTool, ToolAnnotation } from '../../types/chat/toolAnnotations';
 import {
     applyAnnotation,
     deleteAnnotationFromReader,
@@ -43,11 +43,11 @@ interface ToolCallDisplayProps {
 }
 
 interface AnnotationListItemProps {
-    annotation: ToolAnnotationResult;
+    annotation: ToolAnnotation;
     isBusy: boolean;
-    onClick: (annotation: ToolAnnotationResult) => Promise<void>;
-    onDelete: (annotation: ToolAnnotationResult) => Promise<void>;
-    onReAdd: (annotation: ToolAnnotationResult) => Promise<void>;
+    onClick: (annotation: ToolAnnotation) => Promise<void>;
+    onDelete: (annotation: ToolAnnotation) => Promise<void>;
+    onReAdd: (annotation: ToolAnnotation) => Promise<void>;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -72,18 +72,24 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
-            if (annotation.isDeleted) {
+            if (annotation.status === 'deleted') {
                 onReAdd(annotation);
             } else {
                 onDelete(annotation);
             }
         },
-        [annotation, isBusy, onDelete, onReAdd],
+        [annotation, isBusy, onDelete, onReAdd]
     );
 
-    const icon = annotation.annotationType === 'note' ? ZOTERO_ICONS.ANNOTATE_NOTE : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
-    const hasApplicationError = Boolean(annotation.applicationError) && !annotation.isDeleted;
-    const iconColor = hasApplicationError ? 'font-color-warning' : 'font-color-secondary';
+    const icon =
+        annotation.annotation_type === 'note'
+            ? ZOTERO_ICONS.ANNOTATE_NOTE
+            : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
+    const hasApplicationError =
+        Boolean(annotation.error_message) && annotation.status !== 'deleted';
+    const iconColor = hasApplicationError
+        ? 'font-color-warning'
+        : 'font-color-secondary';
     const baseClasses = [
         'px-2',
         'py-1',
@@ -97,10 +103,10 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         'user-select-none',
     ];
 
-    if (isHovered || (annotation.pendingAttachmentOpen && !annotation.isApplied)) {
+    if (isHovered) {
         baseClasses.push('bg-quinary');
     }
-    if (annotation.isDeleted) {
+    if (annotation.status === 'deleted') {
         baseClasses.push('opacity-60');
     }
 
@@ -112,9 +118,19 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                <ZoteroIcon icon={icon} size={13} className={`flex-shrink-0 mt-020 ${iconColor}`} />
+                <ZoteroIcon
+                    icon={icon}
+                    size={13}
+                    className={`flex-shrink-0 mt-020 ${iconColor}`}
+                />
                 <div className="flex-1 min-w-0">
-                    <div className={`${annotation.isDeleted ? 'font-color-tertiary line-through' : 'font-color-secondary'}`}>
+                    <div
+                        className={`${
+                            annotation.status === 'deleted'
+                                ? 'font-color-tertiary line-through'
+                                : 'font-color-secondary'
+                        }`}
+                    >
                         {annotation.title || 'Annotation'}
                     </div>
                 </div>
@@ -124,17 +140,20 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         onClick={handleAction}
                         disabled={isBusy}
                         className="p-1"
-                        title={annotation.isDeleted ? 'Re-add annotation' : 'Delete annotation from PDF'}
-                        icon={annotation.isDeleted ? PlusSignIcon : DeleteIcon}
+                        title={
+                            annotation.status === 'deleted'
+                                ? 'Re-add annotation'
+                                : 'Delete annotation from PDF'
+                        }
+                        icon={
+                            annotation.status === 'deleted'
+                                ? PlusSignIcon
+                                : DeleteIcon
+                        }
                         loading={isBusy}
                     />
                 </div>
             </div>
-            {annotation.pendingAttachmentOpen && !annotation.isApplied && !annotation.isDeleted && (
-                <div className="text-xs font-color-tertiary">
-                    Open the attachment to place this annotation
-                </div>
-            )}
         </div>
     );
 };
@@ -152,14 +171,20 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
-    const annotations = toolCall.annotations || [];
+    const annotations = (toolCall.annotations as ToolAnnotation[]) || [];
     const totalAnnotations = annotations.length;
-    const appliedAnnotations = annotations.filter((annotation) => annotation.isApplied && !annotation.isDeleted).length;
-    const pendingAnnotations = annotations.filter(
-        (annotation) => annotation.pendingAttachmentOpen && !annotation.isDeleted
+    const appliedAnnotations = annotations.filter(
+        (annotation) => annotation.status === 'applied'
     ).length;
-    const deletedAnnotations = annotations.filter((annotation) => annotation.isDeleted).length;
-    const hasErrors = annotations.some((annotation) => annotation.applicationError && !annotation.isDeleted);
+    const pendingAnnotations = annotations.filter(
+        (annotation) => annotation.status === 'pending'
+    ).length;
+    const deletedAnnotations = annotations.filter(
+        (annotation) => annotation.status === 'deleted'
+    ).length;
+    const hasErrors = annotations.some(
+        (annotation) => annotation.status === 'error'
+    );
 
     // Added loading dots animation for in_progress state
     useEffect(() => {
@@ -185,7 +210,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     }, [toolCall.status, totalAnnotations]);
 
     const markAnnotationState = useCallback(
-        (annotationId: string, updates: Partial<ToolAnnotationResult>) => {
+        (annotationId: string, updates: Partial<ToolAnnotation>) => {
             setAnnotationState({
                 messageId,
                 toolcallId: toolCall.id,
@@ -202,40 +227,18 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         const applyPendingAnnotations = async () => {
             for (const annotation of annotations) {
                 if (cancelled) return;
-                if (annotation.isDeleted) continue;
-                if (annotation.isApplied) continue;
-                if (annotation.pendingAttachmentOpen) continue;
-                if (annotation.applicationError) continue;
-                if (annotation.origin === 'summary') {
-                    const existingKey = await resolveExistingAnnotationKey(annotation);
-                    if (cancelled) return;
-                    if (existingKey) {
-                        markAnnotationState(annotation.id, {
-                            isApplied: true,
-                            pendingAttachmentOpen: false,
-                            applicationError: null,
-                            zoteroAnnotationKey: existingKey,
-                            isDeleted: false,
-                        });
-                    } else {
-                        markAnnotationState(annotation.id, {
-                            isDeleted: true,
-                            pendingAttachmentOpen: false,
-                            applicationError: 'Annotation not found in Zotero document',
-                        });
-                    }
-                    continue;
-                }
+                if (annotation.status === 'deleted') continue;
+                if (annotation.status === 'applied') continue;
+                if (annotation.status === 'error') continue;
 
-                const existingKey = await resolveExistingAnnotationKey(annotation);
+                const existingKey =
+                    await resolveExistingAnnotationKey(annotation);
                 if (cancelled) return;
                 if (existingKey) {
                     markAnnotationState(annotation.id, {
-                        isApplied: true,
-                        pendingAttachmentOpen: false,
-                        applicationError: null,
-                        zoteroAnnotationKey: existingKey,
-                        isDeleted: false,
+                        status: 'applied',
+                        error_message: null,
+                        zotero_key: existingKey,
                     });
                     continue;
                 }
@@ -243,25 +246,26 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
                 const result = await applyAnnotation(annotation);
                 if (cancelled) {
-                    setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+                    setBusyState((prev) => ({
+                        ...prev,
+                        [annotation.id]: false,
+                    }));
                     return;
                 }
 
                 if (result.status === 'applied') {
                     markAnnotationState(annotation.id, {
-                        isApplied: true,
-                        pendingAttachmentOpen: false,
-                        applicationError: null,
-                        zoteroAnnotationKey: result.zoteroAnnotationKey,
+                        status: 'applied',
+                        error_message: null,
+                        zotero_key: result.zotero_key,
                     });
                 } else if (result.status === 'pending') {
-                    markAnnotationState(annotation.id, {
-                        pendingAttachmentOpen: true,
-                    });
+                    // Do nothing, wait for user interaction or reader to open
                 } else {
                     markAnnotationState(annotation.id, {
-                        applicationError: result.reason || 'Failed to create annotation',
-                        pendingAttachmentOpen: false,
+                        status: 'error',
+                        error_message:
+                            result.reason || 'Failed to create annotation',
                     });
                 }
                 setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
@@ -276,36 +280,51 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     }, [annotations, markAnnotationState]);
 
     const handleAnnotationClick = useCallback(
-        async (annotation: ToolAnnotationResult) => {
+        async (annotation: ToolAnnotation) => {
             setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
 
-            let existingKey = annotation.zoteroAnnotationKey;
+            let existingKey = annotation.zotero_key;
             if (!existingKey) {
-                logger(`handleAnnotationClick: Resolving existing annotation key for ${annotation.id}`);
-                existingKey = (await resolveExistingAnnotationKey(annotation)) || undefined;
+                logger(
+                    `handleAnnotationClick: Resolving existing annotation key for ${annotation.id}`
+                );
+                existingKey =
+                    (await resolveExistingAnnotationKey(annotation)) ||
+                    undefined;
             }
 
             if (existingKey) {
-                logger(`handleAnnotationClick: Existing annotation key found for ${annotation.id} (${existingKey})`);
+                logger(
+                    `handleAnnotationClick: Existing annotation key found for ${annotation.id} (${existingKey})`
+                );
                 markAnnotationState(annotation.id, {
-                    isApplied: true,
-                    pendingAttachmentOpen: false,
-                    applicationError: null,
-                    zoteroAnnotationKey: existingKey,
-                    isDeleted: false,
+                    status: 'applied',
+                    error_message: null,
+                    zotero_key: existingKey,
                 });
-                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(annotation.libraryId, existingKey);
+                const annotationItem =
+                    await Zotero.Items.getByLibraryAndKeyAsync(
+                        annotation.library_id,
+                        existingKey
+                    );
                 if (!annotationItem) return;
                 await navigateToAnnotation(annotationItem);
-                setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+                setBusyState((prev) => ({
+                    ...prev,
+                    [annotation.id]: false,
+                }));
                 return;
             }
 
             const attemptApply = async () => {
-                logger(`handleAnnotationClick: Attempting to apply annotation ${annotation.id}`);
+                logger(
+                    `handleAnnotationClick: Attempting to apply annotation ${annotation.id}`
+                );
                 let result = await applyAnnotation(annotation);
                 if (result.status === 'pending') {
-                    logger(`handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`);
+                    logger(
+                        `handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`
+                    );
                     await openAttachmentForAnnotation(annotation);
                     result = await applyAnnotation(annotation);
                 }
@@ -315,26 +334,34 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             const result = await attemptApply();
 
             if (result.status === 'applied') {
-                logger(`handleAnnotationClick: Annotation ${annotation.id} is applied`);
+                logger(
+                    `handleAnnotationClick: Annotation ${annotation.id} is applied`
+                );
                 markAnnotationState(annotation.id, {
-                    isApplied: true,
-                    pendingAttachmentOpen: false,
-                    applicationError: null,
-                    zoteroAnnotationKey: result.zoteroAnnotationKey,
-                    isDeleted: false,
+                    status: 'applied',
+                    error_message: null,
+                    zotero_key: result.zotero_key,
                 });
-                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(annotation.libraryId, result.zoteroAnnotationKey);
+                const annotationItem =
+                    await Zotero.Items.getByLibraryAndKeyAsync(
+                        annotation.library_id,
+                        result.zotero_key
+                    );
                 if (!annotationItem) return;
                 await navigateToAnnotation(annotationItem);
             } else if (result.status === 'pending') {
-                logger(`handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`);
-                markAnnotationState(annotation.id, {
-                    pendingAttachmentOpen: true,
-                });
+                logger(
+                    `handleAnnotationClick: Annotation ${annotation.id} is pending, opening attachment`
+                );
+                // The logic to open the attachment is already handled inside attemptApply
             } else {
-                logger(`handleAnnotationClick: Annotation ${annotation.id} has error, setting error`);
+                logger(
+                    `handleAnnotationClick: Annotation ${annotation.id} has error, setting error`
+                );
                 markAnnotationState(annotation.id, {
-                    applicationError: result.reason || 'Failed to create annotation',
+                    status: 'error',
+                    error_message:
+                        result.reason || 'Failed to create annotation',
                 });
             }
 
@@ -344,39 +371,43 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     );
 
     const handleDelete = useCallback(
-        async (annotation: ToolAnnotationResult) => {
+        async (annotation: ToolAnnotation) => {
             setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
             try {
-                if (!annotation.isApplied || !annotation.zoteroAnnotationKey) {
+                if (
+                    annotation.status !== 'applied' ||
+                    !annotation.zotero_key
+                ) {
                     markAnnotationState(annotation.id, {
-                        isDeleted: true,
-                        isApplied: false,
-                        pendingAttachmentOpen: false,
+                        status: 'deleted',
                     });
                 } else {
                     await deleteAnnotationFromReader(annotation);
                     markAnnotationState(annotation.id, {
-                        isDeleted: true,
-                        isApplied: false,
-                        pendingAttachmentOpen: false,
+                        status: 'deleted',
                     });
                 }
             } catch (error: any) {
                 markAnnotationState(annotation.id, {
-                    applicationError: error?.message || 'Failed to delete annotation',
+                    status: 'error',
+                    error_message:
+                        error?.message || 'Failed to delete annotation',
                 });
             } finally {
-                setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+                setBusyState((prev) => ({
+                    ...prev,
+                    [annotation.id]: false,
+                }));
             }
         },
         [markAnnotationState]
     );
 
     const handleReAddAnnotation = useCallback(
-        async (annotation: ToolAnnotationResult) => {
+        async (annotation: ToolAnnotation) => {
             await handleAnnotationClick(annotation);
         },
-        [handleAnnotationClick],
+        [handleAnnotationClick]
     );
 
     // Updated icon logic to return JSX elements directly

@@ -1,6 +1,6 @@
 import {
     ToolAnnotationHighlightLocation,
-    ToolAnnotationResult,
+    ToolAnnotation,
     ToolAnnotationType,
 } from '../types/chat/toolAnnotations';
 import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citations';
@@ -11,7 +11,7 @@ import { logger } from '../../src/utils/logger';
 interface ApplyAnnotationSuccess {
     status: 'applied';
     libraryId: number;
-    zoteroAnnotationKey: string;
+    zotero_key: string;
 }
 
 interface ApplyAnnotationPending {
@@ -124,23 +124,31 @@ function generateSortIndex(pageIndex: number, rect: number[]): string {
 
 async function createHighlightAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<string> {
-    if (!annotation.highlightLocations || annotation.highlightLocations.length === 0) {
+    if (
+        !annotation.highlight_locations ||
+        annotation.highlight_locations.length === 0
+    ) {
         throw new Error('Highlight annotation missing geometry');
     }
 
-    const primaryLocation = annotation.highlightLocations[0];
-    const allSamePage = annotation.highlightLocations.every(
+    const primaryLocation = annotation.highlight_locations[0];
+    const allSamePage = annotation.highlight_locations.every(
         (loc) => loc.pageIndex === primaryLocation.pageIndex
     );
 
     if (!allSamePage) {
-        logger('Highlight annotation spans multiple pages; applying first page only for now', 2);
+        logger(
+            'Highlight annotation spans multiple pages; applying first page only for now',
+            2
+        );
     }
 
     const rects = allSamePage
-        ? annotation.highlightLocations.flatMap((loc) => convertLocationToRects(reader, loc))
+        ? annotation.highlight_locations.flatMap((loc) =>
+              convertLocationToRects(reader, loc)
+          )
         : convertLocationToRects(reader, primaryLocation);
     if (rects.length === 0) {
         throw new Error('Highlight annotation failed to compute rectangles');
@@ -161,7 +169,8 @@ async function createHighlightAnnotation(
         temporary: false,
     };
 
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
+    const iframeWindow = (reader as any)?._internalReader?._primaryView
+        ?._iframeWindow;
     if (!iframeWindow) {
         throw new Error('Unable to access reader iframe window');
     }
@@ -175,14 +184,15 @@ async function createHighlightAnnotation(
 
 function convertNotePositionToRect(
     reader: ZoteroReader,
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): { pageIndex: number; rect: number[] } {
-    if (!annotation.notePosition) {
+    if (!annotation.note_position) {
         throw new Error('Note annotation missing position');
     }
 
-    const { pageIndex, x, y } = annotation.notePosition;
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
+    const { pageIndex, x, y } = annotation.note_position;
+    const iframeWindow = (reader as any)?._internalReader?._primaryView
+        ?._iframeWindow;
     const pdfViewer = iframeWindow?.PDFViewerApplication?.pdfViewer;
     const pageView = pdfViewer?._pages?.[pageIndex];
     if (!pageView) {
@@ -211,7 +221,7 @@ function convertNotePositionToRect(
 
 async function createNoteAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<string> {
     const { pageIndex, rect } = convertNotePositionToRect(reader, annotation);
     const sortIndex = generateSortIndex(pageIndex, rect);
@@ -227,7 +237,7 @@ async function createNoteAnnotation(
         },
         tags: [],
         temporary: false,
-        notePosition: annotation.notePosition,
+        notePosition: annotation.note_position,
     };
 
     const iframeWindow = (reader as any)?._internalReader?._iframeWindow;
@@ -244,9 +254,9 @@ async function createNoteAnnotation(
 
 async function createAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<string> {
-    switch (annotation.annotationType as ToolAnnotationType) {
+    switch (annotation.annotation_type as ToolAnnotationType) {
         case 'note':
             return createNoteAnnotation(reader, annotation);
         case 'highlight':
@@ -256,9 +266,12 @@ async function createAnnotation(
 }
 
 export async function applyAnnotation(
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<ApplyAnnotationResult> {
-    const attachmentItem = await getAttachmentItem(annotation.libraryId, annotation.attachmentKey);
+    const attachmentItem = await getAttachmentItem(
+        annotation.library_id,
+        annotation.attachment_key
+    );
     if (!attachmentItem) {
         return {
             status: 'error',
@@ -277,11 +290,14 @@ export async function applyAnnotation(
     await ensureReaderInitialized(reader as ZoteroReader);
 
     try {
-        const annotationId = await createAnnotation(reader as ZoteroReader, annotation);
+        const annotationId = await createAnnotation(
+            reader as ZoteroReader,
+            annotation
+        );
         return {
             status: 'applied',
-            libraryId: annotation.libraryId,
-            zoteroAnnotationKey: annotationId,
+            libraryId: annotation.library_id,
+            zotero_key: annotationId,
         };
     } catch (error: any) {
         logger(`applyAnnotation error: ${error?.stack || error}`, 1);
@@ -293,26 +309,29 @@ export async function applyAnnotation(
 }
 
 export async function deleteAnnotationFromReader(
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<void> {
-    if (!annotation.zoteroAnnotationKey) {
+    if (!annotation.zotero_key) {
         throw new Error('Annotation key missing for deletion');
     }
 
     const reader = getCurrentReader() as ZoteroReader | null;
-    const attachmentItem = await getAttachmentItem(annotation.libraryId, annotation.attachmentKey);
+    const attachmentItem = await getAttachmentItem(
+        annotation.library_id,
+        annotation.attachment_key
+    );
     if (reader && attachmentItem && isReaderForAttachment(reader, attachmentItem)) {
         const iframeWindow = (reader as any)?._internalReader?._iframeWindow;
         if (iframeWindow) {
             await (reader as any)._internalReader.unsetAnnotations(
-                Components.utils.cloneInto([annotation.zoteroAnnotationKey], iframeWindow)
+                Components.utils.cloneInto([annotation.zotero_key], iframeWindow)
             );
         }
     }
 
     const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-        annotation.libraryId,
-        annotation.zoteroAnnotationKey
+        annotation.library_id,
+        annotation.zotero_key
     );
     if (annotationItem) {
         await annotationItem.eraseTx();
@@ -320,15 +339,22 @@ export async function deleteAnnotationFromReader(
 }
 
 export async function openAttachmentForAnnotation(
-    annotation: ToolAnnotationResult,
+    annotation: ToolAnnotation,
     pageIndex?: number
 ): Promise<ZoteroReader | null> {
-    const attachmentItem = await getAttachmentItem(annotation.libraryId, annotation.attachmentKey);
+    const attachmentItem = await getAttachmentItem(
+        annotation.library_id,
+        annotation.attachment_key
+    );
     if (!attachmentItem) {
         return null;
     }
 
-    const desiredPageIndex = pageIndex ?? annotation.highlightLocations?.[0]?.pageIndex ?? annotation.notePosition?.pageIndex ?? 0;
+    const desiredPageIndex =
+        pageIndex ??
+        annotation.highlight_locations?.[0]?.pageIndex ??
+        annotation.note_position?.pageIndex ??
+        0;
 
     const reader = (await Zotero.Reader.open(attachmentItem.id, {
         pageIndex: Math.max(0, desiredPageIndex),
@@ -342,9 +368,12 @@ export async function openAttachmentForAnnotation(
 }
 
 export async function resolveExistingAnnotationKey(
-    annotation: ToolAnnotationResult
+    annotation: ToolAnnotation
 ): Promise<string | null> {
-    const attachmentItem = await getAttachmentItem(annotation.libraryId, annotation.attachmentKey);
+    const attachmentItem = await getAttachmentItem(
+        annotation.library_id,
+        annotation.attachment_key
+    );
     if (!attachmentItem || !attachmentItem.isAttachment()) {
         return null;
     }
@@ -359,16 +388,17 @@ export async function resolveExistingAnnotationKey(
     for (const item of annotations) {
         if (!item || typeof item.isAnnotation !== 'function') continue;
         if (!item.isAnnotation()) continue;
-        if (item.annotationType !== annotation.annotationType) continue;
+        if (item.annotationType !== annotation.annotation_type) continue;
 
         if (annotation.comment) {
             const existingComment = item.annotationComment?.trim?.() || '';
             if (existingComment !== annotation.comment.trim()) continue;
         }
 
-        if (annotation.annotationType === 'highlight' && annotation.title) {
+        if (annotation.annotation_type === 'highlight' && annotation.title) {
             const existingText = item.annotationText?.trim?.() || '';
-            if (existingText && existingText !== annotation.title.trim()) continue;
+            if (existingText && existingText !== annotation.title.trim())
+                continue;
         }
 
         if (targetColor && item.annotationColor && item.annotationColor.toLowerCase() !== targetColor.toLowerCase()) {

@@ -27,9 +27,9 @@ import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
-import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
+import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../store';
@@ -41,7 +41,7 @@ import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTy
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
-import { RawToolAnnotationResult, toToolAnnotationResult } from '../types/chat/toolAnnotations';
+import { toToolAnnotation } from '../types/chat/toolAnnotations';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -606,19 +606,21 @@ async function _processChatCompletionViaBackend(
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
-            onAnnotation: (messageId: string, toolcallId: string, rawAnnotation: RawToolAnnotationResult) => {
+            onAnnotation: (
+                messageId: string,
+                toolcallId: string,
+                rawAnnotation: Record<string, any>
+            ) => {
                 try {
-                    const annotation = toToolAnnotationResult(rawAnnotation);
-                    logger(
-                        `event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${annotation.id}`,
-                        1
-                    );
-                    set(upsertToolcallAnnotationAtom, { messageId, toolcallId, annotation });
+                    const annotation = toToolAnnotation(rawAnnotation);
+                    logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${annotation.id}`, 1);
+                    set(upsertToolcallAnnotationAtom, {
+                        messageId,
+                        toolcallId,
+                        annotation,
+                    });
                 } catch (error) {
-                    logger(
-                        `event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`,
-                        1
-                    );
+                    logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
                 }
             },
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {

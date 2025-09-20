@@ -11,11 +11,11 @@ import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
 import {
-    ToolAnnotationResult,
+    ToolAnnotation,
     annotationsFromMetadata,
     isAnnotationTool,
     mergeAnnotations,
-} from "../types/chat/toolAnnotations";
+} from '../types/chat/toolAnnotations';
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -34,8 +34,8 @@ function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall):
 
     if (isAnnotationTool(toolcall.function?.name)) {
         const rawMetadata = toolcall.response?.metadata ?? existing?.response?.metadata;
-        const metadataAnnotations = annotationsFromMetadata(rawMetadata, 'summary');
-        const baseAnnotations = normalized.annotations ?? existing?.annotations;
+        const metadataAnnotations = annotationsFromMetadata(rawMetadata);
+        const baseAnnotations = existing?.annotations as ToolAnnotation[] | undefined;
         if (metadataAnnotations.length > 0) {
             normalized.annotations = mergeAnnotations(baseAnnotations, metadataAnnotations);
         } else if (baseAnnotations && baseAnnotations.length > 0) {
@@ -425,24 +425,18 @@ export const addOrUpdateToolcallAtom = atom(
 
 export const upsertToolcallAnnotationAtom = atom(
     null,
-    (
-        get,
-        set,
-        {
-            messageId,
-            toolcallId,
-            annotation,
-        }: { messageId: string; toolcallId: string; annotation: ToolAnnotationResult }
-    ) => {
+    (get, set, {messageId, toolcallId, annotation} : { messageId: string; toolcallId: string; annotation: ToolAnnotation }) => {
         set(threadMessagesAtom, (prevMessages) =>
             prevMessages.map((message) => {
+                // Find message and toolcall
                 if (message.id !== messageId) return message;
                 const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
                 const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
                 if (toolCallIndex === -1) return message;
-
                 const existingToolcall = toolCalls[toolCallIndex];
-                const existingAnnotations = existingToolcall.annotations || [];
+                
+                // Update toolcall with new annotation
+                const existingAnnotations = (existingToolcall.annotations as ToolAnnotation[]) || [];
                 const mergedAnnotations = mergeAnnotations(existingAnnotations, [annotation]);
 
                 toolCalls[toolCallIndex] = {
@@ -461,40 +455,27 @@ export const upsertToolcallAnnotationAtom = atom(
 
 export const updateToolcallAnnotationAtom = atom(
     null,
-    (
-        get,
-        set,
-        {
-            messageId,
-            toolcallId,
-            annotationId,
-            updates,
-        }: {
-            messageId: string;
-            toolcallId: string;
-            annotationId: string;
-            updates: Partial<ToolAnnotationResult>;
-        }
-    ) => {
+    (get, set, { messageId, toolcallId, annotationId, updates }: { messageId: string; toolcallId: string; annotationId: string; updates: Partial<ToolAnnotation> }) => {
         set(threadMessagesAtom, (prevMessages) =>
             prevMessages.map((message) => {
+                // Find message and toolcall
                 if (message.id !== messageId) return message;
                 const toolCalls = message.tool_calls ? [...message.tool_calls] : [];
                 const toolCallIndex = toolCalls.findIndex((tc) => tc.id === toolcallId);
                 if (toolCallIndex === -1) return message;
-
                 const existingToolcall = toolCalls[toolCallIndex];
+                
+                // Update toolcall annotations with new updates
                 if (!existingToolcall.annotations) return message;
-
-                const updatedAnnotations = existingToolcall.annotations.map((annotation) =>
+                const updatedAnnotations = (
+                    existingToolcall.annotations as ToolAnnotation[]
+                ).map((annotation) =>
                     annotation.id === annotationId
-                        ? {
-                              ...annotation,
-                              ...updates,
-                          }
+                        ? {...annotation, ...updates }
                         : annotation
                 );
 
+                // Update toolcall with new annotations
                 toolCalls[toolCallIndex] = {
                     ...existingToolcall,
                     annotations: updatedAnnotations,

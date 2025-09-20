@@ -1,7 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
-import { RawToolAnnotationResult } from '../../react/types/chat/toolAnnotations';
 import { ProviderType } from '../../react/atoms/models';
 import { CitationMetadata } from '../../react/types/citations';
 
@@ -66,7 +65,11 @@ export interface SSECallbacks {
      * @param toolcallId ID of the tool call
      * @param annotation Raw annotation payload
      */
-    onAnnotation: (messageId: string, toolcallId: string, annotation: RawToolAnnotationResult) => void;
+    onAnnotation: (
+        messageId: string,
+        toolcallId: string,
+        annotation: Record<string, any>
+    ) => void;
 
     /**
      * Handles "citation_metadata" event when a citation metadata is received
@@ -332,11 +335,26 @@ export class ChatService extends ApiService {
             onWarning
         }: {
             onThread: (threadId: string) => void;
-            onDelta: (messageId: string, delta: string, type: DeltaType) => void;
+            onDelta: (
+                messageId: string,
+                delta: string,
+                type: DeltaType
+            ) => void;
             onMessage: (data: MessageModel) => void;
-            onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
-            onAnnotation: (messageId: string, toolcallId: string, annotation: any) => void;
-            onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => void;
+            onToolcall: (
+                messageId: string,
+                toolcallId: string,
+                toolCall: ToolCall
+            ) => void;
+            onAnnotation: (
+                messageId: string,
+                toolcallId: string,
+                annotation: Record<string, any>
+            ) => void;
+            onCitationMetadata: (
+                messageId: string,
+                citationMetadata: CitationMetadata
+            ) => void;
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
@@ -408,7 +426,7 @@ export class ChatService extends ApiService {
                     onAnnotation(
                         parsedData.messageId,
                         parsedData.toolcallId,
-                        annotation as RawToolAnnotationResult
+                        annotation
                     );
                 }
                 break;

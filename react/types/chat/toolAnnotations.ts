@@ -10,6 +10,8 @@ export type ToolAnnotationColor =
     | 'blue'
     | 'purple';
 
+export type AnnotationStatus = 'pending' | 'applied' | 'error' | 'deleted';
+
 export interface ToolAnnotationNotePosition {
     pageIndex: number;
     side: 'left' | 'right';
@@ -24,52 +26,39 @@ export interface ToolAnnotationHighlightLocation {
     boxes: BoundingBox[];
 }
 
-export interface ToolAnnotationResult {
+/**
+ * Represents the structure of an annotation as defined by the backend Pydantic model.
+ */
+export interface ToolAnnotation {
+    // Backend fields
     id: string;
-    annotationType: ToolAnnotationType;
-    libraryId: number;
-    attachmentKey: string;
-    /** Raw zotero key as provided by the backend. */
-    zoteroKey?: string;
+    message_id: string;
+    toolcall_id: string;
+    user_id?: string;
+    library_id: number;
+    attachment_key: string;
+    /** Key of the Zotero annotation item, populated by the frontend after creation. */
+    zotero_key?: string;
+    status: AnnotationStatus;
+    error_message?: string | null;
+    annotation_type: ToolAnnotationType;
     title: string;
     comment: string;
+    raw_sentence_ids?: string | null;
+    sentence_ids: string[];
     color?: ToolAnnotationColor | null;
-    rawSentenceIds?: string | null;
-    sentenceIds: string[];
-    highlightLocations?: ToolAnnotationHighlightLocation[];
-    notePosition?: ToolAnnotationNotePosition;
-    /**
-     * True once the Zotero annotation has been materialised in the reader.
-     */
-    isApplied?: boolean;
-    /**
-     * Zotero annotation key once persisted. Used for navigation/deletion.
-     */
-    zoteroAnnotationKey?: string;
-    /** Runtime error encountered when applying the annotation. */
-    applicationError?: string | null;
-    /** Indicates the annotation has been deleted by the user. */
-    isDeleted?: boolean;
-    /** Indicates the annotation still needs the reader to be opened. */
-    pendingAttachmentOpen?: boolean;
-    /** Timestamp of creation to maintain arrival order. */
-    createdAt?: number;
-    /** Identifies whether the annotation originated from streaming or summary metadata. */
-    origin?: 'stream' | 'summary';
-    /** Persisted Zotero annotation item ID when known. */
-    zoteroItemId?: number;
+    note_position?: ToolAnnotationNotePosition;
+    highlight_locations?: ToolAnnotationHighlightLocation[];
+    created_at?: string;
+    modified_at?: string;
 }
 
 export interface AnnotationStreamEvent {
     event: 'annotation';
     messageId: string;
     toolcallId: string;
-    annotation: ToolAnnotationResult;
+    annotation: ToolAnnotation;
 }
-
-export type RawToolAnnotationResult = Partial<Record<string, any>> & {
-    id: string;
-};
 
 export function isAnnotationTool(functionName: string | undefined): boolean {
     if (!functionName) return false;
@@ -106,8 +95,11 @@ function normalizeBoundingBox(raw: any): BoundingBox | null {
     };
 }
 
-function normalizeHighlightLocations(raw: any): ToolAnnotationHighlightLocation[] | undefined {
-    const locations = raw?.highlightLocations ?? raw?.highlight_locations ?? raw?.locations;
+function normalizeHighlightLocations(
+    raw: any
+): ToolAnnotationHighlightLocation[] | undefined {
+    const locations =
+        raw?.highlightLocations ?? raw?.highlight_locations ?? raw?.locations;
     if (!Array.isArray(locations) || locations.length === 0) {
         return undefined;
     }
@@ -195,62 +187,68 @@ function normalizeSentenceIdList(value: any): string[] {
     return [];
 }
 
-export function toToolAnnotationResult(
-    raw: RawToolAnnotationResult,
-    origin: 'stream' | 'summary' = 'stream'
-): ToolAnnotationResult {
+/**
+ * Deserializes and normalizes a raw annotation object from the backend
+ * into a typed ToolAnnotation object. This is necessary because the
+ * backend sends raw JSON, and this function ensures field names are consistent
+ * (e.g., snake_case vs. camelCase) and nested structures are correctly typed.
+ * @param raw - The raw annotation object from the backend.
+ * @returns A typed ToolAnnotation object.
+ */
+export function toToolAnnotation(raw: Record<string, any>): ToolAnnotation {
     const annotationType = toToolAnnotationType(raw);
-    const libraryIdRaw = raw.libraryId ?? raw.library_id;
-    const attachmentKeyRaw = raw.attachmentKey ?? raw.attachment_key ?? raw.zotero_key;
-    const zoteroKeyRaw = raw.zoteroKey ?? raw.zotero_key ?? raw.attachmentKey ?? raw.attachment_key;
+    const libraryIdRaw = raw.library_id ?? raw.libraryId;
+    const attachmentKeyRaw =
+        raw.attachment_key ?? raw.attachmentKey ?? raw.zotero_key;
 
-    const sentenceIds = normalizeSentenceIdList(raw.sentenceIds ?? raw.sentence_ids);
-    const highlightLocations = annotationType === 'highlight' ? normalizeHighlightLocations(raw) : undefined;
-    const notePosition = annotationType === 'note' ? normalizeNotePosition(raw) : undefined;
-
-    const createdAtRaw = raw.createdAt ?? raw.created_at;
-    const parsedCreatedAt =
-        typeof createdAtRaw === 'number'
-            ? createdAtRaw
-            : typeof createdAtRaw === 'string'
-            ? Date.parse(createdAtRaw)
+    const sentenceIds = normalizeSentenceIdList(
+        raw.sentence_ids ?? raw.sentenceIds
+    );
+    const highlightLocations =
+        annotationType === 'highlight'
+            ? normalizeHighlightLocations(raw)
             : undefined;
-    const createdAt = Number.isFinite(parsedCreatedAt) ? (parsedCreatedAt as number) : Date.now();
+    const notePosition =
+        annotationType === 'note' ? normalizeNotePosition(raw) : undefined;
 
     return {
         id: raw.id,
-        annotationType,
-        libraryId: typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw ?? 0),
-        attachmentKey: typeof attachmentKeyRaw === 'string' ? attachmentKeyRaw : String(attachmentKeyRaw ?? ''),
-        zoteroKey: typeof zoteroKeyRaw === 'string' ? zoteroKeyRaw : undefined,
+        message_id: raw.message_id ?? raw.messageId,
+        toolcall_id: raw.toolcall_id ?? raw.toolcallId,
+        user_id: raw.user_id ?? raw.userId,
+        annotation_type: annotationType,
+        library_id:
+            typeof libraryIdRaw === 'number'
+                ? libraryIdRaw
+                : Number(libraryIdRaw ?? 0),
+        attachment_key:
+            typeof attachmentKeyRaw === 'string'
+                ? attachmentKeyRaw
+                : String(attachmentKeyRaw ?? ''),
+        zotero_key: raw.zotero_key ?? raw.zoteroKey,
         title: raw.title ?? '',
         comment: raw.comment ?? '',
-        color: (raw.color ?? raw.highlight_color) ?? null,
-        rawSentenceIds: raw.rawSentenceIds ?? raw.raw_sentence_ids ?? null,
-        sentenceIds,
-        highlightLocations,
-        notePosition,
-        isApplied: Boolean(raw.isApplied ?? false),
-        zoteroAnnotationKey: raw.zoteroAnnotationKey ?? raw.zotero_annotation_key,
-        applicationError: raw.applicationError ?? raw.application_error ?? null,
-        isDeleted: Boolean(raw.isDeleted ?? false),
-        pendingAttachmentOpen: Boolean(raw.pendingAttachmentOpen ?? false),
-        createdAt,
-        origin,
-        zoteroItemId:
-            typeof raw.zoteroItemId === 'number'
-                ? raw.zoteroItemId
-                : typeof raw.zotero_item_id === 'number'
-                ? raw.zotero_item_id
-                : undefined,
+        color: raw.color ?? raw.highlight_color ?? null,
+        raw_sentence_ids:
+            raw.raw_sentence_ids ?? raw.rawSentenceIds ?? null,
+        sentence_ids: sentenceIds,
+        highlight_locations: highlightLocations,
+        note_position: notePosition,
+        status: raw.status ?? 'pending',
+        error_message: raw.error_message ?? raw.errorMessage,
+        created_at: raw.created_at ?? raw.createdAt,
+        modified_at: raw.modified_at ?? raw.modifiedAt,
     };
 }
 
-function normalizeRawAnnotations(value: any): RawToolAnnotationResult[] {
+function normalizeRawAnnotations(value: any): Record<string, any>[] {
     if (!value) return [];
     if (Array.isArray(value)) {
-        return value.filter((candidate): candidate is RawToolAnnotationResult =>
-            typeof candidate === 'object' && candidate !== null && typeof candidate.id === 'string'
+        return value.filter(
+            (candidate): candidate is Record<string, any> =>
+                typeof candidate === 'object' &&
+                candidate !== null &&
+                typeof candidate.id === 'string'
         );
     }
     if (typeof value === 'string') {
@@ -262,7 +260,7 @@ function normalizeRawAnnotations(value: any): RawToolAnnotationResult[] {
         }
     }
     if (typeof value === 'object') {
-        const candidate = value as RawToolAnnotationResult;
+        const candidate = value as Record<string, any>;
         if (typeof candidate.id === 'string') {
             return [candidate];
         }
@@ -270,57 +268,69 @@ function normalizeRawAnnotations(value: any): RawToolAnnotationResult[] {
     return [];
 }
 
-export function annotationsFromMetadata(
-    metadata: unknown,
-    origin: 'stream' | 'summary' = 'summary'
-): ToolAnnotationResult[] {
+export function annotationsFromMetadata(metadata: unknown): ToolAnnotation[] {
     if (!metadata) return [];
 
     const rawAnnotations = Array.isArray(metadata)
         ? normalizeRawAnnotations(metadata)
-        : normalizeRawAnnotations((metadata as any)?.annotations ?? (metadata as any)?.annotation_results);
+        : normalizeRawAnnotations(
+              (metadata as any)?.annotations ??
+                  (metadata as any)?.annotation_results
+          );
 
     return rawAnnotations
         .map((raw) => {
             try {
-                return toToolAnnotationResult(raw, origin);
+                return toToolAnnotation(raw);
             } catch (_error) {
                 return null;
             }
         })
-        .filter((annotation): annotation is ToolAnnotationResult => annotation !== null);
+        .filter(
+            (annotation): annotation is ToolAnnotation => annotation !== null
+        );
 }
 
 export function mergeAnnotations(
-    existing: ToolAnnotationResult[] | undefined,
-    incoming: ToolAnnotationResult[]
-): ToolAnnotationResult[] {
+    existing: ToolAnnotation[] | undefined,
+    incoming: ToolAnnotation[]
+): ToolAnnotation[] {
     if (!existing || existing.length === 0) {
-        return [...incoming];
+        return [...incoming].sort(
+            (a, b) =>
+                Date.parse(a.created_at || '0') -
+                Date.parse(b.created_at || '0')
+        );
     }
 
-    const byId = new Map(incoming.map((annotation) => [annotation.id, annotation] as const));
+    const byId = new Map(
+        incoming.map((annotation) => [annotation.id, annotation] as const)
+    );
     const merged = existing.map((annotation) => {
         const update = byId.get(annotation.id);
         if (!update) return annotation;
         return {
             ...annotation,
             ...update,
-            isApplied: update.isApplied ?? annotation.isApplied,
-            zoteroAnnotationKey: update.zoteroAnnotationKey ?? annotation.zoteroAnnotationKey,
-            applicationError: update.applicationError ?? annotation.applicationError ?? null,
-            isDeleted: update.isDeleted ?? annotation.isDeleted,
-            pendingAttachmentOpen: update.pendingAttachmentOpen ?? annotation.pendingAttachmentOpen,
-            createdAt: annotation.createdAt ?? update.createdAt,
-            origin: annotation.origin ?? update.origin,
+            status: update.status ?? annotation.status,
+            zotero_key: update.zotero_key ?? annotation.zotero_key,
+            error_message:
+                update.error_message ?? annotation.error_message ?? null,
         };
     });
 
     for (const annotation of incoming) {
-        if (!existing.some((existingAnnotation) => existingAnnotation.id === annotation.id)) {
+        if (
+            !existing.some(
+                (existingAnnotation) => existingAnnotation.id === annotation.id
+            )
+        ) {
             merged.push(annotation);
         }
     }
 
-    return merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    return merged.sort(
+        (a, b) =>
+            Date.parse(a.created_at || '0') - Date.parse(b.created_at || '0')
+    );
 }
