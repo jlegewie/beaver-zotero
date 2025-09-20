@@ -150,27 +150,20 @@ interface AnnotationToolCallDisplayProps {
 
 
 const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCall }) => {
-    const [resultsVisible, setResultsVisible] = useState(false); // Changed from true to false
+    const [resultsVisible, setResultsVisible] = useState(false);
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
-    const [isButtonHovered, setIsButtonHovered] = useState(false); // Added for hover state
-    const [loadingDots, setLoadingDots] = useState(1); // Added for loading animation
+    const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [loadingDots, setLoadingDots] = useState(1);
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
+    // Get annotations from tool call
     const annotations = (toolCall.annotations as ToolAnnotation[]) || [];
     const totalAnnotations = annotations.length;
-    const appliedAnnotations = annotations.filter(
-        (annotation) => annotation.status === 'applied'
-    ).length;
-    const pendingAnnotations = annotations.filter(
-        (annotation) => annotation.status === 'pending'
-    ).length;
-    const deletedAnnotations = annotations.filter(
-        (annotation) => annotation.status === 'deleted'
-    ).length;
-    const hasErrors = annotations.some(
-        (annotation) => annotation.status === 'error'
-    );
+
+    // Tool call state
+    const allPending = annotations.every((annotation) => annotation.status === 'pending');
+    const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
     // Added loading dots animation for in_progress state
     useEffect(() => {
@@ -404,7 +397,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             if (resultsVisible) return <Icon icon={ArrowDownIcon} />;
             if (isButtonHovered && totalAnnotations > 0) return <Icon icon={ArrowRightIcon} />;
             if (totalAnnotations === 0) return <Icon icon={AlertIcon} />;
-            if (hasErrors || deletedAnnotations === totalAnnotations) return <Icon icon={AlertIcon} />;
+            if (hasErrors) return <Icon icon={AlertIcon} />;
             return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
         }
         return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
@@ -412,7 +405,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Updated button text logic to match regular tool calls
     const getButtonText = () => {
-        const label = `${appliedAnnotations} ${toolCall.label || 'Annotations'}`;
+        const label = `${totalAnnotations} ${toolCall.label || 'Annotations'}`;
         return label;
     };
 

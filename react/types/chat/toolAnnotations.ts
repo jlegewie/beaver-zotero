@@ -64,7 +64,8 @@ export function isAnnotationTool(functionName: string | undefined): boolean {
     if (!functionName) return false;
     return (
         functionName === 'add_highlight_annotations' ||
-        functionName === 'add_note_annotations'
+        functionName === 'add_note_annotations' ||
+        functionName === 'add_annotations'
     );
 }
 

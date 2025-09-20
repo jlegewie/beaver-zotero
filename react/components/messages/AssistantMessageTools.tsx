@@ -29,9 +29,6 @@ interface ToolCallDisplayProps {
 
 
 export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ messageId: _messageId, toolCall }) => {
-    if (isAnnotationTool(toolCall.function?.name)) {
-        return <AnnotationToolCallDisplay messageId={_messageId} toolCall={toolCall} />;
-    }
     const [resultsVisible, setResultsVisible] = useState(false);
     const [loadingDots, setLoadingDots] = useState(1);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -163,9 +160,14 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 ${getTopMargin()}`
             }
         >
-            {message.tool_calls.map((toolCall) => (
-                <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />
-            ))}
+            {message.tool_calls.map((toolCall) => {
+                // Annotation tool calls are handled by AnnotationToolCallDisplay
+                if (isAnnotationTool(toolCall.function?.name)) {
+                    return <AnnotationToolCallDisplay messageId={message.id} toolCall={toolCall} />;
+                }
+                // Search tool calls are handled by ToolCallDisplay
+                return <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+            })}
         </div>
     );
 };
