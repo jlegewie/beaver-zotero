@@ -188,6 +188,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Compute overall state of all annotations
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
+    const appliedAnnotationCount = annotations.filter((annotation) => annotation.status === 'applied').length;
     const allErrors = annotations.every((annotation) => annotation.status === 'error');
     const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
@@ -414,7 +415,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        {getButtonText()}
+                        <span>Annotations</span>
+                        {appliedAnnotationCount > 0
+                            ? <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
+                            : <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
+                        }
                     </Button>
                     <div className="flex-1"/>
                 </div>
