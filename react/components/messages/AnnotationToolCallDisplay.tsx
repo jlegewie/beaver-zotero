@@ -248,131 +248,18 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     }, [annotations, updateAnnotationState]);
 
     /**
-     * Handle user clicking on an annotation item
-     * Attempts to navigate to the annotation, creating it first if necessary
+     * Navigate to an annotation on annotation click
      */
     const handleAnnotationClick = useCallback(
         async (annotation: ToolAnnotation) => {
-            setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
-
-            // First, check if we already have the annotation key
-            let existingKey = annotation.zotero_key;
-            if (!existingKey) {
-                logger(
-                    `handleAnnotationClick: Validating annotation for ${annotation.id}`
+            if (!annotation.zotero_key || annotation.status !== 'applied') return;
+            const annotationItem =
+                await Zotero.Items.getByLibraryAndKeyAsync(
+                    annotation.library_id,
+                    annotation.zotero_key
                 );
-                // validateAppliedAnnotation: Check if annotation exists in PDF
-                const result = await validateAppliedAnnotation(annotation);
-                
-                if (result.markAsDeleted) {
-                    // Annotation was marked as applied but no longer exists
-                    updateAnnotationState(annotation.id, {
-                        status: 'deleted',
-                        error_message: null,
-                    });
-                    setBusyState((prev) => ({
-                        ...prev,
-                        [annotation.id]: false,
-                    }));
-                    return;
-                }
-                
-                existingKey = result.key || undefined;
-            }
-
-            // If annotation exists, navigate to it
-            if (existingKey) {
-                logger(
-                    `handleAnnotationClick: Existing annotation key found for ${annotation.id} (${existingKey})`
-                );
-                updateAnnotationState(annotation.id, {
-                    status: 'applied',
-                    error_message: null,
-                    zotero_key: existingKey,
-                });
-                
-                // Get the Zotero annotation item and navigate to it
-                const annotationItem =
-                    await Zotero.Items.getByLibraryAndKeyAsync(
-                        annotation.library_id,
-                        existingKey
-                    );
-                if (!annotationItem) return;
-                await navigateToAnnotation(annotationItem);
-                setBusyState((prev) => ({
-                    ...prev,
-                    [annotation.id]: false,
-                }));
-                return;
-            }
-
-            // Annotation doesn't exist yet - try to create it
-            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                annotation.library_id,
-                annotation.attachment_key
-            );
-            if (!attachmentItem) {
-                updateAnnotationState(annotation.id, {
-                    status: 'error',
-                    error_message: 'Attachment not found',
-                });
-                setBusyState((prev) => ({
-                    ...prev,
-                    [annotation.id]: false,
-                }));
-                return;
-            }
-
-            let reader = getCurrentReader() as ZoteroReader | null;
-            if (!reader || (reader as any).itemID !== attachmentItem.id) {
-                reader = await openAttachmentForAnnotation(annotation);
-            }
-
-            if (!reader) {
-                updateAnnotationState(annotation.id, {
-                    status: 'error',
-                    error_message: 'Could not open PDF reader',
-                });
-                setBusyState((prev) => ({
-                    ...prev,
-                    [annotation.id]: false,
-                }));
-                return;
-            }
-
-            const result = await applyAnnotation(annotation, reader as ZoteroReader);
-
-            // Handle the result of annotation creation
-            if (result.updated) {
-                logger(
-                    `handleAnnotationClick: Annotation ${annotation.id} is applied`
-                );
-                updateAnnotationState(annotation.id, {
-                    status: 'applied',
-                    error_message: null,
-                    zotero_key: result.annotation.zotero_key,
-                });
-
-                // Navigate to the newly created annotation
-                const annotationItem =
-                    await Zotero.Items.getByLibraryAndKeyAsync(
-                        annotation.library_id,
-                        result.annotation.zotero_key || ''
-                    );
-                if (!annotationItem) return;
-                await navigateToAnnotation(annotationItem);
-            } else {
-                logger(
-                    `handleAnnotationClick: Annotation ${annotation.id} has error, setting error`
-                );
-                updateAnnotationState(annotation.id, {
-                    status: 'error',
-                    error_message:
-                        result.error || 'Failed to create annotation',
-                });
-            }
-
-            setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
+            if (!annotationItem) return;
+            await navigateToAnnotation(annotationItem);
         },
         [updateAnnotationState]
     );
@@ -449,8 +336,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
 
     // Determine when to show apply button
-    // const showApplyButton = toolCall.status === 'completed' && allPending && isAttachmentReaderOpen;
-    const showApplyButton = true;
+    const showApplyButton = toolCall.status === 'completed' && allPending;
 
     return (
         <div
@@ -481,7 +367,14 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     <div className="flex-1"/>
                     <div className="display-flex">
                         {showApplyButton && (
-                            <Button rightIcon={PlayIcon} iconClassName="-ml-015 mt-015" variant="ghost-secondary" onClick={handleApplyAnnotations}>Apply</Button>
+                            <Button
+                                rightIcon={PlayIcon}
+                                iconClassName="-ml-015 mt-015"
+                                variant="ghost-secondary"
+                                onClick={handleApplyAnnotations}
+                            >
+                                Apply
+                            </Button>
                         )}
                     </div>
                 </div>
