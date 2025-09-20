@@ -230,6 +230,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     : a.highlight_locations?.[0]?.pageIndex;
             });
             const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
+            
             // Navigate to the minimum page index
             await navigateToPage(attachmentItem.id, minPageIndex);
         }
@@ -244,6 +245,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 updateAnnotationState(annotation.id, result.annotation);
             }
         }
+
+        // Show the annotations
+        setResultsVisible(true);
 
     }, [isAttachmentOpen, annotations]);
 
@@ -372,7 +376,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Generate button text showing annotation count
     const getButtonText = () => {
-        const label = `${totalAnnotations} ${toolCall.label || 'Annotations'}`;
+        const label = `${totalAnnotations} Annotations`;
         return label;
     };
 
@@ -391,23 +395,29 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             className={`${resultsVisible ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
         >
             {/* Main button that shows annotation count and toggles visibility */}
-            <div className={`display-flex flex-row bg-senary py-15 ${resultsVisible ? 'border-bottom-quinary' : ''}`}>
-                <Button
-                    variant="ghost-secondary"
-                    icon={getIcon()}
-                    onClick={toggleResults}
-                    onMouseEnter={() => setIsButtonHovered(true)}
-                    onMouseLeave={() => setIsButtonHovered(false)}
-                    className={`
-                        text-base scale-105 ml-2
-                        ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                        ${toolCall.status === 'error' ? 'font-color-warning' : ''}
-                    `}
-                    disabled={isButtonDisabled && !canToggleResults}
-                >
-                    {getButtonText()}
-                </Button>
-                <div className="flex-1"/>
+            <div
+                className={`display-flex flex-row bg-senary py-15 ${resultsVisible ? 'border-bottom-quinary' : ''}`}
+                onMouseEnter={() => setIsButtonHovered(true)}
+                onMouseLeave={() => setIsButtonHovered(false)}
+            >
+                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
+                    <Button
+                        variant="ghost-secondary"
+                        icon={getIcon()}
+                        // onClick={toggleResults}
+                        // onMouseEnter={() => setIsButtonHovered(true)}
+                        // onMouseLeave={() => setIsButtonHovered(false)}
+                        className={`
+                            text-base scale-105 ml-2
+                            ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
+                            ${toolCall.status === 'error' ? 'font-color-warning' : ''}
+                        `}
+                        disabled={isButtonDisabled && !canToggleResults}
+                    >
+                        {getButtonText()}
+                    </Button>
+                    <div className="flex-1"/>
+                </div>
                 {showApplyButton && (
                     <Button
                         rightIcon={PlayIcon}
