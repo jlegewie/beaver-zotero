@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { ToolCall } from '../../types/chat/apiTypes';
 import {
@@ -10,6 +10,7 @@ import {
     Icon,
     DeleteIcon,
     PlusSignIcon,
+    PlayIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -27,6 +28,7 @@ import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { getCurrentReader } from '../../utils/readerUtils';
 import { ZoteroReader } from '../../utils/annotationUtils';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
 
 interface AnnotationListItemProps {
     annotation: ToolAnnotation;
@@ -159,6 +161,9 @@ interface AnnotationToolCallDisplayProps {
  * 3. applied -> User can navigate to or delete the annotation
  */
 const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCall }) => {
+    // Current reader state
+    const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
+
     // UI state for collapsible annotation list
     const [resultsVisible, setResultsVisible] = useState(false);
     
@@ -179,9 +184,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const annotations = (toolCall.annotations as ToolAnnotation[]) || [];
     const totalAnnotations = annotations.length;
 
+    // Is the current reader attachment key the same as the attachment key for annotations
+    const isCurrentReaderAttachmentKey = annotations.some((annotation) => annotation.attachment_key === currentReaderAttachmentKey);
+
     // Compute overall state of all annotations
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
-    const allError = annotations.every((annotation) => annotation.status === 'error');
+    const allErrors = annotations.every((annotation) => annotation.status === 'error');
     const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
@@ -203,6 +211,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         },
         [messageId, setAnnotationState, toolCall.id]
     );
+
+    /**
+     * Handle applying annotations
+     * This function is called when the user clicks the apply button
+     */
+    const handleApplyAnnotations = useCallback(async () => {}, []);
 
     /**
      * Main annotation processing effect - automatically processes pending annotations
@@ -503,12 +517,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     // Determine which icon to show based on tool call and UI state
     const getIcon = () => {
         if (toolCall.status === 'in_progress') return <Icon icon={Spinner} />;
-        if (toolCall.status === 'error') return <Icon icon={AlertIcon} />;
+        if (toolCall.status === 'error' || allErrors) return <Icon icon={AlertIcon} />;
         if (toolCall.status === 'completed') {
             if (resultsVisible) return <Icon icon={ArrowDownIcon} />;
             if (isButtonHovered && totalAnnotations > 0) return <Icon icon={ArrowRightIcon} />;
             if (totalAnnotations === 0) return <Icon icon={AlertIcon} />;
-            if (hasErrors) return <Icon icon={AlertIcon} />;
             return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
         }
         return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
@@ -524,6 +537,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const hasAnnotationsToShow = totalAnnotations > 0;
     const canToggleResults = toolCall.status === 'completed' && hasAnnotationsToShow;
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
+
+    // Determine when to show apply button
+    // const showApplyButton = toolCall.status === 'completed' && allPending && isAttachmentReaderOpen;
+    const showApplyButton = true;
 
     return (
         <div
@@ -544,12 +561,18 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 style={{ padding: '2px 6px', maxHeight: 'none'}}
                 disabled={isButtonDisabled && !canToggleResults}
             >
-                <div className="display-flex flex-row px-3 gap-2">
-                    <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                <div className="display-flex flex-row px-3 flex-1 gap-2 items-center">
+                    <div className={`display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
                         {getIcon()}
                     </div>
                     <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
                         {getButtonText()}
+                    </div>
+                    <div className="flex-1"/>
+                    <div className="display-flex">
+                        {showApplyButton && (
+                            <Button rightIcon={PlayIcon} iconClassName="-ml-015 mt-015" variant="ghost-secondary" onClick={handleApplyAnnotations}>Apply</Button>
+                        )}
                     </div>
                 </div>
             </Button>
