@@ -220,14 +220,14 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 if (annotation.status === 'deleted') continue;
                 if (annotation.status === 'error') continue;
 
-                // Validate annotations that are marked as applied
+                /**
+                 * Validate annotations that are marked as applied
+                 * 
+                 * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
+                 * still exists in Zotero. This handles the case where the annotation was applied
+                 * but manually deleted from Zotero by the user.
+                 */
                 if (annotation.status === 'applied') {
-                    /**
-                     * validateAppliedAnnotation: Checks if an annotation that's marked as 'applied'
-                     * still exists in Zotero. Returns the key if found, or indicates if it should be
-                     * marked as deleted. This handles the case where the annotation was applied but
-                     * and manually deleted from Zotero by the user.
-                     */
                     const validationResult = await validateAppliedAnnotation(annotation);
                     if (cancelled) return;
                     
