@@ -185,7 +185,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const totalAnnotations = annotations.length;
 
     // Is the current reader attachment key the same as the attachment key for annotations
-    const isCurrentReaderAttachmentKey = annotations.some((annotation) => annotation.attachment_key === currentReaderAttachmentKey);
+    const isAttachmentOpen = annotations.some((annotation) => annotation.attachment_key === currentReaderAttachmentKey);
 
     // Compute overall state of all annotations
     const allPending = annotations.every((annotation) => annotation.status === 'pending');
@@ -264,6 +264,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         const applyPendingAnnotations = async () => {
             const pendingAnnotations = annotations.filter((a: ToolAnnotation) => a.status === 'pending');
             if (pendingAnnotations.length === 0) return;
+            if(!isAttachmentOpen) return;
 
             // Validation: Check if all pending annotations have the same attachment key
             const attachmentKey = pendingAnnotations[0].attachment_key;
@@ -304,7 +305,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
                 
                 // Attempt to create new annotation in the PDF reader
-                const result = await applyAnnotation(reader as ZoteroReader, annotation);
+                const result = await applyAnnotation(annotation, reader as ZoteroReader);
 
                 if (cancelled) {
                     setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
@@ -312,16 +313,16 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 }
 
                 // Update annotation state based on result
-                if (result.status === 'applied') {
+                if (result.updated) {
                     updateAnnotationState(annotation.id, {
                         status: 'applied',
                         error_message: null,
-                        zotero_key: result.zotero_key,
+                        zotero_key: result.annotation.zotero_key,
                     });
                 } else {
                     updateAnnotationState(annotation.id, {
                         status: 'error',
-                        error_message: result.reason || 'Failed to create annotation',
+                        error_message: result.error || 'Failed to create annotation',
                     });
                 }
                 setBusyState((prev) => ({ ...prev, [annotation.id]: false }));
@@ -430,24 +431,24 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 return;
             }
 
-            const result = await applyAnnotation(reader, annotation);
+            const result = await applyAnnotation(annotation, reader as ZoteroReader);
 
             // Handle the result of annotation creation
-            if (result.status === 'applied') {
+            if (result.updated) {
                 logger(
                     `handleAnnotationClick: Annotation ${annotation.id} is applied`
                 );
                 updateAnnotationState(annotation.id, {
                     status: 'applied',
                     error_message: null,
-                    zotero_key: result.zotero_key,
+                    zotero_key: result.annotation.zotero_key,
                 });
 
                 // Navigate to the newly created annotation
                 const annotationItem =
                     await Zotero.Items.getByLibraryAndKeyAsync(
                         annotation.library_id,
-                        result.zotero_key
+                        result.annotation.zotero_key || ''
                     );
                 if (!annotationItem) return;
                 await navigateToAnnotation(annotationItem);
@@ -458,7 +459,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 updateAnnotationState(annotation.id, {
                     status: 'error',
                     error_message:
-                        result.reason || 'Failed to create annotation',
+                        result.error || 'Failed to create annotation',
                 });
             }
 
