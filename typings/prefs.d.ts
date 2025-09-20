@@ -18,6 +18,8 @@ declare namespace _ZoteroTypes {
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
+      "annotationToolEnabled": boolean;
+      "autoApplyAnnotations": boolean;
       "maxAttachments": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
