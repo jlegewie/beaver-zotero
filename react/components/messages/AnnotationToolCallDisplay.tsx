@@ -68,10 +68,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         [annotation, isBusy, onDelete, onReAdd]
     );
 
-    const icon =
-        annotation.annotation_type === 'note'
-            ? ZOTERO_ICONS.ANNOTATE_NOTE
-            : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
+    const icon = annotation.annotation_type === 'note'
+        ? ZOTERO_ICONS.ANNOTATE_NOTE
+        : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
     const hasApplicationError = Boolean(annotation.error_message) && annotation.status !== 'deleted';
     const iconColor = hasApplicationError
         ? 'font-color-warning'
