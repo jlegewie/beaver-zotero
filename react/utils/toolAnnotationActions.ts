@@ -367,46 +367,34 @@ export async function openAttachmentForAnnotation(
     return reader;
 }
 
-export async function resolveExistingAnnotationKey(
+/**
+ * Validates that an annotation marked as 'applied' still exists in Zotero.
+ * For annotations with status 'applied', verifies the zotero_key still points to a valid annotation.
+ * @param annotation - The annotation to validate
+ * @returns Object with key (if exists) and whether annotation should be marked as deleted
+ */
+export async function validateAppliedAnnotation(
     annotation: ToolAnnotation
-): Promise<string | null> {
-    const attachmentItem = await getAttachmentItem(
-        annotation.library_id,
-        annotation.attachment_key
-    );
-    if (!attachmentItem || !attachmentItem.isAttachment()) {
-        return null;
-    }
-
-    const annotations = attachmentItem.getAnnotations?.();
-    if (!annotations || !Array.isArray(annotations)) {
-        return null;
-    }
-
-    const targetColor = annotation.color ? resolveHighlightColor(annotation.color) : undefined;
-
-    for (const item of annotations) {
-        if (!item || typeof item.isAnnotation !== 'function') continue;
-        if (!item.isAnnotation()) continue;
-        if (item.annotationType !== annotation.annotation_type) continue;
-
-        if (annotation.comment) {
-            const existingComment = item.annotationComment?.trim?.() || '';
-            if (existingComment !== annotation.comment.trim()) continue;
+): Promise<{ key: string | null; markAsDeleted: boolean }> {
+    // If annotation is marked as applied with a zotero_key, verify it still exists
+    if (annotation.status === 'applied' && annotation.zotero_key) {
+        try {
+            const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                annotation.library_id,
+                annotation.zotero_key
+            );
+            
+            if (annotationItem && annotationItem.isAnnotation()) {
+                return { key: annotation.zotero_key, markAsDeleted: false };
+            } else {
+                // Annotation item doesn't exist - should be marked as deleted
+                return { key: null, markAsDeleted: true };
+            }
+        } catch (error) {
+            return { key: null, markAsDeleted: true };
         }
-
-        if (annotation.annotation_type === 'highlight' && annotation.title) {
-            const existingText = item.annotationText?.trim?.() || '';
-            if (existingText && existingText !== annotation.title.trim())
-                continue;
-        }
-
-        if (targetColor && item.annotationColor && item.annotationColor.toLowerCase() !== targetColor.toLowerCase()) {
-            continue;
-        }
-
-        return item.key;
     }
-
-    return null;
+    
+    // For other statuses, no existing annotation and no need to mark as deleted
+    return { key: null, markAsDeleted: false };
 }
