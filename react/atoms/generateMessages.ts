@@ -25,7 +25,7 @@ import {
 } from './threads';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentReaderAttachmentKeyAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
@@ -42,6 +42,7 @@ import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 import { toToolAnnotation } from '../types/chat/toolAnnotations';
+import { applyAnnotation } from '../utils/toolAnnotationActions';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -611,17 +612,33 @@ async function _processChatCompletionViaBackend(
                 toolcallId: string,
                 rawAnnotation: Record<string, any>
             ) => {
-                try {
-                    const annotation = toToolAnnotation(rawAnnotation);
-                    logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${annotation.id}`, 1);
-                    set(upsertToolcallAnnotationAtom, {
-                        messageId,
-                        toolcallId,
-                        annotation,
-                    });
-                } catch (error) {
-                    logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
+                logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${rawAnnotation.id || 'unknown'}`, 1);
+                async function applyAnnotationAndUpsert(rawAnnotation: Record<string, any>) {
+                    try {
+                        // Convert raw annotation to ToolAnnotation
+                        let annotation = toToolAnnotation(rawAnnotation);
+                        // Apply annotation if autoApplyAnnotations is enabled
+                        // and the current reader attachment key is the same as the annotation attachment key
+                        if (getPref('autoApplyAnnotations')) {
+                            const currentReaderKey = get(currentReaderAttachmentKeyAtom);
+                            if (currentReaderKey !== annotation.attachment_key) return;
+                            const result = await applyAnnotation(annotation);
+                            if (result.updated) {
+                                logger(`event 'onAnnotation': applied annotation for message ${messageId} toolcall ${toolcallId}: ${JSON.stringify(result.annotation)}`, 1);
+                                annotation = result.annotation;
+                            }
+                        }
+                        // Upsert annotation
+                        set(upsertToolcallAnnotationAtom, {
+                            messageId,
+                            toolcallId,
+                            annotation,
+                        });
+                    } catch (error) {
+                        logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
+                    }
                 }
+                applyAnnotationAndUpsert(rawAnnotation);
             },
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
