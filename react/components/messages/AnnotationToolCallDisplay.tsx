@@ -119,23 +119,27 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         {annotation.title + ' (' + annotation.status + ')' || 'Annotation'}
                     </div>
                 </div>
-                {(annotation.status === 'applied' || annotation.status === 'deleted') && (
+                {(annotation.status === 'applied') && (
                     <div className="display-flex flex-row items-center gap-2">
                         <IconButton
                             variant="ghost-secondary"
                             // onClick={annotation.status === 'applied' ? handleDelete : handleApplyAnnotation}
                             onClick={handleAction}
                             className="p-1"
-                            title={
-                                annotation.status === 'applied'
-                                    ? 'Delete annotation'
-                                    : 'Apply annotation'
-                            }
-                            icon={
-                                annotation.status === 'applied'
-                                    ? DeleteIcon
-                                    : PlayIcon
-                            }
+                            title='Delete annotation'
+                            icon={DeleteIcon}
+                            loading={isBusy}
+                        />
+                    </div>
+                )}
+                {(annotation.status === 'deleted') && (
+                    <div className="display-flex flex-row items-center gap-2">
+                        <IconButton
+                            variant="ghost-secondary"
+                            onClick={handleAction}
+                            className="p-1"
+                            title='Apply annotation'
+                            icon={PlayIcon}
                             loading={isBusy}
                         />
                     </div>
