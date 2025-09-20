@@ -76,8 +76,8 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         ? 'font-color-warning'
         : 'font-color-secondary';
     const baseClasses = [
-        'px-2',
-        'py-1',
+        'px-3',
+        'py-15',
         'display-flex',
         'flex-col',
         'gap-1',
@@ -433,7 +433,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
             {/* Expandable list of individual annotations */}
             {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
-                <div className={`py-15 mt-15`}>
+                <div className="py-15">
                     <div className="display-flex flex-col gap-1">
                         {annotations.map((annotation) => (
                             <AnnotationListItem
