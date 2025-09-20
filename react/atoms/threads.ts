@@ -85,6 +85,17 @@ export const threadAttachmentCountWithoutAnnotationsAtom = atom<number>((get) =>
 });
 
 
+export const threadAnnotationsAtom = atom<ToolAnnotation[]>((get) => {
+    const threadMessages = get(threadMessagesAtom);
+    const annotations = threadMessages
+        .filter((message) => message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0)
+        .flatMap((message) => message.tool_calls)
+        .flatMap((toolcall) => toolcall?.annotations)
+        .filter(Boolean) as ToolAnnotation[];
+    return [...new Set(annotations)];
+});
+
+
 // True after a chat request is sent and before the first assistant response arrives.
 // Used to show a spinner during initial LLM response loading.
 export const isChatRequestPendingAtom = atom<boolean>(false);
