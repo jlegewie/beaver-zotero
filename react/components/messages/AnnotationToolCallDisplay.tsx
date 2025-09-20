@@ -259,9 +259,20 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         const validateAppliedAnnotations = async () => {
             const appliedAnnotations = annotations.filter((a: ToolAnnotation) => a.status === 'applied');
             for (const annotation of appliedAnnotations) {
-                const validationResult = await validateAppliedAnnotation(annotation);
 
+                // Skip if annotation was modified in last 10 seconds
+                if (annotation.modified_at) {
+                    const timeSinceModified = Date.now() - new Date(annotation.modified_at).getTime();
+                    if (timeSinceModified < 10000) { // 10 seconds
+                        console.log('validationResult: skipping because modified in last 10 seconds');
+                        continue;
+                    }
+                }
+
+                // Validate annotation
+                const validationResult = await validateAppliedAnnotation(annotation);
                 if (validationResult.markAsDeleted) {
+                    console.log('validationResult: markAsDeleted');
                     // Annotation was marked as applied but no longer exists - mark as deleted
                     updateAnnotationState(annotation.id, {
                         status: 'deleted',
