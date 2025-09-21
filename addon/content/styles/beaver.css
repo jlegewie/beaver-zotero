@@ -1213,6 +1213,24 @@ attachment-box .metadata-table #beaver-status {
     flex-shrink: 0;
 }
 
+[id^="beaver-pane-"] .variant-ghost-tertiary {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-tertiary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-ghost-tertiary:hover {
+    color: var(--fill-secondary);
+}
+
 /* Button: Thread menu */
 [id^="beaver-pane-"] .variant-thread-menu {
     cursor: pointer;
