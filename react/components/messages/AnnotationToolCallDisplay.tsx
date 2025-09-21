@@ -418,8 +418,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Generate button text showing annotation count
     const getButtonText = () => {
-        const label = `${totalAnnotations} Annotations`;
-        return label;
+        if (toolCall.status === 'in_progress') {
+            return `Annotations${''.padEnd(loadingDots, '.')}`;
+        }
+        return 'Annotations';
     };
 
     // Determine when the results can be toggled and when button should be disabled
@@ -456,10 +458,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        <span>Annotations</span>
-                        {appliedAnnotationCount > 0
-                            ? <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
-                            : <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
+                        <span>{getButtonText()}</span>
+                        {toolCall.status === 'completed' && appliedAnnotationCount > 0 &&
+                            <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
+                        }
+                        {toolCall.status === 'completed' && appliedAnnotationCount === 0 &&
+                            <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
                         }
                     </Button>
                     <div className="flex-1"/>
