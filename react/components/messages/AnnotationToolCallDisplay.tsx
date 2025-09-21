@@ -448,7 +448,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         >
             {/* Main button that shows annotation count and toggles visibility */}
             <div
-                className={`display-flex flex-row bg-senary py-15 ${resultsVisible ? 'border-bottom-quinary' : ''}`}
+                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible ? 'border-bottom-quinary' : ''}`}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
@@ -460,7 +460,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         // onMouseEnter={() => setIsButtonHovered(true)}
                         // onMouseLeave={() => setIsButtonHovered(false)}
                         className={`
-                            text-base scale-105 ml-2
+                            text-base scale-105
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                             ${toolCall.status === 'error' ? 'font-color-warning' : ''}
                         `}
@@ -480,7 +480,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     <Button
                         icon={PlayIcon}
                         iconClassName="-mr-015"
-                        className="mr-015"
                         variant="ghost-tertiary"
                         onClick={() => handleApplyAnnotations()}
                     >
@@ -489,9 +488,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         </span>
                     </Button>
                 ) : (
-                    <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
+                    <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
                         {attachmentTitle}
-                    </span>
+                    </div>
                 )}
             </div>
 
