@@ -146,13 +146,13 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 ${getTopMargin()}`
             }
         >
-            {message.tool_calls.map((toolCall) => {
+            {message.tool_calls.map((toolCall, index) => {
                 // Annotation tool calls are handled by AnnotationToolCallDisplay
                 if (isAnnotationTool(toolCall.function?.name)) {
                     return <AnnotationToolCallDisplay messageId={message.id} toolCall={toolCall} />;
                 }
                 // Search tool calls are handled by ToolCallDisplay
-                return <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+                return <ToolCallDisplay key={toolCall.id + index} messageId={message.id} toolCall={toolCall} />;
             })}
         </div>
     );
