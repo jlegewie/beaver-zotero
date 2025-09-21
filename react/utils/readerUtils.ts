@@ -38,8 +38,9 @@ async function getCurrentReaderAndWaitForView(window?: Window): Promise<any | un
  * @param itemID - The item ID.
  * @param page - The page number to navigate to.
  */
-async function navigateToPage(itemID: number, page: number) {
-    await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+async function navigateToPage(itemID: number, page: number): Promise<void | _ZoteroTypes.ReaderInstance> {
+    const reader = await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+    return reader;
 }
 
 async function navigateToPageInCurrentReader(page: number) {
