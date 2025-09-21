@@ -221,10 +221,13 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
  * 
  * @param reader - The reader instance.
  */
-async function ensureReaderInitialized(reader: ZoteroReader): Promise<void> {
+async function ensureReaderInitialized(reader: ZoteroReader, waitForView: boolean = true): Promise<void> {
     try {
         if (reader && (reader as any)._initPromise) {
             await (reader as any)._initPromise;
+            if (waitForView) {
+                await (reader as any)._internalReader?._primaryView?.initializedPromise;
+            }
         }
     } catch (error) {
         logger(`ensureReaderInitialized failed: ${error}`, 1);
