@@ -76,9 +76,14 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         ? ZOTERO_ICONS.ANNOTATE_NOTE
         : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
     const hasApplicationError = annotation.status !== 'error';
-    const iconColor = annotation.status === 'deleted' || annotation.status === 'pending'
+
+    // Icon color
+    let iconColor = annotation.status === 'deleted' || annotation.status === 'pending'
         ? 'font-color-tertiary'
         : 'font-color-secondary';
+    iconColor = annotation.color ? `font-color-${annotation.color}` : iconColor;
+    iconColor = annotation.status === 'error' ? 'font-color-secondary' : iconColor;
+
     const baseClasses = [
         'px-3',
         'py-15',
@@ -430,13 +435,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine when the results can be toggled and when button should be disabled
     const hasAnnotationsToShow = totalAnnotations > 0;
-    const canToggleResults = toolCall.status === 'completed' && hasAnnotationsToShow;
+    const canToggleResults = toolCall.status === 'completed' && hasAnnotationsToShow && !allErrors;
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
 
     // Determine when to show apply button
     const showApplyButton = toolCall.status === 'completed' && somePending;
     
-
     return (
         <div
             id={`tool-${toolCall.id}`}

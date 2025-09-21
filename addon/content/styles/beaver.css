@@ -436,6 +436,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-yellow { color: var(--tag-yellow); opacity: 0.8; }
+[id^="beaver-pane-"] .font-color-purple { color: var(--tag-purple); opacity: 0.8; }
+
 [id^="beaver-pane-"] .user-select-none { user-select: none; }
 [id^="beaver-pane-"] .user-select-text { user-select: text; }
 
