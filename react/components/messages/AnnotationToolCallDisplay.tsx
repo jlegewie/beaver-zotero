@@ -439,7 +439,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
 
     // Determine when to show apply button
-    const showApplyButton = toolCall.status === 'completed' && somePending;
+    const showApplyButton = toolCall.status === 'completed' && somePending && !isApplyingAnnotations;
     
     return (
         <div
