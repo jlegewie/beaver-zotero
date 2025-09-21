@@ -62,7 +62,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
-            if (annotation.status === 'deleted') {
+            if (annotation.status === 'deleted' || annotation.status === 'pending') {
                 onReAdd(annotation);
             } else {
                 onDelete(annotation);
@@ -74,9 +74,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     const icon = annotation.annotation_type === 'note'
         ? ZOTERO_ICONS.ANNOTATE_NOTE
         : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
-    const hasApplicationError = Boolean(annotation.error_message) && annotation.status !== 'deleted';
-    const iconColor = hasApplicationError
-        ? 'font-color-warning'
+    const hasApplicationError = annotation.status !== 'error';
+    const iconColor = annotation.status === 'deleted' || annotation.status === 'pending'
+        ? 'font-color-tertiary'
         : 'font-color-secondary';
     const baseClasses = [
         'px-3',
@@ -90,6 +90,12 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         'transition',
         'user-select-none',
     ];
+
+    const getTextClasses = () => {
+        if (annotation.status === 'deleted') return 'font-color-tertiary line-through';
+        if (annotation.status === 'pending') return 'font-color-tertiary';
+        return 'font-color-secondary';
+    }
 
     if (isHovered) {
         baseClasses.push('bg-quinary');
@@ -106,20 +112,21 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                <ZoteroIcon
-                    icon={icon}
-                    size={13}
-                    className={`flex-shrink-0 mt-020 ${iconColor}`}
-                />
+                {hasApplicationError ? (
+                    <ZoteroIcon
+                        icon={icon}
+                        size={13}
+                        className={`flex-shrink-0 mt-020 ${iconColor}`}
+                    />
+                ) : (
+                    <Icon
+                        icon={AlertIcon}
+                        className={`flex-shrink-0 mt-020 ${iconColor}`}
+                    />
+                )}
                 <div className="flex-1 min-w-0">
-                    <div
-                        className={`${
-                            annotation.status === 'deleted'
-                                ? 'font-color-tertiary line-through'
-                                : 'font-color-secondary'
-                        }`}
-                    >
-                        {annotation.title + ' (' + annotation.status + ')' || 'Annotation'}
+                    <div className={getTextClasses()}>
+                        {annotation.title || 'Annotation'}
                     </div>
                 </div>
                 {(annotation.status === 'applied') && (
@@ -135,7 +142,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         />
                     </div>
                 )}
-                {(annotation.status === 'deleted') && (
+                {(annotation.status === 'deleted' || annotation.status === 'pending') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
@@ -197,17 +204,16 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const isAttachmentOpen = annotations.some((annotation) => annotation.attachment_key === currentReaderAttachmentKey);
 
     // Compute overall state of all annotations
-    const allPending = annotations.every((annotation) => annotation.status === 'pending');
+    const somePending = annotations.some((annotation) => annotation.status === 'pending');
     const appliedAnnotationCount = annotations.filter((annotation) => annotation.status === 'applied').length;
     const allErrors = annotations.every((annotation) => annotation.status === 'error');
-    const hasErrors = annotations.some((annotation) => annotation.status === 'error');
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
     const toggleResults = useCallback(() => {
         if (toolCall.status === 'completed' && totalAnnotations > 0) {
             setResultsVisible((prev) => !prev);
         }
-    }, [toolCall.status, totalAnnotations, allPending]);
+    }, [toolCall.status, totalAnnotations]);
 
     // Helper to update annotation state in global store
     const updateAnnotationState = useCallback(
@@ -257,6 +263,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             return;
         }
         for (const annotation of annotations) {
+            if (annotation.status === 'applied') continue;
             if (annotationId && annotation.id !== annotationId) continue;
             const result = await applyAnnotation(annotation, reader);
             if (result.updated) {
@@ -302,7 +309,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 if (annotation.modified_at) {
                     const timeSinceModified = Date.now() - new Date(annotation.modified_at).getTime();
                     if (timeSinceModified < 10000) { // 10 seconds
-                        console.log('validationResult: skipping because modified in last 10 seconds');
+                        logger('validationResult: skipping because modified in last 10 seconds');
                         continue;
                     }
                 }
@@ -310,7 +317,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 // Validate annotation
                 const validationResult = await validateAppliedAnnotation(annotation);
                 if (validationResult.markAsDeleted) {
-                    console.log('validationResult: markAsDeleted');
+                    logger('validationResult: marking as deleted');
                     // Annotation was marked as applied but no longer exists - mark as deleted
                     updateAnnotationState(annotation.id, {
                         status: 'deleted',
@@ -342,7 +349,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 await navigateToAnnotation(annotationItem);
 
             // Re-add annotation if it was deleted
-            } else if (annotation.status === 'deleted') {
+            } else if (annotation.status === 'deleted' || annotation.status === 'pending') {
                 await handleApplyAnnotations(annotation.id);
             }
         },
@@ -421,7 +428,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
 
     // Determine when to show apply button
-    const showApplyButton = toolCall.status === 'completed' && allPending;
+    const showApplyButton = toolCall.status === 'completed' && somePending;
     
 
     return (
