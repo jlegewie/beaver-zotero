@@ -476,7 +476,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     </Button>
                     <div className="flex-1"/>
                 </div>
-                {showApplyButton && (
+                {showApplyButton ? (
                     <Button
                         icon={PlayIcon}
                         iconClassName="-mr-015"
@@ -488,6 +488,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                             {isAttachmentOpen && attachmentTitle ? 'Apply' : `Apply to ${attachmentTitle}`}
                         </span>
                     </Button>
+                ) : (
+                    <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
+                        {attachmentTitle}
+                    </span>
                 )}
             </div>
 
