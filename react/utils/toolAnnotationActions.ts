@@ -337,36 +337,6 @@ export async function deleteAnnotationFromReader(
     }
 }
 
-export async function openAttachmentForAnnotation(
-    annotation: ToolAnnotation,
-    pageIndex?: number
-): Promise<ZoteroReader | null> {
-    const attachmentItem = await getAttachmentItem(
-        annotation.library_id,
-        annotation.attachment_key
-    );
-    if (!attachmentItem) {
-        return null;
-    }
-
-    const desiredPageIndex =
-        pageIndex ??
-        annotation.highlight_locations?.[0]?.pageIndex ??
-        annotation.note_position?.pageIndex ??
-        0;
-
-    const reader = (await Zotero.Reader.open(attachmentItem.id, {
-        pageIndex: Math.max(0, desiredPageIndex),
-    })) as unknown as ZoteroReader | null;
-
-    if (reader) {
-        await ensureReaderInitialized(reader);
-        await ensurePdfPagesAvailable(reader);
-    }
-
-    return reader;
-}
-
 /**
  * Validates that an annotation marked as 'applied' still exists in Zotero.
  * For annotations with status 'applied', verifies the zotero_key still points to a valid annotation.
