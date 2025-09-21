@@ -18,15 +18,13 @@ import { ToolAnnotation } from '../../types/chat/toolAnnotations';
 import {
     applyAnnotation,
     deleteAnnotationFromReader,
-    openAttachmentForAnnotation,
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
-import { navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
+import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { updateToolcallAnnotationAtom } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
-import { getCurrentReader } from '../../utils/readerUtils';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
@@ -244,6 +242,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      */
     const handleApplyAnnotations = useCallback(async (annotationId?: string) => {
         setIsApplyingAnnotations(true);
+        // try {
         // Open attachment if not already open
         if (!isAttachmentOpen) {
             const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -251,6 +250,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 annotations[0].attachment_key
             );
             if (!attachmentItem) {
+                // TODO: Set annotations to error (attachment not found)
                 setIsApplyingAnnotations(false);
                 return;
             }
@@ -263,15 +263,17 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
             
             // Navigate to the minimum page index
-            await navigateToPage(attachmentItem.id, minPageIndex);
+            await navigateToPage(attachmentItem.id, minPageIndex + 1);
         }
 
-        // Apply annotations
-        const reader = getCurrentReader() as ZoteroReader | undefined;
+        // Get the current reader and wait for the view to be initialized
+        const reader = await getCurrentReaderAndWaitForView() as ZoteroReader | undefined;
         if (!reader) {
             setIsApplyingAnnotations(false);
             return;
         }
+        
+        // Apply annotations
         for (const annotation of annotations) {
             if (annotation.status === 'applied') continue;
             if (annotationId && annotation.id !== annotationId) continue;
