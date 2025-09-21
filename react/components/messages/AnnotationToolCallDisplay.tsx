@@ -214,6 +214,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Compute overall state of all annotations
     const somePending = annotations.some((annotation) => annotation.status === 'pending');
+    const someErrors = annotations.some((annotation) => annotation.status === 'error');
     const appliedAnnotationCount = annotations.filter((annotation) => annotation.status === 'applied').length;
     const allErrors = annotations.every((annotation) => annotation.status === 'error');
 
@@ -439,7 +440,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
 
     // Determine when to show apply button
-    const showApplyButton = toolCall.status === 'completed' && somePending && !isApplyingAnnotations;
+    const showApplyButton = toolCall.status === 'completed' && (somePending || someErrors) && !isApplyingAnnotations;
     
     return (
         <div
