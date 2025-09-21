@@ -485,7 +485,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         onClick={() => handleApplyAnnotations()}
                     >
                         <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
-                            {isAttachmentOpen && attachmentTitle ? 'Apply' : `Apply to ${attachmentTitle}`}
+                            {!isAttachmentOpen && attachmentTitle ? `Apply to ${attachmentTitle}` : 'Apply'}
                         </span>
                     </Button>
                 ) : (
