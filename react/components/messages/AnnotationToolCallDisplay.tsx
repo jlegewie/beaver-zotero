@@ -8,7 +8,6 @@ import {
     ArrowRightIcon,
     Icon,
     DeleteIcon,
-    PlusSignIcon,
     PlayIcon,
     TickIcon
 } from '../icons/icons';
