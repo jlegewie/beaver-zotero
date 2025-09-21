@@ -7,7 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
-import { ensureReaderInitialized } from './readerUtils';
+import { ensureReaderInitialized, ensurePdfPagesAvailable } from './readerUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -45,6 +45,11 @@ function isReaderForAttachment(reader: ZoteroReader | null, attachment: Zotero.I
     return (reader as any).itemID === attachment.id;
 }
 
+function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: string): boolean {
+    if (!reader) return false;
+    if (!attachmentKey) return false;
+    return (reader as any)._item === undefined || (reader as any)._item?.key === attachmentKey;
+}
 
 
 function convertBoundingBoxToBottomLeft(
@@ -267,10 +272,18 @@ export async function applyAnnotation(
             annotation
         };
     }
-    await ensureReaderInitialized(reader);
+    
+    try {
+        // Ensure the reader is initialized and the PDF pages are available
+        await ensureReaderInitialized(reader);
+        await ensurePdfPagesAvailable(reader);
 
-    // Create the annotation
-    try {        
+        // Check if the reader is still correct
+        if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
+            throw new Error('Reader changed to another attachment');
+        }
+        
+        // Create the annotation
         const annotationKey = await createAnnotation(reader, annotation);
         return {
             updated: true,
@@ -349,6 +362,7 @@ export async function openAttachmentForAnnotation(
 
     if (reader) {
         await ensureReaderInitialized(reader);
+        await ensurePdfPagesAvailable(reader);
     }
 
     return reader;
