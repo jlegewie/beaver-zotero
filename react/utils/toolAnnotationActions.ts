@@ -289,7 +289,7 @@ export async function applyAnnotation(
             },
         };
     } catch (error: any) {
-        logger(`applyAnnotation error: ${error?.stack || error}`, 1);
+        logger(`applyAnnotation error: ${error?.message || error?.toString()}`, 1);
         return {
             updated: true,
             error: error?.message || 'Failed to create annotation',
