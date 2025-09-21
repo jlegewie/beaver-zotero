@@ -106,7 +106,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     if (isHovered) {
         baseClasses.push('bg-quinary');
     }
-    if (annotation.status === 'deleted') {
+    if (annotation.status === 'deleted' || annotation.status === 'error') {
         baseClasses.push('opacity-60');
     }
 
