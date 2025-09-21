@@ -39,6 +39,7 @@ interface AnnotationListItemProps {
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
+    className?: string;
 }
 
 const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
@@ -50,6 +51,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     isHovered,
     onMouseEnter,
     onMouseLeave,
+    className,
 }) => {
     const handleClick = useCallback(() => {
         if (isBusy) return;
@@ -98,7 +100,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 
     return (
         <div
-            className={baseClasses.join(' ')}
+            className={`${baseClasses.join(' ')} ${className}`}
             onClick={handleClick}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
@@ -472,22 +474,21 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
             {/* Expandable list of individual annotations */}
             {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
-                <div className="py-15">
-                    <div className="display-flex flex-col gap-1">
-                        {annotations.map((annotation) => (
-                            <AnnotationListItem
-                                key={annotation.id}
-                                annotation={annotation}
-                                isBusy={Boolean(busyState[annotation.id])}
-                                onClick={handleAnnotationClick}
-                                onDelete={handleDelete}
-                                onReAdd={handleReAddAnnotation}
-                                isHovered={hoveredAnnotationId === annotation.id}
-                                onMouseEnter={() => setHoveredAnnotationId(annotation.id)}
-                                onMouseLeave={() => setHoveredAnnotationId(null)}
-                            />
-                        ))}
-                    </div>
+                <div className="display-flex flex-col gap-1">
+                    {annotations.map((annotation, index) => (
+                        <AnnotationListItem
+                            key={annotation.id}
+                            annotation={annotation}
+                            isBusy={Boolean(busyState[annotation.id])}
+                            onClick={handleAnnotationClick}
+                            onDelete={handleDelete}
+                            onReAdd={handleReAddAnnotation}
+                            isHovered={hoveredAnnotationId === annotation.id}
+                            onMouseEnter={() => setHoveredAnnotationId(annotation.id)}
+                            onMouseLeave={() => setHoveredAnnotationId(null)}
+                            className={index === 0 ? 'pt-2' : ''}
+                        />
+                    ))}
                 </div>
             )}
         </div>
