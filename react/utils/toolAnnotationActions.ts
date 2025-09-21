@@ -4,10 +4,9 @@ import {
     ToolAnnotationType,
 } from '../types/chat/toolAnnotations';
 import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citations';
-import { getCurrentReader } from './readerUtils';
+import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
-import { ensureReaderInitialized, ensurePdfPagesAvailable } from './readerUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -263,7 +262,7 @@ export async function applyAnnotation(
     reader?: ZoteroReader
 ): Promise<ApplyAnnotationResult> {
     // Get the current reader if not provided
-    reader = reader ?? getCurrentReader() as ZoteroReader | undefined;
+    reader = reader ?? (await getCurrentReaderAndWaitForView() as ZoteroReader | undefined);
     if (!reader) {
         return {
             updated: false,
@@ -273,10 +272,6 @@ export async function applyAnnotation(
     }
     
     try {
-        // Ensure the reader is initialized and the PDF pages are available
-        await ensureReaderInitialized(reader);
-        await ensurePdfPagesAvailable(reader);
-
         // Check if the reader is still correct
         if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
             throw new Error('Reader changed to another attachment');
