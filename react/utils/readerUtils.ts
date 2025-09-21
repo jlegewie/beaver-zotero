@@ -1,6 +1,6 @@
 import { createSourceIdentifier } from './sourceUtils';
 import { TextSelection } from '../types/attachments/apiTypes';
-import { logger } from 'src/utils/logger';
+import { logger } from '../../src/utils/logger';
 import { ZoteroReader } from './annotationUtils';
 
 
@@ -198,6 +198,11 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
 }
 
+/**
+ * Ensures the reader is initialized.
+ * 
+ * @param reader - The reader instance.
+ */
 async function ensureReaderInitialized(reader: ZoteroReader): Promise<void> {
     try {
         if (reader && (reader as any)._initPromise) {
@@ -208,11 +213,55 @@ async function ensureReaderInitialized(reader: ZoteroReader): Promise<void> {
     }
 }
 
+/**
+ * Ensures the PDF pages are available.
+ * 
+ * @param reader - The reader instance.
+ */
+async function ensurePdfPagesAvailable(reader: any): Promise<void> {
+    const iframeWindow = reader?._internalReader?._primaryView?._iframeWindow;
+    if (!iframeWindow) {
+        throw new Error('Reader iframe window not found.');
+    }
+
+    let pdfViewer = iframeWindow.PDFViewerApplication?.pdfViewer;
+
+    // The viewer might not be available immediately. Let's wait for it.
+    let attempts = 0;
+    while (!pdfViewer && attempts < 100) { // Wait up to 5 seconds
+        await new Promise(resolve => setTimeout(resolve, 50));
+        pdfViewer = iframeWindow.PDFViewerApplication?.pdfViewer;
+        attempts++;
+    }
+
+    if (!pdfViewer) {
+        throw new Error('PDF viewer not available.');
+    }
+
+    // `firstPagePromise` is a good signal that the document is loading.
+    if (pdfViewer.firstPagePromise) {
+        await pdfViewer.firstPagePromise;
+    }
+
+    // After the first page promise resolves, the `_pages` array should be populated.
+    // We'll wait a bit just in case it's not immediate.
+    attempts = 0;
+    while ((!pdfViewer._pages || pdfViewer._pages.length === 0) && attempts < 50) { // Wait up to 2.5 seconds more
+        await new Promise(resolve => setTimeout(resolve, 50));
+        attempts++;
+    }
+
+    if (!pdfViewer._pages || pdfViewer._pages.length === 0) {
+        throw new Error('PDF pages did not become available.');
+    }
+}
+
 export {
     getCurrentReader,
     getCurrentPage,
     navigateToPage,
     getSelectedText,
+    ensurePdfPagesAvailable,
     ensureReaderInitialized,
     getCurrentItem,
     addSelectionChangeListener,
