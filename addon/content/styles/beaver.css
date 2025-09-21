@@ -389,6 +389,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
 [id^="beaver-pane-"] .h-2 { height: 0.5rem; }
 [id^="beaver-pane-"] .-mt-010 { margin-top: -0.1rem; }
+[id^="beaver-pane-"] .-mb-015 { margin-bottom: -0.15rem; }
+[id^="beaver-pane-"] .-mb-1 { margin-bottom: -0.25rem; }
 [id^="beaver-pane-"] .-mt-1 { margin-top: -0.25rem; }
 [id^="beaver-pane-"] .-mt-2 { margin-top: -0.5rem; }
 [id^="beaver-pane-"] .-mt-3 { margin-top: -0.75rem; }

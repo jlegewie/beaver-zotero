@@ -10,6 +10,7 @@ import {
     DeleteIcon,
     PlusSignIcon,
     PlayIcon,
+    TickIcon
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -127,6 +128,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                 <div className="flex-1 min-w-0">
                     <div className={getTextClasses()}>
                         {annotation.title || 'Annotation'}
+                        {annotation.status === 'applied' &&
+                            <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
+                        }
                     </div>
                 </div>
                 {(annotation.status === 'applied') && (
@@ -178,7 +182,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
 
     // UI state for collapsible annotation list
-    const [resultsVisible, setResultsVisible] = useState(false);
+    const [resultsVisible, setResultsVisible] = useState(true);
     
     // Track which individual annotations are currently being processed
     const [isApplyingAnnotations, setIsApplyingAnnotations] = useState(false);
