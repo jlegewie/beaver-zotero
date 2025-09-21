@@ -16,6 +16,23 @@ function getCurrentReader(window?: Window): any | undefined {
 }
 
 /**
+ * Retrieves the current reader instance and waits for the view to be initialized.
+ * 
+ * @param window - The window to get the reader from.
+ * @returns The current reader instance or undefined if no reader is found.
+ */
+async function getCurrentReaderAndWaitForView(window?: Window): Promise<any | undefined> {
+    // Get reader
+    const reader = getCurrentReader(window)
+    if (!reader) return undefined;
+
+    // Wait for reader to be initialized
+    await reader._initPromise;
+    await reader._internalReader?._primaryView?.initializedPromise;
+    return reader;
+}
+
+/**
  * Navigates to a page in the reader.
  * 
  * @param itemID - The item ID.
@@ -258,6 +275,7 @@ async function ensurePdfPagesAvailable(reader: any): Promise<void> {
 
 export {
     getCurrentReader,
+    getCurrentReaderAndWaitForView,
     getCurrentPage,
     navigateToPage,
     getSelectedText,
