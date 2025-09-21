@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { ToolCall } from '../../types/chat/apiTypes';
 import {
@@ -28,6 +28,7 @@ import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { getCurrentReader } from '../../utils/readerUtils';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
+import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 
 interface AnnotationListItemProps {
     annotation: ToolAnnotation;
@@ -173,7 +174,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     // Track which individual annotations are currently being processed
     const [isApplyingAnnotations, setIsApplyingAnnotations] = useState(false);
     const [busyState, setBusyState] = useState<Record<string, boolean>>({});
-    
+    const [attachmentTitle, setAttachmentTitle] = useState<string | null>(null);
+    const attachmentTitleKeyRef = useRef<string | null>(null);
+
     // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
@@ -265,6 +268,21 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         setIsApplyingAnnotations(false);
 
     }, [isAttachmentOpen, annotations]);
+
+    useEffect(() => {
+        const getAttachmentTitle = async () => {
+            // Guard clause
+            if (annotations.length === 0) return;
+            if(attachmentTitleKeyRef.current === annotations[0].attachment_key) return;
+            attachmentTitleKeyRef.current = annotations[0].attachment_key;
+
+            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(annotations[0].library_id, annotations[0].attachment_key);
+            if (!attachmentItem) return;
+            const title = await shortItemTitle(attachmentItem);
+            setAttachmentTitle(title);
+        };
+        getAttachmentTitle();
+    }, [annotations]);
 
     /**
      * Validate applied annotations
@@ -439,13 +457,15 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 </div>
                 {showApplyButton && (
                     <Button
-                        rightIcon={PlayIcon}
-                        iconClassName="-ml-015"
+                        icon={PlayIcon}
+                        iconClassName="-mr-015"
                         className="mr-015"
-                        variant="ghost-secondary"
+                        variant="ghost-tertiary"
                         onClick={() => handleApplyAnnotations()}
                     >
-                        Apply
+                        <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
+                            {isAttachmentOpen && attachmentTitle ? 'Apply' : `Apply to ${attachmentTitle}`}
+                        </span>
                     </Button>
                 )}
             </div>
