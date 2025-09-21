@@ -1,4 +1,6 @@
 import { logger } from "./logger";
+import { extractPrimaryCreators } from "./sync";
+import { extractYear } from "./sync";
 
 /**
  * Get the clientDateModified for an item
@@ -239,4 +241,30 @@ export async function getMimeType(attachment: Zotero.Item, filePath?: string): P
     }
 
     return mimeType;
+}
+
+
+
+export async function shortItemTitle(item: Zotero.Item): Promise<string> {
+    const parentItem = item.isTopLevelItem() ? item : item.parentItem;
+
+    if (parentItem && parentItem.isRegularItem()) {
+        const creators = extractPrimaryCreators(parentItem);
+        const firstCreatorName = creators.length > 0 ? creators[0].last_name || creators[0].first_name || '' : '';
+        const year = extractYear(parentItem);
+
+        // Create the item name
+        let itemName = firstCreatorName;
+        if (creators.length > 1) itemName += ' et al.';
+        if (year) itemName += ` ${year}`;
+
+        // Return the item name
+        return itemName;
+    }
+
+    if (parentItem && parentItem.isAttachment()) {
+        return parentItem.getField('title') || '';
+    }
+
+    return '';
 }
