@@ -1,5 +1,7 @@
 import { createSourceIdentifier } from './sourceUtils';
 import { TextSelection } from '../types/attachments/apiTypes';
+import { logger } from 'src/utils/logger';
+import { ZoteroReader } from './annotationUtils';
 
 
 /**
@@ -196,5 +198,26 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
 }
 
-export { getCurrentReader, getCurrentPage, navigateToPage, getSelectedText, getCurrentItem, addSelectionChangeListener, getSelectedTextAsTextSelection, navigateToPageInCurrentReader, navigateToAnnotation };
+async function ensureReaderInitialized(reader: ZoteroReader): Promise<void> {
+    try {
+        if (reader && (reader as any)._initPromise) {
+            await (reader as any)._initPromise;
+        }
+    } catch (error) {
+        logger(`ensureReaderInitialized failed: ${error}`, 1);
+    }
+}
+
+export {
+    getCurrentReader,
+    getCurrentPage,
+    navigateToPage,
+    getSelectedText,
+    ensureReaderInitialized,
+    getCurrentItem,
+    addSelectionChangeListener,
+    getSelectedTextAsTextSelection,
+    navigateToPageInCurrentReader,
+    navigateToAnnotation
+};
 

@@ -7,6 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
+import { ensureReaderInitialized } from './readerUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -44,15 +45,7 @@ function isReaderForAttachment(reader: ZoteroReader | null, attachment: Zotero.I
     return (reader as any).itemID === attachment.id;
 }
 
-async function ensureReaderInitialized(reader: ZoteroReader): Promise<void> {
-    try {
-        if (reader && (reader as any)._initPromise) {
-            await (reader as any)._initPromise;
-        }
-    } catch (error) {
-        logger(`ensureReaderInitialized failed: ${error}`, 1);
-    }
-}
+
 
 function convertBoundingBoxToBottomLeft(
     bbox: BoundingBox,
