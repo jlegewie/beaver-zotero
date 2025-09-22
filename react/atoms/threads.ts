@@ -6,6 +6,7 @@ import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/con
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
+import { toolCallAnnotationsAtom } from "./toolAnnotations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -147,6 +148,7 @@ export const newThreadAtom = atom(
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
         set(citationMetadataAtom, []);
+        set(toolCallAnnotationsAtom, new Map());
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
