@@ -68,7 +68,7 @@ export interface SSECallbacks {
     onAnnotation: (
         messageId: string,
         toolcallId: string,
-        annotation: Record<string, any>
+        annotations: Record<string, any>[]
     ) => void;
 
     /**
@@ -349,7 +349,7 @@ export class ChatService extends ApiService {
             onAnnotation: (
                 messageId: string,
                 toolcallId: string,
-                annotation: Record<string, any>
+                annotations: Record<string, any>[]
             ) => void;
             onCitationMetadata: (
                 messageId: string,
@@ -423,10 +423,11 @@ export class ChatService extends ApiService {
                         typeof parsedData.annotation === 'string'
                             ? JSON.parse(parsedData.annotation)
                             : parsedData.annotation;
+                    const annotations = Array.isArray(annotation) ? annotation : [annotation];
                     onAnnotation(
                         parsedData.messageId,
                         parsedData.toolcallId,
-                        annotation
+                        annotations
                     );
                 }
                 break;

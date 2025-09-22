@@ -41,7 +41,7 @@ import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTy
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
-import { toToolAnnotation } from '../types/chat/toolAnnotations';
+import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
 import { applyAnnotation } from '../utils/toolAnnotationActions';
 
 /**
@@ -610,35 +610,70 @@ async function _processChatCompletionViaBackend(
             onAnnotation: (
                 messageId: string,
                 toolcallId: string,
-                rawAnnotation: Record<string, any>
+                rawAnnotations: Record<string, any>[]
             ) => {
-                logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationId: ${rawAnnotation.id || 'unknown'}`, 1);
-                async function applyAnnotationAndUpsert(rawAnnotation: Record<string, any>) {
+                logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationsCount: ${rawAnnotations.length}, annotationIds: ${rawAnnotations.map(a => a.id || 'unknown').join(', ')}`, 1);
+                async function applyAnnotationsAndUpsert(rawAnnotations: Record<string, any>[]) {
                     try {
                         // Convert raw annotation to ToolAnnotation
-                        let annotation = toToolAnnotation(rawAnnotation);
+                        const annotations = rawAnnotations.map((a: Record<string, any>) => {
+                            try {
+                                return toToolAnnotation(a);
+                            } catch (error) {
+                                logger(`event 'onAnnotation': Failed to convert annotation ${a.id}: ${error}`, 1);
+                                return null;
+                            }
+                        }).filter((a): a is ToolAnnotation => a !== null);
+                        
+                        // Validate that all annotations belong to the same toolcall
+                        const uniqueToolcallIds = new Set(rawAnnotations.map(a => a.toolcall_id || a.toolcallId));
+                        if (uniqueToolcallIds.size > 1) {
+                            logger(`event 'onAnnotation': Warning - annotations from multiple toolcalls in single batch: ${Array.from(uniqueToolcallIds).join(', ')}`, 1);
+                        }
 
-                        // Apply annotation if autoApplyAnnotations is enabled
-                        // and the current reader attachment key is the same as the annotation attachment key
-                        if (getPref('autoApplyAnnotations')) {
-                            const currentReaderKey = get(currentReaderAttachmentKeyAtom);
-                            if (currentReaderKey !== null && currentReaderKey === annotation.attachment_key) {
+                        // Early return if autoApplyAnnotations is disabled
+                        if (!getPref('autoApplyAnnotations')) {
+                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
+                            return;
+                        }
+
+                        // Early return if no reader is open
+                        const currentReaderKey = get(currentReaderAttachmentKeyAtom);
+                        if (currentReaderKey === null) {
+                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
+                            return;
+                        }
+
+                        // Apply annotations in parallel
+                        const applyPromises = annotations.map(async (annotation) => {
+                            // Only apply if annotation matches current reader
+                            if (annotation.attachment_key !== currentReaderKey) {
+                                return annotation; // Return original annotation unchanged
+                            }
+
+                            try {
                                 const result = await applyAnnotation(annotation);
                                 if (result.updated) {
                                     logger(`event 'onAnnotation': applied annotation for message ${messageId} toolcall ${toolcallId}: ${JSON.stringify(result.annotation)}`, 1);
-                                    annotation = result.annotation;
+                                    return result.annotation;
                                 }
+                                return annotation;
+                            } catch (error) {
+                                logger(`event 'onAnnotation': failed to apply annotation ${annotation.id}: ${error}`, 1);
+                                return annotation;
                             }
-                        }
+                        });
+                        
+                        const appliedAnnotations = await Promise.all(applyPromises);
 
-                        // Upsert annotation
-                        set(upsertToolcallAnnotationAtom, { toolcallId, annotation });
+                        // Update local state: Upsert annotations
+                        set(upsertToolcallAnnotationAtom, { toolcallId, annotations: appliedAnnotations });
 
                     } catch (error) {
                         logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
                     }
                 }
-                applyAnnotationAndUpsert(rawAnnotation);
+                applyAnnotationsAndUpsert(rawAnnotations);
             },
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);

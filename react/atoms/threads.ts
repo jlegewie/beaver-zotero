@@ -439,11 +439,11 @@ export const addOrUpdateToolcallAtom = atom(
 
 export const upsertToolcallAnnotationAtom = atom(
     null,
-    (get, set, {toolcallId, annotation} : { toolcallId: string; annotation: ToolAnnotation }) => {
+    (get, set, {toolcallId, annotations} : { toolcallId: string; annotations: ToolAnnotation[] }) => {
         set(toolCallAnnotationsAtom, (prevMap) => {
             const newMap = new Map(prevMap);
             const existingAnnotations = newMap.get(toolcallId) || [];
-            const mergedAnnotations = mergeAnnotations(existingAnnotations, [annotation]);
+            const mergedAnnotations = mergeAnnotations(existingAnnotations, annotations);
             newMap.set(toolcallId, mergedAnnotations);
             return newMap;
         });
