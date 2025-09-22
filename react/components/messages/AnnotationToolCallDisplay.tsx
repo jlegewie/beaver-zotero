@@ -651,11 +651,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     return (
         <div
             id={`tool-${toolCall.id}`}
-            className={`${resultsVisible ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
+            className={`${resultsVisible && hasAnnotationsToShow ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
         >
             {/* Main button that shows annotation count and toggles visibility */}
             <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible ? 'border-bottom-quinary' : ''}`}
+                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}`}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
