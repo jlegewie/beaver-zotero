@@ -9,7 +9,7 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
-import { allAnnotationsAtom } from '../atoms/threads';
+import { allAnnotationsAtom } from '../atoms/toolAnnotations';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.

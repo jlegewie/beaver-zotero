@@ -7,8 +7,7 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { allAnnotationsAtom } from "../atoms/threads";
-import { updateToolcallAnnotationAtom } from '../atoms/threads';
+import { allAnnotationsAtom, updateToolcallAnnotationAtom } from "../atoms/toolAnnotations";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries

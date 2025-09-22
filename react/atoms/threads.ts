@@ -85,18 +85,6 @@ export const threadAttachmentCountWithoutAnnotationsAtom = atom<number>((get) =>
 });
 
 
-/*
-* Tool call annotations are stored in a map of tool call ID to annotations.
-*/
-export const toolCallAnnotationsAtom = atom<Map<string, ToolAnnotation[]>>(new Map());
-export const getToolCallAnnotationsAtom = atom(
-    (get) => (toolCallId: string) => get(toolCallAnnotationsAtom).get(toolCallId) || []
-);
-
-export const allAnnotationsAtom = atom((get) => {
-    const annotationsMap = get(toolCallAnnotationsAtom);
-    return Array.from(annotationsMap.values()).flat();
-});
 
 
 // True after a chat request is sent and before the first assistant response arrives.
@@ -434,68 +422,5 @@ export const addOrUpdateToolcallAtom = atom(
                 return message;
             })
         );
-    }
-);
-
-export const upsertToolcallAnnotationAtom = atom(
-    null,
-    (get, set, {toolcallId, annotations} : { toolcallId: string; annotations: ToolAnnotation[] }) => {
-        set(toolCallAnnotationsAtom, (prevMap) => {
-            const newMap = new Map(prevMap);
-            const existingAnnotations = newMap.get(toolcallId) || [];
-            const mergedAnnotations = mergeAnnotations(existingAnnotations, annotations);
-            newMap.set(toolcallId, mergedAnnotations);
-            return newMap;
-        });
-    }
-);
-
-export const updateToolcallAnnotationAtom = atom(
-    null,
-    (get, set, { toolcallId, annotationId, updates }: { toolcallId: string; annotationId?: string; updates: Partial<ToolAnnotation> }) => {
-        set(toolCallAnnotationsAtom, (prevMap) => {
-            const newMap = new Map(prevMap);
-            const annotations = newMap.get(toolcallId);
-            
-            if (!annotations) return prevMap; // No annotations for this tool call
-            
-            const updatedAnnotations = annotations.map((annotation) =>
-                annotationId === undefined || annotation.id === annotationId
-                    ? { ...annotation, ...updates }
-                    : annotation
-            );
-            
-            newMap.set(toolcallId, updatedAnnotations);
-            return newMap;
-        });
-    }
-);
-
-export interface AnnotationUpdates {
-    annotationId: string;
-    updates: Partial<ToolAnnotation>;
-}
-
-export const updateToolcallAnnotationsAtom = atom(
-    null,
-    (get, set, { toolcallId, updates }: { toolcallId: string; updates: AnnotationUpdates[] }) => {
-        set(toolCallAnnotationsAtom, (prevMap) => {
-            const newMap = new Map(prevMap);
-            const annotations = newMap.get(toolcallId);
-            
-            if (!annotations) return prevMap; // No annotations for this tool call
-            
-            const updatesById = new Map(updates.map(u => [u.annotationId, u.updates]));
-            
-            const updatedAnnotations = annotations.map((annotation) => {
-                const annotationUpdates = updatesById.get(annotation.id);
-                return annotationUpdates
-                    ? { ...annotation, ...annotationUpdates }
-                    : annotation;
-            });
-            
-            newMap.set(toolcallId, updatedAnnotations);
-            return newMap;
-        });
     }
 );

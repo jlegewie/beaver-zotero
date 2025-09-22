@@ -20,7 +20,7 @@ import {
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
-import { getToolCallAnnotationsAtom, updateToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates } from '../../atoms/threads';
+import { getToolCallAnnotationsAtom, updateToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates } from '../../atoms/toolAnnotations';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';

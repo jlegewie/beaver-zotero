@@ -11,8 +11,6 @@ import {
     currentThreadIdAtom,
     addOrUpdateMessageAtom,
     addOrUpdateToolcallAtom,
-    upsertToolcallAnnotationAtom,
-    updateToolcallAnnotationsAtom,
     addToolCallResponsesToToolAttachmentsAtom,
     cancellerHolder,
     isCancellableAtom,
@@ -22,9 +20,9 @@ import {
     currentAssistantMessageIdAtom,
     userAttachmentsAtom,
     toolAttachmentsAtom,
-    streamReasoningToMessageAtom,
-    AnnotationUpdates,
+    streamReasoningToMessageAtom
 } from './threads';
+import { upsertToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates } from './toolAnnotations';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentReaderAttachmentKeyAtom } from './input';
