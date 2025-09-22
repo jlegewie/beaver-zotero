@@ -285,17 +285,20 @@ export async function applyAnnotation(
                 ...annotation,
                 status: 'applied',
                 zotero_key: annotationKey,
+                error_message: null,
                 modified_at: new Date().toISOString(),
             },
         };
     } catch (error: any) {
         logger(`applyAnnotation error: ${error?.message || error?.toString()}`, 1);
+        const errorMessage = error?.message || 'Failed to create annotation';
         return {
             updated: true,
-            error: error?.message || 'Failed to create annotation',
+            error: errorMessage,
             annotation: {
                 ...annotation,
                 status: 'error',
+                error_message: errorMessage,
                 modified_at: new Date().toISOString(),
             },
         };
