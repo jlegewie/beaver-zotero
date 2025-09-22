@@ -8,7 +8,7 @@ import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUti
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
-import { getCurrentReader } from '../../utils/readerUtils';
+import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
@@ -89,14 +89,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         if (boundingBoxData.length === 0) return [];
         
         try {
-            const reader = getCurrentReader();
+            const reader = await getCurrentReaderAndWaitForView();
             if (!reader || !reader._internalReader) {
                 logger('ZoteroCitation: No active reader found for creating bounding box highlights');
                 return [];
             }
-
-            // Wait for reader initialization
-            await reader._initPromise;
 
             const tempAnnotations: any[] = [];
             const annotationReferences: ZoteroItemReference[] = [];
@@ -248,7 +245,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
         try {
-            let reader = getCurrentReader();
+            let reader = await getCurrentReaderAndWaitForView();
             logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
             
             // Check if we need to open or switch to the correct PDF
@@ -267,10 +264,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 logger(`ZoteroCitation: Opening PDF at page ${pageIndex}`);
                 reader = await Zotero.Reader.open(item.id, { pageIndex: pageIndex - 1 });
 
-                // Wait for reader to initialize
-                if (reader && reader._initPromise) {
-                    await reader._initPromise;
-                }
+                // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
                 await new Promise(resolve => setTimeout(resolve, 300));
             }
 
