@@ -470,3 +470,32 @@ export const updateToolcallAnnotationAtom = atom(
         });
     }
 );
+
+interface AnnotationUpdates {
+    annotationId: string;
+    updates: Partial<ToolAnnotation>;
+}
+
+export const updateToolcallAnnotationsAtom = atom(
+    null,
+    (get, set, { toolcallId, updates }: { toolcallId: string; updates: AnnotationUpdates[] }) => {
+        set(toolCallAnnotationsAtom, (prevMap) => {
+            const newMap = new Map(prevMap);
+            const annotations = newMap.get(toolcallId);
+            
+            if (!annotations) return prevMap; // No annotations for this tool call
+            
+            const updatesById = new Map(updates.map(u => [u.annotationId, u.updates]));
+            
+            const updatedAnnotations = annotations.map((annotation) => {
+                const annotationUpdates = updatesById.get(annotation.id);
+                return annotationUpdates
+                    ? { ...annotation, ...annotationUpdates }
+                    : annotation;
+            });
+            
+            newMap.set(toolcallId, updatedAnnotations);
+            return newMap;
+        });
+    }
+);
