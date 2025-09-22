@@ -584,6 +584,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     });
                     await toolAnnotationsService.updateAnnotation(annotation.id, {
                         status: 'deleted',
+                        zotero_key: '',  // set to null in backend
                         error_message: null,
                     }).catch((error) => {
                         logger(`handleDelete: failed to persist deleted status for annotation ${annotation.id}: ${error}`, 1);

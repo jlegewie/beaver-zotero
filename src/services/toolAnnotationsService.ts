@@ -48,6 +48,7 @@ export interface UpdateAnnotationRequest {
     error_message?: string | null;
     color?: ToolAnnotationColor | null;
     comment?: string;
+    zotero_key?: string | null;
 }
 
 /**
