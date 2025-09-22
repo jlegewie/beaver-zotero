@@ -287,6 +287,17 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         setResultsVisible(true);
         setIsApplyingAnnotations(false);
 
+        // Navigate to the first annotation
+        if (annotations.length > 0 && annotations[0].zotero_key) {
+            const annotationItem =
+                await Zotero.Items.getByLibraryAndKeyAsync(
+                    annotations[0].library_id,
+                    annotations[0].zotero_key
+                );
+            if (!annotationItem) return;
+            await navigateToAnnotation(annotationItem);
+        }
+
     }, [isAttachmentOpen, annotations]);
 
     useEffect(() => {
