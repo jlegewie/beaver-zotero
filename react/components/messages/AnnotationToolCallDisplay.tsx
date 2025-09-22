@@ -27,6 +27,7 @@ import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
+import { toolAnnotationsService } from '../../../src/services/toolAnnotationsService';
 
 interface AnnotationListItemProps {
     annotation: ToolAnnotation;
@@ -242,8 +243,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      * This function is called when the user clicks the apply button
      */
     const handleApplyAnnotations = useCallback(async (annotationId?: string) => {
+        if (annotations.length === 0) return;
         setIsApplyingAnnotations(true);
-        
+
         try {
             // Open attachment if not already open
             if (!isAttachmentOpen) {
@@ -252,34 +254,48 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     annotations[0].attachment_key
                 );
                 if (!attachmentItem) {
-                    // Set annotations to error (attachment not found)
+                    const errorMessage = 'Attachment not found';
                     const errorUpdates = annotations
                         .filter(a => !annotationId || a.id === annotationId)
                         .map(annotation => ({
                             annotationId: annotation.id,
-                            updates: { 
+                            updates: {
                                 status: 'error' as const,
-                                modified_at: new Date().toISOString()
-                            }
+                                error_message: errorMessage,
+                                modified_at: new Date().toISOString(),
+                            },
                         })) as AnnotationUpdates[];
-                    
-                    updateAnnotationsInBatch({
-                        toolcallId: toolCall.id,
-                        updates: errorUpdates
-                    });
-                    
+
+                    if (errorUpdates.length > 0) {
+                        updateAnnotationsInBatch({
+                            toolcallId: toolCall.id,
+                            updates: errorUpdates,
+                        });
+
+                        await Promise.all(
+                            errorUpdates.map((update) =>
+                                toolAnnotationsService.updateAnnotation(update.annotationId, {
+                                    status: 'error',
+                                    error_message: errorMessage,
+                                }).catch((error) => {
+                                    logger(`handleApplyAnnotations: failed to persist attachment error for annotation ${update.annotationId}: ${error}`, 1);
+                                })
+                            )
+                        );
+                    }
+
                     setIsApplyingAnnotations(false);
                     return;
                 }
-                
+
                 // Get the minimum page index of all annotations
-                const pageIndexes = annotations.map((a) => {
-                    return a.annotation_type === 'note'
+                const pageIndexes = annotations.map((a) => (
+                    a.annotation_type === 'note'
                         ? a.note_position?.pageIndex
-                        : a.highlight_locations?.[0]?.pageIndex;
-                });
+                        : a.highlight_locations?.[0]?.pageIndex
+                ));
                 const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
-                
+
                 // Navigate to the minimum page index
                 await navigateToPage(attachmentItem.id, minPageIndex + 1);
             }
@@ -290,7 +306,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 setIsApplyingAnnotations(false);
                 return;
             }
-            
+
             // Filter annotations to apply
             const annotationsToApply = annotations.filter(annotation => {
                 if (annotation.status === 'applied') return false;
@@ -298,66 +314,167 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 return true;
             });
 
-            // Apply annotations in parallel
-            const applyPromises = annotationsToApply.map(async (annotation) => {
-                try {
-                    const result = await applyAnnotation(annotation, reader);
-                    if (result.updated) {
-                        logger(`handleApplyAnnotations: applied annotation ${annotation.id}: ${JSON.stringify(result.annotation)}`, 1);
-                        return {
-                            annotationId: annotation.id,
-                            updates: result.annotation
-                        } as AnnotationUpdates;
-                    }
-                    return null;
-                } catch (error) {
-                    logger(`handleApplyAnnotations: failed to apply annotation ${annotation.id}: ${error}`, 1);
-                    return {
-                        annotationId: annotation.id,
-                        updates: {
-                            status: 'error' as const,
-                            modified_at: new Date().toISOString()
+            if (annotationsToApply.length === 0) {
+                setIsApplyingAnnotations(false);
+                return;
+            }
+
+            type ApplyResult = {
+                update: AnnotationUpdates | null;
+                updatedAnnotation: ToolAnnotation;
+            };
+
+            const applyResults: ApplyResult[] = await Promise.all(
+                annotationsToApply.map(async (annotation) => {
+                    try {
+                        const result = await applyAnnotation(annotation, reader);
+                        if (!result.updated) {
+                            return { update: null, updatedAnnotation: annotation };
                         }
-                    } as AnnotationUpdates;
-                }
-            });
-            
-            const results = await Promise.all(applyPromises);
-            
-            // Filter out null results and prepare batch updates
-            const batchUpdates = results.filter((result): result is AnnotationUpdates => 
-                result !== null
+
+                        const updatedAnnotation: ToolAnnotation = {
+                            ...result.annotation,
+                            ...(result.annotation.status === 'error' && !result.annotation.error_message
+                                ? { error_message: result.error || 'Failed to create annotation' }
+                                : {}),
+                        };
+
+                        if (updatedAnnotation.status === 'applied') {
+                            logger(`handleApplyAnnotations: applied annotation ${annotation.id}: ${JSON.stringify(updatedAnnotation)}`, 1);
+                        }
+
+                        return {
+                            update: {
+                                annotationId: annotation.id,
+                                updates: updatedAnnotation,
+                            },
+                            updatedAnnotation,
+                        };
+                    } catch (error: any) {
+                        const errorMessage = error?.message || 'Failed to apply annotation';
+                        logger(`handleApplyAnnotations: failed to apply annotation ${annotation.id}: ${errorMessage}`, 1);
+                        const updatedAnnotation: ToolAnnotation = {
+                            ...annotation,
+                            status: 'error',
+                            error_message: errorMessage,
+                            modified_at: new Date().toISOString(),
+                        };
+
+                        return {
+                            update: {
+                                annotationId: annotation.id,
+                                updates: updatedAnnotation,
+                            },
+                            updatedAnnotation,
+                        };
+                    }
+                })
             );
 
-            // Update UI in one batch operation
+            const batchUpdates = applyResults
+                .map(result => result.update)
+                .filter((update): update is AnnotationUpdates => update !== null);
+
             if (batchUpdates.length > 0) {
                 updateAnnotationsInBatch({
                     toolcallId: toolCall.id,
-                    updates: batchUpdates
+                    updates: batchUpdates,
                 });
             }
 
-            // Show the annotations
             setResultsVisible(true);
+
+            const ackErrorIds = new Set<string>();
+            const annotationsToAcknowledge = applyResults
+                .map(result => result.updatedAnnotation)
+                .filter(annotation => annotation.status === 'applied' && Boolean(annotation.zotero_key));
+
+            if (annotationsToAcknowledge.length > 0) {
+                try {
+                    const response = await toolAnnotationsService.markAnnotationsApplied(
+                        messageId,
+                        toolCall.id,
+                        annotationsToAcknowledge.map(annotation => ({
+                            annotationId: annotation.id,
+                            zoteroKey: annotation.zotero_key as string,
+                        }))
+                    );
+
+                    if (response.errors.length > 0) {
+                        const ackErrorUpdates: AnnotationUpdates[] = response.errors.map((ackError) => {
+                            ackErrorIds.add(ackError.annotation_id);
+                            return {
+                                annotationId: ackError.annotation_id,
+                                updates: {
+                                    status: 'error',
+                                    error_message: ackError.detail,
+                                    modified_at: new Date().toISOString(),
+                                },
+                            };
+                        });
+
+                        updateAnnotationsInBatch({
+                            toolcallId: toolCall.id,
+                            updates: ackErrorUpdates,
+                        });
+
+                        await Promise.all(
+                            response.errors.map((ackError) =>
+                                toolAnnotationsService.updateAnnotation(ackError.annotation_id, {
+                                    status: 'error',
+                                    error_message: ackError.detail,
+                                }).catch((error) => {
+                                    logger(`handleApplyAnnotations: failed to persist ack error for annotation ${ackError.annotation_id}: ${error}`, 1);
+                                })
+                            )
+                        );
+                    }
+                } catch (ackError: any) {
+                    logger(`handleApplyAnnotations: failed to acknowledge annotations: ${ackError?.message || ackError}`, 1);
+                }
+            }
+
+            const errorAnnotationsForBackend = applyResults
+                .map(result => result.updatedAnnotation)
+                .filter(annotation => annotation.status === 'error' && !ackErrorIds.has(annotation.id));
+
+            if (errorAnnotationsForBackend.length > 0) {
+                await Promise.all(
+                    errorAnnotationsForBackend.map(annotation =>
+                        toolAnnotationsService.updateAnnotation(annotation.id, {
+                            status: 'error',
+                            error_message: annotation.error_message || 'Failed to apply annotation',
+                        }).catch((error) => {
+                            logger(`handleApplyAnnotations: failed to persist error status for annotation ${annotation.id}: ${error}`, 1);
+                        })
+                    )
+                );
+            }
+
             setIsApplyingAnnotations(false);
 
-            // Navigate to the first applied annotation
-            const firstAppliedAnnotation = annotations.find(a => a.status === 'applied' && a.zotero_key);
-            if (firstAppliedAnnotation) {
+            const firstAppliedResult = applyResults.find(
+                (result) =>
+                    result.updatedAnnotation.status === 'applied' &&
+                    result.updatedAnnotation.zotero_key &&
+                    !ackErrorIds.has(result.updatedAnnotation.id)
+            );
+
+            if (firstAppliedResult) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstAppliedAnnotation.library_id,
-                    firstAppliedAnnotation.zotero_key as string
+                    firstAppliedResult.updatedAnnotation.library_id,
+                    firstAppliedResult.updatedAnnotation.zotero_key as string
                 );
                 if (annotationItem) {
                     await navigateToAnnotation(annotationItem);
                 }
             }
-            
+
         } catch (error) {
             logger(`handleApplyAnnotations: unexpected error: ${error}`, 1);
             setIsApplyingAnnotations(false);
         }
-    }, [isAttachmentOpen, annotations, toolCall.id, updateAnnotationsInBatch]);
+    }, [isAttachmentOpen, annotations, toolCall.id, updateAnnotationsInBatch, messageId]);
 
     useEffect(() => {
         const getAttachmentTitle = async () => {
@@ -453,18 +570,36 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     updateAnnotationState(annotation.id, {
                         status: 'deleted',
                     });
+                    await toolAnnotationsService.updateAnnotation(annotation.id, {
+                        status: 'deleted',
+                        error_message: null,
+                    }).catch((error) => {
+                        logger(`handleDelete: failed to persist deleted status for annotation ${annotation.id}: ${error}`, 1);
+                    });
                 } else {
                     // deleteAnnotationFromReader: Removes annotation from PDF reader
                     await deleteAnnotationFromReader(annotation);
                     updateAnnotationState(annotation.id, {
                         status: 'deleted',
                     });
+                    await toolAnnotationsService.updateAnnotation(annotation.id, {
+                        status: 'deleted',
+                        error_message: null,
+                    }).catch((error) => {
+                        logger(`handleDelete: failed to persist deleted status for annotation ${annotation.id}: ${error}`, 1);
+                    });
                 }
             } catch (error: any) {
+                const errorMessage = error?.message || 'Failed to delete annotation';
                 updateAnnotationState(annotation.id, {
                     status: 'error',
-                    error_message:
-                        error?.message || 'Failed to delete annotation',
+                    error_message: errorMessage,
+                });
+                await toolAnnotationsService.updateAnnotation(annotation.id, {
+                    status: 'error',
+                    error_message: errorMessage,
+                }).catch((persistError) => {
+                    logger(`handleDelete: failed to persist error status for annotation ${annotation.id}: ${persistError}`, 1);
                 });
             } finally {
                 setBusyState((prev) => ({
