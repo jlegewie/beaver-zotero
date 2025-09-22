@@ -12,6 +12,7 @@ import {
     addOrUpdateMessageAtom,
     addOrUpdateToolcallAtom,
     upsertToolcallAnnotationAtom,
+    updateToolcallAnnotationsAtom,
     addToolCallResponsesToToolAttachmentsAtom,
     cancellerHolder,
     isCancellableAtom,
@@ -22,6 +23,7 @@ import {
     userAttachmentsAtom,
     toolAttachmentsAtom,
     streamReasoningToMessageAtom,
+    AnnotationUpdates,
 } from './threads';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
@@ -43,6 +45,7 @@ import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
 import { applyAnnotation } from '../utils/toolAnnotationActions';
+import { toolAnnotationsService } from '../../src/services/toolAnnotationsService';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -653,21 +656,106 @@ async function _processChatCompletionViaBackend(
 
                             try {
                                 const result = await applyAnnotation(annotation);
-                                if (result.updated) {
-                                    logger(`event 'onAnnotation': applied annotation for message ${messageId} toolcall ${toolcallId}: ${JSON.stringify(result.annotation)}`, 1);
-                                    return result.annotation;
+                                if (!result.updated) {
+                                    return annotation;
                                 }
-                                return annotation;
-                            } catch (error) {
-                                logger(`event 'onAnnotation': failed to apply annotation ${annotation.id}: ${error}`, 1);
-                                return annotation;
+
+                                const updatedAnnotation: ToolAnnotation = {
+                                    ...result.annotation,
+                                    ...(result.annotation.status === 'error' && !result.annotation.error_message
+                                        ? { error_message: result.error || 'Failed to create annotation' }
+                                        : {}),
+                                };
+
+                                if (updatedAnnotation.status === 'applied') {
+                                    logger(`event 'onAnnotation': applied annotation ${updatedAnnotation.id} for message ${messageId} toolcall ${toolcallId}.`, 1);
+                                }
+                                if (updatedAnnotation.status === 'error') {
+                                    logger(`event 'onAnnotation': error applying annotation ${updatedAnnotation.id} for message ${messageId} toolcall ${toolcallId}: ${result.annotation.error_message}`, 1);
+                                }
+
+                                return updatedAnnotation;
+                            } catch (error: any) {
+                                const errorMessage = error?.message || 'Failed to apply annotation';
+                                logger(`event 'onAnnotation': failed to apply annotation ${annotation.id} for message ${messageId} toolcall ${toolcallId}: ${errorMessage}`, 1);
+                                return {
+                                    ...annotation,
+                                    status: 'error',
+                                    error_message: errorMessage,
+                                    modified_at: new Date().toISOString(),
+                                };
                             }
                         });
-                        
+
                         const appliedAnnotations = await Promise.all(applyPromises);
 
                         // Update local state: Upsert annotations
                         set(upsertToolcallAnnotationAtom, { toolcallId, annotations: appliedAnnotations });
+
+                        const annotationsToAcknowledge = appliedAnnotations.filter(
+                            (annotation) => annotation.status === 'applied' && Boolean(annotation.zotero_key)
+                        );
+
+                        const errorAnnotations = appliedAnnotations.filter(
+                            (annotation) => annotation.status === 'error'
+                        );
+
+                        if (annotationsToAcknowledge.length > 0) {
+                            try {
+                                const response = await toolAnnotationsService.markAnnotationsApplied(
+                                    messageId,
+                                    toolcallId,
+                                    annotationsToAcknowledge.map((annotation) => ({
+                                        annotationId: annotation.id,
+                                        zoteroKey: annotation.zotero_key as string,
+                                    }))
+                                );
+
+                                if (response.errors.length > 0) {
+                                    const ackErrorUpdates: AnnotationUpdates[] = response.errors.map((ackError) => ({
+                                        annotationId: ackError.annotation_id,
+                                        updates: {
+                                            status: 'error',
+                                            error_message: ackError.detail,
+                                            modified_at: new Date().toISOString(),
+                                        },
+                                    }));
+
+                                    if (ackErrorUpdates.length > 0) {
+                                        set(updateToolcallAnnotationsAtom, {
+                                            toolcallId,
+                                            updates: ackErrorUpdates,
+                                        });
+                                    }
+
+                                    await Promise.all(
+                                        response.errors.map((ackError) =>
+                                            toolAnnotationsService.updateAnnotation(ackError.annotation_id, {
+                                                status: 'error',
+                                                error_message: ackError.detail,
+                                            }).catch((error) => {
+                                                logger(`event 'onAnnotation': failed to update backend for ack error ${ackError.annotation_id}: ${error}`, 1);
+                                            })
+                                        )
+                                    );
+                                }
+                            } catch (ackError: any) {
+                                logger(`event 'onAnnotation': failed to acknowledge annotations for message ${messageId} toolcall ${toolcallId}: ${ackError?.message || ackError}`, 1);
+                            }
+                        }
+
+                        if (errorAnnotations.length > 0) {
+                            await Promise.all(
+                                errorAnnotations.map((annotation) =>
+                                    toolAnnotationsService.updateAnnotation(annotation.id, {
+                                        status: 'error',
+                                        error_message: annotation.error_message || 'Failed to apply annotation',
+                                    }).catch((error) => {
+                                        logger(`event 'onAnnotation': failed to persist error status for annotation ${annotation.id}: ${error}`, 1);
+                                    })
+                                )
+                            );
+                        }
 
                     } catch (error) {
                         logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
