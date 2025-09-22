@@ -617,23 +617,23 @@ async function _processChatCompletionViaBackend(
                     try {
                         // Convert raw annotation to ToolAnnotation
                         let annotation = toToolAnnotation(rawAnnotation);
+
                         // Apply annotation if autoApplyAnnotations is enabled
                         // and the current reader attachment key is the same as the annotation attachment key
                         if (getPref('autoApplyAnnotations')) {
                             const currentReaderKey = get(currentReaderAttachmentKeyAtom);
-                            if (currentReaderKey !== annotation.attachment_key) return;
-                            const result = await applyAnnotation(annotation);
-                            if (result.updated) {
-                                logger(`event 'onAnnotation': applied annotation for message ${messageId} toolcall ${toolcallId}: ${JSON.stringify(result.annotation)}`, 1);
-                                annotation = result.annotation;
+                            if (currentReaderKey !== null && currentReaderKey === annotation.attachment_key) {
+                                const result = await applyAnnotation(annotation);
+                                if (result.updated) {
+                                    logger(`event 'onAnnotation': applied annotation for message ${messageId} toolcall ${toolcallId}: ${JSON.stringify(result.annotation)}`, 1);
+                                    annotation = result.annotation;
+                                }
                             }
                         }
+
                         // Upsert annotation
-                        set(upsertToolcallAnnotationAtom, {
-                            messageId,
-                            toolcallId,
-                            annotation,
-                        });
+                        set(upsertToolcallAnnotationAtom, { toolcallId, annotation });
+
                     } catch (error) {
                         logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
                     }

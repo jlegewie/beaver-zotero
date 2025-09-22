@@ -7,7 +7,7 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { threadAnnotationsAtom } from "../atoms/threads";
+import { allAnnotationsAtom } from "../atoms/threads";
 import { updateToolcallAnnotationAtom } from '../atoms/threads';
 
 const DEBOUNCE_MS = 2000;
@@ -226,11 +226,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key && syncLibraryIds.includes(libraryID)) {
                                         // Skip if tool annotation is deleted
-                                        const toolAnnotations = store.get(threadAnnotationsAtom).filter((a) => a.library_id === libraryID && a.zotero_key === key);
+                                        const toolAnnotations = store.get(allAnnotationsAtom).filter((a) => a.library_id === libraryID && a.zotero_key === key);
                                         if (toolAnnotations.length > 0) {
                                             logger(`useZoteroSync: Skipping delete event for tool annotation ${toolAnnotations[0].id}`, 3);
                                             store.set(updateToolcallAnnotationAtom, {
-                                                messageId: toolAnnotations[0].message_id,
                                                 toolcallId: toolAnnotations[0].toolcall_id,
                                                 annotationId: toolAnnotations[0].id,
                                                 updates: { status: 'deleted', modified_at: new Date().toISOString() }

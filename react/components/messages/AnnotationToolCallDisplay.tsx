@@ -20,7 +20,7 @@ import {
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
-import { updateToolcallAnnotationAtom } from '../../atoms/threads';
+import { getToolCallAnnotationsAtom, updateToolcallAnnotationAtom } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
@@ -180,6 +180,8 @@ interface AnnotationToolCallDisplayProps {
  * 3. applied -> User can navigate to or delete the annotation
  */
 const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCall }) => {
+    const getToolCallAnnotations = useAtomValue(getToolCallAnnotationsAtom);
+
     // Current reader state
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
 
@@ -203,7 +205,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
 
     // Extract annotations from tool call result
-    const annotations = (toolCall.annotations as ToolAnnotation[]) || [];
+    const annotations = getToolCallAnnotations(toolCall.id);
     const totalAnnotations = annotations.length;
 
     // Is the current reader attachment key the same as the attachment key for annotations
@@ -226,13 +228,12 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const updateAnnotationState = useCallback(
         (annotationId: string | undefined, updates: Partial<ToolAnnotation>) => {
             setAnnotationState({
-                messageId,
                 toolcallId: toolCall.id,
                 annotationId,
                 updates,
             });
         },
-        [messageId, setAnnotationState, toolCall.id]
+        [setAnnotationState, toolCall.id]
     );
 
     /**
