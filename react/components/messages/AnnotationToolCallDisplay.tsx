@@ -20,7 +20,7 @@ import {
     validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
-import { getToolCallAnnotationsAtom, updateToolcallAnnotationAtom } from '../../atoms/threads';
+import { getToolCallAnnotationsAtom, updateToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates } from '../../atoms/threads';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
@@ -203,6 +203,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     
     // Global state updater for annotation status changes
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
+    const updateAnnotationsInBatch = useSetAtom(updateToolcallAnnotationsAtom);
 
     // Extract annotations from tool call result
     const annotations = getToolCallAnnotations(toolCall.id);
@@ -242,64 +243,121 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
      */
     const handleApplyAnnotations = useCallback(async (annotationId?: string) => {
         setIsApplyingAnnotations(true);
-        // try {
-        // Open attachment if not already open
-        if (!isAttachmentOpen) {
-            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                annotations[0].library_id,
-                annotations[0].attachment_key
-            );
-            if (!attachmentItem) {
-                // TODO: Set annotations to error (attachment not found)
+        
+        try {
+            // Open attachment if not already open
+            if (!isAttachmentOpen) {
+                const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    annotations[0].library_id,
+                    annotations[0].attachment_key
+                );
+                if (!attachmentItem) {
+                    // Set annotations to error (attachment not found)
+                    const errorUpdates = annotations
+                        .filter(a => !annotationId || a.id === annotationId)
+                        .map(annotation => ({
+                            annotationId: annotation.id,
+                            updates: { 
+                                status: 'error' as const,
+                                modified_at: new Date().toISOString()
+                            }
+                        })) as AnnotationUpdates[];
+                    
+                    updateAnnotationsInBatch({
+                        toolcallId: toolCall.id,
+                        updates: errorUpdates
+                    });
+                    
+                    setIsApplyingAnnotations(false);
+                    return;
+                }
+                
+                // Get the minimum page index of all annotations
+                const pageIndexes = annotations.map((a) => {
+                    return a.annotation_type === 'note'
+                        ? a.note_position?.pageIndex
+                        : a.highlight_locations?.[0]?.pageIndex;
+                });
+                const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
+                
+                // Navigate to the minimum page index
+                await navigateToPage(attachmentItem.id, minPageIndex + 1);
+            }
+
+            // Get the current reader and wait for the view to be initialized
+            const reader = await getCurrentReaderAndWaitForView() as ZoteroReader | undefined;
+            if (!reader) {
                 setIsApplyingAnnotations(false);
                 return;
             }
-            // Get the minimum page index of all annotations
-            const pageIndexes = annotations.map((a) => {
-                return a.annotation_type === 'note'
-                    ? a.note_position?.pageIndex
-                    : a.highlight_locations?.[0]?.pageIndex;
-            });
-            const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
             
-            // Navigate to the minimum page index
-            await navigateToPage(attachmentItem.id, minPageIndex + 1);
-        }
+            // Filter annotations to apply
+            const annotationsToApply = annotations.filter(annotation => {
+                if (annotation.status === 'applied') return false;
+                if (annotationId && annotation.id !== annotationId) return false;
+                return true;
+            });
 
-        // Get the current reader and wait for the view to be initialized
-        const reader = await getCurrentReaderAndWaitForView() as ZoteroReader | undefined;
-        if (!reader) {
-            setIsApplyingAnnotations(false);
-            return;
-        }
-        
-        // Apply annotations
-        for (const annotation of annotations) {
-            if (annotation.status === 'applied') continue;
-            if (annotationId && annotation.id !== annotationId) continue;
-            const result = await applyAnnotation(annotation, reader);
-            if (result.updated) {
-                // TODO: batch apply to minimize re-renders
-                updateAnnotationState(annotation.id, result.annotation);
+            // Apply annotations in parallel
+            const applyPromises = annotationsToApply.map(async (annotation) => {
+                try {
+                    const result = await applyAnnotation(annotation, reader);
+                    if (result.updated) {
+                        logger(`handleApplyAnnotations: applied annotation ${annotation.id}: ${JSON.stringify(result.annotation)}`, 1);
+                        return {
+                            annotationId: annotation.id,
+                            updates: result.annotation
+                        } as AnnotationUpdates;
+                    }
+                    return null;
+                } catch (error) {
+                    logger(`handleApplyAnnotations: failed to apply annotation ${annotation.id}: ${error}`, 1);
+                    return {
+                        annotationId: annotation.id,
+                        updates: {
+                            status: 'error' as const,
+                            modified_at: new Date().toISOString()
+                        }
+                    } as AnnotationUpdates;
+                }
+            });
+            
+            const results = await Promise.all(applyPromises);
+            
+            // Filter out null results and prepare batch updates
+            const batchUpdates = results.filter((result): result is AnnotationUpdates => 
+                result !== null
+            );
+
+            // Update UI in one batch operation
+            if (batchUpdates.length > 0) {
+                updateAnnotationsInBatch({
+                    toolcallId: toolCall.id,
+                    updates: batchUpdates
+                });
             }
-        }
 
-        // Show the annotations
-        setResultsVisible(true);
-        setIsApplyingAnnotations(false);
+            // Show the annotations
+            setResultsVisible(true);
+            setIsApplyingAnnotations(false);
 
-        // Navigate to the first annotation
-        if (annotations.length > 0 && annotations[0].zotero_key) {
-            const annotationItem =
-                await Zotero.Items.getByLibraryAndKeyAsync(
-                    annotations[0].library_id,
-                    annotations[0].zotero_key
+            // Navigate to the first applied annotation
+            const firstAppliedAnnotation = annotations.find(a => a.status === 'applied' && a.zotero_key);
+            if (firstAppliedAnnotation) {
+                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    firstAppliedAnnotation.library_id,
+                    firstAppliedAnnotation.zotero_key as string
                 );
-            if (!annotationItem) return;
-            await navigateToAnnotation(annotationItem);
+                if (annotationItem) {
+                    await navigateToAnnotation(annotationItem);
+                }
+            }
+            
+        } catch (error) {
+            logger(`handleApplyAnnotations: unexpected error: ${error}`, 1);
+            setIsApplyingAnnotations(false);
         }
-
-    }, [isAttachmentOpen, annotations]);
+    }, [isAttachmentOpen, annotations, toolCall.id, updateAnnotationsInBatch]);
 
     useEffect(() => {
         const getAttachmentTitle = async () => {
@@ -376,7 +434,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 await handleApplyAnnotations(annotation.id);
             }
         },
-        [updateAnnotationState]
+        [handleApplyAnnotations]
     );
 
     /**

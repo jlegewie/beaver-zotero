@@ -471,7 +471,7 @@ export const updateToolcallAnnotationAtom = atom(
     }
 );
 
-interface AnnotationUpdates {
+export interface AnnotationUpdates {
     annotationId: string;
     updates: Partial<ToolAnnotation>;
 }
