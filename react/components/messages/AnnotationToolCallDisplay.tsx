@@ -674,10 +674,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         disabled={isButtonDisabled && !canToggleResults}
                     >
                         <span>{getButtonText()}</span>
-                        {toolCall.status === 'completed' && appliedAnnotationCount > 0 &&
+                        {toolCall.status === 'completed' && appliedAnnotationCount > 0 && hasAnnotationsToShow &&
                             <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
                         }
-                        {toolCall.status === 'completed' && appliedAnnotationCount === 0 &&
+                        {toolCall.status === 'completed' && appliedAnnotationCount === 0 && hasAnnotationsToShow &&
                             <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
                         }
                     </Button>
