@@ -155,7 +155,8 @@ async function createHighlightAnnotation(
         temporary: false,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver'
+        authorName: 'Beaver',
+        annotationAuthorName: 'Beaver'
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
@@ -239,7 +240,8 @@ async function createNoteAnnotation(
         notePosition: annotation.note_position,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver'
+        authorName: 'Beaver',
+        annotationAuthorName: 'Beaver'
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
