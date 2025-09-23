@@ -178,7 +178,7 @@ function convertNotePositionToRect(
         throw new Error('Note annotation missing position');
     }
 
-    const { pageIndex, x, y } = annotation.note_position;
+    const { pageIndex, side, y } = annotation.note_position;
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
     const pdfViewer = iframeWindow?.PDFViewerApplication?.pdfViewer;
     const pageView = pdfViewer?._pages?.[pageIndex];
@@ -188,6 +188,16 @@ function convertNotePositionToRect(
 
     const viewport = pageView.viewport;
     const viewBoxLL: [number, number] = [viewport.viewBox[0], viewport.viewBox[1]];
+    
+    // Calculate x position based on side
+    let x: number;
+    if (side === 'right') {
+        // Use xMax from viewBox directly, minus margin and note size
+        x = viewport.viewBox[2] - NOTE_RECT_SIZE - 15;
+    } else {
+        // Use xMin from viewBox plus margin
+        x = viewport.viewBox[0] + 10;
+    }
 
     const converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
