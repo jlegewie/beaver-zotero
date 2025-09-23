@@ -638,6 +638,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         if (toolCall.status === 'in_progress') {
             return `Annotations${''.padEnd(loadingDots, '.')}`;
         }
+        if (toolCall.status === 'error') {
+            return 'Annotations: Error';
+        }
         return 'Annotations';
     };
 
