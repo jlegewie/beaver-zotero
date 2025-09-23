@@ -22,7 +22,7 @@ import {
     toolAttachmentsAtom,
     streamReasoningToMessageAtom
 } from './threads';
-import { upsertToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates } from './toolAnnotations';
+import { upsertToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates, allAnnotationsAtom } from './toolAnnotations';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
 import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentReaderAttachmentKeyAtom } from './input';
@@ -392,6 +392,33 @@ export const regenerateFromMessageAtom = atom(
         const lastUserMessageIndex = findLastUserMessageIndexBefore(threadMessages, messageIndex);
         const userMessageId = threadMessages[lastUserMessageIndex].id;
         if (lastUserMessageIndex < 0) return null;
+
+        // Delete annotations if user confirms
+        const messageIdsToDelete = threadMessages.slice(lastUserMessageIndex + 1).map(m => m.id);
+        const annotationsToDelete = get(allAnnotationsAtom)
+            .filter(a => messageIdsToDelete.includes(a.message_id))
+            .filter(a => a.status === 'applied' && a.zotero_key);
+        if (annotationsToDelete.length > 0) {
+            const buttonIndex = Zotero.Prompt.confirm({
+                window: Zotero.getMainWindow(),
+                title: 'Delete annotations?',
+                text: 'Do you want to delete the annotations created by the assistant messages that will be regenerated?',
+                button0: Zotero.Prompt.BUTTON_TITLE_YES,
+                button1: Zotero.Prompt.BUTTON_TITLE_NO,
+                defaultButton: 1,
+            });
+            if (buttonIndex === 0) {
+                for (const annotation of annotationsToDelete) {
+                    const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                        annotation.library_id,
+                        annotation.zotero_key as string
+                    );
+                    if (annotationItem) {
+                        await annotationItem.eraseTx();
+                    }
+                }
+            }
+        }
         
         // Truncate messages
         const truncatedMessages = threadMessages.slice(0, lastUserMessageIndex + 1);
