@@ -179,8 +179,7 @@ function convertNotePositionToRect(
     }
 
     const { pageIndex, x, y } = annotation.note_position;
-    const iframeWindow = (reader as any)?._internalReader?._primaryView
-        ?._iframeWindow;
+    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
     const pdfViewer = iframeWindow?.PDFViewerApplication?.pdfViewer;
     const pageView = pdfViewer?._pages?.[pageIndex];
     if (!pageView) {
@@ -196,7 +195,7 @@ function convertNotePositionToRect(
             b: y,
             r: x + NOTE_RECT_SIZE,
             t: y + NOTE_RECT_SIZE,
-            coord_origin: CoordOrigin.TOPLEFT,
+            coord_origin: CoordOrigin.BOTTOMLEFT,
         },
         viewport
     );
