@@ -137,19 +137,24 @@ async function createHighlightAnnotation(
         throw new Error('Highlight annotation failed to compute rectangles');
     }
 
+    const now = (new Date()).toISOString();
     const sortIndex = generateSortIndex(primaryLocation.pageIndex, rects[0]);
     const data = {
         type: 'highlight',
         color: resolveHighlightColor(annotation.color),
         comment: annotation.comment || '',
+        pageLabel: primaryLocation.pageIndex + 1,
         sortIndex,
         position: {
             pageIndex: primaryLocation.pageIndex,
             rects,
         },
-        text: annotation.title || '',
+        text: annotation.title || '',   // This should be the highlighted text, not the title
         tags: [],
         temporary: false,
+        dateCreated: now,
+        dateModified: now,
+        authorName: 'Beaver'
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
@@ -208,10 +213,12 @@ async function createNoteAnnotation(
     const { pageIndex, rect } = convertNotePositionToRect(reader, annotation);
     const sortIndex = generateSortIndex(pageIndex, rect);
 
+    const now = (new Date()).toISOString();
     const data = {
         type: 'note',
         comment: annotation.comment || annotation.title || '',
         color: resolveHighlightColor(annotation.color),
+        pageLabel: pageIndex + 1,
         sortIndex,
         position: {
             pageIndex,
@@ -220,6 +227,9 @@ async function createNoteAnnotation(
         tags: [],
         temporary: false,
         notePosition: annotation.note_position,
+        dateCreated: now,
+        dateModified: now,
+        authorName: 'Beaver'
     };
 
     const iframeWindow = (reader as any)?._internalReader?._iframeWindow;
