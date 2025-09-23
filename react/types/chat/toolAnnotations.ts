@@ -44,6 +44,7 @@ export interface ToolAnnotation {
     annotation_type: ToolAnnotationType;
     title: string;
     comment: string;
+    text?: string;
     raw_sentence_ids?: string | null;
     sentence_ids: string[];
     color?: ToolAnnotationColor | null;
@@ -229,6 +230,7 @@ export function toToolAnnotation(raw: Record<string, any>): ToolAnnotation {
         zotero_key: raw.zotero_key ?? raw.zoteroKey,
         title: raw.title ?? '',
         comment: raw.comment ?? '',
+        text: raw.text,
         color: raw.color ?? raw.highlight_color ?? null,
         raw_sentence_ids:
             raw.raw_sentence_ids ?? raw.rawSentenceIds ?? null,

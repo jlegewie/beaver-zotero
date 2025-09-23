@@ -149,7 +149,7 @@ async function createHighlightAnnotation(
             pageIndex: primaryLocation.pageIndex,
             rects,
         },
-        text: annotation.title || '',   // This should be the highlighted text, not the title
+        text: annotation.text || '',
         tags: [],
         temporary: false,
         dateCreated: now,
