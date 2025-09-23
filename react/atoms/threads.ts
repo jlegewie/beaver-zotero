@@ -11,12 +11,6 @@ import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
-import {
-    ToolAnnotation,
-    annotationsFromMetadata,
-    isAnnotationTool,
-    mergeAnnotations,
-} from '../types/chat/toolAnnotations';
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -32,17 +26,6 @@ function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall):
         ...toolcall,
         response: mergedResponse,
     };
-
-    if (isAnnotationTool(toolcall.function?.name)) {
-        const rawMetadata = toolcall.response?.metadata ?? existing?.response?.metadata;
-        const metadataAnnotations = annotationsFromMetadata(rawMetadata);
-        const baseAnnotations = existing?.annotations as ToolAnnotation[] | undefined;
-        if (metadataAnnotations.length > 0) {
-            normalized.annotations = mergeAnnotations(baseAnnotations, metadataAnnotations);
-        } else if (baseAnnotations && baseAnnotations.length > 0) {
-            normalized.annotations = [...baseAnnotations];
-        }
-    }
 
     return normalized;
 }
@@ -206,7 +189,7 @@ export const loadThreadAtom = atom(
             }
         } else {
             // Use remote API
-            const { messages, userAttachments, toolAttachments, citationMetadata } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
                 // Update the thread messages and attachments state
@@ -216,6 +199,16 @@ export const loadThreadAtom = atom(
                 set(updateCitationDataAtom);
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                
+                // Group annotations by toolcall_id
+                const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
+                    if (!acc.has(annotation.toolcall_id)) {
+                        acc.set(annotation.toolcall_id, []);
+                    }
+                    acc.get(annotation.toolcall_id).push(annotation);
+                    return acc;
+                }, new Map());
+                set(toolCallAnnotationsAtom, groupedAnnotations);
             }
         }
         

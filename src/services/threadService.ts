@@ -6,6 +6,7 @@ import { toMessageUI } from '../../react/types/chat/converters';
 import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
 import { ThreadModel } from '../../react/types/chat/apiTypes';
 import { CitationMetadata } from '../../react/types/citations';
+import { ToolAnnotation, toToolAnnotation } from '../../react/types/chat/toolAnnotations';
 
 
 // Based on backend MessageModel
@@ -13,6 +14,12 @@ export interface PaginatedThreadsResponse {
     data: ThreadModel[];
     next_cursor: string | null;
     has_more: boolean;
+}
+
+// Based on backend ThreadMessagesResponse
+export interface ThreadMessagesResponse {
+    messages: MessageModel[];
+    tool_annotations?: ToolAnnotation[];
 }
 
 /**
@@ -55,10 +62,13 @@ export class ThreadService extends ApiService {
         messages: ChatMessage[],
         userAttachments: MessageAttachmentWithId[],
         toolAttachments: MessageAttachmentWithId[],
-        citationMetadata: CitationMetadata[]
+        citationMetadata: CitationMetadata[],
+        toolCallAnnotations: ToolAnnotation[]
     }> {
-        // Get thread messages from backend
-        const messages = await this.get<MessageModel[]>(`/api/v1/threads/${threadId}/messages`);
+        // Get thread messages from backend using new endpoint
+        const response = await this.get<ThreadMessagesResponse>(`/api/v1/threads/${threadId}/messages-with-annotations`);
+        const messages = response.messages;
+        const toolCallAnnotations = response.tool_annotations?.map(toToolAnnotation) || [];
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
@@ -72,7 +82,7 @@ export class ThreadService extends ApiService {
         // Get user attachments from thread messages
         const userAttachments: MessageAttachmentWithId[] = [];
         const toolAttachments: MessageAttachmentWithId[] = [];
-        
+
         for (const message of messages) {
             if (message.role === 'user') {
                 for (const attachment of message.attachments || []) {
@@ -85,7 +95,8 @@ export class ThreadService extends ApiService {
             messages: chatMessages,
             userAttachments: userAttachments,
             toolAttachments: toolAttachments,
-            citationMetadata: citationMetadata
+            citationMetadata: citationMetadata,
+            toolCallAnnotations: toolCallAnnotations
         };
     }
 

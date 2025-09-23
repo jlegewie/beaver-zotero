@@ -1,11 +1,6 @@
 import { MessageModel, ToolCall } from './apiTypes';
 import { ChatMessage } from '../chat/uiTypes';
-import { SourceAttachment, MessageAttachment } from '../attachments/apiTypes';
-import {
-    annotationsFromMetadata,
-    isAnnotationTool,
-    mergeAnnotations,
-} from './toolAnnotations';
+import { SourceAttachment } from '../attachments/apiTypes';
 
 // export function toMessageUI(message: Message): MessageUI {
 export function toMessageUI(message: MessageModel): ChatMessage {
@@ -24,17 +19,6 @@ export function toMessageUI(message: MessageModel): ChatMessage {
                 ...toolcall,
                 response: toolcall.response ? { ...toolcall.response } : undefined,
             };
-
-            if (isAnnotationTool(toolcall.function?.name)) {
-                const rawMetadata = toolcall.response?.metadata;
-                const metadataAnnotations = annotationsFromMetadata(rawMetadata, 'summary');
-                if (metadataAnnotations.length > 0) {
-                    const mergedAnnotations = mergeAnnotations(toolcall.annotations, metadataAnnotations);
-                    normalized.annotations = mergedAnnotations;
-                } else if (toolcall.annotations && toolcall.annotations.length > 0) {
-                    normalized.annotations = [...toolcall.annotations];
-                }
-            }
 
             return normalized;
         });
