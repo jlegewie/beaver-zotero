@@ -233,7 +233,7 @@ async function createNoteAnnotation(
         authorName: 'Beaver'
     };
 
-    const iframeWindow = (reader as any)?._internalReader?._iframeWindow;
+    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
     if (!iframeWindow) {
         throw new Error('Unable to access reader iframe window');
     }
