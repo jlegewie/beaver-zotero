@@ -143,7 +143,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     // Critical properties to prevent crashes - MUST be present
                     tags: [],
                     comment: '',
-                    text: `${BEAVER_ANNOTATION_TEXT}${page ? ` (Page ${page})` : ''}`,
+                    text: previewText,
                     authorName: 'Beaver',
                     pageLabel: page.toString(),
                     isExternal: false,
@@ -154,7 +154,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     // Backup annotation properties
                     annotationType: 'highlight',
                     annotationAuthorName: 'Beaver',
-                    annotationText: `${BEAVER_ANNOTATION_TEXT}${page ? ` (Page ${page})` : ''}`,
+                    annotationText: `${BEAVER_ANNOTATION_TEXT}`,
                     annotationComment: '',
                     annotationColor: '#00bbff',
                     annotationPageLabel: '',
