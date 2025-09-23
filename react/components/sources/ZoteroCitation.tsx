@@ -145,7 +145,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     comment: '',
                     text: `${BEAVER_ANNOTATION_TEXT}${page ? ` (Page ${page})` : ''}`,
                     authorName: 'Beaver',
-                    pageLabel: '',
+                    pageLabel: page.toString(),
                     isExternal: false,
                     readOnly: false,
                     lastModifiedByUser: '',

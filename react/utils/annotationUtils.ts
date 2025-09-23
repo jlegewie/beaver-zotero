@@ -27,6 +27,7 @@ interface Annotation {
     color: string;
     sortIndex: string;
     comment?: string;
+    pageLabel?: string;
     position: {
         pageIndex: number;
         rects: number[][];
@@ -102,6 +103,7 @@ const ZoteroImageAnnotations = {
             type: 'image',
             color: color,
             sortIndex: sortIndex,
+            pageLabel: (pageIndex + 1).toString(),
             comment: comment,
             position: {
                 pageIndex: pageIndex,
