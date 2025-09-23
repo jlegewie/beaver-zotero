@@ -142,7 +142,8 @@ async function createHighlightAnnotation(
     const data = {
         type: 'highlight',
         color: resolveHighlightColor(annotation.color),
-        comment: annotation.comment || '',
+        // comment: annotation.comment || '',
+        comment: annotation.title || '',
         pageLabel: primaryLocation.pageIndex + 1,
         sortIndex,
         position: {
