@@ -199,7 +199,7 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
 export async function extractAttachmentData(item: Zotero.Item, clientDateModified: string | undefined, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
 
     // 1. File: Confirm that the item is an attachment and that the file exists
-    if (!item.isAttachment() || !(await item.fileExists())) return null;
+    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) return null;
     const file_hash = options?.lightweight ? '' : await item.attachmentHash;
 
     // 2. Metadata: Prepare the object containing only fields for hashing
