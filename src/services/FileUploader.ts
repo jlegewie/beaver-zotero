@@ -7,7 +7,7 @@
  */
 
 import PQueue from 'p-queue';
-import { getPDFPageCount } from '../../react/utils/pdfUtils';
+import { getPDFPageCount, getPDFPageCountFromData } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
@@ -20,6 +20,8 @@ import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessa
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
 import { getMimeType } from '../utils/zoteroUtils';
 import { ProcessingTier } from '../../react/types/profile';
+import { isAttachmentOnServer } from '../utils/files';
+import { getAttachmentDataInMemory } from '../utils/files';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -264,75 +266,90 @@ export class FileUploader {
                 return;
             }
 
-            // Get the file path for the attachment
-            const filePath: string | null = await attachment.getFilePathAsync() || null;
+            // Check if file exists locally or on server
+            const useLocalFile = await attachment.fileExists();
+            const useServerFile = !useLocalFile && isAttachmentOnServer(attachment);
 
-            // Attempt to download if file is not available locally
-            // NOTE: Disable for now because it violates user intent. Plugin shouldn't download all files for users who use "as needed" setting.
-            /* if (!filePath) {
-                const fileSyncEnabled = Zotero.Sync.Storage.Local.getEnabledForLibrary(attachment.libraryID);
+            logger(`File Uploader uploadFile ${item.zotero_key}: Use local file: ${useLocalFile}, use server file: ${useServerFile}`, 3);
+
+            if (!useLocalFile && !useServerFile) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: File not available locally or on server`, 1);
+                await this.handlePermanentFailure(item, user_id, "File not available locally or on server");
+                return;
+            }
+
+            // File data
+            let fileArrayBuffer: Uint8Array | null = null;
+            let mimeType: string = '';
+            let pageCount: number | null = null;
+            let fileSize: number | null = null;
+
+            // File exists locally
+            if (useLocalFile) {
+                // Get the file path for the attachment
+                const filePath: string | null = await attachment.getFilePathAsync() || null;
                 
-                // Only try to download if:
-                // 1. File sync is enabled
-                // 2. This is NOT a linked file (linked files can't be downloaded from server)
-                if (fileSyncEnabled && attachment.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_LINKED_FILE) {
-                    logger(`File not available locally, attempting to download: ${item.zotero_key}`, 1);
-                    
-                    try {
-                        // Download the file on-demand
-                        const results = await Zotero.Sync.Runner.downloadFile(attachment);
-                        
-                        if (results && results.localChanges) {
-                            // File was downloaded successfully, get the path again
-                            filePath = await attachment.getFilePathAsync() || null;
-                            logger(`File downloaded successfully: ${item.zotero_key}`, 1);
-                        } else {
-                            logger(`File download failed: ${item.zotero_key}`, 1);
-                            await this.handlePermanentFailure(item, user_id, "File path not found");
-                            return;
-                        }
-                    } catch (downloadError: any) {
-                        logger(`File download error for ${item.zotero_key}: ${downloadError.message}`, 1);
-                        await this.handlePermanentFailure(item, user_id, "File path not found");
-                        return;
-                    }
+                // File check: if file path is not found, we can't upload it
+                if (!filePath) {
+                    logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
+                    await this.handlePermanentFailure(item, user_id, "File path not found");
+                    return;
                 }
-            }*/
-            
-            // File check: if file path is not found, we can't upload it
-            if (!filePath) {
-                logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
-                await this.handlePermanentFailure(item, user_id, "File path not found");
+
+                // File metadata
+                mimeType = await getMimeType(attachment, filePath);
+                pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+                fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+
+                // Read file content
+                try {
+                    fileArrayBuffer = await IOUtils.read(filePath);
+                } catch (readError: any) {
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Error reading file`, 1);
+                    Zotero.logError(readError);
+                    await this.handlePermanentFailure(item, user_id, "Error reading file");
+                    return;
+                }
+
+            // File exists on server
+            } else if (useServerFile) {
+
+                // Download the file data to memory
+                fileArrayBuffer = await getAttachmentDataInMemory(attachment);
+                if (!fileArrayBuffer) {
+                    // handle error better (e.g. zotero rate limits)
+                    logger(`File Uploader uploadFile ${item.zotero_key}: File not available in memory`, 1);
+                    await this.handlePermanentFailure(item, user_id, "File not available in memory");
+                    return;
+                }
+                
+                // File metadata
+                mimeType = await getMimeType(attachment);
+                fileSize = fileArrayBuffer.length;
+                pageCount = mimeType === 'application/pdf' ? await getPDFPageCountFromData(fileArrayBuffer) : null;
+
+            }
+
+            // File array buffer check
+            if (!fileArrayBuffer) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: File array buffer not found`, 1);
+                await this.handlePermanentFailure(item, user_id, "File array buffer not found");
                 return;
             }
 
-            // File metadata
-            const mimeType = await getMimeType(attachment, filePath);
-            const pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
-            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-
-            // File size limit
-            const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
-            const planFeatures = store.get(planFeaturesAtom);
-            const sizeLimit = planFeatures.uploadFileSizeLimit;
-            logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
-            if (fileSizeInMB > sizeLimit) {
-                logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-                await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier, "plan_limit_file_size");
-                return;
+            // Enforce file size limit
+            if (fileSize) {
+                const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
+                const planFeatures = store.get(planFeaturesAtom);
+                const sizeLimit = planFeatures.uploadFileSizeLimit;
+                logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
+                if (fileSizeInMB > sizeLimit) {
+                    logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
+                    await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier, "plan_limit_file_size");
+                    return;
+                }
             }
 
-            // Read file content
-            let fileArrayBuffer;
-            try {
-                fileArrayBuffer = await IOUtils.read(filePath);
-            } catch (readError: any) {
-                logger(`File Uploader uploadFile ${item.zotero_key}: Error reading file`, 1);
-                Zotero.logError(readError);
-                await this.handlePermanentFailure(item, user_id, "Error reading file");
-                return;
-            }
-            
             // Create a blob from the file array buffer with the mime type
             const blob = new Blob([fileArrayBuffer], { type: mimeType });
 
