@@ -294,7 +294,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         ? a.note_position?.pageIndex
                         : a.highlight_locations?.[0]?.pageIndex
                 ));
-                const minPageIndex = Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'));
+                const minPageIndex = pageIndexes.length > 0
+                    ? Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'))
+                    : 0;
 
                 // Navigate to the minimum page index
                 await navigateToPage(attachmentItem.id, minPageIndex + 1);
