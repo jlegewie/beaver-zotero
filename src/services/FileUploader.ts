@@ -18,7 +18,7 @@ import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
-import { getMimeType } from '../utils/zoteroUtils';
+import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
 import { ProcessingTier } from '../../react/types/profile';
 import { isAttachmentOnServer } from '../utils/files';
 import { getAttachmentDataInMemory } from '../utils/files';
@@ -324,7 +324,7 @@ export class FileUploader {
                 }
                 
                 // File metadata
-                mimeType = await getMimeType(attachment);
+                mimeType = getMimeTypeFromData(attachment, fileArrayBuffer);
                 fileSize = fileArrayBuffer.length;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCountFromData(fileArrayBuffer) : null;
 
