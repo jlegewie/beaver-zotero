@@ -14,6 +14,8 @@ pref("updateSourcesFromZoteroSelection", false);
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
+pref("annotationToolEnabled", true);
+pref("autoApplyAnnotations", true);
 
 // AI settings
 pref("maxAttachments", 8);

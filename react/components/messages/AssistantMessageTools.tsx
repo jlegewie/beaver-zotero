@@ -2,10 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { ToolCall } from '../../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Spinner, AlertIcon, ArrowDownIcon, ArrowRightIcon, SearchIcon, ViewIcon, Icon } from '../icons/icons';
+import {
+    Spinner,
+    AlertIcon,
+    ArrowDownIcon,
+    ArrowRightIcon,
+    SearchIcon,
+    ViewIcon,
+    Icon
+} from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
-import { MessageErrorWarningDisplay } from './ErrorWarningDisplay';
+import { isAnnotationTool } from '../../types/chat/toolAnnotations';
+import AnnotationToolCallDisplay from './AnnotationToolCallDisplay';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
@@ -14,28 +24,15 @@ interface AssistantMessageToolsProps {
 }
 
 interface ToolCallDisplayProps {
+    messageId: string;
     toolCall: ToolCall;
 }
 
-export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
-    const [resultsVisible, setResultsVisible] = useState(false);
-    const [loadingDots, setLoadingDots] = useState(1);
-    const [isButtonHovered, setIsButtonHovered] = useState(false);
 
-    useEffect(() => {
-        let interval: NodeJS.Timeout | undefined;
-        if (toolCall.status === 'in_progress') {
-            setLoadingDots(1); 
-            interval = setInterval(() => {
-                setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
-            }, 250);
-        } else {
-            setLoadingDots(1); 
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [toolCall.status]);
+export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ messageId: _messageId, toolCall }) => {
+    const [resultsVisible, setResultsVisible] = useState(false);
+    const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
 
     const numResults = toolCall.response?.attachments?.length ?? 0;
 
@@ -149,9 +146,14 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 ${getTopMargin()}`
             }
         >
-            {message.tool_calls.map((toolCall) => (
-                <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
-            ))}
+            {message.tool_calls.map((toolCall, index) => {
+                // Annotation tool calls are handled by AnnotationToolCallDisplay
+                if (isAnnotationTool(toolCall.function?.name)) {
+                    return <AnnotationToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+                }
+                // Search tool calls are handled by ToolCallDisplay
+                return <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+            })}
         </div>
     );
 };

@@ -6,10 +6,40 @@ import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/con
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
+import { toolCallAnnotationsAtom } from "./toolAnnotations";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
+
+function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
+    const mergedResponse = toolcall.response
+        ? {
+              ...existing?.response,
+              ...toolcall.response,
+              metadata: toolcall.response.metadata ?? existing?.response?.metadata,
+          }
+        : existing?.response;
+
+    const normalized: ToolCall = {
+        ...existing,
+        ...toolcall,
+        response: mergedResponse,
+    };
+
+    return normalized;
+}
+
+function normalizeToolCalls(
+    incoming: ToolCall[] | undefined | null,
+    existing?: ToolCall[]
+): ToolCall[] | undefined {
+    if (!incoming) return existing;
+    return incoming.map((toolcall) => {
+        const current = existing?.find((tc) => tc.id === toolcall.id);
+        return normalizeToolCallWithExisting(toolcall, current);
+    });
+}
 
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
@@ -37,6 +67,8 @@ export const threadAttachmentCountWithoutAnnotationsAtom = atom<number>((get) =>
     const keys = get(userAttachmentsAtom).filter((a) => a.type != "annotation").map((a) => a.zotero_key);
     return [...new Set(keys)].length;
 });
+
+
 
 
 // True after a chat request is sent and before the first assistant response arrives.
@@ -99,6 +131,7 @@ export const newThreadAtom = atom(
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
         set(citationMetadataAtom, []);
+        set(toolCallAnnotationsAtom, new Map());
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(resetCurrentSourcesAtom);
@@ -156,7 +189,7 @@ export const loadThreadAtom = atom(
             }
         } else {
             // Use remote API
-            const { messages, userAttachments, toolAttachments, citationMetadata } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
                 // Update the thread messages and attachments state
@@ -166,6 +199,16 @@ export const loadThreadAtom = atom(
                 set(updateCitationDataAtom);
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                
+                // Group annotations by toolcall_id
+                const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
+                    if (!acc.has(annotation.toolcall_id)) {
+                        acc.set(annotation.toolcall_id, []);
+                    }
+                    acc.get(annotation.toolcall_id).push(annotation);
+                    return acc;
+                }, new Map());
+                set(toolCallAnnotationsAtom, groupedAnnotations);
             }
         }
         
@@ -301,8 +344,10 @@ export const addOrUpdateMessageAtom = atom(
                     ? {
                         ...m,
                         ...(message.content && { content: message.content }),
-                        ...(message.tool_calls && { tool_calls: message.tool_calls }),
-                        ...(message.status && { status: message.status })
+                        ...(message.status && { status: message.status }),
+                        ...(message.tool_calls && {
+                            tool_calls: normalizeToolCalls(message.tool_calls, m.tool_calls) || m.tool_calls
+                        })
                     }
                     : m
             ));
@@ -315,14 +360,35 @@ export const addOrUpdateMessageAtom = atom(
                     // Insert before the specified message
                     set(threadMessagesAtom, [
                         ...currentMessages.slice(0, insertIndex),
-                        message,
+                        {
+                            ...message,
+                            ...(message.tool_calls && {
+                                tool_calls: normalizeToolCalls(message.tool_calls)
+                            })
+                        },
                         ...currentMessages.slice(insertIndex)
                     ]);
                 } else {
-                    set(threadMessagesAtom, [...currentMessages, message]);
+                    set(threadMessagesAtom, [
+                        ...currentMessages,
+                        {
+                            ...message,
+                            ...(message.tool_calls && {
+                                tool_calls: normalizeToolCalls(message.tool_calls)
+                            })
+                        }
+                    ]);
                 }
             } else {
-                set(threadMessagesAtom, [...get(threadMessagesAtom), message]);
+                set(threadMessagesAtom, [
+                    ...get(threadMessagesAtom),
+                    {
+                        ...message,
+                        ...(message.tool_calls && {
+                            tool_calls: normalizeToolCalls(message.tool_calls)
+                        })
+                    }
+                ]);
             }
         }
     }
@@ -338,11 +404,13 @@ export const addOrUpdateToolcallAtom = atom(
                     const existingToolCallIndex = toolCalls.findIndex(tc => tc.id === toolcallId);
 
                     if (existingToolCallIndex !== -1) {
-                        // Replace existing tool call
-                        toolCalls[existingToolCallIndex] = toolcall;
+                        const existingToolCall = toolCalls[existingToolCallIndex];
+                        toolCalls[existingToolCallIndex] = normalizeToolCallWithExisting(
+                            toolcall,
+                            existingToolCall
+                        );
                     } else {
-                        // Append new tool call
-                        toolCalls.push(toolcall);
+                        toolCalls.push(normalizeToolCallWithExisting(toolcall));
                     }
                     return { ...message, tool_calls: toolCalls };
                 }

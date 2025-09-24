@@ -8,6 +8,8 @@ import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
+import { store } from '../store';
+import { allAnnotationsAtom } from '../atoms/toolAnnotations';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -199,6 +201,7 @@ export function useReaderTabSelection() {
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                        if (store.get(allAnnotationsAtom).some((a) => a.zotero_key === item.key)) return;
                         if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                         await updateSourcesFromZoteroItems([item], true);
                     }

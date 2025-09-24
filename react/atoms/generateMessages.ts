@@ -20,15 +20,16 @@ import {
     currentAssistantMessageIdAtom,
     userAttachmentsAtom,
     toolAttachmentsAtom,
-    streamReasoningToMessageAtom,
+    streamReasoningToMessageAtom
 } from './threads';
+import { upsertToolcallAnnotationAtom, updateToolcallAnnotationsAtom, AnnotationUpdates, allAnnotationsAtom } from './toolAnnotations';
 import { InputSource } from '../types/sources';
 import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
+import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentReaderAttachmentKeyAtom } from './input';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, search_tool_request, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
-import { FullModelConfig, selectedModelAtom, supportedModelsAtom } from './models';
+import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { toMessageUI } from '../types/chat/converters';
 import { store } from '../store';
@@ -40,6 +41,9 @@ import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTy
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
 import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
+import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
+import { applyAnnotation } from '../utils/toolAnnotationActions';
+import { toolAnnotationsService } from '../../src/services/toolAnnotationsService';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -388,6 +392,33 @@ export const regenerateFromMessageAtom = atom(
         const lastUserMessageIndex = findLastUserMessageIndexBefore(threadMessages, messageIndex);
         const userMessageId = threadMessages[lastUserMessageIndex].id;
         if (lastUserMessageIndex < 0) return null;
+
+        // Delete annotations if user confirms
+        const messageIdsToDelete = threadMessages.slice(lastUserMessageIndex + 1).map(m => m.id);
+        const annotationsToDelete = get(allAnnotationsAtom)
+            .filter(a => messageIdsToDelete.includes(a.message_id))
+            .filter(a => a.status === 'applied' && a.zotero_key);
+        if (annotationsToDelete.length > 0) {
+            const buttonIndex = Zotero.Prompt.confirm({
+                window: Zotero.getMainWindow(),
+                title: 'Delete annotations?',
+                text: 'Do you want to delete the annotations created by the assistant messages that will be regenerated?',
+                button0: Zotero.Prompt.BUTTON_TITLE_YES,
+                button1: Zotero.Prompt.BUTTON_TITLE_NO,
+                defaultButton: 1,
+            });
+            if (buttonIndex === 0) {
+                for (const annotation of annotationsToDelete) {
+                    const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                        annotation.library_id,
+                        annotation.zotero_key as string
+                    );
+                    if (annotationItem) {
+                        await annotationItem.eraseTx();
+                    }
+                }
+            }
+        }
         
         // Truncate messages
         const truncatedMessages = threadMessages.slice(0, lastUserMessageIndex + 1);
@@ -603,6 +634,159 @@ async function _processChatCompletionViaBackend(
             onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
+            },
+            onAnnotation: (
+                messageId: string,
+                toolcallId: string,
+                rawAnnotations: Record<string, any>[]
+            ) => {
+                logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationsCount: ${rawAnnotations.length}, annotationIds: ${rawAnnotations.map(a => a.id || 'unknown').join(', ')}`, 1);
+                async function applyAnnotationsAndUpsert(rawAnnotations: Record<string, any>[]) {
+                    try {
+                        // Convert raw annotation to ToolAnnotation
+                        const annotations = rawAnnotations.map((a: Record<string, any>) => {
+                            try {
+                                return toToolAnnotation(a);
+                            } catch (error) {
+                                logger(`event 'onAnnotation': Failed to convert annotation ${a.id}: ${error}`, 1);
+                                return null;
+                            }
+                        }).filter((a): a is ToolAnnotation => a !== null);
+                        
+                        // Validate that all annotations belong to the same toolcall
+                        const uniqueToolcallIds = new Set(rawAnnotations.map(a => a.toolcall_id || a.toolcallId));
+                        if (uniqueToolcallIds.size > 1) {
+                            logger(`event 'onAnnotation': Warning - annotations from multiple toolcalls in single batch: ${Array.from(uniqueToolcallIds).join(', ')}`, 1);
+                        }
+
+                        // Early return if autoApplyAnnotations is disabled
+                        if (!getPref('autoApplyAnnotations')) {
+                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
+                            return;
+                        }
+
+                        // Early return if no reader is open
+                        const currentReaderKey = get(currentReaderAttachmentKeyAtom);
+                        if (currentReaderKey === null) {
+                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
+                            return;
+                        }
+
+                        // Apply annotations in parallel
+                        const applyPromises = annotations.map(async (annotation) => {
+                            // Only apply if annotation matches current reader
+                            if (annotation.attachment_key !== currentReaderKey) {
+                                return annotation; // Return original annotation unchanged
+                            }
+
+                            try {
+                                const result = await applyAnnotation(annotation);
+                                if (!result.updated) {
+                                    return annotation;
+                                }
+
+                                const updatedAnnotation: ToolAnnotation = {
+                                    ...result.annotation,
+                                    ...(result.annotation.status === 'error' && !result.annotation.error_message
+                                        ? { error_message: result.error || 'Failed to create annotation' }
+                                        : {}),
+                                };
+
+                                if (updatedAnnotation.status === 'applied') {
+                                    logger(`event 'onAnnotation': applied annotation ${updatedAnnotation.id} for message ${messageId} toolcall ${toolcallId}.`, 1);
+                                }
+                                if (updatedAnnotation.status === 'error') {
+                                    logger(`event 'onAnnotation': error applying annotation ${updatedAnnotation.id} for message ${messageId} toolcall ${toolcallId}: ${result.annotation.error_message}`, 1);
+                                }
+
+                                return updatedAnnotation;
+                            } catch (error: any) {
+                                const errorMessage = error?.message || 'Failed to apply annotation';
+                                logger(`event 'onAnnotation': failed to apply annotation ${annotation.id} for message ${messageId} toolcall ${toolcallId}: ${errorMessage}`, 1);
+                                return {
+                                    ...annotation,
+                                    status: 'error',
+                                    error_message: errorMessage,
+                                    modified_at: new Date().toISOString(),
+                                };
+                            }
+                        });
+
+                        const appliedAnnotations = await Promise.all(applyPromises);
+
+                        // Update local state: Upsert annotations
+                        set(upsertToolcallAnnotationAtom, { toolcallId, annotations: appliedAnnotations });
+
+                        const annotationsToAcknowledge = appliedAnnotations.filter(
+                            (annotation) => annotation.status === 'applied' && Boolean(annotation.zotero_key)
+                        );
+
+                        const errorAnnotations = appliedAnnotations.filter(
+                            (annotation) => annotation.status === 'error'
+                        );
+
+                        if (annotationsToAcknowledge.length > 0) {
+                            try {
+                                const response = await toolAnnotationsService.markAnnotationsApplied(
+                                    messageId,
+                                    toolcallId,
+                                    annotationsToAcknowledge.map((annotation) => ({
+                                        annotationId: annotation.id,
+                                        zoteroKey: annotation.zotero_key as string,
+                                    }))
+                                );
+
+                                if (response.errors.length > 0) {
+                                    const ackErrorUpdates: AnnotationUpdates[] = response.errors.map((ackError) => ({
+                                        annotationId: ackError.annotation_id,
+                                        updates: {
+                                            status: 'error',
+                                            error_message: ackError.detail,
+                                            modified_at: new Date().toISOString(),
+                                        },
+                                    }));
+
+                                    if (ackErrorUpdates.length > 0) {
+                                        set(updateToolcallAnnotationsAtom, {
+                                            toolcallId,
+                                            updates: ackErrorUpdates,
+                                        });
+                                    }
+
+                                    await Promise.all(
+                                        response.errors.map((ackError) =>
+                                            toolAnnotationsService.updateAnnotation(ackError.annotation_id, {
+                                                status: 'error',
+                                                error_message: ackError.detail,
+                                            }).catch((error) => {
+                                                logger(`event 'onAnnotation': failed to update backend for ack error ${ackError.annotation_id}: ${error}`, 1);
+                                            })
+                                        )
+                                    );
+                                }
+                            } catch (ackError: any) {
+                                logger(`event 'onAnnotation': failed to acknowledge annotations for message ${messageId} toolcall ${toolcallId}: ${ackError?.message || ackError}`, 1);
+                            }
+                        }
+
+                        if (errorAnnotations.length > 0) {
+                            await Promise.all(
+                                errorAnnotations.map((annotation) =>
+                                    toolAnnotationsService.updateAnnotation(annotation.id, {
+                                        status: 'error',
+                                        error_message: annotation.error_message || 'Failed to apply annotation',
+                                    }).catch((error) => {
+                                        logger(`event 'onAnnotation': failed to persist error status for annotation ${annotation.id}: ${error}`, 1);
+                                    })
+                                )
+                            );
+                        }
+
+                    } catch (error) {
+                        logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
+                    }
+                }
+                applyAnnotationsAndUpsert(rawAnnotations);
             },
             onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);

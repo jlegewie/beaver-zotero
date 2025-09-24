@@ -1,5 +1,7 @@
 import { createSourceIdentifier } from './sourceUtils';
 import { TextSelection } from '../types/attachments/apiTypes';
+import { logger } from '../../src/utils/logger';
+import { ZoteroReader } from './annotationUtils';
 
 
 /**
@@ -14,13 +16,31 @@ function getCurrentReader(window?: Window): any | undefined {
 }
 
 /**
+ * Retrieves the current reader instance and waits for the view to be initialized.
+ * 
+ * @param window - The window to get the reader from.
+ * @returns The current reader instance or undefined if no reader is found.
+ */
+async function getCurrentReaderAndWaitForView(window?: Window): Promise<any | undefined> {
+    // Get reader
+    const reader = getCurrentReader(window)
+    if (!reader) return undefined;
+
+    // Wait for reader to be initialized
+    await reader._initPromise;
+    await reader._internalReader?._primaryView?.initializedPromise;
+    return reader;
+}
+
+/**
  * Navigates to a page in the reader.
  * 
  * @param itemID - The item ID.
  * @param page - The page number to navigate to.
  */
-async function navigateToPage(itemID: number, page: number) {
-    await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+async function navigateToPage(itemID: number, page: number): Promise<void | _ZoteroTypes.ReaderInstance> {
+    const reader = await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+    return reader;
 }
 
 async function navigateToPageInCurrentReader(page: number) {
@@ -196,5 +216,35 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
 }
 
-export { getCurrentReader, getCurrentPage, navigateToPage, getSelectedText, getCurrentItem, addSelectionChangeListener, getSelectedTextAsTextSelection, navigateToPageInCurrentReader, navigateToAnnotation };
+/**
+ * Ensures the reader is initialized.
+ * 
+ * @param reader - The reader instance.
+ */
+async function ensureReaderInitialized(reader: ZoteroReader, waitForView: boolean = true): Promise<void> {
+    try {
+        if (reader && (reader as any)._initPromise) {
+            await (reader as any)._initPromise;
+            if (waitForView) {
+                await (reader as any)._internalReader?._primaryView?.initializedPromise;
+            }
+        }
+    } catch (error) {
+        logger(`ensureReaderInitialized failed: ${error}`, 1);
+    }
+}
+
+export {
+    getCurrentReader,
+    getCurrentReaderAndWaitForView,
+    getCurrentPage,
+    navigateToPage,
+    getSelectedText,
+    ensureReaderInitialized,
+    getCurrentItem,
+    addSelectionChangeListener,
+    getSelectedTextAsTextSelection,
+    navigateToPageInCurrentReader,
+    navigateToAnnotation
+};
 

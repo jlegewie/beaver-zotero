@@ -257,15 +257,19 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
  * @param item Zotero item
  * @returns Array of primary creators
  */
-function extractPrimaryCreators(item: Zotero.Item): any[] {
+export function extractPrimaryCreators(item: Zotero.Item): ZoteroCreator[] {
     const itemCreators = item.getCreators();
     const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
     return itemCreators
         .filter(creator => creator.creatorTypeID == primaryCreatorTypeID)
         .map(creator => ({
-            ...creator,
-            type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
-        }));
+            first_name: creator.firstName || null,
+            last_name: creator.lastName || null,
+            field_mode: creator.fieldMode,
+            creator_type_id: creator.creatorTypeID,
+            creator_type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+            is_primary: creator.creatorTypeID === primaryCreatorTypeID
+        } as ZoteroCreator));
 }
 
 /**

@@ -1,6 +1,6 @@
 import { MessageModel, ToolCall } from './apiTypes';
 import { ChatMessage } from '../chat/uiTypes';
-import { SourceAttachment, MessageAttachment } from '../attachments/apiTypes';
+import { SourceAttachment } from '../attachments/apiTypes';
 
 // export function toMessageUI(message: Message): MessageUI {
 export function toMessageUI(message: MessageModel): ChatMessage {
@@ -12,6 +12,17 @@ export function toMessageUI(message: MessageModel): ChatMessage {
         status: message.status,
         tool_calls: message.tool_calls,
     } as ChatMessage;
+
+    if (message.tool_calls && message.tool_calls.length > 0) {
+        chatMessage.tool_calls = message.tool_calls.map((toolcall) => {
+            const normalized: ToolCall = {
+                ...toolcall,
+                response: toolcall.response ? { ...toolcall.response } : undefined,
+            };
+
+            return normalized;
+        });
+    }
     if (message.error) {
         const errorParts = message.error.split(':');
         if (errorParts.length > 0) {

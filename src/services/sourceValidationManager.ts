@@ -299,9 +299,15 @@ class SourceValidationManager {
                 }
 
                 if (this.isCacheValid(cachedEntry, currentFileHash)) {
-                    const localValidationResult = await this.performLocalValidation(source);
-                    if (localValidationResult.isValid == cachedEntry.result.isValid) {
-                        logger(`SourceValidationManager: Returning cached validation for ${source.itemKey}`, 4);
+                    // For cached results from backend validation, don't re-check local validation
+                    // as it may differ (file exists locally but not in backend)
+                    if (cachedEntry.result.validationType === SourceValidationType.LOCAL_ONLY) {
+                        const localValidationResult = await this.performLocalValidation(source);
+                        if (localValidationResult.isValid == cachedEntry.result.isValid) {
+                            return cachedEntry.result;
+                        }
+                    } else {
+                        // Backend validation results are authoritative
                         return cachedEntry.result;
                     }
                     logger(`SourceValidationManager: Cached validation is different from local validation for ${source.itemKey}`, 4);

@@ -7,6 +7,7 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
+import { allAnnotationsAtom, updateToolcallAnnotationAtom } from "../atoms/toolAnnotations";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
@@ -223,6 +224,18 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                        // Skip if tool annotation is deleted
+                                        const toolAnnotations = store.get(allAnnotationsAtom).filter((a) => a.library_id === libraryID && a.zotero_key === key);
+                                        if (toolAnnotations.length > 0) {
+                                            logger(`useZoteroSync: Skipping delete event for tool annotation ${toolAnnotations[0].id}`, 3);
+                                            store.set(updateToolcallAnnotationAtom, {
+                                                toolcallId: toolAnnotations[0].toolcall_id,
+                                                annotationId: toolAnnotations[0].id,
+                                                updates: { status: 'deleted', modified_at: new Date().toISOString() }
+                                            });
+                                            return;
+                                        }
+                                        // Queue for backend deletion
                                         eventsRef.current.delete.set(id, { libraryID, key });
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);

@@ -389,6 +389,8 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
 [id^="beaver-pane-"] .h-2 { height: 0.5rem; }
 [id^="beaver-pane-"] .-mt-010 { margin-top: -0.1rem; }
+[id^="beaver-pane-"] .-mb-015 { margin-bottom: -0.15rem; }
+[id^="beaver-pane-"] .-mb-1 { margin-bottom: -0.25rem; }
 [id^="beaver-pane-"] .-mt-1 { margin-top: -0.25rem; }
 [id^="beaver-pane-"] .-mt-2 { margin-top: -0.5rem; }
 [id^="beaver-pane-"] .-mt-3 { margin-top: -0.75rem; }
@@ -434,8 +436,12 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-yellow { color: var(--tag-yellow); opacity: 0.8; }
+[id^="beaver-pane-"] .font-color-purple { color: var(--tag-purple); opacity: 0.8; }
+
 [id^="beaver-pane-"] .user-select-none { user-select: none; }
 [id^="beaver-pane-"] .user-select-text { user-select: text; }
+
+[id^="beaver-pane-"] .line-through { text-decoration: line-through; }
 
 /* Transitions */
 [id^="beaver-pane-"] .transition { transition: all 0.2s ease-in-out; }
@@ -451,11 +457,13 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .ease-out { transition-timing-function: ease-out; }
 
 /* States */
+[id^="beaver-pane-"] .opacity-0 { opacity: 0; }
 [id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
 [id^="beaver-pane-"] .opacity-60 { opacity: 0.6; }
 [id^="beaver-pane-"] .opacity-70 { opacity: 0.7; }
 [id^="beaver-pane-"] .opacity-80 { opacity: 0.8; }
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
+[id^="beaver-pane-"] .opacity-100 { opacity: 1; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
@@ -1207,6 +1215,24 @@ attachment-box .metadata-table #beaver-status {
     width: 1em;
     height: 1em;
     flex-shrink: 0;
+}
+
+[id^="beaver-pane-"] .variant-ghost-tertiary {
+    cursor: pointer;
+    border: 0px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--fill-tertiary);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-ghost-tertiary:hover {
+    color: var(--fill-secondary);
 }
 
 /* Button: Thread menu */

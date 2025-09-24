@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icons/icons';
 import Button from '../ui/Button';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface ThinkingContentProps {
     thinkingContent: string;
@@ -11,23 +12,8 @@ interface ThinkingContentProps {
 
 const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isThinking, previousMessageHasToolCalls }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
-    const [loadingDots, setLoadingDots] = useState(1);
+    const loadingDots = useLoadingDots(isThinking);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-
-    useEffect(() => {
-        let interval: NodeJS.Timeout | undefined;
-        if (isThinking) {
-            setLoadingDots(1); 
-            interval = setInterval(() => {
-                setLoadingDots((dots) => (dots < 3 ? dots + 1 : 1));
-            }, 250);
-        } else {
-            setLoadingDots(0); 
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [isThinking]);
 
     const toggleResults = () => {
         setResultsVisible(!resultsVisible);
