@@ -224,8 +224,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
+        if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
+
         // (a) Pass the syncing filter
-        if (!syncingItemFilter(item)) return {valid: false, error: "Item type not supported"};
+        if (!(await syncingItemFilterAsync(item))) {
+            return {valid: false, error: "File not available for sync"};
+        }
 
         // (b) Has attachments or notes
         if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
@@ -234,6 +238,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
+        if (!(item.isPDFAttachment() || item.isImageAttachment())) {
+            return {valid: false, error: "Beaver only supports PDF and image files"};
+        }
+
+        if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
+
         // Use the same comprehensive filter as sync
         if (!(await syncingItemFilterAsync(item))) {
             return {valid: false, error: "File not available for sync"};
