@@ -40,9 +40,9 @@ export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: numb
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
     if (!item) return false;
-    if (item.isRegularItem()) return !item.isInTrash();
-    if (item.isPDFAttachment()) return !item.isInTrash();
-    if (item.isImageAttachment()) return !item.isInTrash();
+    if (item.isInTrash()) return false;
+    if (item.isRegularItem()) return true;
+    if (item.isPDFAttachment() || item.isImageAttachment()) return true;
     return false;
 };
 
