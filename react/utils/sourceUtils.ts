@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { InputSource } from '../types/sources';
 import { truncateText } from './stringUtils';
-import { syncingItemFilter } from '../../src/utils/sync';
+import { syncingItemFilter, syncingItemFilterAsync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
@@ -224,8 +224,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
+        if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
+
         // (a) Pass the syncing filter
-        if (!syncingItemFilter(item)) return {valid: false, error: "Item type not supported"};
+        if (!(await syncingItemFilterAsync(item))) {
+            return {valid: false, error: "File not available for sync"};
+        }
 
         // (b) Has attachments or notes
         if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
@@ -234,14 +238,18 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
-        // (a) Pass the syncing filter
-        if (!syncingItemFilter(item)) return {valid: false, error: "Item type not supported"};
+        if (!(item.isPDFAttachment() || item.isImageAttachment())) {
+            return {valid: false, error: "Beaver only supports PDF and image files"};
+        }
 
-        // (b) Has a file
-        const hasFile = await item.fileExists();
-        if (!hasFile) return {valid: false, error: "File does not exist"};
+        if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
-        // (c) Confirm upload status
+        // Use the same comprehensive filter as sync
+        if (!(await syncingItemFilterAsync(item))) {
+            return {valid: false, error: "File not available for sync"};
+        }
+
+        // Confirm upload status
         // const userId = store.get(userIdAtom) || '';
         // const attachment = await Zotero.Beaver.db.getAttachmentByZoteroKey(userId, item.libraryID, item.key);
         // if (!attachment) return {valid: false, error: "Attachment not found"};
