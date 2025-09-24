@@ -61,7 +61,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
-		if (!downloadUrl || redirectResponse.status !== 302) {
+		if (!downloadUrl || (redirectResponse.status !== 302 && redirectResponse.status !== 200)) {
 			throw new Error(`getDownloadUrl: Failed to get a download redirect. Server responded with status ${redirectResponse.status}`);
 		}
 
@@ -131,7 +131,7 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
-		if (!downloadUrl || redirectResponse.status !== 302) {
+		if (!downloadUrl || (redirectResponse.status !== 302 && redirectResponse.status !== 200)) {
 			throw new Error(`getAttachmentDataInMemory: Failed to get a download redirect. Server responded with status ${redirectResponse.status}`);
 		}
 
