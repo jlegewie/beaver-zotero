@@ -64,7 +64,7 @@ export const syncingItemFilterAsync = async (item: Zotero.Item | false, collecti
     if (item.isInTrash()) return false;
     if (item.isRegularItem()) return true;
     if (item.isPDFAttachment() || item.isImageAttachment()) {
-        return item.isStoredFileAttachment() && await item.fileExists();
+        return await item.fileExists();
     }
     return false;
 };
