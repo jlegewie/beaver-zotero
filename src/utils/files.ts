@@ -5,7 +5,7 @@ import { logger } from "./logger";
  * @param item Zotero item
  * @returns true if the attachment is on the server
  */
-export function isAttachmentOnServer(item: Zotero.Item) {
+export function isAttachmentOnServer(item: Zotero.Item): boolean {
     if (!item.isAttachment() || !item.isStoredFileAttachment()) {
         return false;
     }
@@ -28,7 +28,7 @@ export function isAttachmentOnServer(item: Zotero.Item) {
  * @returns {Promise<string|null>} A promise that resolves with the path to the
  *   temporary file on success, or null if the file could not be downloaded.
  */
-export async function getAttachmentDataInMemory(item: Zotero.Item) {
+export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint8Array | null> {
 
 	// 1. Validate the input item
 	if (!item || !item.isStoredFileAttachment()) {
