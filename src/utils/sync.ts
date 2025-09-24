@@ -34,7 +34,11 @@ export const isLibraryValidForSync = (
 export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
 
 /**
- * Filter function for syncing items
+ * Filter function for syncing items based on item type and trash status
+ * 
+ * This filter only checks for item type and trash status.
+ * It servers as a fast, first pass filter.
+ * 
  * @param item Zotero item
  * @returns true if the item should be synced
  */
@@ -46,27 +50,23 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
     return false;
 };
 
+/**
+ * Comprehensive filter function for syncing items based on item type, trash status and file availability
+ * 
+ * This filter checks for item type, trash status and file availability.
+ * It servers as a comprehensive filter for what actually gets synced.
+ * 
+ * @param item Zotero item
+ * @returns Promise resolving to true if the item should be synced
+ */
 export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
     if (!item) return false;
-    
-    // Check if the item is a valid type
-    const isValidType = item.isRegularItem() || item.isPDFAttachment() || item.isImageAttachment();
-    if (!isValidType) return false;
-    
-    // Check if the item is deleted
-    if (item.deleted) return false;
-    if (item.isTopLevelItem()) return true;
-    
-    // For child items, check if the parent item is in the trash
-    try {
-        return !item.isInTrash();
-    } catch (error) {
-        // If the parent item is not loaded, get it from the library and key
-        if (!item.parentKey) return false;
-        const parent = await Zotero.Items.getByLibraryAndKeyAsync(item.libraryID, item.parentKey);
-        if (!parent) return false;
-        return !parent.isInTrash();
+    if (item.isInTrash()) return false;
+    if (item.isRegularItem()) return true;
+    if (item.isPDFAttachment() || item.isImageAttachment()) {
+        return item.isStoredFileAttachment() && await item.fileExists();
     }
+    return false;
 };
 
 
