@@ -14,6 +14,66 @@ export function isAttachmentOnServer(item: Zotero.Item): boolean {
     return item.attachmentSyncState !== Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
 }
 
+/**
+ * Gets the download URL for an attachment that exists on the server.
+ * @param item Zotero item
+ * @returns Promise resolving to the download URL or null if the file could not be downloaded.
+ */
+export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> {
+    // 1. Validate the input item
+	if (!item || !item.isStoredFileAttachment()) {
+		logger("getDownloadUrl: Item is not a valid stored file attachment.");
+		return null;
+	}
+
+	if (!isAttachmentOnServer(item)) {
+		logger("getDownloadUrl: File is not on server.");
+		return null;
+	}
+
+	// 2. Get the necessary API credentials for the download
+	const userID = Zotero.Users.getCurrentUserID();
+	if (!userID) {
+		logger("getDownloadUrl: Cannot download file: Not logged into a Zotero account.");
+		return null;
+	}
+
+	const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
+	if (!apiKey) {
+		logger("getDownloadUrl: Cannot download file: Missing Zotero API key.");
+		return null;
+	}
+
+	// 3. Construct the initial API URL
+	const baseApiUrl = ZOTERO_CONFIG.API_URL;
+	let apiUrl;
+	if (item.library.isGroup) {
+		apiUrl = `${baseApiUrl}groups/${item.libraryID}/items/${item.key}/file`;
+	} else {
+		apiUrl = `${baseApiUrl}users/${userID}/items/${item.key}/file`;
+	}
+
+	try {
+		// 4. Make the first request to get the redirect URL
+		logger(`getDownloadUrl: Requesting download URL from: ${apiUrl}`);
+		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
+			headers: { 'Zotero-API-Key': apiKey }
+		});
+
+		const downloadUrl = redirectResponse.responseURL;
+		if (!downloadUrl || redirectResponse.status !== 302) {
+			throw new Error(`getDownloadUrl: Failed to get a download redirect. Server responded with status ${redirectResponse.status}`);
+		}
+
+		return downloadUrl;
+
+	} catch (e) {
+		logger(`getDownloadUrl: Error during download URL retrieval: ${e}`);
+		return null;
+	}
+}
+
+
 
 /**
  * Downloads an attachment that exists on the server but not locally to a temporary file.
