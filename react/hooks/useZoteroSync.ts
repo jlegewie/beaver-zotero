@@ -108,7 +108,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             }
 
             logger(`useZoteroSync: Syncing ${librariesToSync.length} changed libraries: ${librariesToSync.join(', ')}`, 3);
-            await syncZoteroDatabase(librariesToSync, filterFunction, SYNC_BATCH_SIZE_INITIAL, 'incremental');
+            await syncZoteroDatabase(librariesToSync, { filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL, syncType: 'incremental' });
         } catch (error: any) {
             logger(`useZoteroSync: Error syncing changed libraries: ${error.message}`, 1);
             Zotero.logError(error);
@@ -191,7 +191,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             logger(`useZoteroSync: Detected ${changedLibraries.length} changed libraries after sync: ${changedLibraries.join(', ')}`, 3);
                             
                             try {
-                                await syncZoteroDatabase(changedLibraries, filterFunction, SYNC_BATCH_SIZE_INITIAL, 'incremental');
+                                await syncZoteroDatabase(changedLibraries, {filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL, syncType: 'incremental' });
                             } catch (error: any) {
                                 logger(`useZoteroSync: Error syncing changed libraries after Zotero sync: ${error.message}`, 1);
                                 Zotero.logError(error);
@@ -274,7 +274,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 initializeLibraryVersionCache();
                 
                 // First sync the database
-                await syncZoteroDatabase(syncLibraryIds, filterFunction, SYNC_BATCH_SIZE_INITIAL);
+                await syncZoteroDatabase(syncLibraryIds, { filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL });
                 
                 // Update cache after initial sync
                 updateLibraryVersionCache();

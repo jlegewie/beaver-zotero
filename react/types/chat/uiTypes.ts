@@ -4,7 +4,7 @@ import { ZoteroItemReference } from '../zotero';
 
 
 // WarningMessage messages
-export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments";
+export type WarningType = "user_key_failed_unexpected" | "user_key_rate_limit_exceeded" | "user_key_failed" | "missing_attachments" | "low_credits";
 export interface WarningMessage {
     id: string;
     type: WarningType;

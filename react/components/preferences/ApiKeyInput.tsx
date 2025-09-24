@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon } from '../icons/icons';
+import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon } from '../icons/icons';
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
@@ -35,6 +35,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 }) => {
     const [isVerifying, setIsVerifying] = useState(false);
     const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [streamingVerificationFailed, setStreamingVerificationFailed] = useState(false);
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
@@ -71,6 +72,11 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 savePref(currentValue);
                 logger(`API Key for ${provider} verified and saved.`);
                 validateSelectedModel();
+                if (result.streaming_valid === false && result.streaming_error_type === 'VerificationRequiredError') {
+                    setStreamingVerificationFailed(true);
+                } else {
+                    setStreamingVerificationFailed(false);
+                }
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');
@@ -87,11 +93,11 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
 
     const getButtonContent = () => {
         if (isVerifying) {
-            return { text: 'Verify', icon: Spinner };
+            return { text: 'Confirm', icon: Spinner };
         }
         switch (verificationStatus) {
             case 'success':
-                return { text: 'Verified', icon: TickIcon };
+                return { text: 'Confirmed', icon: TickIcon };
             case 'error':
                 // let errorText = 'Verification Failed';
                 // if (verificationError === 'AuthenticationError') errorText = 'Invalid Key';
@@ -101,7 +107,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 return { text: "Failed", icon: AlertIcon };
             case 'idle':
             default:
-                return { text: 'Verify', icon: ArrowRightIcon };
+                return { text: 'Confirm', icon: ArrowRightIcon };
         }
     };
 
@@ -124,25 +130,45 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     />
                 )}
             </div>
-            <div className="display-flex flex-row items-start gap-2 mt-1 mb-1 flex-1 w-full">
-                <input
-                    id={id}
-                    type="password"
-                    value={currentValue}
-                    onChange={handleChange}
-                    placeholder={placeholder}
-                    className={`flex-1 p-1 m-0 border text-sm rounded-sm ${inputBorderColor} bg-senary focus:border-tertiary outline-none`}
-                    aria-invalid={verificationStatus === 'error'}
-                />
-                <Button
-                    variant={buttonVariant}
-                    style={{ padding: "3px 6px" }}
-                    rightIcon={buttonIcon}
-                    onClick={handleVerify}
-                    disabled={isVerifying || !currentValue}
-                >
-                    {buttonText}
-                </Button>
+            <div className="display-flex flex-col gap-2 mt-1 mb-1 flex-1 w-full">
+                <div className="display-flex flex-row items-start gap-2 flex-1 w-full">
+                    <input
+                        id={id}
+                        type="password"
+                        value={currentValue}
+                        onChange={handleChange}
+                        placeholder={placeholder}
+                        className={`flex-1 p-1 m-0 border text-sm rounded-sm ${inputBorderColor} bg-senary focus:border-tertiary outline-none`}
+                        aria-invalid={verificationStatus === 'error'}
+                    />
+                    <Button
+                        variant={buttonVariant}
+                        style={{ padding: "3px 6px" }}
+                        rightIcon={buttonIcon}
+                        onClick={handleVerify}
+                        disabled={isVerifying || !currentValue}
+                    >
+                        {buttonText}
+                    </Button>
+                </div>
+                {streamingVerificationFailed && (
+                    <div className="display-flex flex-row items-start gap-2 flex-1 w-full">
+                        <Icon icon={AlertIcon} className="scale-10 mt-010 font-color-secondary" />
+                        <div className="text-sm font-color-secondary">
+                            OpenAI requires verification to use this API key in Beaver. Please go to{' '}
+                            <a
+                                href="https://platform.openai.com/settings/organization/general"
+                                onClick={() => Zotero.getActiveZoteroPane().loadURI("https://platform.openai.com/settings/organization/general")}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-color-link underline"
+                            >
+                                OpenAI Organization Settings
+                            </a>{' '}
+                            and click on <strong>Verify Organization</strong>.
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Spinner, ArrowRightIcon, Icon, AlertIcon } from "../icons/icons";
+import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
-import { isSyncCompleteAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
+import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import Button from "../ui/Button";
-import { hasAuthorizedAccessAtom } from '../../atoms/profile';
+import { hasAuthorizedAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
 import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
@@ -18,6 +18,8 @@ import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zot
 import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 import FileStatusDisplay from "../status/FileStatusDisplay";
+import { isLibraryValidForSync } from "../../../src/utils/sync";
+import { store } from "../../store";
 
 
 const OnboardingPage: React.FC = () => {
@@ -32,6 +34,7 @@ const OnboardingPage: React.FC = () => {
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
     const [isLibrarySelectionValid, setIsLibrarySelectionValid] = useState<boolean>(false);
+    const [validLibraryIds, setValidLibraryIds] = useState<number[]>([]);
 
     // Sync toggle state
     const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
@@ -42,7 +45,7 @@ const OnboardingPage: React.FC = () => {
 
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
-    const isSyncComplete = useAtomValue(isSyncCompleteAtom);
+    const overallSyncStatus = useAtomValue(overallSyncStatusAtom);
     
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
@@ -61,8 +64,13 @@ const OnboardingPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        setIsLibrarySelectionValid(selectedLibraryIds.length > 0);
-    }, [selectedLibraryIds]);
+        const validIds = selectedLibraryIds.filter(id => {
+            const library = Zotero.Libraries.get(id);
+            return isLibraryValidForSync(library, useZoteroSync);
+        });
+        setValidLibraryIds(validIds);
+        setIsLibrarySelectionValid(validIds.length > 0);
+    }, [selectedLibraryIds, useZoteroSync]);
 
     // Handle sync toggle change
     const handleSyncToggleChange = (checked: boolean) => {
@@ -75,14 +83,14 @@ const OnboardingPage: React.FC = () => {
 
     // Handle authorization
     const handleAuthorize = async () => {
-        if (selectedLibraryIds.length === 0 || isAuthorizing) return;
+        if (validLibraryIds.length === 0 || isAuthorizing) return;
         if (!profileWithPlan) return;
         
         setIsAuthorizing(true);
         try {
             // Create a map of library IDs to library sync status
             const selectedLibraries = Object.fromEntries(
-                selectedLibraryIds
+                validLibraryIds
                     .map(id => {
                         const library = libraryStatistics.find(library => library.libraryID === id);
                         return [
@@ -105,7 +113,7 @@ const OnboardingPage: React.FC = () => {
             const requireOnboarding = (Object.values(selectedLibraries) as LibrarySyncStatus[]).some((library: LibrarySyncStatus) => library.status === 'idle');
             
             // Call the service to authorize access
-            const libraries = selectedLibraryIds
+            const libraries = validLibraryIds
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
                     if (!library) return null;
@@ -155,9 +163,43 @@ const OnboardingPage: React.FC = () => {
                 
         // Set completing onboarding to true
         setIsCompletingOnboarding(true);
-        try {            
+
+        if (overallSyncStatus === 'partially_completed') {
+            const buttonIndex = Zotero.Prompt.confirm({
+                window: Zotero.getMainWindow(),
+                title: "Complete Onboarding?",
+                text: "Are you sure you want to complete onboarding?\n\nLibraries with errors will not be synced with Beaver.",
+                button0: Zotero.Prompt.BUTTON_TITLE_YES,
+                button1: Zotero.Prompt.BUTTON_TITLE_NO,
+                defaultButton: 1,
+            });
+
+            if (buttonIndex === 1) {
+                setIsCompletingOnboarding(false);
+                return;
+            }
+        }
+        try {
+            // Get updated libraries
+            let updatedLibraries = undefined;
+            if (overallSyncStatus === 'partially_completed') {
+                const syncStatus = store.get(syncStatusAtom)
+                const completedLibraryIds = Object.values(syncStatus)
+                    .filter(library => library.status === 'completed')
+                    .map(library => library.libraryID);
+                updatedLibraries = store.get(syncLibrariesAtom).filter(library => completedLibraryIds.includes(library.library_id));
+            }
+            
             // Call the service to complete onboarding
-            await accountService.completeOnboarding(profileWithPlan.plan.processing_tier);
+            await accountService.completeOnboarding(profileWithPlan.plan.processing_tier, overallSyncStatus, updatedLibraries);
+
+            // Update local state with updated libraries if they were updated
+            if (updatedLibraries) {
+                setProfileWithPlan({
+                    ...profileWithPlan,
+                    libraries: updatedLibraries
+                });
+            }
 
             // Show indexing complete message if indexing is not complete
             if (fileStatusSummary.progress < 100) setPref("showIndexingCompleteMessage", true);
@@ -185,8 +227,10 @@ const OnboardingPage: React.FC = () => {
     };
 
     const getFooterMessage = () => {
-        if (!isSyncComplete) {
-            return "Waiting for initial syncing process to complete.";
+        if (overallSyncStatus === 'in_progress') {
+            return "Initial syncing in progress.";
+        } else if (overallSyncStatus === 'failed') {
+            return `Initial syncing failed. Please retry or contact support.`;
         } else if (!isUploadProcessed) {
             return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
         } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
@@ -249,13 +293,7 @@ const OnboardingPage: React.FC = () => {
                             {/* Syncing your library */}
                             <DatabaseSyncStatus />
 
-                            {(connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') && (
-                                <div className="p-2 font-color-tertiary display-flex flex-row gap-3 items-start">
-                                    <Icon icon={AlertIcon} className="scale-12 mt-020"/>
-                                    {/* TODO: Retry button */}
-                                    <div>No connection. Please reconnect to continue with the onboarding process.</div>
-                                </div>
-                            )}
+                            {/* File status display */}
                             <FileStatusDisplay connectionStatus={connectionStatus}/>
                         </div>
 
@@ -312,7 +350,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadProcessed || !isSyncComplete || isCompletingOnboarding}
+                            disabled={!isUploadProcessed || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete

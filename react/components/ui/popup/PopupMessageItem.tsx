@@ -1,13 +1,13 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon } from '../../icons/icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
-import { showFileStatusDetailsAtom } from '../../../atoms/ui';
+import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
 import Button from "../Button";
 
 interface PopupMessageItemProps {
@@ -18,6 +18,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const removeMessage = useSetAtom(removePopupMessageAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
+    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
 
@@ -52,6 +53,11 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 duration: 100
             }
         });
+    };
+
+    const showSettings = () => {
+        setIsPreferencePageVisible(true);
+        handleDismiss();
     };
 
     const getDefaultIcon = () => {
@@ -153,6 +159,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 {message.showGoToFileStatusButton && (
                     <div className="display-flex flex-row gap-2 items-end w-full justify-end py-1">
                         <Button onClick={showFileStatusDetails} variant="outline">View File Status</Button>
+                    </div>
+                )}
+
+                {message.showSettingsButton && !message.showGoToFileStatusButton && (
+                    <div className="display-flex flex-row gap-2 items-end w-full justify-end py-1">
+                        <Button onClick={showSettings} icon={SettingsIcon} variant="outline">Settings</Button>
                     </div>
                 )}
             </div>

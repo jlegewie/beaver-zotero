@@ -107,7 +107,7 @@ export interface SSECallbacks {
 }
 
 
-export type ErrorType = "AuthenticationError" | "PermissionDeniedError" | "RateLimitError" | "UnexpectedError";
+export type ErrorType = "AuthenticationError" | "PermissionDeniedError" | "RateLimitError" | "UnexpectedError" | "VerificationRequiredError";
 
 export interface VerifyKeyRequest {
     provider: ProviderType;
@@ -117,6 +117,8 @@ export interface VerifyKeyRequest {
 export interface VerifyKeyResponse {
     valid: boolean;
     error_type?: ErrorType;
+    streaming_valid?: boolean;
+    streaming_error_type?: ErrorType;
 }
 
 /**

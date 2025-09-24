@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
+import { ZoteroLibrary } from "../types/zotero";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
@@ -18,6 +19,11 @@ export const isDeviceAuthorizedAtom = selectAtom(
 );
 
 // Sync libraries
+export const syncLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.libraries || [];
+});
+
 export const syncLibraryIdsAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.libraries?.map((library) => library.library_id) || [],

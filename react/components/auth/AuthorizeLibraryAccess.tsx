@@ -2,7 +2,10 @@ import React, { Dispatch, SetStateAction } from "react";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import ConsentToggle from "../preferences/ConsentToggle";
-import LibrarySelection from "../LibrarySelection";
+import SelectLibraries from "../SelectLibraries";
+import { planNameAtom } from "../../atoms/profile";
+import { useAtomValue } from "jotai";
+import Button from "../ui/Button";
 
 interface AuthorizeLibraryAccessProps {
     selectedLibraryIds: number[];
@@ -27,36 +30,62 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     consentToShare,
     handleConsentChange
 }) => {
-    
+    const planName = useAtomValue(planNameAtom);
+
     return (
-        <div className="display-flex flex-col gap-4 flex-1 min-h-0">
-            <div className="text-lg font-semibold">Step 1: Select Libraries</div>
-            <div className="display-flex flex-col flex-1 min-h-0 gap-3">
+        <div className="display-flex flex-col gap-3 flex-1 min-h-0">
 
-                {/* Library Selection */}
-                <LibrarySelection
-                    selectedLibraryIds={selectedLibraryIds}
-                    setSelectedLibraryIds={setSelectedLibraryIds}
-                    libraryStatistics={libraryStatistics}
-                    setLibraryStatistics={setLibraryStatistics}
-                />
+            {/* Library Selection */}
+            <SelectLibraries
+                selectedLibraryIds={selectedLibraryIds}
+                setSelectedLibraryIds={setSelectedLibraryIds}
+                libraryStatistics={libraryStatistics}
+                setLibraryStatistics={setLibraryStatistics}
+                useZoteroSync={useZoteroSync}
+            />
 
-                {/* Sync Toggle & Consent Toggle */}
-                <div className="flex-1" />
-                <div className="display-flex flex-col gap-3">
-                    <div className="h-1 border-top-quinary" />
-                    <ZoteroSyncToggle 
-                        checked={useZoteroSync}
-                        onChange={handleSyncToggleChange}
-                        disabled={disableSyncToggle}
-                    />
-                    <ConsentToggle
-                        checked={consentToShare}
-                        onChange={handleConsentChange}
-                    />
+            {/* Beta Account */}
+            {planName === 'beta' && (
+                <div className="font-color-tertiary text-sm px-2">
+                    Beta accounts include unlimited metadata and related reference search. Full-document search is limited to 75,000 pages total, with PDFs up to 500 pages (50MB) per file.
                 </div>
-                
+            )}
+
+            {/* Free Account */}
+            {planName === 'free' && (
+                <div className="display-flex flex-col gap-5">
+                    <div className="font-color-tertiary text-sm px-2">
+                        Free accounts supports unlimited metadata and related item search.
+                    </div>
+                    <div className="p-3 rounded-md bg-senary">
+                        <div className="display-flex flex-col gap-2">
+                            <div className="display-flex flex-row justify-between items-center mb-1">
+                                <div className="font-medium">Upgrade Account</div>
+                                <Button variant="outline">Upgrade</Button>
+                            </div>
+                            <div className="text-sm font-color-secondary">
+                                Full-document search, sentence-level citations, etc...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Sync Toggle & Consent Toggle */}
+            <div className="flex-1" />
+            <div className="display-flex flex-col gap-4">
+                <div className="h-1 border-top-quinary" />
+                <ZoteroSyncToggle 
+                    checked={useZoteroSync}
+                    onChange={handleSyncToggleChange}
+                    disabled={disableSyncToggle}
+                />
+                <ConsentToggle
+                    checked={consentToShare}
+                    onChange={handleConsentChange}
+                />
             </div>
+            
         </div>
     );
 };
