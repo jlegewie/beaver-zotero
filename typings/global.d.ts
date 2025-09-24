@@ -22,6 +22,10 @@ declare const addon: import("../src/addon").default;
 
 declare const __env__: "production" | "development";
 
+declare const ZOTERO_CONFIG: {
+    API_URL: string;
+};
+
 declare namespace Zotero {
     namespace Beaver {
         const pluginVersion: string;
