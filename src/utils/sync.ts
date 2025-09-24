@@ -12,6 +12,7 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
+import { isAttachmentOnServer } from './files';
 
 /**
  * Checks if a library is valid for sync
@@ -64,7 +65,8 @@ export const syncingItemFilterAsync = async (item: Zotero.Item | false, collecti
     if (item.isInTrash()) return false;
     if (item.isRegularItem()) return true;
     if (item.isPDFAttachment() || item.isImageAttachment()) {
-        return await item.fileExists();
+        // Item is available locally or on server
+        return isAttachmentOnServer(item) || await item.fileExists();
     }
     return false;
 };
