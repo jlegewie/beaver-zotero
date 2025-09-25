@@ -409,11 +409,10 @@ class SourceValidationManager {
             // Get file hash for backend validation
             let fileHash: string;
             try {
-                fileHash = await item.attachmentHash;
-                if (!fileHash) {
-                    throw new Error('No file hash available');
-                }
+                // Note: file hash can be undefined for missing files
+                fileHash = await item.attachmentHash || '';
             } catch (error: any) {
+                logger(`SourceValidationManager: Unable to get file details for ${source.itemKey}: ${error.message}`, 1);
                 return {
                     ...baseResult,
                     isValid: false,
