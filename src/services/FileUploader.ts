@@ -339,9 +339,9 @@ export class FileUploader {
             logger(`File Uploader uploadFile ${item.zotero_key}: File metadata: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`, 3);
 
             // File array buffer check
-            if (!fileArrayBuffer) {
-                logger(`File Uploader uploadFile ${item.zotero_key}: File array buffer not found`, 1);
-                await this.handlePermanentFailure(item, user_id, "File array buffer not found");
+            if (!fileArrayBuffer || !mimeType || !fileSize || !pageCount) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: Unable to get file data`, 1);
+                await this.handlePermanentFailure(item, user_id, "Unable to get file data");
                 return;
             }
 
