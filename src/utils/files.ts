@@ -73,6 +73,20 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 	}
 }
 
+function md5FromBytes(uint8: Uint8Array): string {
+	// @ts-ignore Components is available in Zotero
+	const ch = Components.classes["@mozilla.org/security/hash;1"]
+		.createInstance(Components.interfaces.nsICryptoHash);
+	ch.init(ch.MD5);
+	ch.update(uint8, uint8.length);
+	const bin = ch.finish(false);
+	let hex = "";
+	for (let i = 0; i < bin.length; i++) {
+		const h = bin.charCodeAt(i).toString(16);
+		hex += h.length === 1 ? "0" + h : h;
+	}
+	return hex;
+}
 
 
 /**
@@ -143,3 +157,18 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		return null;
 	}
 }
+
+
+		// const fileHash = (function md5FromBytes(uint8) {
+		// 	const ch = Components.classes["@mozilla.org/security/hash;1"]
+		// 		.createInstance(Components.interfaces.nsICryptoHash);
+		// 	ch.init(ch.MD5);
+		// 	ch.update(uint8, uint8.length);
+		// 	const bin = ch.finish(false);
+		// 	let hex = "";
+		// 	for (let i = 0; i < bin.length; i++) {
+		// 		const h = bin.charCodeAt(i).toString(16);
+		// 		hex += h.length === 1 ? "0" + h : h;
+		// 	}
+		// 	return hex;
+		// })(data);
