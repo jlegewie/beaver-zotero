@@ -359,7 +359,7 @@ export class FileUploader {
             }
 
             // Create a blob from the file array buffer with the mime type
-            const blob = new Blob([fileArrayBuffer], { type: mimeType });
+            const blob = new Blob([new Uint8Array(fileArrayBuffer)], { type: mimeType });
 
             // Perform the file upload with retry for network issues
             let uploadSuccess = false;
@@ -464,7 +464,7 @@ export class FileUploader {
         }
 
         // Create blob from file content
-        const blob = new Blob([fileArrayBuffer], { type: mimeType });
+        const blob = new Blob([new Uint8Array(fileArrayBuffer)], { type: mimeType });
 
         // Upload with retry logic
         let uploadSuccess = false;
