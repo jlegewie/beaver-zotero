@@ -268,7 +268,13 @@ export class FileUploader {
 
             // Check if file exists locally or on server
             const useLocalFile = await attachment.fileExists();
-            const useServerFile = !useLocalFile && isAttachmentOnServer(attachment);
+            const useServerFile = (
+                !useLocalFile &&
+                isAttachmentOnServer(attachment) &&
+                Boolean(Zotero.Users.getCurrentUserID()) &&
+                Boolean(Zotero.Sync.Data.Local.getAPIKey())
+            );
+            
 
             logger(`File Uploader uploadFile ${item.zotero_key}: Use local file: ${useLocalFile}, use server file: ${useServerFile}`, 3);
 
