@@ -218,3 +218,98 @@ export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDo
 		xhr.send(null);
 	});
 }
+
+
+interface FileHashInfo {
+	key: string;
+	md5: string | null;
+	mtime: number | null;
+}
+
+
+/**
+ * Gets the file hashes for a list of attachment items.
+ * @param items Zotero items
+ * @param batchSize The number of items to process in each batch
+ * @returns Promise resolving to the file hashes or null if the hashes could not be retrieved.
+ */
+export async function getFileHashes(items: Zotero.Item[], batchSize: number = 50): Promise<FileHashInfo[]> {
+	const attachmentItems = items.filter(item => item && isAttachmentOnServer(item));
+	if (attachmentItems.length === 0) return [];
+
+	const userID = Zotero.Users.getCurrentUserID();
+	const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
+	if (!userID || !apiKey) return [];
+
+	const base = ZOTERO_CONFIG.API_URL;
+
+	// Group items by library type and ID for efficient batching
+	const groupedItems = new Map<string, Zotero.Item[]>();
+	for (const item of attachmentItems) {
+		const isGroup = item.library && item.library.isGroup;
+		const libraryKey = isGroup ? `group-${item.libraryID}` : `user-${userID}`;
+		if (!groupedItems.has(libraryKey)) groupedItems.set(libraryKey, []);
+		groupedItems.get(libraryKey)!.push(item);
+	}
+
+	const results: FileHashInfo[] = [];
+
+	// Process each library group
+	for (const [libraryKey, libraryItems] of groupedItems.entries()) {
+		// Process in batches of batchSize (API limit)
+		for (let i = 0; i < libraryItems.length; i += batchSize) {
+			const batch = libraryItems.slice(i, i + batchSize);
+			const itemKeys = batch.map((it: Zotero.Item) => it.key).join(',');
+
+			const isGroup = libraryKey.startsWith('group-');
+			const libraryID = libraryKey.split('-')[1];
+
+			const apiUrl = isGroup
+				? `${base}groups/${libraryID}/items?itemKey=${itemKeys}&include=data`
+				: `${base}users/${userID}/items?itemKey=${itemKeys}&include=data`;
+
+			try {
+				const response = await fetch(apiUrl, {
+					headers: {
+						'Zotero-API-Key': apiKey,
+						'Accept': 'application/json'
+					}
+				});
+
+				if (!response.ok) {
+					console.error(`Failed to fetch hashes for batch: ${response.status}`);
+					continue;
+				}
+
+				const data = await response.json();
+				const fetchedItems = Array.isArray(data) ? data : [];
+
+				for (const it of fetchedItems) {
+					const d = it && it.data;
+					if (d && d.itemType === 'attachment' && d.md5) {
+						results.push({
+							key: d.key,
+							md5: d.md5,
+							mtime: d.mtime ? parseInt(d.mtime, 10) : null
+						});
+					}
+				}
+			} catch (error) {
+				console.error('Error fetching file hashes:', error);
+				continue;
+			}
+		}
+	}
+
+	return results;
+}
+
+/**
+ * Gets the file hash for an attachment item.
+ * @param item Zotero item
+ * @returns Promise resolving to the file hash or null if the hash could not be retrieved.
+ */
+export async function getFileHash(item: Zotero.Item): Promise<FileHashInfo | null> {
+	const results = await getFileHashes([item]);
+	return results.length > 0 ? results[0] : null;
+}
