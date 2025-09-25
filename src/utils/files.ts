@@ -158,17 +158,63 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 	}
 }
 
+interface SignedDownloadInfo {
+	downloadUrl: string;
+	md5: string | null;
+	mtime: number | null;
+	compressed: boolean;
+}
 
-		// const fileHash = (function md5FromBytes(uint8) {
-		// 	const ch = Components.classes["@mozilla.org/security/hash;1"]
-		// 		.createInstance(Components.interfaces.nsICryptoHash);
-		// 	ch.init(ch.MD5);
-		// 	ch.update(uint8, uint8.length);
-		// 	const bin = ch.finish(false);
-		// 	let hex = "";
-		// 	for (let i = 0; i < bin.length; i++) {
-		// 		const h = bin.charCodeAt(i).toString(16);
-		// 		hex += h.length === 1 ? "0" + h : h;
-		// 	}
-		// 	return hex;
-		// })(data);
+/**
+ * Gets the signed download info for an attachment that exists on the server.
+ * @param item Zotero item
+ * @returns Promise resolving to the signed download info or null if the info could not be retrieved.
+ */
+export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDownloadInfo | null> {
+	if (!item?.isStoredFileAttachment()) return null;
+
+	const userID = Zotero.Users.getCurrentUserID();
+	const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
+	if (!userID || !apiKey) return null;
+
+	const base = ZOTERO_CONFIG.API_URL;
+	const apiUrl = item.library.isGroup
+		? `${base}groups/${item.libraryID}/items/${item.key}/file`
+		: `${base}users/${userID}/items/${item.key}/file`;
+
+	return await new Promise((resolve) => {
+		let xhr = new XMLHttpRequest();
+		xhr.mozBackgroundRequest = true;
+		xhr.open('GET', apiUrl, true);
+		xhr.setRequestHeader('Zotero-API-Key', apiKey);
+
+		let info: SignedDownloadInfo | null = null;
+
+		// Capture redirect headers and cancel redirect
+		// @ts-ignore notificationCallbacks is available in XMLHttpRequest
+		xhr.channel.notificationCallbacks = {
+			QueryInterface: ChromeUtils.generateQI([Ci.nsIInterfaceRequestor, Ci.nsIChannelEventSink]),
+			getInterface: ChromeUtils.generateQI([Ci.nsIChannelEventSink]),
+			asyncOnChannelRedirect(oldChannel: any, newChannel: any, flags: any, callback: any) {
+				try {
+					oldChannel.QueryInterface(Ci.nsIHttpChannel);
+					info = {
+						downloadUrl: newChannel.URI.spec,
+						md5: oldChannel.getResponseHeader('Zotero-File-MD5') || null,
+						mtime: parseInt(oldChannel.getResponseHeader('Zotero-File-Modification-Time')) || null,
+						compressed: (oldChannel.getResponseHeader('Zotero-File-Compressed') == 'Yes') || false
+					};
+				} catch (e) {
+					info = { downloadUrl: newChannel.URI.spec, md5: null, mtime: null, compressed: false };
+				}
+				// Cancel the redirect
+				oldChannel.cancel(Cr.NS_BINDING_ABORTED);
+				callback.onRedirectVerifyCallback(Cr.NS_BINDING_ABORTED);
+			}
+		};
+
+		xhr.onloadend = () => resolve(info);
+		xhr.onerror = () => resolve(null);
+		xhr.send(null);
+	});
+}
