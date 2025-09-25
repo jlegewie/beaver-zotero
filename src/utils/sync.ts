@@ -590,15 +590,30 @@ export async function syncItemsToBackend(
         
         try {
             // ------- Transform items in this batch -------
-            const regularItems = batchItems.filter(item => item.action === 'upsert' && item.item.isRegularItem()).map(item => item.item);
-            const attachmentItems = batchItems.filter(item => item.action === 'upsert' && item.item.isAttachment()).map(item => item.item);
-            const itemsToDelete = await Promise.all(batchItems.filter(item => item.action === 'delete').map(item => extractDeleteData(item.item)));
+            const regularItems = batchItems
+                .filter(item => item.action === 'upsert' && item.item.isRegularItem())
+                .map(item => item.item);
+
+            const attachmentItems = batchItems
+                .filter(item => item.action === 'upsert' && item.item.isAttachment())
+                .map(item => item.item);
+
+            const itemsToDelete = await Promise.all(
+                batchItems.filter(item => item.action === 'delete')
+                    .map(item => extractDeleteData(item.item))
+            );
             
             const [batchItemsData, batchAttachmentsData] = await Promise.all([
-                Promise.all(regularItems.map((item) => extractItemData(item, clientDateModifiedMap.get(item.id)))).then(data => 
-                    data.filter((item) => item !== null) as ItemData[]
+                Promise.all(
+                    regularItems.map((item) =>
+                        extractItemData(item, clientDateModifiedMap.get(item.id))
+                    )
+                ).then(
+                    data => data.filter((item) => item !== null) as ItemData[]
                 ),
-                Promise.all(attachmentItems.map((item) => extractAttachmentData(item, clientDateModifiedMap.get(item.id)))).then(data => 
+                Promise.all(attachmentItems.map((item) =>
+                    extractAttachmentData(item, clientDateModifiedMap.get(item.id)))
+                ).then(data => 
                     data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
