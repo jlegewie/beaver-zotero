@@ -123,11 +123,16 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		apiUrl = `${baseApiUrl}users/${userID}/items/${item.key}/file`;
 	}
 
+	const retryOptions = {
+		errorDelayIntervals: [500, 1500, 3000] // 3 retries
+	};
+
 	try {
 		// 4. Make the first request to get the redirect URL
 		logger(`getAttachmentDataInMemory: Requesting download URL from: ${apiUrl}`);
 		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey }
+			headers: { 'Zotero-API-Key': apiKey },
+			...retryOptions
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
@@ -138,7 +143,10 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		Zotero.debug(`Downloading file from S3 URL: ${downloadUrl}`, 2);
 
 		// 5. Make the second request to the signed S3 URL to get the file content
-		const fileResponse = await Zotero.HTTP.request('GET', downloadUrl, { responseType: 'arraybuffer' });
+		const fileResponse = await Zotero.HTTP.request('GET', downloadUrl, {
+			responseType: 'arraybuffer',
+			...retryOptions
+		});
 
 		if (fileResponse.status !== 200) {
 			throw new Error(`getAttachmentDataInMemory: File download failed. S3 responded with status ${fileResponse.status}`);
