@@ -420,16 +420,18 @@ class SourceValidationManager {
             let requiresUpload = false;
 
             if (validationType === SourceValidationType.PROCESSED_FILE) {
-                // Processed file: pass if file exists OR is processed
-                isValid = backendResponse.file_exists || backendResponse.processed;
+                // Processed file: pass if file is processed
+                isValid = backendResponse.processed;
                 if (!isValid) {
-                    reason = 'File not available';
+                    reason = backendResponse.details || 'File not available';
                 }
             } else {
-                // Require file: require file to exist
-                isValid = backendResponse.file_exists;
+                // Require file: require file to exist and be processed
+                isValid = backendResponse.file_exists && backendResponse.processed;
                 requiresUpload = shouldUpload;
-                if (!isValid && !requiresUpload) {
+                if (!isValid && !backendResponse.processed) {
+                    reason = backendResponse.details || 'File not available';
+                } else if (!isValid && !requiresUpload) {
                     reason = 'File upload failed';
                 } else if (!isValid && requiresUpload) {
                     reason = 'File upload failed';
