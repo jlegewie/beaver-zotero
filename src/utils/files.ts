@@ -114,49 +114,32 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		return null;
 	}
 
-	// 3. Construct the initial API URL
+	// 3. Construct the API URL (this endpoint will 302 to a signed URL)
 	const baseApiUrl = ZOTERO_CONFIG.API_URL;
-	let apiUrl;
-	if (item.library.isGroup) {
-		apiUrl = `${baseApiUrl}groups/${item.libraryID}/items/${item.key}/file`;
-	} else {
-		apiUrl = `${baseApiUrl}users/${userID}/items/${item.key}/file`;
-	}
-
+	const apiUrl = item.library.isGroup
+		? `${baseApiUrl}groups/${item.libraryID}/items/${item.key}/file`
+		: `${baseApiUrl}users/${userID}/items/${item.key}/file`;
+	
 	const retryOptions = {
 		errorDelayIntervals: [500, 1500, 3000] // 3 retries
 	};
 
 	try {
-		// 4. Make the first request to get the redirect URL
+		// 4. Single request: follow redirect and get bytes
 		logger(`getAttachmentDataInMemory: Requesting download URL from: ${apiUrl}`);
-		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
+		const resp = await Zotero.HTTP.request('GET', apiUrl, {
 			headers: { 'Zotero-API-Key': apiKey },
+			responseType: 'arraybuffer', // defaults to following redirects
 			...retryOptions
 		});
-
-		const downloadUrl = redirectResponse.responseURL;
-		if (!downloadUrl || (redirectResponse.status !== 302 && redirectResponse.status !== 200)) {
-			throw new Error(`getAttachmentDataInMemory: Failed to get a download redirect. Server responded with status ${redirectResponse.status}`);
+		if (resp.status !== 200) {
+			return null;
 		}
 
-		Zotero.debug(`Downloading file from S3 URL: ${downloadUrl}`, 2);
+		const data = new Uint8Array(resp.response);
 
-		// 5. Make the second request to the signed S3 URL to get the file content
-		const fileResponse = await Zotero.HTTP.request('GET', downloadUrl, {
-			responseType: 'arraybuffer',
-			...retryOptions
-		});
-
-		if (fileResponse.status !== 200) {
-			throw new Error(`getAttachmentDataInMemory: File download failed. S3 responded with status ${fileResponse.status}`);
-		}
-
-		// 6. Return the data as a Uint8Array
-		return new Uint8Array(fileResponse.response);
-
+		return data;
 	} catch (e) {
-		logger(`getAttachmentDataInMemory: Error during in-memory attachment download: ${e}`);
 		return null;
 	}
 }
