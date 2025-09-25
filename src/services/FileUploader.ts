@@ -274,9 +274,6 @@ export class FileUploader {
                 Boolean(Zotero.Users.getCurrentUserID()) &&
                 Boolean(Zotero.Sync.Data.Local.getAPIKey())
             );
-            
-
-            logger(`File Uploader uploadFile ${item.zotero_key}: Use local file: ${useLocalFile}, use server file: ${useServerFile}`, 3);
 
             if (!useLocalFile && !useServerFile) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: File not available locally or on server`, 1);
@@ -292,6 +289,8 @@ export class FileUploader {
 
             // File exists locally
             if (useLocalFile) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: Using local file`, 3);
+
                 // Get the file path for the attachment
                 const filePath: string | null = await attachment.getFilePathAsync() || null;
                 
@@ -319,6 +318,7 @@ export class FileUploader {
 
             // File exists on server
             } else if (useServerFile) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: Using server file`, 3);
 
                 // Download the file data to memory
                 fileArrayBuffer = await getAttachmentDataInMemory(attachment);
