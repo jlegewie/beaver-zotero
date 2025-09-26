@@ -11,7 +11,7 @@ import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
-import { loadFullItemData } from "../../src/utils/zoteroUtils";
+import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -210,12 +210,7 @@ export const loadThreadAtom = atom(
                     const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
 
                     if (itemsToLoad.length > 0) {
-                        const options = {
-                            includeParents: true,
-                            includeChildren: true,
-                            dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
-                        };
-                        await loadFullItemData(itemsToLoad, options);
+                        await loadFullItemDataWithAllTypes(itemsToLoad);
 
                         if (!Zotero.Styles.initialized()) {
                             await Zotero.Styles.init();

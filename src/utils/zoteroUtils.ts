@@ -353,3 +353,11 @@ export async function loadFullItemData(
         await Zotero.Items.loadDataTypes(itemsToLoad, dataTypes);
     }
 }
+
+export async function loadFullItemDataWithAllTypes(items: Zotero.Item[] = []) {
+    await loadFullItemData(items, {
+        includeParents: true,
+        includeChildren: true,
+        dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
+    });
+}
