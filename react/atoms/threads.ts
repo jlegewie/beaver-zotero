@@ -209,9 +209,13 @@ export const loadThreadAtom = atom(
                     const options = {
                         includeParents: true,
                         includeChildren: true,
-                        dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]
+                        dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
                     };
                     await loadFullItemData(itemsToLoad, options);
+
+                    if (!Zotero.Styles.initialized()) {
+                        await Zotero.Styles.init();
+                    }
                 }
 
                 // Update the thread messages and attachments state
