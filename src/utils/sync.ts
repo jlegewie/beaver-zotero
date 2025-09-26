@@ -6,13 +6,17 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedAsISOString, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
+import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
-import { isAttachmentOnServer } from './files';
+import { isAttachmentOnServer, getFileHashes } from './files';
+
+const NEEDS_HASH = '[needs_hash]';
+const MAX_SERVER_FILES = 200;
+
 
 /**
  * Checks if a library is valid for sync
@@ -26,7 +30,15 @@ export const isLibraryValidForSync = (
 ): boolean => {
     if (!useZoteroSync) useZoteroSync = store.get(syncWithZoteroAtom);
     if (!library) return false;
-    return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
+    const isValid = !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
+    if (!isValid) return false;
+    // Check number of server files
+    const prefKey = library.isGroup ? 'sync.storage.downloadMode.groups' : 'sync.storage.downloadMode.personal';
+    const prefValue = Zotero.Prefs.get(prefKey);
+    if (prefValue === 'on-demand') {
+        // Check number of server files for library
+    }
+    return true;
 };
 
 /**
@@ -653,13 +665,13 @@ export async function syncItemsToBackend(
             const attachmentsNeedingHashes = batchAttachmentsData.filter(
                 att => att && att.file_hash === NEEDS_HASH
             );
-            const attachmentsWithHashes = batchAttachmentsData.filter(
-                (att) => att.file_hash !== NEEDS_HASH
+            let attachmentsWithHashes = batchAttachmentsData.filter(
+                att => att && att.file_hash !== NEEDS_HASH,
             );
 
             if (attachmentsNeedingHashes.length > 0) {
                 const updatedAttachments = await fetchRemoteFileHashes(
-                    attachmentsNeedingHashes,
+                    attachmentsNeedingHashes as AttachmentDataWithMimeType[],
                     syncSessionId
                 );
 
