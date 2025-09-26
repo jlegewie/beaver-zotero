@@ -9,8 +9,50 @@ import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
 import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 import { getPref, setPref } from "./utils/prefs";
+import { performConsistencyCheck } from "./utils/syncConsistency";
+import { store } from "../react/store";
+import { isAuthenticatedAtom } from "../react/atoms/auth";
+import { accountService } from "./services/accountService";
 
 // const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
+
+/**
+ * Compares two semantic version strings.
+ * @param v1 Version string 1
+ * @param v2 Version string 2
+ * @returns 1 if v1 > v2, -1 if v1 < v2, 0 if v1 === v2
+ */
+function compareVersions(v1: string, v2: string): number {
+    const parts1 = v1.split('.').map(Number);
+    const parts2 = v2.split('.').map(Number);
+    const len = Math.max(parts1.length, parts2.length);
+
+    for (let i = 0; i < len; i++) {
+        const p1 = parts1[i] || 0;
+        const p2 = parts2[i] || 0;
+        if (p1 > p2) return 1;
+        if (p1 < p2) return -1;
+    }
+    return 0;
+}
+
+/**
+ * Handles upgrade tasks between plugin versions.
+ * @param lastVersion The previously installed version
+ * @param currentVersion The current plugin version
+ */
+async function handleUpgrade(lastVersion: string, currentVersion: string) {
+	// Upgrade to 0.5.0 or newer from a version before 0.5.0
+    if (compareVersions(lastVersion, '0.5.0') < 0 && compareVersions(currentVersion, '0.5.0') >= 0) {
+        
+        // a) Show changelog
+        Zotero.launchURL("https://www.beaverapp.ai/changelog/v0.5");
+
+        // b) Set flag to run consistency check from UI context
+        setPref('runConsistencyCheck', true);
+        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for consistency check.`);
+    }
+}
 
 async function onStartup() {
 	await Promise.all([
@@ -59,6 +101,12 @@ async function onStartup() {
 	await Promise.all(
 		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
 	);
+
+	// -------- Handle plugin upgrade --------
+	const lastVersion = getPref('installedVersion');
+	if (lastVersion && lastVersion !== version) {
+		await handleUpgrade(lastVersion, version);
+	}
 
 	// -------- Set installed version --------
 	setPref('installedVersion', version);
