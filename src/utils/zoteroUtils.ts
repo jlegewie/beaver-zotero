@@ -311,3 +311,40 @@ export async function shortItemTitle(item: Zotero.Item): Promise<string> {
 
     return '';
 }
+
+
+
+export async function loadFullItemData(items: Zotero.Item[], includeParents: boolean = true, includeChildren: boolean = true) {
+    const dataTypes = ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"];
+    if (items.length === 0) return;
+    
+    // 1. Load main items
+    await Zotero.Items.loadDataTypes(items, dataTypes);
+
+    // 2. Collect parent and child IDs
+    const parentIDs = includeParents
+        ? items
+            .map(item => item.parentID)
+            .filter((id): id is number => Boolean(id))
+        : [];
+
+    const childIDs = includeChildren
+        ? items
+            .filter((item) => item.isRegularItem())
+            .flatMap(item => item.getAttachments())
+            .filter((id): id is number => Boolean(id))
+        : [];
+
+    // 3. Load parent and child items into memory
+    const parentItems = parentIDs.length > 0 ? await Zotero.Items.getAsync(parentIDs) : [];
+    const childItems = childIDs.length > 0 ? await Zotero.Items.getAsync(childIDs) : []; 
+    
+    // 4. Load child and parent items
+    if (parentItems.length > 0 || childItems.length > 0) {
+        const itemsToLoad = [...parentItems, ...childItems]
+            .filter((item, index, self) => item && index === self.findIndex((i) => i.id === item.id));
+        
+        // Load all default data types (itemData, creators, etc.) for display
+        await Zotero.Items.loadDataTypes(itemsToLoad, dataTypes);
+    }
+}
