@@ -312,10 +312,26 @@ export async function shortItemTitle(item: Zotero.Item): Promise<string> {
     return '';
 }
 
+/**
+ * Loads full item data for a list of Zotero items.
+ * @param items - The Zotero items to load data for.
+ * @param options - The options for loading the data.
+ * @returns A promise that resolves when the data is loaded.
+ */
+export async function loadFullItemData(
+    items: Zotero.Item[],
+    options: {
+        includeParents: boolean,
+        includeChildren: boolean,
+        dataTypes: string[]
+    } = {
+        includeParents: true,
+        includeChildren: true,
+        dataTypes: ["primaryData", "creators", "itemData", "childItems"]
+    }
+) {
+    const { includeParents, includeChildren, dataTypes } = options;
 
-
-export async function loadFullItemData(items: Zotero.Item[], includeParents: boolean = true, includeChildren: boolean = true) {
-    const dataTypes = ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"];
     if (items.length === 0) return;
     
     // 1. Load main items

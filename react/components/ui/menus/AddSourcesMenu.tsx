@@ -141,7 +141,14 @@ const AddSourcesMenu: React.FC<{
             const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds);
 
             // Ensure item data is loaded
-            await loadFullItemData(resultsItems);
+            await loadFullItemData(
+                resultsItems,
+                {
+                    includeParents: true,
+                    includeChildren: true,
+                    dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]
+                }
+            );
             
             // Check if this search was cancelled
             if (searchId !== currentSearchRef.current) {
