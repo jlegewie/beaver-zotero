@@ -267,19 +267,14 @@ export async function getFileHashes(items: Zotero.Item[], batchSize: number = 50
 				: `${base}users/${userID}/items?itemKey=${itemKeys}&include=data`;
 
 			try {
-				const response = await fetch(apiUrl, {
+				const xhr = await Zotero.HTTP.request('GET', apiUrl, {
 					headers: {
 						'Zotero-API-Key': apiKey,
-						'Accept': 'application/json'
+						'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION
 					}
 				});
 
-				if (!response.ok) {
-					console.error(`Failed to fetch hashes for batch: ${response.status}`);
-					continue;
-				}
-
-				const data = await response.json();
+				const data = JSON.parse(xhr.responseText);
 				const fetchedItems = Array.isArray(data) ? data : [];
 
 				for (const it of fetchedItems) {
