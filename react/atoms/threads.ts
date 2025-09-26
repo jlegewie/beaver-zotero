@@ -11,6 +11,7 @@ import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { logger } from "../../src/utils/logger";
+import { loadFullItemData } from "../../src/utils/zoteroUtils";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -192,6 +193,27 @@ export const loadThreadAtom = atom(
             const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
+                // Load item data
+                const allItemReferences = new Set<string>();
+                [...userAttachments, ...citationMetadata, ...toolAttachments]
+                    .map(att => `${att.library_id}-${att.zotero_key}`)
+                    .forEach(ref => allItemReferences.add(ref));
+
+                const itemsPromises = Array.from(allItemReferences).map(ref => {
+                    const [libraryId, key] = ref.split('-');
+                    return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                })
+                const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
+
+                if (itemsToLoad.length > 0) {
+                    const options = {
+                        includeParents: true,
+                        includeChildren: true,
+                        dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]
+                    };
+                    await loadFullItemData(itemsToLoad, options);
+                }
+
                 // Update the thread messages and attachments state
                 set(threadMessagesAtom, messages);
                 set(userAttachmentsAtom, userAttachments);
