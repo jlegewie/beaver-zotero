@@ -177,7 +177,7 @@ export async function performConsistencyCheck(
                     }
 
                     const localDateModified = clientDateModifiedMapAttachments.get(zoteroAttachment.id) || await getClientDateModifiedAsISOString(zoteroAttachment);
-                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { lightweight: true });
+                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { skipFileHash: true });
                     if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,

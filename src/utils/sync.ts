@@ -198,11 +198,41 @@ async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
  * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
  * @returns Promise resolving to AttachmentData object for syncing
  */
-export async function extractAttachmentData(item: Zotero.Item, clientDateModified: string | undefined, options?: { lightweight?: boolean }): Promise<AttachmentDataWithMimeType | null> {
+export async function extractAttachmentData(
+    item: Zotero.Item,
+    clientDateModified: string | undefined,
+    options?: { skipFileHash?: boolean }
+): Promise<AttachmentDataWithMimeType | null> {
+    const skipFileHash = options?.skipFileHash || false;
 
-    // 1. File: Confirm that the item is an attachment and that the file exists
+    // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
     if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) return null;
-    const file_hash = options?.lightweight ? '' : await item.attachmentHash;
+    
+    // 2. Get the file hash
+    let file_hash: string = '';
+    let needs_hash: boolean = false;
+
+    // Determine local availability
+    const existsLocal = await item.fileExists();
+    const existsServer = isAttachmentOnServer(item);
+
+    // Get the file hash
+    if (!skipFileHash) {
+        // Hash from local file
+        if(existsLocal) {
+            file_hash = await item.attachmentHash;
+        
+        // Hash from server
+        } else if (existsServer) {
+            needs_hash = true;
+        }
+    }
+
+    if (!file_hash && !needs_hash && !skipFileHash) {
+        // TODO: silent failure for example when user doesn't sync and local file was removed
+        logger(`Beaver Sync: Attachment ${item.key} unavailable (local: ${existsLocal}, server: ${existsServer}). Skipping.`, 1);
+        return null;
+    }
 
     // 2. Metadata: Prepare the object containing only fields for hashing
     const hashedFields: AttachmentDataHashedFields = {
@@ -238,11 +268,11 @@ export async function extractAttachmentData(item: Zotero.Item, clientDateModifie
         }
     }
 
-    // 4. AttachmentData: Construct final AttachmentData object
+    // 4. AttachmentData: Construct final AttachmentData object (with optional placeholder flag)
     const attachmentData: AttachmentDataWithMimeType = {
         ...hashedFields,
         // Add non-hashed fields
-        file_hash: file_hash,
+        file_hash: needs_hash ? NEEDS_HASH : file_hash,
         mime_type: await getMimeType(item),
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
         date_modified: finalDateModified,
@@ -603,21 +633,43 @@ export async function syncItemsToBackend(
                     .map(item => extractDeleteData(item.item))
             );
             
-            const [batchItemsData, batchAttachmentsData] = await Promise.all([
+            // Extract item and attachment data
+            let [batchItemsData, batchAttachmentsData] = await Promise.all([
+                // Items
                 Promise.all(
                     regularItems.map((item) =>
                         extractItemData(item, clientDateModifiedMap.get(item.id))
                     )
-                ).then(
-                    data => data.filter((item) => item !== null) as ItemData[]
-                ),
+                ).then(data => data.filter((item) => item !== null) as ItemData[]),
+                // Attachments
                 Promise.all(attachmentItems.map((item) =>
                     extractAttachmentData(item, clientDateModifiedMap.get(item.id)))
                 ).then(data => 
                     data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
+
+            // ------- Fetch file hashes for attachments that need them -------
+            const attachmentsNeedingHashes = batchAttachmentsData.filter(att => att && att.file_hash === NEEDS_HASH);
+            const updatedAttachments = await fetchRemoteFileHashes(attachmentsNeedingHashes, syncSessionId);
             
+            const updatedAttachmentsMap = new Map(
+                updatedAttachments.map(att => [att.zotero_key, att])
+            );
+            
+            batchAttachmentsData = batchAttachmentsData
+                .map(att => {
+                    if (att.file_hash === NEEDS_HASH) {
+                        return updatedAttachmentsMap.get(att.zotero_key) || att;
+                    }
+                    return att;
+                })
+                .filter(att => att.file_hash !== NEEDS_HASH);
+
+            // Alternative
+            // const attachmentsWithHashes = batchAttachmentsData.filter(att => att && att.file_hash !== NEEDS_HASH);
+            // batchAttachmentsData = [...attachmentsWithHashes, ...updatedAttachments].filter(a => Boolean(a));
+
             const totalItems = batchItemsData.length + batchAttachmentsData.length + itemsToDelete.length;
             if (totalItems === 0) {
                 logger(`Beaver Sync '${syncSessionId}':     No items to send to backend`, 4);
@@ -1242,3 +1294,59 @@ async function getRegularAndAttachmentIDs(libraryID: number, includeDeleted = fa
     
     return await Zotero.DB.columnQueryAsync(sql, params);
 };
+
+/**
+ * Fetches file hashes from the server for attachments that need them
+ * @param attachmentsNeedingHashes Array of attachment data that need file hashes
+ * @param syncSessionId Session ID for logging
+ * @returns Promise resolving to new array of attachment data with updated file hashes
+ */
+async function fetchRemoteFileHashes(
+    attachmentsNeedingHashes: AttachmentDataWithMimeType[],
+    syncSessionId: string
+): Promise<AttachmentDataWithMimeType[]> {
+    if (attachmentsNeedingHashes.length === 0) {
+        return [];
+    }
+
+    logger(`Beaver Sync '${syncSessionId}':     Fetching file hashes for ${attachmentsNeedingHashes.length} attachments from server`, 4);
+    
+    try {
+        // Fetch items that need hashes
+        const itemPromises = attachmentsNeedingHashes.map(att => 
+            Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key).catch(error => {
+                logger(`Beaver Sync '${syncSessionId}':     Failed to fetch item ${att.zotero_key}: ${error.message}`, 2);
+                return null;
+            })
+        );
+        
+        const items = (await Promise.all(itemPromises)).filter(item => item !== null) as Zotero.Item[];
+        
+        if (items.length > 0) {
+            // Get file hashes from server
+            const fileHashes = await getFileHashes(items);
+            
+            // Create a map for efficient lookup
+            const hashMap = new Map(fileHashes.map(hash => [hash.key, hash.md5]));
+            
+            // Create new array with updated file hashes
+            let updatedCount = 0;
+            const updatedAttachments = attachmentsNeedingHashes.map(att => {
+                const md5 = hashMap.get(att.zotero_key);
+                if (md5) {
+                    updatedCount++;
+                    return { ...att, file_hash: md5 };
+                }
+                return att; // Keep original if no hash found
+            });
+            
+            logger(`Beaver Sync '${syncSessionId}':     Successfully fetched ${updatedCount} file hashes from server`, 4);
+            return updatedAttachments;
+        }
+    } catch (error: any) {
+        logger(`Beaver Sync '${syncSessionId}':     Error fetching file hashes: ${error.message}`, 2);
+    }
+
+    // Return original array if no updates were made
+    return attachmentsNeedingHashes;
+}
