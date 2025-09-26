@@ -62,7 +62,7 @@ export function useAuth() {
     
     // Stable callback for the auth listener
     const handleAuthStateChange = useCallback((event: AuthChangeEvent, newSession: Session | null) => {
-        logger(`auth: received event ${event}`, newSession ? 1 : 0);
+        // logger(`auth: received event ${event}`, newSession ? 1 : 0);
         
         const currentSession = sessionRef.current;
         const currentUser = userRef.current;
@@ -83,9 +83,10 @@ export function useAuth() {
         if (shouldUpdateSession) {
             logger(`auth: updating session atom for ${event}`);
             setSession(newSession);
-        } else {
-            logger(`auth: skipping session update for ${event} - no meaningful changes`);
         }
+        // else {
+            // logger(`auth: skipping session update for ${event} - no meaningful changes`);
+        // }
         
         // --- Determine if User Atom should be updated ---
         const shouldUpdateUser =
@@ -108,9 +109,10 @@ export function useAuth() {
             } else {
                 setUser(null);
             }
-        } else {
-            logger(`auth: skipping user update for ${event}`);
         }
+        // else {
+        //     logger(`auth: skipping user update for ${event}`);
+        // }
     }, [setSession, setUser]);
     
     useEffect(() => {
