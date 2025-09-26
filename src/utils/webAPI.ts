@@ -129,7 +129,7 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 	// 3. Construct the API URL (this endpoint will 302 to a signed URL)
 	const baseApiUrl = ZOTERO_CONFIG.API_URL;
 	const apiUrl = item.library.isGroup
-		? `${baseApiUrl}groups/${item.libraryID}/items/${item.key}/file`
+		? `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`
 		: `${baseApiUrl}users/${userID}/items/${item.key}/file`;
 	
 	const retryOptions = {
