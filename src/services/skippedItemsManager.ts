@@ -1,4 +1,4 @@
-import { SkippedItem } from '../../react/types/zotero';
+import { SkippedItem, ZoteroItemReference } from '../../react/types/zotero';
 import { getPref, setPref } from '../utils/prefs';
 
 const SKIPPED_ITEMS_PREF = 'skippedItems';
@@ -56,7 +56,7 @@ export class SkippedItemsManager {
      * @param itemsToSkip An array of Zotero.Item objects to upsert.
      * @param reason The reason the items are being skipped.
      */
-    public batchUpsert(itemsToSkip: Zotero.Item[], reason: string): void {
+    public batchUpsert(itemsToSkip: Zotero.Item[] | ZoteroItemReference[], reason: string): void {
         const existingSkippedItems = this.getAll();
         const skippedItemsMap = new Map<string, SkippedItem>();
 
@@ -66,13 +66,15 @@ export class SkippedItemsManager {
         }
 
         for (const itemToSkip of itemsToSkip) {
-            const key = `${itemToSkip.libraryID}-${itemToSkip.key}`;
+            const libraryID = itemToSkip instanceof Zotero.Item ? itemToSkip.libraryID : itemToSkip.library_id;
+            const key = itemToSkip instanceof Zotero.Item ? itemToSkip.key : itemToSkip.zotero_key;
+            const uniqueKey = `${libraryID}-${key}`;
             const skippedItem: SkippedItem = {
-                zotero_key: itemToSkip.key,
-                library_id: itemToSkip.libraryID,
+                zotero_key: key,
+                library_id: libraryID,
                 reason: reason,
             };
-            skippedItemsMap.set(key, skippedItem);
+            skippedItemsMap.set(uniqueKey, skippedItem);
         }
     
         const newSkippedItems = Array.from(skippedItemsMap.values());
