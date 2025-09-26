@@ -41,3 +41,6 @@ pref("deletionJobs", "[]");
 
 // Items skipped during sync
 pref("skippedItems", "[]")
+
+// Flag to run consistency check on upgrade
+pref("runConsistencyCheck", false);
