@@ -10,7 +10,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { InputSource } from '../../../types/sources';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';
-import { searchTitleCreatorYear } from '../../../utils/search';
+import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { planFeaturesAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
 import { threadAttachmentCountAtom } from '../../../atoms/threads';
@@ -115,75 +115,6 @@ const AddSourcesMenu: React.FC<{
             onClose();
         }, 5);
     }
-
-    // Custom scoring function for search results
-    const scoreSearchResult = useCallback((item: Zotero.Item, query: string): number => {
-        const queryLower = query.toLowerCase();
-        let score = 0;
-        
-        // Get item data
-        const title = item.getField('title')?.toLowerCase() || '';
-        const creators = item.getCreators();
-        const year = item.getField('date') || '';
-        
-        // Perfect matches get highest scores
-        const titleExactMatch = title === queryLower;
-        const authorExactMatch = creators.some(creator => {
-            const lastName = creator.lastName?.toLowerCase() || '';
-            const firstName = creator.firstName?.toLowerCase() || '';
-            const fullName = `${firstName} ${lastName}`.trim();
-            return lastName === queryLower || firstName === queryLower || fullName === queryLower;
-        });
-        
-        if (titleExactMatch) score += 1000;
-        if (authorExactMatch) score += 900;
-        
-        // Starts with matches (high priority)
-        const titleStartsWith = title.startsWith(queryLower);
-        const authorStartsWith = creators.some(creator => {
-            const lastName = creator.lastName?.toLowerCase() || '';
-            const firstName = creator.firstName?.toLowerCase() || '';
-            return lastName.startsWith(queryLower) || firstName.startsWith(queryLower);
-        });
-        
-        if (titleStartsWith) score += 500;
-        if (authorStartsWith) score += 600; // Author matches weighted higher
-        
-        // Word boundary matches (medium priority)
-        const titleWordMatch = new RegExp(`\\b${queryLower}`, 'i').test(title);
-        const authorWordMatch = creators.some(creator => {
-            const lastName = creator.lastName || '';
-            const firstName = creator.firstName || '';
-            const fullName = `${firstName} ${lastName}`;
-            return new RegExp(`\\b${queryLower}`, 'i').test(fullName);
-        });
-        
-        if (titleWordMatch) score += 200;
-        if (authorWordMatch) score += 300; // Author matches weighted higher
-        
-        // Contains matches (lower priority)
-        const titleContains = title.includes(queryLower);
-        const authorContains = creators.some(creator => {
-            const lastName = creator.lastName?.toLowerCase() || '';
-            const firstName = creator.firstName?.toLowerCase() || '';
-            return lastName.includes(queryLower) || firstName.includes(queryLower);
-        });
-        
-        if (titleContains) score += 50;
-        if (authorContains) score += 100; // Author matches weighted higher
-        
-        // Year match bonus
-        if (year.includes(queryLower)) {
-            score += 150;
-        }
-        
-        // Boost for regular items over attachments/notes
-        if (item.isRegularItem()) {
-            score += 10;
-        }
-        
-        return score;
-    }, []);
 
     // Improved search function with debouncing and cancellation
     const handleSearch = useCallback(async (query: string, limit: number = 10) => {
