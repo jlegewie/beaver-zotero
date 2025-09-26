@@ -9,7 +9,7 @@ import { currentSourcesAtom, inputAttachmentCountAtom, currentLibraryIdsAtom } f
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { InputSource } from '../../../types/sources';
 import { getPref, setPref } from '../../../../src/utils/prefs';
-import { getRecentAsync } from '../../../../src/utils/zoteroUtils';
+import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { planFeaturesAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
@@ -208,6 +208,9 @@ const AddSourcesMenu: React.FC<{
             const searchLibraryIds = currentLibraryIds.length > 0 ? currentLibraryIds : syncLibraryIds;
             logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}`)
             const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds);
+
+            // Ensure item data is loaded
+            await loadFullItemData(resultsItems);
             
             // Check if this search was cancelled
             if (searchId !== currentSearchRef.current) {
