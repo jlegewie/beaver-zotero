@@ -34,7 +34,7 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     } else {
         const firstCreator = item.firstCreator || 'Unknown Author';
         const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
-        displayName = `${firstCreator} ${year ? year : ''}`;
+        displayName = `${firstCreator}${year ? ` ${year}` : ''}`;
     }
     
     if (count && count > 1) displayName = `${displayName} (${count})`;
