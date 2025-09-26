@@ -5,7 +5,7 @@ import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../../atoms/profile'
 import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
-import { isLibraryValidForSync } from '../../../../src/utils/sync';
+import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
 import { logger } from '../../../../src/utils/logger';
 import { accountService } from '../../../../src/services/accountService';
 import { ZoteroLibrary } from '../../../types/zotero';
@@ -43,10 +43,25 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
             return;
         }
 
-        // Confirm adding the library
+        // Get the library
         const lib = Zotero.Libraries.get(libraryID);
         if (!lib) return;
 
+        // Group libraries: Check if the library is valid for sync (temporary guard)
+        if (lib.isGroup) {
+            const isValid = await isLibraryValidForSyncWithServerCheck(lib);
+            if (!isValid) {
+                Zotero.alert(
+                    Zotero.getMainWindow(),
+                    'Unable to add library "' + lib.name + '"',
+                    'The library includes too many files that are stored on the Zotero server and not locally.\n\nConsider changing the "Download files" setting to "at sync time" in Zotero preferences -> Sync.\n\nLater versions of Beaver might support syncing files stored on the Zotero server.',
+                );
+                logger(`AddLibraryButton: Library ${libraryID} includes too many files that are stored on the Zotero server and not locally`, 1);
+                return;
+            }
+        }
+
+        // Confirm adding the library
         const buttonIndex = Zotero.Prompt.confirm({
             window: Zotero.getMainWindow(),
             title: 'Sync Library with Beaver?',

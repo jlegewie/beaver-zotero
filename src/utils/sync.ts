@@ -16,7 +16,7 @@ import { isAttachmentOnServer, getFileHashes } from './webAPI';
 import { getServerOnlyAttachmentCount } from './libraries';
 
 const NEEDS_HASH = '[needs_hash]';
-const MAX_SERVER_FILES = 200;
+const MAX_SERVER_FILES = 100;
 
 
 /**
