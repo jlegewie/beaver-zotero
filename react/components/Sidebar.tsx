@@ -19,6 +19,8 @@ import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import DialogContainer from './dialog/DialogContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
+import { isLoadingThreadAtom } from '../atoms/threads';
+import { Spinner } from './icons/icons';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -33,8 +35,10 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
+    const isLoadingThread = useAtomValue(isLoadingThreadAtom);
 
     useEffect(() => {
+        if (isLoadingThread) return;
         if (messagesContainerRef.current) {
             scrollToBottom(messagesContainerRef, false);
         }
@@ -50,6 +54,20 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             scrollToBottom(messagesContainerRef, false);
         }
     };
+
+    if (isLoadingThread) {
+        return (
+            <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
+                <Header />
+                <div className="display-flex flex-1 items-center justify-center">
+                    <div className="display-flex flex-col items-center gap-3">
+                        <Spinner size={22}/>
+                        <span className="font-color-tertiary">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     {/* Login page */}
     if (!isAuthenticated || !isProfileLoaded) {
