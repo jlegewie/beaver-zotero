@@ -12,7 +12,7 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
-import { isAttachmentOnServer, getFileHashes } from './files';
+import { isAttachmentOnServer, getFileHashes } from './webAPI';
 
 const NEEDS_HASH = '[needs_hash]';
 const MAX_SERVER_FILES = 200;

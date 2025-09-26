@@ -20,8 +20,7 @@ import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessa
 import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
 import { ProcessingTier } from '../../react/types/profile';
-import { isAttachmentOnServer } from '../utils/files';
-import { getAttachmentDataInMemory } from '../utils/files';
+import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.

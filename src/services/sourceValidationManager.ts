@@ -6,7 +6,7 @@ import { getMimeType } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { planFeaturesAtom } from '../../react/atoms/profile';
-import { isAttachmentOnServer } from '../utils/files';
+import { isAttachmentOnServer } from '../utils/webAPI';
 
 /**
  * Types of source validation
