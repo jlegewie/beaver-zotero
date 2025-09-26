@@ -30,15 +30,7 @@ export const isLibraryValidForSync = (
 ): boolean => {
     if (!useZoteroSync) useZoteroSync = store.get(syncWithZoteroAtom);
     if (!library) return false;
-    const isValid = !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
-    if (!isValid) return false;
-    // Check number of server files
-    const prefKey = library.isGroup ? 'sync.storage.downloadMode.groups' : 'sync.storage.downloadMode.personal';
-    const prefValue = Zotero.Prefs.get(prefKey);
-    if (prefValue === 'on-demand') {
-        // Check number of server files for library
-    }
-    return true;
+    return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
 };
 
 /**
