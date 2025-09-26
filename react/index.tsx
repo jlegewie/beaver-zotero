@@ -11,6 +11,7 @@ import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
+import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 
 
 /**
@@ -20,6 +21,9 @@ import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 const GlobalContextInitializer = () => {
     // Handle Supabase authentication
     useAuth();
+
+    // Handle plugin upgrade tasks
+    useUpgradeHandler();
 
     // Handle Zotero sync
     useZoteroSync();
