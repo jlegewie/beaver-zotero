@@ -27,14 +27,17 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
 }
 
 export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null): string {
-    // Get the display name
-    let displayName = item.isNote()
-        ? `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`
-        : Zotero.Beaver.citationService.formatCitation(item, true);
-
-    // Add a count
+    let displayName: string;
+    
+    if (item.isNote()) {
+        displayName = `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`;
+    } else {
+        const firstCreator = item.firstCreator || 'Unknown Author';
+        const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
+        displayName = `${firstCreator} ${year ? year : ''}`;
+    }
+    
     if (count && count > 1) displayName = `${displayName} (${count})`;
-
     return displayName;
 }
 
