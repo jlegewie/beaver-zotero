@@ -5,7 +5,7 @@ import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference } from '../../react/types/zotero';
 import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
@@ -14,6 +14,7 @@ import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer, getFileHashes } from './webAPI';
 import { getServerOnlyAttachmentCount } from './libraries';
+import { skippedItemsManager } from '../services/skippedItemsManager';
 
 const NEEDS_HASH = '[needs_hash]';
 const MAX_SERVER_FILES = 100;
@@ -239,7 +240,10 @@ export async function extractAttachmentData(
     const skipFileHash = options?.skipFileHash || false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) return null;
+    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) {
+        if(item.isAttachment()) skippedItemsManager.upsert(item, 'not available locally or on server');
+        return null;
+    }
     
     // 2. Get the file hash
     let file_hash: string = '';
@@ -264,6 +268,7 @@ export async function extractAttachmentData(
     if (!file_hash && !needs_hash && !skipFileHash) {
         // TODO: silent failure for example when user doesn't sync and local file was removed
         logger(`Beaver Sync: Attachment ${item.key} unavailable (local: ${existsLocal}, server: ${existsServer}). Skipping.`, 1);
+        skippedItemsManager.upsert(item, 'not available locally or on server');
         return null;
     }
 
@@ -635,6 +640,9 @@ export async function syncItemsToBackend(
         },
     );
 
+    // Track skipped items
+    const skippedItems: ZoteroItemReference[] = [];
+
     // 3. Process each batch
     for (let i = 0; i < batches.length; i++) {
         const batchItems = batches[i];
@@ -700,6 +708,20 @@ export async function syncItemsToBackend(
                 const successfullyUpdated = updatedAttachments.filter(
                     (att) => att.file_hash !== NEEDS_HASH
                 );
+
+                // Track skipped items
+                const itemsWithMissingHash = updatedAttachments.filter(
+                    (att) => att.file_hash === NEEDS_HASH
+                );
+                if (itemsWithMissingHash.length > 0) {
+                    logger(`Beaver Sync '${syncSessionId}':     Failed to fetch file hashes for ${itemsWithMissingHash.length} attachments`, 1);
+                    const itemReferences = itemsWithMissingHash.map(att => ({
+                        zotero_key: att.zotero_key,
+                        library_id: att.library_id,
+                    } as ZoteroItemReference));
+                    skippedItemsManager.batchUpsert(itemReferences, 'Failed to fetch file hashes from server');
+                    skippedItems.push(...itemReferences);
+                }
 
                 // Recombine the lists
                 batchAttachmentsData = [...attachmentsWithHashes, ...successfullyUpdated];
@@ -793,6 +815,14 @@ export async function syncItemsToBackend(
             break;
         }
     }
+    // Check for skipped items
+    if (skippedItems.length > 0) {
+        logger(`Beaver Sync '${syncSessionId}':     ${skippedItems.length} items were skipped`, 1);
+        if (skippedItems.length/ totalItemsForLibrary > 0.05) {
+            throw new Error("Too many items were skipped during sync");
+        }
+    }
+    // Complete sync
     if (!syncFailed) {
         logger(`Beaver Sync '${syncSessionId}':   All ${totalItemsForLibrary} items requiring sync were processed; marking as complete.`, 3);
         onStatusChange?.(libraryID, 'completed');
@@ -1368,6 +1398,7 @@ async function fetchRemoteFileHashes(
             // Create new array with updated file hashes
             let updatedCount = 0;
             const updatedAttachments = attachmentsNeedingHashes.map(att => {
+                // return att;
                 const md5 = hashMap.get(att.zotero_key);
                 if (md5) {
                     updatedCount++;
