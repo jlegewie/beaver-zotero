@@ -5,7 +5,7 @@ import IconButton from './ui/IconButton';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './ui/menus/SearchMenu';
 import { isLibrarySynced } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
-import { isLibraryValidForSync } from '../../src/utils/sync';
+import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../src/utils/sync';
 
 interface SelectLibrariesProps {
     selectedLibraryIds: number[];
@@ -110,7 +110,22 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
         setSelectedLibraryIds(prev => prev.filter(id => id !== libraryId));
     };
 
-    const handleAddLibrary = (libraryId: number) => {
+    const handleAddLibrary = async (libraryId: number) => {
+        const library = Zotero.Libraries.get(libraryId);
+        if (!library) return;
+        // Group libraries: Check if the library is valid for sync (temporary guard)
+        if (library.isGroup) {
+            const isValid = await isLibraryValidForSyncWithServerCheck(library, useZoteroSync);
+            if (!isValid) {
+                Zotero.alert(
+                    Zotero.getMainWindow(),
+                    'Unable to add library "' + library.name + '"',
+                    'The library includes too many files that are stored on the Zotero server and not locally.\n\nConsider changing the "Download files" setting to "at sync time" in Zotero preferences -> Sync.\n\nLater versions of Beaver might support syncing files stored on the Zotero server.',
+                );
+                logger(`AddLibraryMenu: Library ${library.libraryID} includes too many files that are stored on the Zotero server and not locally`, 1);
+                return;
+            }
+        }
         setSelectedLibraryIds(prev => [...prev, libraryId]);
         setIsMenuOpen(false);
     };

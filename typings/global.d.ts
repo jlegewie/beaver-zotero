@@ -24,6 +24,7 @@ declare const __env__: "production" | "development";
 
 declare const ZOTERO_CONFIG: {
     API_URL: string;
+    API_VERSION: string;
 };
 
 declare namespace Zotero {
@@ -280,6 +281,10 @@ declare namespace Zotero {
          * @return {Boolean}
          */
         isInTrash(): boolean;
+    }
+
+    interface HTTP {
+        UnexpectedStatusException: new (...args: any[]) => Error;
     }
 
     interface Utilities {

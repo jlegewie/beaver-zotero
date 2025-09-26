@@ -1,10 +1,12 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibraryIcon, Icon, CSSIcon, TickIcon } from '../../icons/icons';
+import { LibraryIcon, Icon, CSSIcon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { syncLibraryIdsAtom } from '../../../atoms/profile';
+import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
 import { currentLibraryIdsAtom } from '../../../atoms/input';
+import { isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
+import { logger } from '../../../../src/utils/logger';
 
 interface AddLibraryMenuProps {
     showText: boolean;
@@ -29,6 +31,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
     const createMenuItemFromLibrary = useCallback((
         library: Zotero.Library,
@@ -44,7 +47,20 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
         
         return {
             label: library.name,
-            onClick: () => {
+            onClick: async () => {
+                // Group libraries: Check if the library is valid for sync (temporary guard)
+                if (library.isGroup) {
+                    const isValid = await isLibraryValidForSyncWithServerCheck(library, syncWithZotero);
+                    if (!isValid) {
+                        Zotero.alert(
+                            Zotero.getMainWindow(),
+                            'Unable to add library "' + library.name + '"',
+                            'The library includes too many files that are stored on the Zotero server and not locally.\n\nConsider changing the "Download files" setting to "at sync time" in Zotero preferences -> Sync.\n\nLater versions of Beaver might support syncing files stored on the Zotero server.',
+                        );
+                        logger(`AddLibraryMenu: Library ${library.libraryID} includes too many files that are stored on the Zotero server and not locally`, 1);
+                        return;
+                    }
+                }
                 setCurrentLibraryIds([library.libraryID]);
                 // Delay the onClose call to ensure focus happens after menu is fully closed
                 setTimeout(() => {

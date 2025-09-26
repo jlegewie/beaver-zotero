@@ -38,3 +38,6 @@ pref("customPrompts", '[ { "title": "Detailed summary", "text": "Provide a detai
 
 // Deletion jobs
 pref("deletionJobs", "[]");
+
+// Items skipped during sync
+pref("skippedItems", "[]")

@@ -244,6 +244,49 @@ export async function getMimeType(attachment: Zotero.Item, filePath?: string): P
 }
 
 
+/**
+ * Detects the MIME type from in-memory file data.
+ * This replicates the logic of Zotero.MIME.getMIMETypeFromFile without needing a file on disk.
+ *
+ * @param {Zotero.Item} attachment - The attachment item, used for the filename extension hint.
+ * @param {Uint8Array|ArrayBuffer} fileData - The binary content of the file.
+ * @returns {string} The detected MIME type, or the stored MIME type if detection fails.
+ */
+export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Array | ArrayBuffer): string {
+    if (!attachment.isAttachment()) return '';
+
+    let mimeType = attachment.attachmentContentType;
+
+
+    // Validate/correct MIME type by checking actual file if needed
+    if (!mimeType || mimeType === 'application/octet-stream' || mimeType === '') {
+        // File data check
+        if (!fileData) return mimeType;
+
+        // Ensure we have a Uint8Array to work with
+        const data = (fileData instanceof Uint8Array) ? fileData : new Uint8Array(fileData);
+
+        // Take a sample from the beginning of the file for sniffing.
+        const sampleSize = 512;
+        const sampleBytes = data.slice(0, sampleSize);
+
+        // Convert the binary sample to a string
+        let sampleString = '';
+        for (let i = 0; i < sampleBytes.length; i++) {
+            sampleString += String.fromCharCode(sampleBytes[i]);
+        }
+
+        // Get the file extension from the attachment's filename as a hint.
+        const extension = (attachment.attachmentFilename.split('.').pop() || '').toLowerCase();
+
+        // Use Zotero's internal data-based MIME type detection
+        return Zotero.MIME.getMIMETypeFromData(sampleString, extension);
+    }
+
+    return mimeType;
+}
+
+
 
 export async function shortItemTitle(item: Zotero.Item): Promise<string> {
     const parentItem = item.isTopLevelItem() ? item : item.parentItem;

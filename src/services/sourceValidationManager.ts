@@ -6,6 +6,7 @@ import { getMimeType } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { planFeaturesAtom } from '../../react/atoms/profile';
+import { isAttachmentOnServer } from '../utils/webAPI';
 
 /**
  * Types of source validation
@@ -128,6 +129,17 @@ class SourceValidationManager {
         }
 
         // 3. Check file size limits (same logic as FileUploader)
+        const isLocalFile = await item.fileExists();
+        const isServerFile = isAttachmentOnServer(item);
+        
+        // If file is not available locally or on server, it is invalid
+        if (!isLocalFile && !isServerFile) {
+            return { isValid: false, reason: 'File not available locally or on server' };
+        }
+
+        // Skip file size check if file is on server only
+        if (!isLocalFile && isServerFile) return { isValid: true };
+
         try {
             const fileSize = await Zotero.Attachments.getTotalFileSize(item);
             const fileSizeInMB = fileSize / 1024 / 1024;
@@ -397,11 +409,10 @@ class SourceValidationManager {
             // Get file hash for backend validation
             let fileHash: string;
             try {
-                fileHash = await item.attachmentHash;
-                if (!fileHash) {
-                    throw new Error('No file hash available');
-                }
+                // Note: file hash can be undefined for missing files
+                fileHash = await item.attachmentHash || '';
             } catch (error: any) {
+                logger(`SourceValidationManager: Unable to get file details for ${source.itemKey}: ${error.message}`, 1);
                 return {
                     ...baseResult,
                     isValid: false,

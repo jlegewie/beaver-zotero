@@ -32,6 +32,7 @@ declare namespace _ZoteroTypes {
       "citationLocale": string;
       "customPrompts": string;
       "deletionJobs": string;
+      "skippedItems": string;
     };
   }
 }

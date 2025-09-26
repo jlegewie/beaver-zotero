@@ -1,3 +1,5 @@
+import { logger } from "../../src/utils/logger";
+
 /**
  * Get the total number of pages for a PDF attachment
  * @param {Zotero.Item} item - The PDF attachment item
@@ -26,6 +28,51 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
     }
 }
 
+export function naivePdfPageCount(bytes: Uint8Array): number | null {
+    // Fallback: count '/Type /Page' markers (works for most PDFs)
+    const text = new TextDecoder('latin1').decode(bytes);
+    const re = /\/Type\s*\/Page\b/g;
+    let n = 0; while (re.exec(text)) n++;
+    return n || null;
+}
+
+/**
+ * Gets the number of pages from a PDF's binary data.
+ * This function handles data that is either an ArrayBuffer (from local files) or a
+ * Uint8Array (from network requests).
+ *
+ * @param {ArrayBuffer|Uint8Array} pdfData - The binary content of the PDF file.
+ * @returns {Promise<number|null>} A promise that resolves with the total number
+ *   of pages, or null if the page count could not be determined.
+ */
+export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer): Promise<number | null> {
+    try {
+        const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+
+        // Clone the exact subrange into a fresh ArrayBuffer
+        const buf = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+
+        if (Zotero.PDFWorker?.init) {
+            try { await Zotero.PDFWorker.init(); } catch {}
+        }
+
+        const result = await Zotero.PDFWorker._query(
+            "getFulltext",
+            { buf, maxPages: 1 },
+            [buf] // transfer the clone, not the original
+        );
+        return result?.totalPages ?? null;
+    } catch (e) {
+        try {
+            logger("getPDFPageCountFromData: Using naive PDF page count: " + e);
+            const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+            return naivePdfPageCount(view);
+        } catch (e2) {
+            logger("getPDFPageCountFromData: Error getting PDF page count from data: " + e2);
+            return null;
+        }
+    }
+}
 
 /**
  * Get the total number of pages for a PDF attachment

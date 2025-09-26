@@ -177,7 +177,7 @@ export async function performConsistencyCheck(
                     }
 
                     const localDateModified = clientDateModifiedMapAttachments.get(zoteroAttachment.id) || await getClientDateModifiedAsISOString(zoteroAttachment);
-                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { lightweight: true });
+                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { skipFileHash: true });
                     if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,
@@ -304,8 +304,9 @@ export async function performConsistencyCheck(
         // TODO: This includes attachments with missing files. They are excluded from the actual sync but counted here.
         const zoteroItems = await Promise.all(Array.from(localItemKeys).map((key) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key)));
         const newItemsToSync: SyncItem[] = zoteroItems.filter(syncingItemFilter).map((item) => ({ action: 'upsert', item } as SyncItem));
+        const newItemKeys = newItemsToSync.map((item) => item.item.key)
 
-        logger(`Beaver Consistency Check '${consistencyId}': Found ${newItemsToSync.length} new items to add`, 3);
+        logger(`Beaver Consistency Check '${consistencyId}': Found ${newItemsToSync.length} new items to add (${newItemKeys.join(', ')})`, 3);
 
         if (newItemsToSync.length > 0) {
             try {
