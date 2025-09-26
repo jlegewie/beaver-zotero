@@ -115,7 +115,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
         if (!library) return;
         // Group libraries: Check if the library is valid for sync (temporary guard)
         if (library.isGroup) {
-            const isValid = await isLibraryValidForSyncWithServerCheck(library);
+            const isValid = await isLibraryValidForSyncWithServerCheck(library, useZoteroSync);
             if (!isValid) {
                 Zotero.alert(
                     Zotero.getMainWindow(),

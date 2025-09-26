@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
 import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
@@ -26,6 +26,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
     const [libraryStats, setLibraryStats] = useState<Record<number, LibraryStatistics>>({});
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const libraryStatsRef = useRef<Record<number, LibraryStatistics>>({});
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
     useEffect(() => {
         libraryStatsRef.current = libraryStats;
@@ -49,7 +50,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
 
         // Group libraries: Check if the library is valid for sync (temporary guard)
         if (lib.isGroup) {
-            const isValid = await isLibraryValidForSyncWithServerCheck(lib);
+            const isValid = await isLibraryValidForSyncWithServerCheck(lib, syncWithZotero);
             if (!isValid) {
                 Zotero.alert(
                     Zotero.getMainWindow(),
@@ -157,7 +158,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
             .filter(lib => lib.name.toLowerCase().includes(lowerCaseQuery))
             .map<SearchMenuItem>(library => {
                 const stats = libraryStats[library.libraryID];
-                const isValid = isLibraryValidForSync(library);
+                const isValid = isLibraryValidForSync(library, syncWithZotero);
 
                 if (!isValid) {
                     return {

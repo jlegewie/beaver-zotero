@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibraryIcon, Icon, CSSIcon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { syncLibraryIdsAtom } from '../../../atoms/profile';
+import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
 import { currentLibraryIdsAtom } from '../../../atoms/input';
 import { isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
 import { logger } from '../../../../src/utils/logger';
@@ -31,6 +31,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
     const createMenuItemFromLibrary = useCallback((
         library: Zotero.Library,
@@ -49,7 +50,7 @@ const AddLibraryMenu: React.FC<AddLibraryMenuProps> = ({
             onClick: async () => {
                 // Group libraries: Check if the library is valid for sync (temporary guard)
                 if (library.isGroup) {
-                    const isValid = await isLibraryValidForSyncWithServerCheck(library);
+                    const isValid = await isLibraryValidForSyncWithServerCheck(library, syncWithZotero);
                     if (!isValid) {
                         Zotero.alert(
                             Zotero.getMainWindow(),

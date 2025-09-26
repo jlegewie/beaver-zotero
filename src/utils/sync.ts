@@ -28,9 +28,8 @@ const MAX_SERVER_FILES = 100;
  */
 export const isLibraryValidForSync = (
     library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
-    useZoteroSync?: boolean
+    useZoteroSync: boolean
 ): boolean => {
-    if (useZoteroSync === undefined) useZoteroSync = store.get(syncWithZoteroAtom);
     if (!library) return false;
     return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
 };
@@ -44,7 +43,7 @@ export const isLibraryValidForSync = (
  */
 export const isLibraryValidForSyncWithServerCheck = async (
     library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
-    useZoteroSync?: boolean,
+    useZoteroSync: boolean,
     maxServerFiles: number = MAX_SERVER_FILES
 ): Promise<boolean> => {
     // Basic validation first
