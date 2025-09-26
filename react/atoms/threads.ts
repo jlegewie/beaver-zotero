@@ -149,95 +149,103 @@ export const newThreadAtom = atom(
     }
 );
 
+export const isLoadingThreadAtom = atom<boolean>(false);
+
 export const loadThreadAtom = atom(
     null,
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
-        set(userScrolledAtom, false);
-        // Set the current thread ID
-        set(currentThreadIdAtom, threadId);
-        set(isPreferencePageVisibleAtom, false);
+        set(isLoadingThreadAtom, true);
+        try {
+            set(userScrolledAtom, false);
+            // Set the current thread ID
+            set(currentThreadIdAtom, threadId);
+            set(isPreferencePageVisibleAtom, false);
 
-        const statefulChat = getPref('statefulChat');
-        
-        if (!statefulChat) {
-            const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
-            logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
-            const messages = messagesDB.map(toMessageUI);
+            const statefulChat = getPref('statefulChat');
             
-            // Extract user attachments from messages
-            const userAttachments: MessageAttachmentWithId[] = [];
-            for (const messageDB of messagesDB) {
-                if (messageDB.role === 'user') {
-                    for (const attachment of messageDB.attachments || []) {
-                        userAttachments.push({ ...attachment, messageId: messageDB.id } as MessageAttachmentWithId);
-                    }
-                }
-            }
-
-            // Get citation metadata from messages
-            const citationMetadata = messagesDB.flatMap(message => {
-                const messageCitations = (message.metadata?.citations || []);
-                return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
-            });
-            
-            // Update the thread messages and attachments state
-            if (messages.length > 0) {
-                set(threadMessagesAtom, messages);
-                set(citationMetadataAtom, citationMetadata);
-                set(userAttachmentsAtom, userAttachments);
-                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                set(updateCitationDataAtom);
-            }
-        } else {
-            // Use remote API
-            const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
-            
-            if (messages.length > 0) {
-                // Load item data
-                const allItemReferences = new Set<string>();
-                [...userAttachments, ...citationMetadata, ...toolAttachments]
-                    .map(att => `${att.library_id}-${att.zotero_key}`)
-                    .forEach(ref => allItemReferences.add(ref));
-
-                const itemsPromises = Array.from(allItemReferences).map(ref => {
-                    const [libraryId, key] = ref.split('-');
-                    return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
-                })
-                const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
-
-                if (itemsToLoad.length > 0) {
-                    const options = {
-                        includeParents: true,
-                        includeChildren: true,
-                        dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
-                    };
-                    await loadFullItemData(itemsToLoad, options);
-
-                    if (!Zotero.Styles.initialized()) {
-                        await Zotero.Styles.init();
-                    }
-                }
-
-                // Update the thread messages and attachments state
-                set(threadMessagesAtom, messages);
-                set(userAttachmentsAtom, userAttachments);
-                set(citationMetadataAtom, citationMetadata);
-                set(updateCitationDataAtom);
-                // set(toolAttachmentsAtom, toolAttachments);
-                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+            if (!statefulChat) {
+                const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
+                logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
+                const messages = messagesDB.map(toMessageUI);
                 
-                // Group annotations by toolcall_id
-                const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
-                    if (!acc.has(annotation.toolcall_id)) {
-                        acc.set(annotation.toolcall_id, []);
+                // Extract user attachments from messages
+                const userAttachments: MessageAttachmentWithId[] = [];
+                for (const messageDB of messagesDB) {
+                    if (messageDB.role === 'user') {
+                        for (const attachment of messageDB.attachments || []) {
+                            userAttachments.push({ ...attachment, messageId: messageDB.id } as MessageAttachmentWithId);
+                        }
                     }
-                    acc.get(annotation.toolcall_id).push(annotation);
-                    return acc;
-                }, new Map());
-                set(toolCallAnnotationsAtom, groupedAnnotations);
+                }
+
+                // Get citation metadata from messages
+                const citationMetadata = messagesDB.flatMap(message => {
+                    const messageCitations = (message.metadata?.citations || []);
+                    return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
+                });
+                
+                // Update the thread messages and attachments state
+                if (messages.length > 0) {
+                    set(threadMessagesAtom, messages);
+                    set(citationMetadataAtom, citationMetadata);
+                    set(userAttachmentsAtom, userAttachments);
+                    set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                    set(updateCitationDataAtom);
+                }
+            } else {
+                // Use remote API
+                const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
+                
+                if (messages.length > 0) {
+                    // Load item data
+                    const allItemReferences = new Set<string>();
+                    [...userAttachments, ...citationMetadata, ...toolAttachments]
+                        .map(att => `${att.library_id}-${att.zotero_key}`)
+                        .forEach(ref => allItemReferences.add(ref));
+
+                    const itemsPromises = Array.from(allItemReferences).map(ref => {
+                        const [libraryId, key] = ref.split('-');
+                        return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                    })
+                    const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
+
+                    if (itemsToLoad.length > 0) {
+                        const options = {
+                            includeParents: true,
+                            includeChildren: true,
+                            dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
+                        };
+                        await loadFullItemData(itemsToLoad, options);
+
+                        if (!Zotero.Styles.initialized()) {
+                            await Zotero.Styles.init();
+                        }
+                    }
+
+                    // Update the thread messages and attachments state
+                    set(threadMessagesAtom, messages);
+                    set(userAttachmentsAtom, userAttachments);
+                    set(citationMetadataAtom, citationMetadata);
+                    set(updateCitationDataAtom);
+                    // set(toolAttachmentsAtom, toolAttachments);
+                    set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
+                    
+                    // Group annotations by toolcall_id
+                    const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
+                        if (!acc.has(annotation.toolcall_id)) {
+                            acc.set(annotation.toolcall_id, []);
+                        }
+                        acc.get(annotation.toolcall_id).push(annotation);
+                        return acc;
+                    }, new Map());
+                    set(toolCallAnnotationsAtom, groupedAnnotations);
+                }
             }
+        } catch (error) {
+            console.error('Error loading thread:', error);
+        } finally {
+            set(isLoadingThreadAtom, false);
         }
-        
         // Clear sources for now
         set(currentSourcesAtom, []);
         set(currentMessageContentAtom, '');
