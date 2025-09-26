@@ -9,10 +9,6 @@ import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
 import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 import { getPref, setPref } from "./utils/prefs";
-import { performConsistencyCheck } from "./utils/syncConsistency";
-import { store } from "../react/store";
-import { isAuthenticatedAtom } from "../react/atoms/auth";
-import { accountService } from "./services/accountService";
 
 // const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
