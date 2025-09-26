@@ -13,6 +13,7 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer, getFileHashes } from './webAPI';
+import { getServerOnlyAttachmentCount } from './libraries';
 
 const NEEDS_HASH = '[needs_hash]';
 const MAX_SERVER_FILES = 200;
@@ -31,6 +32,34 @@ export const isLibraryValidForSync = (
     if (!useZoteroSync) useZoteroSync = store.get(syncWithZoteroAtom);
     if (!library) return false;
     return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
+};
+
+/**
+ * Checks if a library is valid for sync with a server check
+ * @param library Zotero library
+ * @param useZoteroSync Whether to use Zotero sync
+ * @param maxServerFiles Maximum number of server files allowed
+ * @returns True if the library is valid for sync with a server check
+ */
+export const isLibraryValidForSyncWithServerCheck = async (
+    library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
+    useZoteroSync?: boolean,
+    maxServerFiles: number = MAX_SERVER_FILES
+): Promise<boolean> => {
+    // Basic validation first
+    if (!isLibraryValidForSync(library, useZoteroSync)) {
+        return false;
+    }
+    
+    // Additional server-only attachment check
+    if (library && 'libraryID' in library) {
+        const serverOnlyCount = await getServerOnlyAttachmentCount(library.libraryID);
+        if (serverOnlyCount > maxServerFiles) {
+            return false;
+        }
+    }
+    
+    return true;
 };
 
 /**
