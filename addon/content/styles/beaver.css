@@ -272,6 +272,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .items-center { align-items: center; }
 [id^="beaver-pane-"] .items-start { align-items: flex-start; }
 [id^="beaver-pane-"] .items-end { align-items: flex-end; }
+[id^="beaver-pane-"] .justify-center { justify-content: center; }
 [id^="beaver-pane-"] .justify-between { justify-content: space-between; }
 [id^="beaver-pane-"] .justify-end { justify-content: flex-end; }
 [id^="beaver-pane-"], [id^="beaver-pane-"] .h-full { height: 100%; }
