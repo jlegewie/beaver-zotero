@@ -17,7 +17,7 @@ export interface ItemSearchResult {
     similarity?: number;
 }
 
-export function itemSearchResultFromZoteroItem(item: Zotero.Item) {
+export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchResult {
     return {
         id: uuidv4(),
         library_id: item.libraryID,
@@ -27,7 +27,6 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item) {
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
         year: extractYear(item),
-        formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         rank: 0,
         similarity: 0,
     } as ItemSearchResult;
