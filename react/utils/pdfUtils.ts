@@ -48,19 +48,15 @@ export function naivePdfPageCount(bytes: Uint8Array): number | null {
 export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer): Promise<number | null> {
     try {
         const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-
+        
         // Clone the exact subrange into a fresh ArrayBuffer
         const buf = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
 
-        if (Zotero.PDFWorker?.init) {
-            try { await Zotero.PDFWorker.init(); } catch {}
-        }
-
-        const result = await Zotero.PDFWorker._query(
-            "getFulltext",
-            { buf, maxPages: 1 },
-            [buf] // transfer the clone, not the original
-        );
+        // Use _enqueue to ensure proper initialization, then call _query with buffer
+        const result = await Zotero.PDFWorker._enqueue(async () => {
+            return await Zotero.PDFWorker._query("getFulltext", { buf, maxPages: 1 }, [buf]);
+        });
+        
         return result?.totalPages ?? null;
     } catch (e) {
         try {
