@@ -272,7 +272,7 @@ export class FileUploader {
                 !useLocalFile &&
                 isAttachmentOnServer(attachment) &&
                 Boolean(Zotero.Users.getCurrentUserID()) &&
-                Boolean(Zotero.Sync.Data.Local.getAPIKey())
+                Boolean(await Zotero.Sync.Data.Local.getAPIKey())
             );
 
             if (!useLocalFile && !useServerFile) {
