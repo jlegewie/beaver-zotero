@@ -650,26 +650,29 @@ export async function syncItemsToBackend(
             ]);
 
             // ------- Fetch file hashes for attachments that need them -------
-            const attachmentsNeedingHashes = batchAttachmentsData.filter(att => att && att.file_hash === NEEDS_HASH);
-            const updatedAttachments = await fetchRemoteFileHashes(attachmentsNeedingHashes, syncSessionId);
-            
-            const updatedAttachmentsMap = new Map(
-                updatedAttachments.map(att => [att.zotero_key, att])
+            const attachmentsNeedingHashes = batchAttachmentsData.filter(
+                att => att && att.file_hash === NEEDS_HASH
             );
-            
-            batchAttachmentsData = batchAttachmentsData
-                .map(att => {
-                    if (att.file_hash === NEEDS_HASH) {
-                        return updatedAttachmentsMap.get(att.zotero_key) || att;
-                    }
-                    return att;
-                })
-                .filter(att => att.file_hash !== NEEDS_HASH);
+            const attachmentsWithHashes = batchAttachmentsData.filter(
+                (att) => att.file_hash !== NEEDS_HASH
+            );
 
-            // Alternative
-            // const attachmentsWithHashes = batchAttachmentsData.filter(att => att && att.file_hash !== NEEDS_HASH);
-            // batchAttachmentsData = [...attachmentsWithHashes, ...updatedAttachments].filter(a => Boolean(a));
+            if (attachmentsNeedingHashes.length > 0) {
+                const updatedAttachments = await fetchRemoteFileHashes(
+                    attachmentsNeedingHashes,
+                    syncSessionId
+                );
 
+                // Filter for attachments where a hash was successfully found
+                const successfullyUpdated = updatedAttachments.filter(
+                    (att) => att.file_hash !== NEEDS_HASH
+                );
+
+                // Recombine the lists
+                batchAttachmentsData = [...attachmentsWithHashes, ...successfullyUpdated];
+            }
+
+            // Count total items
             const totalItems = batchItemsData.length + batchAttachmentsData.length + itemsToDelete.length;
             if (totalItems === 0) {
                 logger(`Beaver Sync '${syncSessionId}':     No items to send to backend`, 4);
