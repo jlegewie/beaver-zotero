@@ -274,32 +274,36 @@ const AddSourcesMenu: React.FC<{
             };
             const menuItemsLibraries = syncLibraryIds.length > 1 ? [selectLibrariesMenuItem, librariesHeader] : [];
 
-            // Current sources
-            const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
-            const items = await Promise.all(
+            // 1. Get all initial items
+            const currentSourcesItems = await Promise.all(
                 sources
                     .filter((s) => s.type !== "annotation")
                     .map(async (source) => await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, source.itemKey))
-                );
+            );
+            const currentSourcesItemsFiltered = currentSourcesItems.filter((item): item is Zotero.Item => Boolean(item));
+            const recentItems: Zotero.Item[] = await getRecentItems();
+            const recentlyModifiedItems = await getRecentAsync(1, { limit: RECENT_ITEMS_LIMIT * 3 }) as Zotero.Item[];
+
+            const allItems = [...currentSourcesItemsFiltered, ...recentItems, ...recentlyModifiedItems]
+                .filter((item): item is Zotero.Item => Boolean(item));
+
+            await loadFullItemData(allItems);
+
+            // 5. Process items
+            const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
             const menuItemsCurrentSources = await Promise.all(
-                items
-                    .filter((item): item is Zotero.Item => Boolean(item))
-                    .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
+                currentSourcesItemsFiltered.map(async (item) => await createMenuItemFromZoteroItem(item, sources))
             );
             const menuItemsCurrentSourcesWithHeader = menuItemsCurrentSources.length > 0 ? [...menuItemsCurrentSources, currentSourcesHeader] : [];
 
             // Recently used items
             const recentItemsHeader = { label: "Recent Items", isGroupHeader: true, onClick: () => {} };
-            const recentItems: Zotero.Item[] = await getRecentItems();
-            
-            // Recently modified items
-            const recentlyModifiedItems = await getRecentAsync(1, { limit: RECENT_ITEMS_LIMIT*3 }) as Zotero.Item[];
-            const recentlyModifiedItemsFiltered = await Promise.all(
-                recentlyModifiedItems
-                    .map((item) => item.parentItem ? item.parentItem : item)
-                    .filter((item) => item.isRegularItem() || item.isAttachment())
-            );
 
+            // Recently modified items - process them now that data is loaded
+            const recentlyModifiedItemsFiltered = recentlyModifiedItems
+                .map((item) => item.parentItem ? item.parentItem : item)
+                .filter((item) => item.isRegularItem() || item.isAttachment());
+            
             // Remove duplicates from recent items and recently modified items
             const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
                 .filter((item, index, self) =>
@@ -307,19 +311,25 @@ const AddSourcesMenu: React.FC<{
                     !sources.some((source) => source.itemKey === item.key && source.libraryID === item.libraryID)
                 )
                 .slice(0, Math.max(RECENT_ITEMS_LIMIT - menuItemsCurrentSources.length, 0));
-
-            // Create menu items from combined items
+            
+            // Create menu items from combined items (data already loaded)
             const menuItemsRecentItems = await Promise.all(
-                combinedItems
-                    .map(async (item) => await createMenuItemFromZoteroItem(item, sources))
+                combinedItems.map(async (item) => await createMenuItemFromZoteroItem(item, sources))
             );
 
             const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0
                 ? [...menuItemsRecentItems, recentItemsHeader]
                 : [];
 
+            // Combine all menu items
+            const allMenuItems = [
+                ...menuItemsLibraries,
+                ...menuItemsCurrentSourcesWithHeader, 
+                ...menuItemsRecentItemsWithHeader
+            ];
+
             // Set menu items
-            setMenuItems([...menuItemsLibraries, ...menuItemsCurrentSourcesWithHeader, ...menuItemsRecentItemsWithHeader]);
+            setMenuItems(allMenuItems);
         }
         getMenuItems();
     }, [isMenuOpen, menuMode, sources, syncLibraryIds]);
