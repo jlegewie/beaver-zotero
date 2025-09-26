@@ -33,6 +33,7 @@ declare namespace _ZoteroTypes {
       "customPrompts": string;
       "deletionJobs": string;
       "skippedItems": string;
+      "runConsistencyCheck": boolean;
     };
   }
 }
