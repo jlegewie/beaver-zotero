@@ -26,6 +26,14 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
     }
 }
 
+export function naivePdfPageCount(bytes: Uint8Array): number | null {
+    // Fallback: count '/Type /Page' markers (works for most PDFs)
+    const text = new TextDecoder('latin1').decode(bytes);
+    const re = /\/Type\s*\/Page\b/g;
+    let n = 0; while (re.exec(text)) n++;
+    return n || null;
+}
+
 /**
  * Gets the number of pages from a PDF's binary data.
  * This function handles data that is either an ArrayBuffer (from local files) or a
