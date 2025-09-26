@@ -31,6 +31,10 @@ export interface FailedItemReference extends ZoteroItemReference {
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
+export interface SkippedItem extends ZoteroItemReference {
+    reason: string;
+}
+
 export interface FailedFileReference extends FileHashReference {
     errorCode?: string;
     buttonText?: string;
