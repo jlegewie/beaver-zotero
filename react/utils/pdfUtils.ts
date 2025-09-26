@@ -1,3 +1,5 @@
+import { logger } from "../../src/utils/logger";
+
 /**
  * Get the total number of pages for a PDF attachment
  * @param {Zotero.Item} item - The PDF attachment item
@@ -43,7 +45,7 @@ export function naivePdfPageCount(bytes: Uint8Array): number | null {
  * @returns {Promise<number|null>} A promise that resolves with the total number
  *   of pages, or null if the page count could not be determined.
  */
-export async function getPDFPageCountFromData(pdfData: ArrayBuffer | Uint8Array): Promise<number | null> {
+export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer): Promise<number | null> {
     try {
         let pdfBuffer;
 
@@ -73,8 +75,13 @@ export async function getPDFPageCountFromData(pdfData: ArrayBuffer | Uint8Array)
 
         return result.totalPages;
     } catch (e) {
-        Zotero.debug('Error getting PDF page count from data: ' + e);
-        return null;
+        try {
+            logger('getPDFPageCountFromData: Using naive PDF page count: ' + e);
+            return naivePdfPageCount(pdfData as Uint8Array);
+        } catch (e) {
+            logger('getPDFPageCountFromData: Error getting PDF page count from data: ' + e);
+            return null;
+        }
     }
 }
 
