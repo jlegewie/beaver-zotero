@@ -47,33 +47,24 @@ export function naivePdfPageCount(bytes: Uint8Array): number | null {
  */
 export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer): Promise<number | null> {
     try {
-        let pdfBuffer;
+        const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
 
-        // Robustly get the underlying ArrayBuffer, avoiding cross-context 'instanceof' issues.
-        const dataType = Object.prototype.toString.call(pdfData);
+        // CLONE the view into a fresh buffer before transferring
+        const transferable = view.slice().buffer;  // <- this is a new ArrayBuffer
 
-        if (dataType === '[object Uint8Array]') {
-            // @ts-ignore buffer exists
-            pdfBuffer = pdfData.buffer;
-        } else if (dataType === '[object ArrayBuffer]') {
-            pdfBuffer = pdfData;
-        } else {
-            throw new Error(`Input data must be an ArrayBuffer or Uint8Array, but was ${dataType}`);
+        if (Zotero.PDFWorker?.init) {
+            try { await Zotero.PDFWorker.init(); } catch {}
         }
 
         // Zotero.PDFWorker._query is the internal method that sends data to the
         // worker process. The 'buf' property must be an ArrayBuffer, and it
         // must also be in the transfer list (third argument).
         const result = await Zotero.PDFWorker._query(
-            'getFulltext',
-            {
-                buf: pdfBuffer,
-                maxPages: 1 // We only need metadata, not the full text.
-            },
-            [pdfBuffer] // The ArrayBuffer to be transferred
+            "getFulltext",
+            { buf: transferable, maxPages: 1 },
+            [transferable]
         );
-
-        return result.totalPages;
+  return result?.totalPages ?? null;
     } catch (e) {
         try {
             logger('getPDFPageCountFromData: Using naive PDF page count: ' + e);
