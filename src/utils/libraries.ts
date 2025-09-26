@@ -215,3 +215,45 @@ export async function getLibraryItemCounts(libraryID: number): Promise<LibrarySt
         imageCount: imageAttachments || 0
     } as LibraryStatistics;
 }
+
+
+export async function getServerOnlyAttachmentCount(libraryID: number): Promise<number> {
+	const sql = `
+		SELECT COUNT(*)
+		FROM items I
+		JOIN itemAttachments IA USING (itemID)
+		WHERE I.libraryID = ?
+		  AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+		  AND IA.linkMode != ?
+		  AND IA.linkMode != ?
+		  AND IA.syncState = ?
+	`;
+	const count = await Zotero.DB.valueQueryAsync(sql, [
+		libraryID,
+		Zotero.Attachments.LINK_MODE_LINKED_FILE,
+		Zotero.Attachments.LINK_MODE_LINKED_URL,
+		Zotero.Sync.Storage.Local.SYNC_STATE_TO_DOWNLOAD
+	]);
+	return Number(count) || 0;
+}
+
+
+export async function getServerOnlyAttachmentKeys(libraryID: number): Promise<string[]> {
+    const sql = `
+        SELECT I.key
+        FROM items I
+        JOIN itemAttachments IA USING (itemID)
+        WHERE I.libraryID = ?
+          AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+          AND IA.linkMode != ?
+          AND IA.linkMode != ?
+          AND IA.syncState = ?
+    `;
+    const keys = await Zotero.DB.columnQueryAsync(sql, [
+        libraryID,
+        Zotero.Attachments.LINK_MODE_LINKED_FILE,
+        Zotero.Attachments.LINK_MODE_LINKED_URL,
+        Zotero.Sync.Storage.Local.SYNC_STATE_TO_DOWNLOAD
+    ]);
+    return keys as unknown as string[] || [];
+}
