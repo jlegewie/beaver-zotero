@@ -41,13 +41,6 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     return displayName;
 }
 
-export function getCitationFromItem(item: Zotero.Item): string {
-    const citation = item.isNote()
-        ? "Note"
-        : Zotero.Beaver.citationService.formatCitation(item, true);
-    return citation;
-}
-
 export function getReferenceFromItem(item: Zotero.Item): string {
     const formatted_citation = item.isNote()
         // @ts-ignore unescapeHTML exists

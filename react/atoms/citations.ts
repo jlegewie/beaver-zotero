@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { getCitationFromItem, getReferenceFromItem, getDisplayNameFromItem } from '../utils/sourceUtils';
+import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 import { CitationMetadata, CitationData } from '../types/citations';
@@ -69,7 +69,7 @@ export const updateCitationDataAtom = atom(
                     parentKey: parentItem?.key || null,
                     icon: item.getItemTypeIconName(),
                     name: getDisplayNameFromItem(itemToCite),
-                    citation: getCitationFromItem(itemToCite),
+                    citation: getDisplayNameFromItem(itemToCite),
                     formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
                     numericCitation

@@ -4,7 +4,7 @@ import { useAtomValue } from 'jotai';
 import { citationDataAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
-import { getCitationFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
+import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
@@ -73,7 +73,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
 
         // Get the citation data
-        citation = getCitationFromItem(item);
+        citation = getDisplayNameFromItem(item);
         formatted_citation = getReferenceFromItem(item);
         url = createZoteroURI(item);
     }
