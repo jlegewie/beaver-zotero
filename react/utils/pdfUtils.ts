@@ -49,28 +49,26 @@ export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer)
     try {
         const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
 
-        // CLONE the view into a fresh buffer before transferring
-        const transferable = view.slice().buffer;  // <- this is a new ArrayBuffer
+        // Clone the exact subrange into a fresh ArrayBuffer
+        const buf = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
 
         if (Zotero.PDFWorker?.init) {
             try { await Zotero.PDFWorker.init(); } catch {}
         }
 
-        // Zotero.PDFWorker._query is the internal method that sends data to the
-        // worker process. The 'buf' property must be an ArrayBuffer, and it
-        // must also be in the transfer list (third argument).
         const result = await Zotero.PDFWorker._query(
             "getFulltext",
-            { buf: transferable, maxPages: 1 },
-            [transferable]
+            { buf, maxPages: 1 },
+            [buf] // transfer the clone, not the original
         );
-  return result?.totalPages ?? null;
+        return result?.totalPages ?? null;
     } catch (e) {
         try {
-            logger('getPDFPageCountFromData: Using naive PDF page count: ' + e);
-            return naivePdfPageCount(pdfData as Uint8Array);
-        } catch (e) {
-            logger('getPDFPageCountFromData: Error getting PDF page count from data: ' + e);
+            logger("getPDFPageCountFromData: Using naive PDF page count: " + e);
+            const view = pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+            return naivePdfPageCount(view);
+        } catch (e2) {
+            logger("getPDFPageCountFromData: Error getting PDF page count from data: " + e2);
             return null;
         }
     }
