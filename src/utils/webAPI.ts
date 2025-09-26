@@ -55,7 +55,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 		// 4. Make the first request to get the redirect URL
 		logger(`getDownloadUrl: Requesting download URL from: ${apiUrl}`);
 		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey }
+			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION }
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
@@ -140,7 +140,7 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
 		// 4. Single request: follow redirect and get bytes
 		logger(`getAttachmentDataInMemory: Requesting download URL from: ${apiUrl}`);
 		const resp = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey },
+			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION },
 			responseType: 'arraybuffer', // defaults to following redirects
 			...retryOptions
 		});
