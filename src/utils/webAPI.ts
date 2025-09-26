@@ -242,28 +242,28 @@ export async function getFileHashes(items: Zotero.Item[], batchSize: number = 50
 	const base = ZOTERO_CONFIG.API_URL;
 
 	// Group items by library type and ID for efficient batching
-	const groupedItems = new Map<string, Zotero.Item[]>();
+	const groupedItems = new Map<number, Zotero.Item[]>();
 	for (const item of attachmentItems) {
-		const isGroup = item.library && item.library.isGroup;
-		const libraryKey = isGroup ? `group-${item.libraryID}` : `user-${userID}`;
-		if (!groupedItems.has(libraryKey)) groupedItems.set(libraryKey, []);
-		groupedItems.get(libraryKey)!.push(item);
+		if (!groupedItems.has(item.libraryID)) groupedItems.set(item.libraryID, []);
+		groupedItems.get(item.libraryID)!.push(item);
 	}
 
 	const results: FileHashInfo[] = [];
 
 	// Process each library group
-	for (const [libraryKey, libraryItems] of groupedItems.entries()) {
+	for (const [libraryID, libraryItems] of groupedItems.entries()) {
 		// Process in batches of batchSize (API limit)
 		for (let i = 0; i < libraryItems.length; i += batchSize) {
 			const batch = libraryItems.slice(i, i + batchSize);
 			const itemKeys = batch.map((it: Zotero.Item) => it.key).join(',');
+			if (batch.length === 0) continue;
 
-			const isGroup = libraryKey.startsWith('group-');
-			const libraryID = libraryKey.split('-')[1];
+			const library = Zotero.Libraries.get(libraryID);
+			if (!library) continue;
+			const isGroup = library.isGroup;
 
 			const apiUrl = isGroup
-				? `${base}groups/${libraryID}/items?itemKey=${itemKeys}&include=data`
+				? `${base}groups/${library.id}/items?itemKey=${itemKeys}&include=data`
 				: `${base}users/${userID}/items?itemKey=${itemKeys}&include=data`;
 
 			try {
