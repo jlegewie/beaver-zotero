@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSIcon, Icon, RepeatIcon } from "../icons/icons";
+import { AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSIcon, Icon, RepeatIcon, BugIcon } from "../icons/icons";
 import Tooltip from "../ui/Tooltip";
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
@@ -10,6 +10,7 @@ import { CancelIcon, CheckmarkIcon, AlertIcon as AlertIconIcon, SpinnerIcon } fr
 import { syncZoteroDatabase } from "../../../src/utils/sync";
 import { LibrarySyncStatus } from "../../atoms/sync";
 import { syncLibraryIdsAtom } from "../../atoms/profile";
+import { isErrorReportDialogVisibleAtom } from '../../atoms/ui';
 
 
 export const DatabaseSyncStatus: React.FC = () => {
@@ -19,6 +20,7 @@ export const DatabaseSyncStatus: React.FC = () => {
     const failedSyncLibraryIds = useAtomValue(failedSyncLibraryIdsAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const syncStatus = useAtomValue(overallSyncStatusAtom);
+    const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const [showFailedLibraries, setShowFailedLibraries] = React.useState(false);
 
     const failedLibraries = React.useMemo(() => (
@@ -104,9 +106,19 @@ export const DatabaseSyncStatus: React.FC = () => {
                         <div className={`text-lg ${getTitleColor()}`}>Syncing Zotero Library</div>
                         <div className="flex-1"/>
                         {(syncStatus === 'partially_completed' || syncStatus === 'failed') && (
-                            <Tooltip content="Retry syncing" showArrow singleLine>
-                                <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
-                            </Tooltip>
+                            <div className="display-flex flex-row items-center gap-4">
+                                <Tooltip content="Report issue" showArrow singleLine>
+                                    <IconButton
+                                        icon={BugIcon}
+                                        onClick={() => setErrorReportDialogVisible(true)}
+                                        variant="ghost-secondary"
+                                        className="scale-12"
+                                    />
+                                </Tooltip>
+                                <Tooltip content="Retry syncing" showArrow singleLine>
+                                    <IconButton icon={RepeatIcon} onClick={handleSyncRetryClick} variant="ghost-secondary" className="scale-12" />
+                                </Tooltip>
+                            </div>
                         )}
                     </div>
                     {(syncStatusSummary.progress !== undefined || syncStatus !== 'in_progress') && (
