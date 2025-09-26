@@ -30,7 +30,7 @@ export const isLibraryValidForSync = (
     library: Zotero.Library | { isGroup: boolean, libraryID: number } | undefined | null | false,
     useZoteroSync?: boolean
 ): boolean => {
-    if (!useZoteroSync) useZoteroSync = store.get(syncWithZoteroAtom);
+    if (useZoteroSync === undefined) useZoteroSync = store.get(syncWithZoteroAtom);
     if (!library) return false;
     return !library.isGroup || (library.isGroup && useZoteroSync && isLibrarySynced(library.libraryID));
 };
