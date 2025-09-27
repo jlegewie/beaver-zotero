@@ -103,7 +103,7 @@ export interface SSECallbacks {
      * @param warningType Type of warning that occurred
      * @param data Additional data related to the warning
      */
-    onWarning: (messageId: string | null, warningType: string, message: string, data: any) => void;
+    onWarning: (messageId: string | null, warningType: string, message: string, data: any) => Promise<void>;
 }
 
 
@@ -360,7 +360,7 @@ export class ChatService extends ApiService {
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;
-            onWarning: (messageId: string | null, warningType: string, message: string, data: any) => void;
+            onWarning: (messageId: string | null, warningType: string, message: string, data: any) => Promise<void>;
         }
     ): void {
         let eventName = 'message';
