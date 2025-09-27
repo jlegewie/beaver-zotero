@@ -685,6 +685,15 @@ async function _processChatCompletionViaBackend(
                             logger(`event 'onAnnotation': Warning - annotations from multiple toolcalls in single batch: ${Array.from(uniqueToolcallIds).join(', ')}`, 1);
                         }
 
+                        // Load item data
+                        const attachmentRefs= new Set<ZoteroItemReference>();
+                        annotations.forEach(a => attachmentRefs.add({library_id: a.library_id, zotero_key: a.attachment_key}));
+                        const attachmentPromises = Array.from(attachmentRefs).map(ref => Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key));
+                        const attachments = (await Promise.all(attachmentPromises)).filter(Boolean) as Zotero.Item[];
+                        if (attachments.length > 0) {
+                            await loadFullItemDataWithAllTypes(attachments);
+                        }
+
                         // Early return if autoApplyAnnotations is disabled
                         if (!getPref('autoApplyAnnotations')) {
                             set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
