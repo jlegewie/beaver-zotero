@@ -764,7 +764,6 @@ async function _processChatCompletionViaBackend(
                             try {
                                 const response = await toolAnnotationsService.markAnnotationsApplied(
                                     messageId,
-                                    toolcallId,
                                     annotationsToAcknowledge.map((annotation) => ({
                                         annotationId: annotation.id,
                                         zoteroKey: annotation.zotero_key as string,
