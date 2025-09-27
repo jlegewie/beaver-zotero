@@ -12,6 +12,7 @@ import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
+import { loadFullItemDataWithAllTypes } from '../../../src/utils/zoteroUtils';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -49,13 +50,60 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Find the attachmentCitation in the available sources
     const attachmentCitation = citationsData.find(a => a.citation_id === citationId);
 
-    // Get citation data
+    // Fallback citation data (when citation metadata is not available)
+    const [fallbackCitation, setFallbackCitation] = useState<{
+        formatted_citation: string;
+        citation: string;
+        url: string;
+        loading: boolean;
+    } | null>(null);
+
+    // Load fallback citation data when citation metadata is not available
+    useEffect(() => {
+        const loadFallbackCitation = async () => {
+            // Only load if we don't have attachmentCitation and haven't loaded fallback yet
+            if (!attachmentCitation && !fallbackCitation) {
+                setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+                
+                try {
+                    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+                    if (!item) {
+                        logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
+                        setFallbackCitation(null);
+                        return;
+                    }
+
+                    await loadFullItemDataWithAllTypes([item]);
+
+                    const parentItem = item.parentItem;
+                    const itemToCite = item.isNote() ? item : parentItem || item;
+                    
+                    const citation = getDisplayNameFromItem(itemToCite);
+                    const formatted_citation = getReferenceFromItem(itemToCite);
+                    const url = createZoteroURI(item);
+
+                    setFallbackCitation({
+                        formatted_citation,
+                        citation,
+                        url,
+                        loading: false
+                    });
+                } catch (error) {
+                    logger('ZoteroCitation: Error loading fallback citation: ' + error);
+                    setFallbackCitation(null);
+                }
+            }
+        };
+
+        loadFallbackCitation();
+    }, [attachmentCitation, libraryID, itemKey, unique_key]);
+
+    // Update the citation data logic
     let formatted_citation = '';
     let citation = '';
     let url = '';
     let previewText = '';
 
-    // If we have a attachmentCitation, use it
     if (attachmentCitation) {
         formatted_citation = attachmentCitation.formatted_citation || '';
         citation = attachmentCitation.citation || '';
@@ -63,19 +111,24 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         previewText = attachmentCitation.preview
             ? `"${attachmentCitation.preview}"`
             : formatted_citation || '';
-    // Fallback: get the Zotero item and create the citation data
-    } else {
-        // Get the Zotero item
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-        if (!item) {
-            logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
-            return null;
+    } else if (fallbackCitation) {
+        if (fallbackCitation.loading) {
+            // Show loading state
+            formatted_citation = '?';
+            citation = '?';
+            url = '';
+            previewText = 'Loading citation data...';
+        } else {
+            formatted_citation = fallbackCitation.formatted_citation;
+            citation = fallbackCitation.citation;
+            url = fallbackCitation.url;
+            previewText = formatted_citation;
         }
-
-        // Get the citation data
-        citation = getDisplayNameFromItem(item);
-        formatted_citation = getReferenceFromItem(item);
-        url = createZoteroURI(item);
+    } else {
+        // No data available
+        formatted_citation = '';
+        citation = '';
+        url = '';
     }
     
     // Add the URL to open the PDF/Note
