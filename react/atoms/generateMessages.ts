@@ -44,6 +44,7 @@ import { sourceValidationManager, SourceValidationType } from '../../src/service
 import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
 import { applyAnnotation } from '../utils/toolAnnotationActions';
 import { toolAnnotationsService } from '../../src/services/toolAnnotationsService';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
 /**
  * Flattens sources from regular items, attachments, notes, and annotations.
@@ -788,8 +789,15 @@ async function _processChatCompletionViaBackend(
                 }
                 applyAnnotationsAndUpsert(rawAnnotations);
             },
-            onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => {
+            onCitationMetadata: async (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
+                // Load item data
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(citationMetadata.library_id, citationMetadata.zotero_key);
+                if (item) {
+                    await loadFullItemDataWithAllTypes([item]);
+                }
+
+                // Update state
                 set(citationMetadataAtom, (prev: CitationMetadata[]) => {
                     const newCitation = { ...citationMetadata, message_id: messageId };
                     return [...prev, newCitation];

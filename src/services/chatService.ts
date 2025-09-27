@@ -76,7 +76,7 @@ export interface SSECallbacks {
      * @param messageId ID of the assistant message
      * @param citationMetadata The citation metadata object
      */
-    onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => void;
+    onCitationMetadata: (messageId: string, citationMetadata: CitationMetadata) => Promise<void>;
     
     /**
      * Handles "complete" event when a message processing is fully complete.
@@ -356,7 +356,7 @@ export class ChatService extends ApiService {
             onCitationMetadata: (
                 messageId: string,
                 citationMetadata: CitationMetadata
-            ) => void;
+            ) => Promise<void>;
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
             onError: (messageId: string | null, errorType: string) => void;

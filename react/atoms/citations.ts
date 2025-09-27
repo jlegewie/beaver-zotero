@@ -3,6 +3,7 @@ import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUti
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 import { CitationMetadata, CitationData } from '../types/citations';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
 
 /*
@@ -60,6 +61,7 @@ export const updateCitationDataAtom = atom(
             try {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);
                 if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
+                await loadFullItemDataWithAllTypes([item]);
 
                 const parentItem = item.parentItem;
                 const itemToCite = item.isNote() ? item : parentItem || item;
