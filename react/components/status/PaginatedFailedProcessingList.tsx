@@ -9,7 +9,7 @@ import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
-import { getMimeType } from '../../../src/utils/zoteroUtils';
+import { getMimeType, loadFullItemData } from '../../../src/utils/zoteroUtils';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -87,6 +87,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                 let enableRetry = false;
                 let fileHash: string | undefined = undefined;
                 const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                if (zoteroItem) await loadFullItemData([zoteroItem]);
                 if (zoteroItem && zoteroItem.isAttachment()) {
                     fileHash = await zoteroItem.attachmentHash;
                     if (fileHash !== item.file_hash) enableRetry = true;
@@ -106,6 +107,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                     buttonText: enableRetry && fileHash ? 'Retry' : undefined,
                     buttonAction: enableRetry && fileHash ? async () => {
                         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                        if (zoteroItem) await loadFullItemData([zoteroItem]);
                         if(!zoteroItem || !zoteroItem.isAttachment()) return;
                         const mimeType = await getMimeType(zoteroItem);
                         await attachmentsService.updateFile(item.library_id, item.zotero_key, fileHash, mimeType);
