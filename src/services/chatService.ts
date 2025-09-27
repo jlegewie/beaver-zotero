@@ -322,7 +322,7 @@ export class ChatService extends ApiService {
      * Splits a raw SSE event into lines, finds `event: ...` and `data: ...`,
      * then dispatches to the appropriate callback.
      */
-    private parseAndHandleEvent(
+    private async parseAndHandleEvent(
         rawEvent: string,
         {
             onThread,
@@ -362,7 +362,7 @@ export class ChatService extends ApiService {
             onError: (messageId: string | null, errorType: string) => void;
             onWarning: (messageId: string | null, warningType: string, message: string, data: any) => Promise<void>;
         }
-    ): void {
+    ): Promise<void> {
         let eventName = 'message';
         let eventData = '';
 
@@ -409,14 +409,14 @@ export class ChatService extends ApiService {
             case 'message':
                 if (parsedData?.message) {
                     const message = JSON.parse(parsedData.message) as MessageModel;
-                    onMessage(message);
+                    await onMessage(message);
                 }
                 break;
             case 'toolcall':
                 // e.g. data: {"messageId": "uuid", "toolcallId": "uuid", "toolcall": {...}}
                 if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.toolcall) {
                     const toolcall = JSON.parse(parsedData.toolcall) as ToolCall;
-                    onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
+                    await onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
                 }
                 break;
             case 'annotation':
@@ -454,7 +454,7 @@ export class ChatService extends ApiService {
                 break;
             case 'warning':
                 if (parsedData?.type && parsedData?.message) {
-                    onWarning(parsedData?.messageId || null, parsedData?.type, parsedData?.message, parsedData?.data || null);
+                    await onWarning(parsedData?.messageId || null, parsedData?.type, parsedData?.message, parsedData?.data || null);
                 }
                 break;
             default:
