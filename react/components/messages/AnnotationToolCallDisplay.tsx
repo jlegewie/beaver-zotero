@@ -168,7 +168,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 
 interface AnnotationToolCallDisplayProps {
     messageId: string;
-    toolCall: ToolCall;
+    toolCalls: ToolCall[];
 }
 
 /**
@@ -180,7 +180,7 @@ interface AnnotationToolCallDisplayProps {
  * 2. pending -> Apply annotation to PDF (if reader is open)
  * 3. applied -> User can navigate to or delete the annotation
  */
-const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCall }) => {
+const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCalls }) => {
     const getToolCallAnnotations = useAtomValue(getToolCallAnnotationsAtom);
 
     // Current reader state
@@ -198,16 +198,21 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+
+    // State of tool calls group
+    const isInProgress = toolCalls.some((toolCall) => toolCall.status === 'in_progress');
+    const isCompleted = toolCalls.every((toolCall) => toolCall.status === 'completed');
+    const isError = toolCalls.some((toolCall) => toolCall.status === 'error');
     
     // Loading animation for in-progress tool calls
-    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
+    const loadingDots = useLoadingDots(isInProgress);
     
     // Global state updater for annotation status changes
     const setAnnotationState = useSetAtom(updateToolcallAnnotationAtom);
     const updateAnnotationsInBatch = useSetAtom(updateToolcallAnnotationsAtom);
 
     // Extract annotations from tool call result
-    const annotations = getToolCallAnnotations(toolCall.id);
+    const annotations = toolCalls.map((toolCall) => getToolCallAnnotations(toolCall.id)).flat();
     const totalAnnotations = annotations.length;
 
     // Is the current reader attachment key the same as the attachment key for annotations
@@ -221,21 +226,21 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
     const toggleResults = useCallback(() => {
-        if (toolCall.status === 'completed' && totalAnnotations > 0) {
+        if (isCompleted && totalAnnotations > 0) {
             setResultsVisible((prev) => !prev);
         }
-    }, [toolCall.status, totalAnnotations]);
+    }, [isCompleted, totalAnnotations]);
 
     // Helper to update annotation state in global store
     const updateAnnotationState = useCallback(
-        (annotationId: string | undefined, updates: Partial<ToolAnnotation>) => {
+        (toolCallId: string, annotationId: string | undefined, updates: Partial<ToolAnnotation>) => {
             setAnnotationState({
-                toolcallId: toolCall.id,
+                toolcallId: toolCallId,
                 annotationId,
                 updates,
             });
         },
-        [setAnnotationState, toolCall.id]
+        [setAnnotationState]
     );
 
     /**
@@ -267,9 +272,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         })) as AnnotationUpdates[];
 
                     if (errorUpdates.length > 0) {
-                        updateAnnotationsInBatch({
-                            toolcallId: toolCall.id,
-                            updates: errorUpdates,
+                        toolCalls.forEach((toolCall) => {
+                            updateAnnotationsInBatch({
+                                toolcallId: toolCall.id,
+                                updates: errorUpdates,
+                            });
                         });
 
                         await Promise.all(
@@ -378,9 +385,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 .filter((update): update is AnnotationUpdates => update !== null);
 
             if (batchUpdates.length > 0) {
-                updateAnnotationsInBatch({
-                    toolcallId: toolCall.id,
-                    updates: batchUpdates,
+                toolCalls.forEach((toolCall) => {
+                    updateAnnotationsInBatch({
+                        toolcallId: toolCall.id,
+                        updates: batchUpdates,
+                    });
                 });
             }
 
@@ -395,7 +404,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 try {
                     const response = await toolAnnotationsService.markAnnotationsApplied(
                         messageId,
-                        toolCall.id,
                         annotationsToAcknowledge.map(annotation => ({
                             annotationId: annotation.id,
                             zoteroKey: annotation.zotero_key as string,
@@ -415,9 +423,11 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                             };
                         });
 
-                        updateAnnotationsInBatch({
-                            toolcallId: toolCall.id,
-                            updates: ackErrorUpdates,
+                        toolCalls.forEach((toolCall) => {
+                            updateAnnotationsInBatch({
+                                toolcallId: toolCall.id,
+                                updates: ackErrorUpdates,
+                            });
                         });
 
                         await Promise.all(
@@ -476,7 +486,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             logger(`handleApplyAnnotations: unexpected error: ${error}`, 1);
             setIsApplyingAnnotations(false);
         }
-    }, [isAttachmentOpen, annotations, toolCall.id, updateAnnotationsInBatch, messageId]);
+    }, [isAttachmentOpen, annotations, toolCalls, updateAnnotationsInBatch, messageId]);
 
     useEffect(() => {
         const getAttachmentTitle = async () => {
@@ -519,7 +529,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 if (validationResult.markAsDeleted) {
                     logger('validationResult: marking as deleted');
                     // Annotation was marked as applied but no longer exists - mark as deleted
-                    updateAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.toolcall_id, annotation.id, {
                         status: 'deleted',
                         zotero_key: undefined,
                         error_message: null,
@@ -569,7 +579,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                     !annotation.zotero_key
                 ) {
                     // Annotation not yet applied to PDF - just mark as deleted
-                    updateAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.toolcall_id, annotation.id, {
                         status: 'deleted',
                     });
                     await toolAnnotationsService.updateAnnotation(annotation.id, {
@@ -581,7 +591,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 } else {
                     // deleteAnnotationFromReader: Removes annotation from PDF reader
                     await deleteAnnotationFromReader(annotation);
-                    updateAnnotationState(annotation.id, {
+                    updateAnnotationState(annotation.toolcall_id, annotation.id, {
                         status: 'deleted',
                     });
                     await toolAnnotationsService.updateAnnotation(annotation.id, {
@@ -594,7 +604,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 }
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to delete annotation';
-                updateAnnotationState(annotation.id, {
+                updateAnnotationState(annotation.toolcall_id, annotation.id, {
                     status: 'error',
                     error_message: errorMessage,
                 });
@@ -624,9 +634,9 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine which icon to show based on tool call and UI state
     const getIcon = () => {
-        if (toolCall.status === 'in_progress' || isApplyingAnnotations) return Spinner;
-        if (toolCall.status === 'error' || allErrors) return AlertIcon;
-        if (toolCall.status === 'completed') {
+        if (isInProgress || isApplyingAnnotations) return Spinner;
+        if (isError || allErrors) return AlertIcon;
+        if (isCompleted) {
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
             if (totalAnnotations === 0) return AlertIcon;
@@ -637,10 +647,10 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Generate button text showing annotation count
     const getButtonText = () => {
-        if (toolCall.status === 'in_progress') {
+        if (isInProgress) {
             return `Annotations${''.padEnd(loadingDots, '.')}`;
         }
-        if (toolCall.status === 'error') {
+        if (isError) {
             return 'Annotations: Error';
         }
         return 'Annotations';
@@ -648,15 +658,15 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
 
     // Determine when the results can be toggled and when button should be disabled
     const hasAnnotationsToShow = totalAnnotations > 0;
-    const canToggleResults = toolCall.status === 'completed' && hasAnnotationsToShow && !allErrors;
-    const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAnnotationsToShow);
+    const canToggleResults = isCompleted && hasAnnotationsToShow && !allErrors;
+    const isButtonDisabled = isInProgress || isError || (isCompleted && !hasAnnotationsToShow);
 
     // Determine when to show apply button
-    const showApplyButton = toolCall.status === 'completed' && (somePending || someErrors) && !isApplyingAnnotations;
+    const showApplyButton = isCompleted && (somePending || someErrors) && !isApplyingAnnotations;
     
     return (
         <div
-            id={`tool-${toolCall.id}`}
+            id={`tool-${toolCalls[0].id}`}
             className={`${resultsVisible && hasAnnotationsToShow ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
         >
             {/* Main button that shows annotation count and toggles visibility */}
@@ -675,15 +685,15 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                         className={`
                             text-base scale-105
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                            ${toolCall.status === 'error' ? 'font-color-warning' : ''}
+                            ${isError ? 'font-color-warning' : ''}
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
                         <span>{getButtonText()}</span>
-                        {toolCall.status === 'completed' && appliedAnnotationCount > 0 && hasAnnotationsToShow &&
+                        {isCompleted && appliedAnnotationCount > 0 && hasAnnotationsToShow &&
                             <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
                         }
-                        {toolCall.status === 'completed' && appliedAnnotationCount === 0 && hasAnnotationsToShow &&
+                        {isCompleted && appliedAnnotationCount === 0 && hasAnnotationsToShow &&
                             <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
                         }
                     </Button>
@@ -708,7 +718,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
             </div>
 
             {/* Expandable list of individual annotations */}
-            {resultsVisible && hasAnnotationsToShow && toolCall.status === 'completed' && (
+            {resultsVisible && hasAnnotationsToShow && isCompleted && (
                 <div className="display-flex flex-col gap-1">
                     {annotations.map((annotation, index) => (
                         <AnnotationListItem

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { ToolCall } from '../../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -28,6 +28,61 @@ interface ToolCallDisplayProps {
     toolCall: ToolCall;
 }
 
+/**
+ * Helper function to extract attachment_id from tool call arguments
+ * @param toolCall - The tool call to extract attachment_id from
+ * @returns The attachment_id if found, null otherwise
+ */
+function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
+    try {
+        if (!toolCall.function?.arguments) return null;
+        const args = typeof toolCall.function.arguments === 'string'
+            ? JSON.parse(toolCall.function.arguments)
+            : toolCall.function.arguments;
+        return args.attachment_id || null;
+    } catch (error) {
+        console.warn('Failed to parse tool call arguments:', error);
+        return null;
+    }
+}
+
+/**
+ * Groups tool calls for display
+ * - Non-annotation tools: individual groups (lists of 1)
+ * - Annotation tools: grouped by attachment_id
+ * @param toolCalls - Array of tool calls to group
+ * @returns Array of tool call groups
+ */
+function groupToolCalls(toolCalls: ToolCall[]): ToolCall[][] {
+    const groups: ToolCall[][] = [];
+    const annotationGroups = new Map<string, ToolCall[]>();
+
+    for (const toolCall of toolCalls) {
+        if (isAnnotationTool(toolCall.function?.name)) {
+            const attachmentId = getAttachmentIdFromToolCall(toolCall);
+            if (attachmentId) {
+                // Group by attachment_id
+                if (!annotationGroups.has(attachmentId)) {
+                    annotationGroups.set(attachmentId, []);
+                }
+                annotationGroups.get(attachmentId)!.push(toolCall);
+            } else {
+                // No attachment_id found, keep as individual group
+                groups.push([toolCall]);
+            }
+        } else {
+            // Non-annotation tools are kept as individual groups
+            groups.push([toolCall]);
+        }
+    }
+
+    // Add all annotation groups to the main groups array
+    for (const group of annotationGroups.values()) {
+        groups.push(group);
+    }
+
+    return groups;
+}
 
 export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ messageId: _messageId, toolCall }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
@@ -138,6 +193,9 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
         return 'mt-1';
     }
 
+    // Group tool calls by attachment_id for annotation tools, keep others individual
+    const toolCallGroups = groupToolCalls(message.tool_calls);
+
     return (
         <div
             id={`tools-${message.id}`}
@@ -146,13 +204,26 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 ${getTopMargin()}`
             }
         >
-            {message.tool_calls.map((toolCall, index) => {
-                // Annotation tool calls are handled by AnnotationToolCallDisplay
-                if (isAnnotationTool(toolCall.function?.name)) {
-                    return <AnnotationToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+            {toolCallGroups.map((group, groupIndex) => {
+                // For groups with single tool call
+                if (group.length === 1) {
+                    const toolCall = group[0];
+                    // Annotation tool calls are handled by AnnotationToolCallDisplay
+                    if (isAnnotationTool(toolCall.function?.name)) {
+                        console.log('Annotation tool call', toolCall);
+                        return <AnnotationToolCallDisplay key={toolCall.id} messageId={message.id} toolCalls={[toolCall]} />;
+                    }
+                    // Search tool calls are handled by ToolCallDisplay
+                    return <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
                 }
-                // Search tool calls are handled by ToolCallDisplay
-                return <ToolCallDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+                
+                // For groups with multiple tool calls (annotation tools grouped by attachment_id)
+                // All should be annotation tools at this point, so use AnnotationToolCallDisplay for each
+                return (
+                    <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
+                        <AnnotationToolCallDisplay key={group[0].id} messageId={message.id} toolCalls={group} />
+                    </div>
+                );
             })}
         </div>
     );
