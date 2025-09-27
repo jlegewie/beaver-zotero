@@ -16,7 +16,6 @@ export interface AckLink {
  */
 export interface AckRequest {
     message_id: string;
-    toolcall_id: string;
     links: AckLink[];
 }
 
@@ -35,7 +34,6 @@ export interface AckError {
 export interface AckResponse {
     success: boolean;
     message_id: string;
-    toolcall_id: string;
     updated: number;
     errors: AckError[];
 }
@@ -103,20 +101,17 @@ export class ToolAnnotationsService extends ApiService {
      * It is idempotent (safe to call multiple times).
      * 
      * @param messageId The message ID containing the annotations
-     * @param toolcallId The toolcall ID that created the annotations
      * @param links Array of annotation_id -> zotero_key mappings
      * @returns Promise with success status, count of updated annotations, and any per-item errors
      */
     async acknowledgeAnnotations(
         messageId: string,
-        toolcallId: string,
         links: AckLink[]
     ): Promise<AckResponse> {
         logger(`acknowledgeAnnotations: Acknowledging ${links.length} annotations for message ${messageId}`);
         
         const request: AckRequest = {
             message_id: messageId,
-            toolcall_id: toolcallId,
             links
         };
         
@@ -182,13 +177,11 @@ export class ToolAnnotationsService extends ApiService {
      * Marks multiple annotations as applied with their Zotero keys
      * 
      * @param messageId The message ID containing the annotations
-     * @param toolcallId The toolcall ID that created the annotations
      * @param annotationKeyPairs Array of {annotationId, zoteroKey} pairs
      * @returns Promise with acknowledgment response
      */
     async markAnnotationsApplied(
         messageId: string,
-        toolcallId: string,
         annotationKeyPairs: Array<{ annotationId: string; zoteroKey: string }>
     ): Promise<AckResponse> {
         const links: AckLink[] = annotationKeyPairs.map(pair => ({
@@ -196,7 +189,7 @@ export class ToolAnnotationsService extends ApiService {
             zotero_key: pair.zoteroKey
         }));
         
-        return this.acknowledgeAnnotations(messageId, toolcallId, links);
+        return this.acknowledgeAnnotations(messageId, links);
     }
 
     /**
