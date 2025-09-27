@@ -348,6 +348,7 @@ export const addToolCallResponsesToToolAttachmentsAtom = atom(
     null,
     async (get, set, { messages }: { messages: ChatMessage[] }) => {
         const attachments: MessageAttachmentWithId[] = [];
+        const itemsToLoad = new Set<Zotero.Item>();
         const messagesWithToolCalls = messages.filter(message => message.tool_calls && message.tool_calls.length > 0);
 
         for (const message of messagesWithToolCalls) {
@@ -355,10 +356,12 @@ export const addToolCallResponsesToToolAttachmentsAtom = atom(
             for (const attachment of messageAttachments || []) {
                 const validAttachment = await Zotero.Items.getByLibraryAndKeyAsync(attachment.library_id, attachment.zotero_key);
                 if (validAttachment) {
+                    itemsToLoad.add(validAttachment);
                     attachments.push({...attachment, messageId: message.id});
                 }
             }
         }
+        await loadFullItemDataWithAllTypes([...itemsToLoad]);
         set(toolAttachmentsAtom, (prevAttachments: MessageAttachmentWithId[]) => [...prevAttachments, ...attachments]);
     }
 );
