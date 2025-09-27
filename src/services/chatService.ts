@@ -49,7 +49,7 @@ export interface SSECallbacks {
      * Handles "message" event to add or update a complete message
      * @param data The complete message object to add or update
      */
-    onMessage: (data: MessageModel) => void;
+    onMessage: (data: MessageModel) => Promise<void>;
     
     /**
      * Handles "toolcall" event when a tool call is received
@@ -57,7 +57,7 @@ export interface SSECallbacks {
      * @param toolcallId ID of the tool call
      * @param toolCall The tool call object
      */
-    onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => void;
+    onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => Promise<void>;
 
     /**
      * Handles "annotation" event when annotation data is streamed
@@ -342,12 +342,12 @@ export class ChatService extends ApiService {
                 delta: string,
                 type: DeltaType
             ) => void;
-            onMessage: (data: MessageModel) => void;
+            onMessage: (data: MessageModel) => Promise<void>;
             onToolcall: (
                 messageId: string,
                 toolcallId: string,
                 toolCall: ToolCall
-            ) => void;
+            ) => Promise<void>;
             onAnnotation: (
                 messageId: string,
                 toolcallId: string,

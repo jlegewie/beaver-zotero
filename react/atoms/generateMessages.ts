@@ -31,7 +31,7 @@ import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/ser
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
-import { toMessageUI } from '../types/chat/converters';
+import { getResultAttachmentsFromToolcall, toMessageUI } from '../types/chat/converters';
 import { store } from '../store';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { logger } from '../../src/utils/logger';
@@ -611,13 +611,28 @@ async function _processChatCompletionViaBackend(
                     }
                 }
             },
-            onMessage: (msg: MessageModel) => {
+            onMessage: async (msg: MessageModel) => {
                 logger(`event 'onMessage': ${JSON.stringify(msg)}`, 1);
                 set(currentAssistantMessageIdAtom, msg.id);
                 set(isChatRequestPendingAtom, false);
                 if (!msg) return;
+
+                // Convert to MessageUI
                 const message = toMessageUI(msg);
+
+                // Load item data
+                if (message.tool_calls) {
+                    const messageAttachments = message.tool_calls.flatMap(getResultAttachmentsFromToolcall) || [];
+                    const attachmentPromises = messageAttachments.map(att => Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key));
+                    const attachments = (await Promise.all(attachmentPromises)).filter(Boolean) as Zotero.Item[];
+                    if (attachments.length > 0) {
+                        await loadFullItemDataWithAllTypes(attachments);
+                    }
+                }
+
+                // Add message to the thread messages
                 set(addOrUpdateMessageAtom, { message });
+
                 // Add the tool call sources to the thread sources (if any)
                 if (message.status === 'completed' && message.tool_calls) {
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: [message]});
@@ -632,8 +647,18 @@ async function _processChatCompletionViaBackend(
                     Zotero.Beaver.db.upsertMessage(user_id, msg);
                 }
             },
-            onToolcall: (messageId: string, toolcallId: string, toolcall: ToolCall) => {
-                logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${toolcall}`, 1);
+            onToolcall: async (messageId: string, toolcallId: string, toolcall: ToolCall) => {
+                logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${JSON.stringify(toolcall)}`, 1);
+
+                // Load item data
+                const toolcallAttachments = getResultAttachmentsFromToolcall(toolcall) || [];
+                const attachmentPromises = toolcallAttachments.map(att => Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key));
+                const attachments = (await Promise.all(attachmentPromises)).filter(Boolean) as Zotero.Item[];
+                if (attachments.length > 0) {
+                    await loadFullItemDataWithAllTypes(attachments);
+                }
+
+                // Update state
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
             onAnnotation: (
