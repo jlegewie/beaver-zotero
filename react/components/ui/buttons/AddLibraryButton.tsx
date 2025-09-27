@@ -242,7 +242,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 closeOnSelect={true}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
-                showSearchInput={true}
+                showSearchInput={availableLibraries.length > 5}
             />
         </>
     );
