@@ -49,31 +49,39 @@ export async function getCollectionClientDateModifiedAsISOString(collection: Zot
  * @returns Map of itemID to clientDateModified string in ISO format
  */
 export async function getClientDateModifiedBatch(
-    items: (Zotero.Item | number)[]
+    items: (Zotero.Item | number)[],
+    chunkSize: number = 500
 ): Promise<Map<number, string>> {
     const itemIds = items.map(item => typeof item === 'number' ? item : item.id);
     if (itemIds.length === 0) return new Map();
 
-    const placeholders = itemIds.map(() => '?').join(', ');
-    const sql = `SELECT itemID, clientDateModified FROM items WHERE itemID IN (${placeholders})`;
-    const rows = await Zotero.DB.queryAsync(sql, itemIds);
-
     const result = new Map<number, string>();
-    for (const row of rows || []) {
-        // The value from DB is a SQL datetime string (UTC)
-        // Convert to ISO string. Append 'Z' to treat it as UTC.
-        if (row.clientDateModified) {
-            try {
-                result.set(
-                    row.itemID,
-                    Zotero.Date.sqlToISO8601(row.clientDateModified),
-                );
-            } catch (e) {
-                logger(
-                    `getClientDateModifiedBatch: Could not parse clientDateModified '${row.clientDateModified}' for item ${row.itemID}. This item will not be included in date-based batching.`,
-                    2,
-                );
+    
+    // Process in chunks to avoid SQLite parameter limits
+    for (let i = 0; i < itemIds.length; i += chunkSize) {
+        const chunk = itemIds.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const sql = `SELECT itemID, clientDateModified FROM items WHERE itemID IN (${placeholders})`;
+        
+        try {
+            const rows = await Zotero.DB.queryAsync(sql, chunk);
+            
+            for (const row of rows || []) {
+                if (row.clientDateModified) {
+                    try {
+                        result.set(
+                            row.itemID,
+                            Zotero.Date.sqlToISO8601(row.clientDateModified),
+                        );
+                    } catch (e) {
+                        logger(`getClientDateModifiedBatch: Could not parse clientDateModified '${row.clientDateModified}' for item ${row.itemID}. This item will not be included in date-based batching.`, 2);
+                    }
+                }
             }
+        } catch (error) {
+            logger(`getClientDateModifiedBatch: Error processing chunk ${i}-${i + chunk.length}: ${(error as Error).message}`, 1);
+            throw error;
+            // Continue with next chunk even if one fails
         }
     }
 
