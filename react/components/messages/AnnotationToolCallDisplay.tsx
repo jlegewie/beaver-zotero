@@ -79,7 +79,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     let iconColor = annotation.status === 'deleted' || annotation.status === 'pending'
         ? 'font-color-tertiary'
         : 'font-color-secondary';
-    iconColor = annotation.color ? `font-color-${annotation.color}` : iconColor;
+    iconColor = annotation.color
+        ? `${annotation.color == 'yellow' ? 'opacity-100' : ''} font-color-${annotation.color}`
+        : iconColor;
     iconColor = annotation.status === 'error' ? 'font-color-secondary' : iconColor;
 
     const baseClasses = [
