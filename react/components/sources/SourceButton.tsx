@@ -62,7 +62,7 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 return;
             }
 
-            let name = getDisplayNameFromItem(item);
+            let name = getDisplayNameFromItem(item.parentItem || item);
             if (source.childItemKeys.length > 1) {
                 name = `${name} (${source.childItemKeys.length})`;
             }
