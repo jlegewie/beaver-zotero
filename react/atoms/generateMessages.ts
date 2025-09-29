@@ -863,6 +863,7 @@ async function _processChatCompletionViaBackend(
                 if (isCancelling) {
                     // Cancel the message
                     set(cancelStreamingMessageAtom, { assistantMessageId: currentMessageId });
+                    set(isCancellingAtom, false);
                 } else {
                     // Mark the assistant message as error
                     set(setMessageStatusAtom, {
