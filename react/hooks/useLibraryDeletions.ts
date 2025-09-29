@@ -29,6 +29,7 @@ export function useLibraryDeletions() {
     const [jobs, setJobs] = useAtom(deletionJobsAtom);
     const timerRef = useRef<number | null>(null);
     const jobsRef = useRef(jobs);
+    const pollIntervalRef = useRef(5000); // Start at 5 seconds
 
     useEffect(() => {
         jobsRef.current = jobs;
@@ -162,14 +163,37 @@ export function useLibraryDeletions() {
         });
     }, [setJobs]);
 
+    const scheduleNextPoll = useCallback(() => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        
+        const currentJobs = Object.values(jobsRef.current)
+            .filter(j => j.status !== 'completed' && j.status !== 'failed');
+        
+        if (currentJobs.length === 0) {
+            pollIntervalRef.current = 5000; // Reset for next time
+            return;
+        }
+
+        timerRef.current = setTimeout(async () => {
+            await pollOnce();
+            // Exponential backoff: 5s -> 10s -> 20s -> 40s -> 60s (capped)
+            pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 60000);
+            scheduleNextPoll();
+        }, pollIntervalRef.current) as unknown as number;
+    }, [pollOnce]);
+
     useEffect(() => {
         // Run once on mount to catch up
         void pollOnce();
-
-        if (timerRef.current) clearInterval(timerRef.current);
-        timerRef.current = setInterval(pollOnce, 20000) as unknown as number; // 20s
-        return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [pollOnce]);
+        
+        // Reset interval when jobs change (new deletions started)
+        pollIntervalRef.current = 5000;
+        scheduleNextPoll();
+        
+        return () => { 
+            if (timerRef.current) clearTimeout(timerRef.current); 
+        };
+    }, [pollOnce, scheduleNextPoll]);
 
     const activeDeletionIds = useMemo(
         () => new Set(activeJobs.map(j => j.libraryID)),
