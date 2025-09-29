@@ -127,8 +127,9 @@ export function useLibraryDeletions() {
         });
     }, [setJobs]);
 
-    // Poller
-    const pollOnce = useCallback(async () => {
+    // Poller - use useRef to avoid recreating the callback
+    const pollOnceRef = useRef<() => Promise<void>>();
+    pollOnceRef.current = async () => {
         const currentJobs = Object.values(jobsRef.current)
             .filter(j => j.status !== 'completed' && j.status !== 'failed');
 
@@ -161,7 +162,7 @@ export function useLibraryDeletions() {
             }
             return next;
         });
-    }, [setJobs]);
+    };
 
     const scheduleNextPoll = useCallback(() => {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -175,25 +176,32 @@ export function useLibraryDeletions() {
         }
 
         timerRef.current = setTimeout(async () => {
-            await pollOnce();
+            await pollOnceRef.current?.();
             // Exponential backoff: 5s -> 10s -> 20s -> 40s -> 60s (capped)
             pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 60000);
             scheduleNextPoll();
         }, pollIntervalRef.current) as unknown as number;
-    }, [pollOnce]);
+    }, []); // ← No dependencies! Uses refs instead
 
+    // Only start polling when active jobs count changes
     useEffect(() => {
-        // Run once on mount to catch up
-        void pollOnce();
+        const hasActiveJobs = activeJobs.length > 0;
         
-        // Reset interval when jobs change (new deletions started)
-        pollIntervalRef.current = 5000;
-        scheduleNextPoll();
+        if (hasActiveJobs) {
+            // Run immediately on first poll or when new jobs are added
+            void pollOnceRef.current?.();
+            // Reset interval for new jobs
+            pollIntervalRef.current = 5000;
+            scheduleNextPoll();
+        } else {
+            // Stop polling when no active jobs
+            if (timerRef.current) clearTimeout(timerRef.current);
+        }
         
         return () => { 
             if (timerRef.current) clearTimeout(timerRef.current); 
         };
-    }, [pollOnce, scheduleNextPoll]);
+    }, [activeJobs.length, scheduleNextPoll]); // ← Only re-run when count changes
 
     const activeDeletionIds = useMemo(
         () => new Set(activeJobs.map(j => j.libraryID)),
