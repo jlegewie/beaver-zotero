@@ -147,6 +147,7 @@ export interface UpdateUploadStatusRequest {
     update_processing_status: boolean;
     processing_tier?: ProcessingTier;
     error_code?: PlanLimitErrorCode;
+    details?: string;
 }
 
 /**
@@ -417,14 +418,16 @@ export class AttachmentsService extends ApiService {
         status: UploadStatus,
         updateProcessingStatus: boolean = false,
         processingTier?: ProcessingTier,
-        errorCode?: PlanLimitErrorCode
+        errorCode?: PlanLimitErrorCode,
+        details?: string
     ): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
             file_hash: fileHash,
             status: status,
             update_processing_status: updateProcessingStatus,
             processing_tier: processingTier,
-            error_code: errorCode
+            error_code: errorCode,
+            details: details
         };
         return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }

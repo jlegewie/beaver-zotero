@@ -260,8 +260,8 @@ export class FileUploader {
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
-                logger(`File Uploader uploadFile ${item.zotero_key}: Attachment not found`, 1);
-                await this.handlePermanentFailure(item, user_id, "Attachment not found in Zotero");
+                logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
+                await this.handlePermanentFailure(item, user_id, `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
                 return;
             }
 
@@ -295,8 +295,8 @@ export class FileUploader {
                 
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: File path not found`, 1);
-                    await this.handlePermanentFailure(item, user_id, "File path not found");
+                    logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
+                    await this.handlePermanentFailure(item, user_id, `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
                     return;
                 }
 
@@ -309,9 +309,9 @@ export class FileUploader {
                 try {
                     fileArrayBuffer = await IOUtils.read(filePath);
                 } catch (readError: any) {
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Error reading file`, 1);
+                    logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
-                    await this.handlePermanentFailure(item, user_id, "Error reading file");
+                    await this.handlePermanentFailure(item, user_id, `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
                     return;
                 }
 
@@ -339,8 +339,10 @@ export class FileUploader {
 
             // File array buffer check
             if (!fileArrayBuffer || !mimeType || !fileSize || (!pageCount && mimeType === 'application/pdf')) {
-                logger(`File Uploader uploadFile ${item.zotero_key}: Unable to get file data`, 1);
-                await this.handlePermanentFailure(item, user_id, "Unable to get file data");
+                const fileStatus = useLocalFile ? 'local' : 'server';
+                const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
+                logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
+                await this.handlePermanentFailure(item, user_id, message);
                 return;
             }
 
@@ -636,8 +638,15 @@ export class FileUploader {
         logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
-            // First, notify backend of failure
-            await attachmentsService.updateUploadStatus(item.file_hash, 'failed');
+            // First, notify backend of failure with error details
+            await attachmentsService.updateUploadStatus(
+                item.file_hash, 
+                'failed',
+                false, // updateProcessingStatus
+                undefined, // processingTier
+                undefined, // errorCode
+                reason // details
+            );
             
             // Error message for manual retry (only show if user has completed onboarding)
             if (store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
@@ -665,7 +674,14 @@ export class FileUploader {
     private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, processingTier: ProcessingTier, errorCode: PlanLimitErrorCode): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
-            await attachmentsService.updateUploadStatus(item.file_hash, 'plan_limit', true, processingTier, errorCode);
+            await attachmentsService.updateUploadStatus(
+                item.file_hash, 
+                'plan_limit', 
+                true, // updateProcessingStatus
+                processingTier, 
+                errorCode,
+                reason // details
+            );
             
         } catch (failError: any) {
             logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
