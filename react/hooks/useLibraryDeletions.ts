@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { deletionJobsAtom, DeletionJob, DeletionStatus } from '../atoms/sync';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { scheduleLibraryDeletion } from '../../src/utils/sync';
-import { syncService, DeletionStatusRequestItem, DeletionStatusResponse } from '../../src/services/syncService';
+import { syncService, DeletionStatusRequestItem, DeletionStatusResponse, DeleteLibraryTask } from '../../src/services/syncService';
 import { logger } from '../../src/utils/logger';
 
 const PREF_KEY = 'deletionJobs';
@@ -22,6 +22,70 @@ function writeJobsPref(jobs: Record<number, DeletionJob>) {
         setPref(PREF_KEY, JSON.stringify(jobs) as any);
     } catch {
         // ignore
+    }
+}
+
+/**
+ * Schedules a library deletion and manages the deletion job state
+ * This is a shared utility used by both the hook and components
+ * @param lib Library metadata
+ * @param setJobs Setter function for deletionJobsAtom
+ * @returns Promise resolving to the deletion tasks
+ */
+export async function scheduleSingleLibraryDeletion(
+    lib: { libraryID: number; name: string; isGroup: boolean },
+    setJobs: (update: (prev: Record<number, DeletionJob>) => Record<number, DeletionJob>) => void
+): Promise<DeleteLibraryTask[]> {
+    // Optimistically update deletion jobs atom
+    setJobs((prev) => ({
+        ...prev,
+        [lib.libraryID]: {
+            libraryID: lib.libraryID,
+            name: lib.name,
+            isGroup: lib.isGroup,
+            startedAt: new Date().toISOString(),
+            status: 'queued'
+        }
+    }));
+
+    try {
+        // Schedule backend deletion
+        const tasks = await scheduleLibraryDeletion([lib.libraryID]);
+        const task = tasks.find((t) => t.library_id === lib.libraryID);
+
+        // Update with task details
+        setJobs((prev) => {
+            const next = { ...prev };
+            const j = next[lib.libraryID];
+            if (!j) return next;
+            return {
+                ...next,
+                [lib.libraryID]: {
+                    ...j,
+                    status: 'processing',
+                    msgId: task?.msg_id,
+                    sessionId: task?.session_id,
+                }
+            };
+        });
+
+        return tasks;
+    } catch (error) {
+        // Rollback optimistic update on failure
+        setJobs((prev) => {
+            const next = { ...prev };
+            const j = next[lib.libraryID];
+            if (!j) return next;
+            return {
+                ...next,
+                [lib.libraryID]: {
+                    ...j,
+                    status: 'failed',
+                    error: error instanceof Error ? error.message : String(error)
+                }
+            };
+        });
+        throw error;
     }
 }
 
@@ -52,38 +116,9 @@ export function useLibraryDeletions() {
         [jobs]
     );
 
-    // Start deletion for a single library (schedules backend + tracks session)
+    // Start deletion for a single library (uses shared utility)
     const startDeletion = useCallback(async (lib: { libraryID: number; name: string; isGroup: boolean }) => {
-        // Optimistic enqueue in UI
-        setJobs(prev => ({
-            ...prev,
-            [lib.libraryID]: {
-                libraryID: lib.libraryID,
-                name: lib.name,
-                isGroup: lib.isGroup,
-                startedAt: new Date().toISOString(),
-                status: 'queued'
-            }
-        }));
-
-        // Schedule backend deletion and capture session/msg id
-        const tasks = await scheduleLibraryDeletion([lib.libraryID]) as any;
-        const task = Array.isArray(tasks) ? tasks.find((t: any) => t.library_id === lib.libraryID) : undefined;
-
-        setJobs(prev => {
-            const next = { ...prev };
-            const j = next[lib.libraryID];
-            if (!j) return next;
-            return {
-                ...next,
-                [lib.libraryID]: {
-                    ...j,
-                    status: 'processing',
-                    msgId: task?.msg_id,
-                    sessionId: task?.session_id,
-                }
-            };
-        });
+        await scheduleSingleLibraryDeletion(lib, setJobs);
     }, [setJobs]);
 
     // Start deletion for multiple libraries

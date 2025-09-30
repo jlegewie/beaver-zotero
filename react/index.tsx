@@ -35,6 +35,7 @@ const GlobalContextInitializer = () => {
     useProfileSync();
 
     // Validate sync libraries against local Zotero (once per session)
+    // Also initializes global useLibraryDeletions hook via useValidateSyncLibraries
     useValidateSyncLibraries();
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)

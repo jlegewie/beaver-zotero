@@ -1,6 +1,6 @@
 import React from 'react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { useAtom, useAtomValue, useStore } from 'jotai';
+import { useAtom, useAtomValue, useStore, useSetAtom } from 'jotai';
 import { userAtom } from '../../atoms/auth';
 import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
 import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, CancelCircleIcon } from '../icons/icons';
@@ -9,10 +9,10 @@ import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sy
 import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import IconButton from '../ui/IconButton';
-import { useLibraryDeletions } from '../../hooks/useLibraryDeletions';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
-import { syncStatusAtom } from '../../atoms/sync';
+import { syncStatusAtom, deletionJobsAtom } from '../../atoms/sync';
 import { isLibrarySynced } from '../../../src/utils/zoteroUtils';
+import { scheduleSingleLibraryDeletion } from '../../hooks/useLibraryDeletions';
 
 type LastSyncedMap = Record<number, string>;
 
@@ -37,15 +37,16 @@ const SyncedLibraries: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const store = useStore();
 
+    // Read deletion jobs from atom (managed globally by hook in index.tsx)
+    const jobs = useAtomValue(deletionJobsAtom);
+    const setJobs = useSetAtom(deletionJobsAtom);
+
     const [lastSynced, setLastSynced] = useState<LastSyncedMap>({});
     const [isSyncingComplete, setIsSyncingComplete] = useState<Record<number, boolean>>({});
     const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
 
     // Track libraries for which we've already refreshed after initial sync completes
     const initialSyncRefreshed = useRef<Set<number>>(new Set());
-
-    // Hydrate/poll deletion jobs
-    const { jobs, startDeletion } = useLibraryDeletions();
 
     const libraries = useMemo(() => {
         // Get synced libraries
@@ -170,7 +171,12 @@ const SyncedLibraries: React.FC = () => {
         setIsDeleting((s) => ({ ...s, [libraryID]: true }));
         try {
             logger(`SyncedLibraries: Starting deletion for library ${libraryID}`);
-            await startDeletion({ libraryID, name: lib.name, isGroup: lib.isGroup });
+            
+            // Use shared utility function
+            await scheduleSingleLibraryDeletion(
+                { libraryID: lib.libraryID, name: lib.name, isGroup: lib.isGroup },
+                setJobs
+            );
 
             // Update list of libraries in backend/profile
             if (profileWithPlan) {
@@ -196,7 +202,7 @@ const SyncedLibraries: React.FC = () => {
         } finally {
             setIsDeleting((s) => ({ ...s, [libraryID]: false }));
         }
-    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting, startDeletion]);
+    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting, setJobs]);
 
     return (
         <div className="display-flex flex-col gap-3">
