@@ -325,7 +325,7 @@ const PreferencePage: React.FC = () => {
                         <div className="font-color-secondary">Plan:</div>
                         <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
-                    {profileBalance.pagesRemaining && 
+                    {profileBalance.pagesRemaining !== undefined && 
                         <div className="display-flex flex-row items-center gap-2">
                             <div className="font-color-secondary">Remaining Page Balance:</div>
                             <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
