@@ -569,7 +569,7 @@ export async function syncItemsToBackend(
     syncMethod: SyncMethod,
     onStatusChange?: (libraryID: number, status: SyncStatus, errorMessage?: string) => void,
     onProgress?: (libraryID: number, processed: number, totalForLibrary: number) => void,
-    batchSize: number = 200,
+    batchSize: number = 100,
 ) {
     const userId = store.get(userIdAtom);
     if (!userId) {
