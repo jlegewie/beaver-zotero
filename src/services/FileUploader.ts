@@ -338,7 +338,7 @@ export class FileUploader {
             logger(`File Uploader uploadFile ${item.zotero_key}: File metadata: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`, 3);
 
             // File array buffer check
-            if (!fileArrayBuffer || !mimeType || !fileSize || !pageCount) {
+            if (!fileArrayBuffer || !mimeType || !fileSize || (!pageCount && mimeType === 'application/pdf')) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: Unable to get file data`, 1);
                 await this.handlePermanentFailure(item, user_id, "Unable to get file data");
                 return;
