@@ -125,7 +125,7 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
 
     // ------- 1. Get full item data -------
     // @ts-ignore - Returns of item.toJSON are not typed correctly
-    const { abstractNote, creators, collections, tags, version, ...fullItemData } = item.toJSON();
+    const {abstractNote, key, libraryID, itemType, deleted, dateAdded, dateModified, accessDate, creators, collections, tags, version, ...fullItemData } = item.toJSON();
 
     // ------- 2. Extract fields for hashing -------
     const hashedFields: ItemDataHashedFields = {
@@ -140,9 +140,6 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
         abstract: item.getField('abstractNote'),
         url: item.getField('url'),
         identifiers: extractIdentifiers(item),
-
-        item_json: fullItemData,
-
         language: item.getField('language'),
         formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
         deleted: item.isInTrash(),
@@ -174,6 +171,8 @@ export async function extractItemData(item: Zotero.Item, clientDateModified: str
 
     const itemData: ItemData = {
         ...hashedFields,
+        // Add full item data
+        item_json: fullItemData,
         // Add non-hashed fields
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded), // Convert UTC SQL datetime format to ISO string
         date_modified: finalDateModified,

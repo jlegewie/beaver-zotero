@@ -128,8 +128,6 @@ export type ItemDataHashedFields = Pick<ItemData,
     | 'zotero_key' | 'library_id'
     // Core bibliographic fields
     | 'item_type' | 'title' | 'creators' | 'date' | 'year' | 'publication_title' | 'abstract' | 'url' | 'identifiers'
-    // full item data
-    | 'item_json'
     // Metadata
     | 'language' | 'formatted_citation' | 'deleted' | 'tags' | 'collections' | 'citation_key'
 >;
