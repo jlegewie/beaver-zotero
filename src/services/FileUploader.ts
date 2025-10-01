@@ -17,7 +17,7 @@ import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
-import { showFileStatusDetailsAtom } from '../../react/atoms/ui';
+import { showFileStatusDetailsAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
 import { ProcessingTier } from '../../react/types/profile';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
@@ -326,6 +326,7 @@ export class FileUploader {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
                     await this.handlePermanentFailure(item, user_id, errorMessage);
+                    store.set(zoteroServerDownloadErrorAtom, true);
                     return;
                 }
                 
@@ -344,6 +345,7 @@ export class FileUploader {
                 const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
                 await this.handlePermanentFailure(item, user_id, message);
+                if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
                 return;
             }
 
@@ -708,6 +710,7 @@ export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "fa
         // -------- (1) Retry uploads in backend --------
         const results: FileHashReference[] = await attachmentsService.retryUploadsByStatus(status);
         logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
+        store.set(zoteroServerDownloadErrorAtom, false);
 
         // -------- (2) Restart the uploader --------
         await fileUploader.start("manual");

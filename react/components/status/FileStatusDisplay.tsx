@@ -12,6 +12,7 @@ import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
 import { planFeaturesAtom } from "../../atoms/profile";
 import Button from "../ui/Button";
+import { zoteroServerDownloadErrorAtom } from "../../atoms/ui";
 
 interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
@@ -57,6 +58,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const planFeatures = useAtomValue(planFeaturesAtom);
     const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
     const timeRemaining = useTimeRemaining(backoffUntil);
+    const zoteroServerDownloadError = useAtomValue(zoteroServerDownloadErrorAtom);
     const [showSkippedFiles, setShowSkippedFiles] = useState(false);
 
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
@@ -239,6 +241,13 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Zotero server download error */}
+            {zoteroServerDownloadError && (
+                <div className="font-color-tertiary text-sm">
+                    Some uploads failed because they could not be downloaded from Zotero's server. Please try again later.
                 </div>
             )}
         </div>

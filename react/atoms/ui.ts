@@ -31,6 +31,9 @@ export const activeDialogAtom = atom<DialogType>((get) => {
     return null;
 });
 
+// Zotero server download error
+export const zoteroServerDownloadErrorAtom = atom(false);
+
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 
