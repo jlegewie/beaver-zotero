@@ -270,16 +270,13 @@ export class FileUploader {
             
             // Check if file exists on server
             const validZoteroCredentials = Boolean(Zotero.Users.getCurrentUserID()) && Boolean(await Zotero.Sync.Data.Local.getAPIKey())
-            const useServerFile = (
-                !useLocalFile &&
-                isAttachmentOnServer(attachment) &&
-                validZoteroCredentials
-            );
+            const isServerFile = isAttachmentOnServer(attachment);
+            const useServerFile = !useLocalFile && isServerFile && validZoteroCredentials;
 
             if (!useLocalFile && !useServerFile) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: File not available locally or on server`, 1);
                 await this.handlePermanentFailure(item, user_id, "File not available locally or on server");
-                if(!useLocalFile && isAttachmentOnServer(attachment) && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
+                if(!useLocalFile && isServerFile && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
                 return;
             }
 
