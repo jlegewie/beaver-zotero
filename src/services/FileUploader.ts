@@ -261,7 +261,7 @@ export class FileUploader {
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
-                await this.handlePermanentFailure(item, user_id, {
+                await this.handlePermanentFailure(item, {
                     reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                 });
                 return;
@@ -278,7 +278,7 @@ export class FileUploader {
             if (!useLocalFile && !useServerFile) {
                 const message = `File not available locally or on server (useLocalFile: ${useLocalFile}, useServerFile: ${useServerFile}, validZoteroCredentials: ${validZoteroCredentials})`;
                 logger(`File Uploader uploadFile ${item.zotero_key}: ${message}`, 1);
-                await this.handlePermanentFailure(item, user_id, {
+                await this.handlePermanentFailure(item, {
                     reason: message
                 });
                 if(!useLocalFile && isServerFile && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
@@ -301,7 +301,7 @@ export class FileUploader {
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
-                    await this.handlePermanentFailure(item, user_id, {
+                    await this.handlePermanentFailure(item, {
                         reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
                     return;
@@ -318,7 +318,7 @@ export class FileUploader {
                 } catch (readError: any) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
-                    await this.handlePermanentFailure(item, user_id, {
+                    await this.handlePermanentFailure(item, {
                         reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
                     return;
@@ -346,7 +346,7 @@ export class FileUploader {
                 } catch (downloadError: any) {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
-                    await this.handlePermanentFailure(item, user_id, {
+                    await this.handlePermanentFailure(item, {
                         reason: errorMessage
                     });
                     store.set(zoteroServerDownloadErrorAtom, true);
@@ -367,7 +367,7 @@ export class FileUploader {
                 const fileStatus = useLocalFile ? 'local' : 'server';
                 const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
-                await this.handlePermanentFailure(item, user_id, {
+                await this.handlePermanentFailure(item, {
                     reason: message
                 });
                 if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
@@ -438,7 +438,7 @@ export class FileUploader {
             Zotero.logError(error);
 
             // Treat as permanently failed with message for manual retry
-            await this.handlePermanentFailure(item, user_id, {
+            await this.handlePermanentFailure(item, {
                 reason: error instanceof Error ? error.message : "Max attempts reached"
             });
         }
@@ -649,8 +649,7 @@ export class FileUploader {
             for (const batchItem of batchToSend) {
                 try {
                     await this.handlePermanentFailure(
-                        batchItem.item, 
-                        userId, 
+                        batchItem.item,
                         {
                             reason: `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
                         }
@@ -668,7 +667,6 @@ export class FileUploader {
      */
     private async handlePermanentFailure(
         item: UploadQueueItem,
-        user_id: string,
         {
             processingTier,
             errorCode,
