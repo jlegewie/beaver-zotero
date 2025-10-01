@@ -7,7 +7,7 @@
  */
 
 import PQueue from 'p-queue';
-import { getPDFPageCount, getPDFPageCountFromData } from '../../react/utils/pdfUtils';
+import { getPDFPageCount, getPDFPageCountFromData, naivePdfPageCount } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
@@ -314,6 +314,15 @@ export class FileUploader {
                     Zotero.logError(readError);
                     await this.handlePermanentFailure(item, user_id, `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
                     return;
+                }
+
+                // If page count is still null for PDFs, try naive method with file data
+                if (mimeType === 'application/pdf' && !pageCount && fileArrayBuffer) {
+                    
+                    pageCount = naivePdfPageCount(fileArrayBuffer);
+                    if (pageCount) {
+                        logger(`File Uploader uploadFile ${item.zotero_key}: Got page count ${pageCount} using naive method`, 3);
+                    }
                 }
 
             // File exists on server
