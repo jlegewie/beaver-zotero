@@ -261,7 +261,9 @@ export class FileUploader {
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
-                await this.handlePermanentFailure(item, user_id, `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
+                await this.handlePermanentFailure(item, user_id, {
+                    reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
+                });
                 return;
             }
 
@@ -276,7 +278,9 @@ export class FileUploader {
             if (!useLocalFile && !useServerFile) {
                 const message = `File not available locally or on server (useLocalFile: ${useLocalFile}, useServerFile: ${useServerFile}, validZoteroCredentials: ${validZoteroCredentials})`;
                 logger(`File Uploader uploadFile ${item.zotero_key}: ${message}`, 1);
-                await this.handlePermanentFailure(item, user_id, message);
+                await this.handlePermanentFailure(item, user_id, {
+                    reason: message
+                });
                 if(!useLocalFile && isServerFile && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
                 return;
             }
@@ -297,7 +301,9 @@ export class FileUploader {
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
-                    await this.handlePermanentFailure(item, user_id, `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
+                    await this.handlePermanentFailure(item, user_id, {
+                        reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
+                    });
                     return;
                 }
 
@@ -312,7 +318,9 @@ export class FileUploader {
                 } catch (readError: any) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
-                    await this.handlePermanentFailure(item, user_id, `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`);
+                    await this.handlePermanentFailure(item, user_id, {
+                        reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
+                    });
                     return;
                 }
 
@@ -338,7 +346,9 @@ export class FileUploader {
                 } catch (downloadError: any) {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
-                    await this.handlePermanentFailure(item, user_id, errorMessage);
+                    await this.handlePermanentFailure(item, user_id, {
+                        reason: errorMessage
+                    });
                     store.set(zoteroServerDownloadErrorAtom, true);
                     return;
                 }
@@ -357,7 +367,9 @@ export class FileUploader {
                 const fileStatus = useLocalFile ? 'local' : 'server';
                 const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
-                await this.handlePermanentFailure(item, user_id, message);
+                await this.handlePermanentFailure(item, user_id, {
+                    reason: message
+                });
                 if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
                 return;
             }
@@ -426,7 +438,9 @@ export class FileUploader {
             Zotero.logError(error);
 
             // Treat as permanently failed with message for manual retry
-            await this.handlePermanentFailure(item, user_id, error instanceof Error ? error.message : "Max attempts reached");
+            await this.handlePermanentFailure(item, user_id, {
+                reason: error instanceof Error ? error.message : "Max attempts reached"
+            });
         }
     }
 
@@ -637,7 +651,9 @@ export class FileUploader {
                     await this.handlePermanentFailure(
                         batchItem.item, 
                         userId, 
-                        `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
+                        {
+                            reason: `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
+                        }
                     );
                 } catch (failError: any) {
                     logger(`File Uploader: Failed to mark batch item ${batchItem.item.zotero_key} as permanently failed: ${failError.message}`, 1);
@@ -650,7 +666,19 @@ export class FileUploader {
     /**
      * Handles permanent failures by marking items as failed in the backend and removing them from the backend queue
      */
-    private async handlePermanentFailure(item: UploadQueueItem, user_id: string, reason: string): Promise<void> {
+    private async handlePermanentFailure(
+        item: UploadQueueItem,
+        user_id: string,
+        {
+            processingTier,
+            errorCode,
+            reason
+        }: {
+            processingTier?: ProcessingTier,
+            errorCode?: PlanLimitErrorCode,
+            reason?: string
+        }
+    ): Promise<void> {
         logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
@@ -658,9 +686,9 @@ export class FileUploader {
             await attachmentsService.updateUploadStatus(
                 item.file_hash, 
                 'failed',
-                false, // updateProcessingStatus
-                undefined, // processingTier
-                undefined, // errorCode
+                processingTier !== undefined, // updateProcessingStatus
+                processingTier, // processingTier
+                errorCode, // errorCode
                 reason // details
             );
             
