@@ -245,7 +245,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
             )}
 
             {/* Zotero server download error */}
-            {zoteroServerDownloadError && (
+            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && zoteroServerDownloadError && (
                 <div className="font-color-tertiary text-sm">
                     Some uploads failed because they could not be downloaded from Zotero's server. Please try again later.
                 </div>
