@@ -283,10 +283,6 @@ declare namespace Zotero {
         isInTrash(): boolean;
     }
 
-    interface HTTP {
-        UnexpectedStatusException: new (...args: any[]) => Error;
-    }
-
     interface Utilities {
         Internal: {
             /**
@@ -363,5 +359,15 @@ declare namespace Zotero {
              */
             update(item: Zotero.Item): string;
         };
+    }
+}
+
+
+declare namespace _ZoteroTypes {
+    interface HTTP {
+        UnexpectedStatusException: new (...args: any[]) => Error;
+        BrowserOfflineException: new (...args: any[]) => Error;
+        TimeoutException: new (...args: any[]) => Error;
+        SecurityException: new (...args: any[]) => Error;
     }
 }
