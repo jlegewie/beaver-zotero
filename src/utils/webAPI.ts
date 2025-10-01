@@ -91,72 +91,118 @@ function md5FromBytes(uint8: Uint8Array): string {
 
 
 /**
- * Downloads an attachment that exists on the server but not locally to a temporary file.
- * This function does NOT change the item's sync state or save the file to the user's
- * permanent Zotero storage directory. The goal is to get file access for
- * an upload without disrupting the user's library.
- *
- * NOTE: The caller of this function is responsible for deleting the temporary file
- *       from the filesystem once it is no longer needed.
+ * Downloads the file data of an attachment from the Zotero server into memory.
  *
  * @param {Zotero.Item} item - The attachment item to download.
- * @returns {Promise<string|null>} A promise that resolves with the path to the
- *   temporary file on success, or null if the file could not be downloaded.
+ * @returns {Promise<Uint8Array>} A promise that resolves with the file data
+ * @throws {Error} If the file cannot be downloaded, with a descriptive error message
  */
-export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint8Array | null> {
+export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint8Array> {
 
-	// 1. Validate the input item
-	if (!item || !item.isStoredFileAttachment()) {
+    // 1. Validate the input item
+    if (!item || !item.isStoredFileAttachment()) {
 		logger("getAttachmentDataInMemory: Item is not a valid stored file attachment.");
-		return null;
-	}
+        throw new Error("Item is not a valid stored file attachment");
+    }
 
-	if (!isAttachmentOnServer(item)) {
-		logger("getAttachmentDataInMemory: File is not on server.");
-		return null;
-	}
+    if (!isAttachmentOnServer(item)) {
+		logger(`getAttachmentDataInMemory: File not on server (sync state: ${item.attachmentSyncState})`);
+        throw new Error(`File not on server (sync state: ${item.attachmentSyncState})`);
+    }
 
-	// 2. Get the necessary API credentials for the download
-	const userID = Zotero.Users.getCurrentUserID();
-	if (!userID) {
-		logger("getAttachmentDataInMemory: Cannot download file: Not logged into a Zotero account.");
-		return null;
-	}
+    // 2. Get the necessary API credentials for the download
+    const userID = Zotero.Users.getCurrentUserID();
+    if (!userID) {
+		logger("getAttachmentDataInMemory: Not logged into a Zotero account");
+        throw new Error("Not logged into a Zotero account");
+    }
 
-	const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
-	if (!apiKey) {
-		logger("getAttachmentDataInMemory: Cannot download file: Missing Zotero API key.");
-		return null;
-	}
+    const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
+    if (!apiKey) {
+		logger("getAttachmentDataInMemory: Missing Zotero API key");
+        throw new Error("Missing Zotero API key");
+    }
 
-	// 3. Construct the API URL (this endpoint will 302 to a signed URL)
-	const baseApiUrl = ZOTERO_CONFIG.API_URL;
-	const apiUrl = item.library.isGroup
-		? `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`
-		: `${baseApiUrl}users/${userID}/items/${item.key}/file`;
-	
-	const retryOptions = {
-		errorDelayIntervals: [500, 1500, 3000] // 3 retries
-	};
+    // 3. Construct the API URL (this endpoint will 302 to a signed URL)
+    const baseApiUrl = ZOTERO_CONFIG.API_URL;
+    const apiUrl = item.library.isGroup
+        ? `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`
+        : `${baseApiUrl}users/${userID}/items/${item.key}/file`;
+    
+    const retryOptions = {
+        errorDelayIntervals: [500, 1500, 3000] // 3 retries
+    };
 
-	try {
-		// 4. Single request: follow redirect and get bytes
-		logger(`getAttachmentDataInMemory: Requesting download URL from: ${apiUrl}`);
-		const resp = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION },
-			responseType: 'arraybuffer', // defaults to following redirects
-			...retryOptions
-		});
-		if (resp.status !== 200) {
-			return null;
+    try {
+        // 4. Single request: follow redirect and get bytes
+        logger(`getAttachmentDataInMemory: Requesting download URL from: ${apiUrl}`);
+        const resp = await Zotero.HTTP.request('GET', apiUrl, {
+            headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION },
+            responseType: 'arraybuffer', // defaults to following redirects
+            ...retryOptions
+        });
+        
+        if (resp.status !== 200) {
+			logger(`getAttachmentDataInMemory: Zotero API returned status ${resp.status}: ${resp.statusText || 'Unknown error'}`);
+            throw new Error(`Zotero API returned status ${resp.status}: ${resp.statusText || 'Unknown error'}`);
+        }
+
+        const data = new Uint8Array(resp.response);
+        
+        if (!data || data.length === 0) {
+			logger("getAttachmentDataInMemory: Downloaded file is empty");
+            throw new Error("Downloaded file is empty");
+        }
+
+        return data;
+    } catch (e: any) {
+		    // Handle specific Zotero exception types
+		if (e instanceof Zotero.HTTP.BrowserOfflineException) {
+			logger(`getAttachmentDataInMemory: ${Zotero.appName} is offline`);
+			throw new Error(`Cannot download: ${Zotero.appName} is offline`);
+		}
+		
+		if (e instanceof Zotero.HTTP.TimeoutException) {
+			logger(`getAttachmentDataInMemory: Download timeout: ${e.message}`);
+			throw new Error(`Download timeout: ${e.message}`);
+		}
+		
+		if (e instanceof Zotero.HTTP.SecurityException) {
+			logger(`getAttachmentDataInMemory: Security error downloading from Zotero: ${e.message}`);
+			throw new Error(`Security error downloading from Zotero: ${e.message}`);
 		}
 
-		const data = new Uint8Array(resp.response);
-
-		return data;
-	} catch (e) {
-		return null;
-	}
+		// Check if it's a Zotero HTTP exception with status info
+        if (e.xmlhttp) {
+            const status = e.xmlhttp.status;
+            const statusText = e.xmlhttp.statusText;
+            
+            if (status === 403) {
+                throw new Error(`Access forbidden (403): Check Zotero API key permissions`);
+            } else if (status === 404) {
+                throw new Error(`File not found on server (404): File may not have been synced to Zotero cloud`);
+            } else if (status === 429) {
+                throw new Error(`Rate limited by Zotero API (429): Too many requests`);
+            } else if (status >= 500) {
+                throw new Error(`Zotero server error (${status}): ${statusText || 'Server error after retries'}`);
+            } else {
+                throw new Error(`Zotero API error (${status}): ${statusText || e.message || 'Unknown error'}`);
+            }
+        }
+        
+        // Check for network/connection errors
+        if (e.message?.includes('NS_ERROR') || e.message?.includes('network')) {
+            throw new Error(`Network error downloading from Zotero: ${e.message}`);
+        }
+        
+        // Re-throw with original message if it's already descriptive
+        if (e.message) {
+            throw new Error(`Failed to download from Zotero: ${e.message}`);
+        }
+        
+        // Fallback
+        throw new Error(`Failed to download from Zotero: ${String(e)}`);
+    }
 }
 
 interface SignedDownloadInfo {
