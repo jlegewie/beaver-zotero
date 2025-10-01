@@ -320,11 +320,12 @@ export class FileUploader {
                 logger(`File Uploader uploadFile ${item.zotero_key}: Using server file`, 3);
 
                 // Download the file data to memory
-                fileArrayBuffer = await getAttachmentDataInMemory(attachment);
-                if (!fileArrayBuffer) {
-                    // handle error better (e.g. zotero rate limits)
-                    logger(`File Uploader uploadFile ${item.zotero_key}: File not available in memory`, 1);
-                    await this.handlePermanentFailure(item, user_id, "File not available in memory");
+                try {
+                    fileArrayBuffer = await getAttachmentDataInMemory(attachment);
+                } catch (downloadError: any) {
+                    const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
+                    logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
+                    await this.handlePermanentFailure(item, user_id, errorMessage);
                     return;
                 }
                 
