@@ -7,9 +7,12 @@ import { logger } from "./logger";
  */
 export function isAttachmentOnServer(item: Zotero.Item): boolean {
 	if (!item?.isStoredFileAttachment()) return false;
-    // File is on the server if it's not in the 'to_upload' state.
-    // The other states (in_sync, to_download, etc.) all imply existence on the server.
-    return item.attachmentSyncState !== Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD
+	
+	const state = item.attachmentSyncState;
+	
+	// File is on server if it's in any state other than to_upload
+	// to_upload means either: (1) never uploaded, or (2) local changes pending
+	return state !== Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
 }
 
 /**
