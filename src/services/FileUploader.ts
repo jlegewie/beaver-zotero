@@ -17,7 +17,7 @@ import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
-import { showFileStatusDetailsAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
+import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
 import { ProcessingTier } from '../../react/types/profile';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
@@ -265,18 +265,21 @@ export class FileUploader {
                 return;
             }
 
-            // Check if file exists locally or on server
+            // Check if file exists locally
             const useLocalFile = await attachment.fileExists();
+            
+            // Check if file exists on server
+            const validZoteroCredentials = Boolean(Zotero.Users.getCurrentUserID()) && Boolean(await Zotero.Sync.Data.Local.getAPIKey())
             const useServerFile = (
                 !useLocalFile &&
                 isAttachmentOnServer(attachment) &&
-                Boolean(Zotero.Users.getCurrentUserID()) &&
-                Boolean(await Zotero.Sync.Data.Local.getAPIKey())
+                validZoteroCredentials
             );
 
             if (!useLocalFile && !useServerFile) {
                 logger(`File Uploader uploadFile ${item.zotero_key}: File not available locally or on server`, 1);
                 await this.handlePermanentFailure(item, user_id, "File not available locally or on server");
+                if(!useLocalFile && isAttachmentOnServer(attachment) && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
                 return;
             }
 
@@ -711,6 +714,7 @@ export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "fa
         const results: FileHashReference[] = await attachmentsService.retryUploadsByStatus(status);
         logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
         store.set(zoteroServerDownloadErrorAtom, false);
+        store.set(zoteroServerCredentialsErrorAtom, false);
 
         // -------- (2) Restart the uploader --------
         await fileUploader.start("manual");

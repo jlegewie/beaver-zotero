@@ -12,7 +12,7 @@ import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
 import { planFeaturesAtom } from "../../atoms/profile";
 import Button from "../ui/Button";
-import { zoteroServerDownloadErrorAtom } from "../../atoms/ui";
+import { zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from "../../atoms/ui";
 
 interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
@@ -59,6 +59,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
     const timeRemaining = useTimeRemaining(backoffUntil);
     const zoteroServerDownloadError = useAtomValue(zoteroServerDownloadErrorAtom);
+    const zoteroServerCredentialsError = useAtomValue(zoteroServerCredentialsErrorAtom);
     const [showSkippedFiles, setShowSkippedFiles] = useState(false);
 
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
@@ -244,12 +245,20 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 </div>
             )}
 
+            {/* Zotero server credentials error */}
+            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && zoteroServerCredentialsError && (
+                <div className="font-color-tertiary text-sm">
+                    Some uploads failed because the user is not logged in to Zotero. Please log in to Zotero and try again.
+                </div>
+            )}
+
             {/* Zotero server download error */}
-            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && zoteroServerDownloadError && (
+            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && !zoteroServerCredentialsError && zoteroServerDownloadError && (
                 <div className="font-color-tertiary text-sm">
                     Some uploads failed because they could not be downloaded from Zotero's server. Please try again later.
                 </div>
             )}
+
         </div>
     );
 };
