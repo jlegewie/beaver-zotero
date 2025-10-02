@@ -9,7 +9,6 @@ import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
 import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 import { getPref, setPref } from "./utils/prefs";
-import { toolAnnotationApplyBatcher } from '../react/utils/toolAnnotationApplyBatcher';
 
 // const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -237,11 +236,7 @@ function unloadKatexStylesheet() {
 async function onShutdown(): Promise<void> {
 	try {
 		ztoolkit.log("Cleaning up Beaver during shutdown.");
-		
-		// Dispose annotation batcher
-		toolAnnotationApplyBatcher.dispose();
-		ztoolkit.log("ToolAnnotationApplyBatcher disposed.");
-		
+				
 		// Close database connection if it exists
 		if (addon.db) {
 			await addon.db.closeDatabase();
