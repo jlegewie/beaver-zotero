@@ -236,7 +236,7 @@ function unloadKatexStylesheet() {
 async function onShutdown(): Promise<void> {
 	try {
 		ztoolkit.log("Cleaning up Beaver during shutdown.");
-		
+				
 		// Close database connection if it exists
 		if (addon.db) {
 			await addon.db.closeDatabase();
