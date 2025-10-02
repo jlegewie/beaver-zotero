@@ -40,7 +40,17 @@ export const errorMapping = {
     "db_update_failed": "Unexpected error",
     "max_retries": "Unexpected error",
     "timeout": "Unexpected error",
-    "unexpected_error": "Unexpected error"
+    "unexpected_error": "Unexpected error",
+    
+    // Upload errors 
+    "attachment_not_found": "Attachment deleted",
+    "file_unavailable": "File not available",
+    "zotero_credentials_invalid": "Zotero login required",
+    "server_download_failed": "Zotero server download failed",
+    "unable_to_read_file": "Unable to read file",
+    "storage_upload_failed": "Upload failed",
+    "completion_failed": "Upload failed",
+    "invalid_file_metadata": "Invalid file metadata"
 }
 
 export const errorMappingOverview = {
@@ -74,7 +84,17 @@ export const errorMappingOverview = {
     "db_update_failed": "Files with processing errors",
     "max_retries": "Files with processing errors",
     "timeout": "Files with processing errors",
-    "unexpected_error": "Files with processing errors"
+    "unexpected_error": "Files with processing errors",
+    
+    // Upload errors
+    "attachment_not_found": "Files deleted from Zotero",
+    "file_unavailable": "Files not available locally or on server",
+    "zotero_credentials_invalid": "Files requiring Zotero login",
+    "server_download_failed": "Files failed to download from Zotero server",
+    "unable_to_read_file": "Files unable to read",
+    "storage_upload_failed": "Files failed to upload",
+    "completion_failed": "Files uploaded but not confirmed",
+    "invalid_file_metadata": "Files with invalid metadata"
 }
 
 export const errorMappingHintAtom = atom((get) => {
@@ -85,6 +105,14 @@ export const errorMappingHintAtom = atom((get) => {
         "plan_limit_unsupported_file": "Only PDFs are supported for Beta",
         "plan_limit_insufficient_balance": "Full-document search limited to 75k pages for Beta. You can still add files manually.",
         "no_text_layer": "Supported in the future",
+        
+        // Upload error hints
+        "zotero_credentials_invalid": "Sign in to Zotero (Edit → Preferences → Sync)",
+        "file_unavailable": "File links may be broken in Zotero",
+        "unable_to_read_file": "File may be corrupted or have permission issues",
+        "storage_upload_failed": "Check your internet connection and retry",
+        "completion_failed": "Retry to complete the upload",
+        "invalid_file_metadata": "File may be corrupted or in an unsupported format"
     };
 });
 
