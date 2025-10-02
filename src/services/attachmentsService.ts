@@ -79,6 +79,7 @@ export interface AttachmentStatusResponse {
     text_error_code?: string
     md_error_code?: string
     docling_error_code?: string
+    upload_error_code?: string
 }
 
 /**
