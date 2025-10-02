@@ -80,7 +80,7 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
 
             const newItems = await Promise.all(result.items.map(async (item) => {
                 const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
-                const errorCode = await getErrorMessage(attachment);
+                const errorCode = item.upload_error_code || await getErrorMessage(attachment);
 
                 return {
                     file_hash: item.file_hash || '',
