@@ -7,6 +7,7 @@ import { AnnotationUpdates, updateToolcallAnnotationsAtom, upsertToolcallAnnotat
 import { applyAnnotation } from './toolAnnotationActions';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;
+const MAX_QUEUE_SIZE = 50;
 
 type AnnotationBatchItem = {
     messageId: string;
@@ -36,7 +37,21 @@ export class ToolAnnotationApplyBatcher {
         }
 
         this.queue.push(item);
-        this.scheduleFlush();
+        
+        // Proactively flush if queue size exceeds threshold
+        if (this.queue.length >= MAX_QUEUE_SIZE) {
+            logger(`AnnotationBatcher: proactive flush queue size ${this.queue.length} exceeds threshold ${MAX_QUEUE_SIZE}`, 1);
+            // Cancel scheduled flush and flush immediately
+            if (this.timer) {
+                clearTimeout(this.timer);
+                this.timer = null;
+            }
+            this.flush().catch((error) => {
+                logger(`AnnotationBatcher: proactive flush error: ${error?.message || error}`, 1);
+            });
+        } else {
+            this.scheduleFlush();
+        }
     }
 
     private scheduleFlush(): void {
