@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon } from '../icons/icons';
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { chatService, ErrorType } from '../../../src/services/chatService';
 import { ProviderType } from '../../atoms/models';
 import { logger } from "../../../src/utils/logger";
-import { validateSelectedModelAtom } from '../../atoms/models';
+import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom } from '../../atoms/models';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 
 
 interface ApiKeyInputProps {
@@ -39,6 +40,9 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
 
     useEffect(() => {
         setCurrentValue(value);
@@ -60,6 +64,19 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         }
     };
 
+    const getProviderDisplayName = (provider: ProviderType): string => {
+        switch (provider) {
+            case 'google':
+                return 'Google Gemini';
+            case 'openai':
+                return 'OpenAI';
+            case 'anthropic':
+                return 'Claude';
+            default:
+                return provider.charAt(0).toUpperCase() + provider.slice(1);
+        }
+    };
+
     const handleVerify = async () => {
         setIsVerifying(true);
         setVerificationStatus('idle');
@@ -72,11 +89,34 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 savePref(currentValue);
                 logger(`API Key for ${provider} verified and saved.`);
                 validateSelectedModel();
-                if (result.streaming_valid === false && result.streaming_error_type === 'VerificationRequiredError') {
+                
+                const hasStreamingIssue = result.streaming_valid === false && 
+                                         result.streaming_error_type === 'VerificationRequiredError';
+                
+                if (hasStreamingIssue) {
                     setStreamingVerificationFailed(true);
                 } else {
                     setStreamingVerificationFailed(false);
                 }
+
+                // Build popup message
+                const providerName = getProviderDisplayName(provider);
+                let messageText = `You can now select ${providerName} models from the model selector.`;
+                
+                if (provider === 'openai' && hasStreamingIssue) {
+                    messageText += '\n\nVerification required: Visit OpenAI Organization Settings to verify your organization before using this key.';
+                }
+
+                if (isAppKeyModel && selectedModel) {
+                    messageText += `\n\nThe current model (${selectedModel.name}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
+                }
+
+                addPopupMessage({
+                    type: 'info',
+                    title: `${providerName} API Key Added`,
+                    text: messageText,
+                    expire: false
+                });
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');
