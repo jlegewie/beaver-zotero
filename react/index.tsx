@@ -12,7 +12,6 @@ import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
-import { toolAnnotationApplyBatcher } from './utils/toolAnnotationApplyBatcher';
 
 
 /**
@@ -44,15 +43,6 @@ const GlobalContextInitializer = () => {
 
     // Handle attachment status info row
     // useAttachmentStatusInfoRow();
-
-    // Cleanup on unmount
-    React.useEffect(() => {
-        return () => {
-            // This runs when the component unmounts (window closes)
-            toolAnnotationApplyBatcher.dispose();
-            console.log('[Beaver] ToolAnnotationApplyBatcher disposed');
-        };
-    }, []);
 
     return null; // This component does not render any UI
 };
