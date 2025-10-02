@@ -1171,6 +1171,31 @@ async function getModifiedCollections(libraryID: number, sinceDate: string, unti
     return await Zotero.Collections.getAsync(ids);
 }
 
+async function getParentLoadPromises(item: Zotero.Item) {
+    const promises = [];
+    const seen = new Set();
+
+    // Include item
+    promises.push(item.loadAllData());
+    seen.add(item.id);
+
+    // Parents
+    let current = item;
+    while (current?.parentID) {
+        const parent = await Zotero.Items.getAsync(current.parentID);
+        if (!parent) break;
+
+        const pid = parent.id;
+        if (seen.has(pid)) break;
+        seen.add(pid);
+
+        promises.push(parent.loadAllData());
+        current = parent;
+    }
+
+    return promises;
+}
+
 async function getItemsToSync(
     libraryID: number,
     isInitialSync: boolean,
@@ -1194,10 +1219,12 @@ async function getItemsToSync(
         // collections = await getAllCollections(libraryID);
     } else if (lastSyncVersion !== null && syncMethod === 'version') {
         items = await getItemsSinceVersion(libraryID, lastSyncVersion);
+        logger(`Beaver Sync: Found ${items.length} modified items: ${items.map(item => item.id).join(', ')}`, 3);
         // collections = await getCollectionsSinceVersion(libraryID, lastSyncVersion);
     } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
         lastSyncDate = Zotero.Date.isISODate(lastSyncDate) ? Zotero.Date.isoToSQL(lastSyncDate) : lastSyncDate;
         items = await getModifiedItems(libraryID, lastSyncDate);
+        logger(`Beaver Sync: Found ${items.length} modified items: ${items.map(item => item.id).join(', ')}`, 3);
         // collections = await getModifiedCollections(libraryID, lastSyncDate);
     } else {
         throw new Error(`Beaver Sync: Invalid sync state: ${syncMethod} ${lastSyncDate} ${lastSyncVersion}`);
@@ -1205,6 +1232,7 @@ async function getItemsToSync(
 
     // For incremental syncs, load data only for the specific items
     if (!isInitialSync && items.length > 0) {
+        logger(`Beaver Sync: Loading data for ${items.length} items`, 3);
         const loadPromises = items
             .map(async (item) => {
                 try {
@@ -1215,10 +1243,15 @@ async function getItemsToSync(
                     return null;
                 }
             });
-        
         const settledItems = await Promise.all(loadPromises);
-        // Filter out any items that failed to load.
         items = settledItems.filter(Boolean) as Zotero.Item[];
+
+        // Load parents
+        const parentLoadPromisesArrays = await Promise.all(
+            items.map(item => getParentLoadPromises(item))
+        );
+        const parentLoadPromises = parentLoadPromisesArrays.flat();
+        await Promise.all(parentLoadPromises);        
     }
     
     // Get items to upsert: Included by filter function
@@ -1229,6 +1262,8 @@ async function getItemsToSync(
             item
         } as SyncItem));
     
+    logger(`Beaver Sync: Found ${itemsToUpsert.length} items to upsert: ${itemsToUpsert.map(item => item.item.id).join(', ')}`, 3);
+    
     // Get items to delete: Excluded by filter function
     const itemsToDelete = items
         .filter((_) => !isInitialSync) // Only delete items if not initial sync
@@ -1238,6 +1273,8 @@ async function getItemsToSync(
             action: 'delete',
             item
         } as SyncItem));
+    
+    logger(`Beaver Sync: Found ${itemsToDelete.length} items to delete: ${itemsToDelete.map(item => item.item.id).join(', ')}`, 3);
 
     return {
         itemsToUpsert,
