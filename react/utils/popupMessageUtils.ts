@@ -104,3 +104,119 @@ export const removePopupMessageAtom = atom(
         );
     }
 );
+
+/**
+ * Adds or updates an API key popup message.
+ * If an API key message already exists, updates it with the new provider.
+ * Otherwise, creates a new message.
+ * 
+ * @param provider The provider type (google, openai, anthropic)
+ * @param providerDisplayName The display name (e.g., "Google Gemini", "OpenAI")
+ * @param hasStreamingIssue Whether OpenAI requires verification
+ * @param currentModelUsesAppKey Whether the current model uses Beaver's key
+ * @param currentModelName The name of the current model (if using app key)
+ */
+export const addAPIKeyMessageAtom = atom(
+    null,
+    (get, set, {
+        provider,
+        providerDisplayName,
+        hasStreamingIssue,
+        currentModelUsesAppKey,
+        currentModelName
+    }: {
+        provider: string;
+        providerDisplayName: string;
+        hasStreamingIssue: boolean;
+        currentModelUsesAppKey: boolean;
+        currentModelName?: string;
+    }) => {
+        const messages = get(popupMessagesAtom);
+        // Look for any message with "API Key" in the title
+        const existingMessage = messages.find((msg) => msg.title?.includes('API Key'));
+
+        // Build the provider list and special notes
+        let providers: string[] = [];
+        let streamingNote = '';
+        let appKeyNote = '';
+        let existingMessageId: string | undefined;
+
+        if (existingMessage && existingMessage.title) {
+            existingMessageId = existingMessage.id;
+            
+            // Extract existing providers from the title
+            // Match patterns like "OpenAI API Key Added" or "OpenAI and Claude API Keys Added"
+            const titleMatch = existingMessage.title.match(/^(.+?) API Keys? Added$/);
+            if (titleMatch) {
+                // Split by "and" or ", " to get individual providers
+                const providerText = titleMatch[1];
+                providers = providerText.split(/ and |, /).map(p => p.trim());
+            }
+            
+            // Keep existing streaming note if present
+            if (existingMessage.text?.includes('Verification required:')) {
+                streamingNote = '\n\nVerification required: Visit OpenAI Organization Settings to verify your organization before using OpenAI key.';
+            }
+            
+            // Keep existing app key note if present
+            const appKeyMatch = existingMessage.text?.match(/The current model \((.+?)\) uses Beaver's key/);
+            if (appKeyMatch) {
+                appKeyNote = `\n\nThe current model (${appKeyMatch[1]}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
+            }
+        }
+
+        // Add new provider if not already in list
+        if (!providers.includes(providerDisplayName)) {
+            providers.push(providerDisplayName);
+        }
+
+        // Update streaming note if this is OpenAI with issues
+        if (provider === 'openai' && hasStreamingIssue) {
+            streamingNote = '\n\nVerification required: Visit OpenAI Organization Settings to verify your organization before using this key.';
+        }
+
+        // Update app key note with current state
+        if (currentModelUsesAppKey && currentModelName) {
+            appKeyNote = `\n\nThe current model (${currentModelName}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
+        } else {
+            appKeyNote = ''; // Clear if no longer using app key
+        }
+
+        // Format provider list for display
+        const formatProviderList = (providers: string[]): string => {
+            if (providers.length === 1) return providers[0];
+            if (providers.length === 2) return providers.join(' and ');
+            const last = providers[providers.length - 1];
+            const rest = providers.slice(0, -1);
+            return `${rest.join(', ')}, and ${last}`;
+        };
+
+        const formattedProviders = formatProviderList(providers);
+        const isPlural = providers.length > 1;
+        
+        // Build title and text
+        const title = `${formattedProviders} API Key${isPlural ? 's' : ''} Added`;
+        let messageText = `You can now select ${formattedProviders} models from the model selector.`;
+        messageText += streamingNote;
+        messageText += appKeyNote;
+
+        if (existingMessage && existingMessageId) {
+            // Update existing message
+            set(updatePopupMessageAtom, {
+                messageId: existingMessageId,
+                updates: {
+                    title: title,
+                    text: messageText
+                }
+            });
+        } else {
+            // Create new message
+            set(addPopupMessageAtom, {
+                type: 'info',
+                title: title,
+                text: messageText,
+                expire: false
+            });
+        }
+    }
+);

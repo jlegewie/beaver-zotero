@@ -7,7 +7,7 @@ import { chatService, ErrorType } from '../../../src/services/chatService';
 import { ProviderType } from '../../atoms/models';
 import { logger } from "../../../src/utils/logger";
 import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom } from '../../atoms/models';
-import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
+import { addAPIKeyMessageAtom } from '../../utils/popupMessageUtils';
 
 
 interface ApiKeyInputProps {
@@ -40,7 +40,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const addAPIKeyMessage = useSetAtom(addAPIKeyMessageAtom);
     const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
 
@@ -99,23 +99,13 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     setStreamingVerificationFailed(false);
                 }
 
-                // Build popup message
-                const providerName = getProviderDisplayName(provider);
-                let messageText = `You can now select ${providerName} models from the model selector.`;
-                
-                if (provider === 'openai' && hasStreamingIssue) {
-                    messageText += '\n\nVerification required: Visit OpenAI Organization Settings to verify your organization before using this key.';
-                }
-
-                if (isAppKeyModel && selectedModel) {
-                    messageText += `\n\nThe current model (${selectedModel.name}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
-                }
-
-                addPopupMessage({
-                    type: 'info',
-                    title: `${providerName} API Key Added`,
-                    text: messageText,
-                    expire: false
+                // Add or update the combined API key message
+                addAPIKeyMessage({
+                    provider,
+                    providerDisplayName: getProviderDisplayName(provider),
+                    hasStreamingIssue: hasStreamingIssue,
+                    currentModelUsesAppKey: isAppKeyModel,
+                    currentModelName: selectedModel?.name
                 });
             } else {
                 setVerificationStatus('error');
