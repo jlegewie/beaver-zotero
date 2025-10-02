@@ -11,7 +11,7 @@ import { getPDFPageCount, getPDFPageCountFromData, naivePdfPageCount } from '../
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode } from './attachmentsService';
+import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode, UploadErrorCode } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
@@ -262,6 +262,7 @@ export class FileUploader {
             if (!attachment) {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
                 await this.handlePermanentFailure(item, {
+                    errorCode: 'attachment_not_found',
                     reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                 });
                 return;
@@ -278,7 +279,14 @@ export class FileUploader {
             if (!useLocalFile && !useServerFile) {
                 const message = `File not available locally or on server (useLocalFile: ${useLocalFile}, useServerFile: ${useServerFile}, validZoteroCredentials: ${validZoteroCredentials})`;
                 logger(`File Uploader uploadFile ${item.zotero_key}: ${message}`, 1);
+                
+                // Determine specific error code
+                const errorCode: UploadErrorCode = (!useLocalFile && isServerFile && !validZoteroCredentials) 
+                    ? 'zotero_credentials_invalid' 
+                    : 'file_unavailable';
+                
                 await this.handlePermanentFailure(item, {
+                    errorCode: errorCode,
                     reason: message
                 });
                 if(!useLocalFile && isServerFile && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
@@ -302,6 +310,7 @@ export class FileUploader {
                 if (!filePath) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
                     await this.handlePermanentFailure(item, {
+                        errorCode: 'file_unavailable',
                         reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
                     return;
@@ -319,6 +328,7 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
                     await this.handlePermanentFailure(item, {
+                        errorCode: 'unable_to_read_file',
                         reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
                     return;
@@ -347,6 +357,7 @@ export class FileUploader {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
                     await this.handlePermanentFailure(item, {
+                        errorCode: 'server_download_failed',
                         reason: errorMessage
                     });
                     store.set(zoteroServerDownloadErrorAtom, true);
@@ -368,6 +379,7 @@ export class FileUploader {
                 const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
                 await this.handlePermanentFailure(item, {
+                    errorCode: 'invalid_file_metadata',
                     reason: message
                 });
                 if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
@@ -439,6 +451,7 @@ export class FileUploader {
 
             // Treat as permanently failed with message for manual retry
             await this.handlePermanentFailure(item, {
+                errorCode: 'storage_upload_failed',
                 reason: error instanceof Error ? error.message : "Max attempts reached"
             });
         }
@@ -651,6 +664,7 @@ export class FileUploader {
                     await this.handlePermanentFailure(
                         batchItem.item,
                         {
+                            errorCode: 'completion_failed',
                             reason: `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
                         }
                     );
@@ -673,7 +687,7 @@ export class FileUploader {
             reason
         }: {
             processingTier?: ProcessingTier,
-            errorCode?: PlanLimitErrorCode,
+            errorCode?: UploadErrorCode | PlanLimitErrorCode,
             reason?: string
         }
     ): Promise<void> {

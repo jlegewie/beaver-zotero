@@ -140,13 +140,31 @@ export interface ReadUploadQueueResponse {
 /**
  * Request body for marking an upload as failed
  */
-export type PlanLimitErrorCode = "plan_limit_unsupported_file" | "plan_limit_max_pages" | "plan_limit_file_size";
+export type PlanLimitErrorCode =
+    | "plan_limit_unsupported_file"
+    | "plan_limit_max_pages"
+    | "plan_limit_file_size";
+
+// Add upload failure error codes
+export type UploadErrorCode = 
+    | "attachment_not_found"
+    | "file_unavailable"
+    | "zotero_credentials_invalid"
+    | "server_download_failed"
+    | "unable_to_read_file"
+    | "storage_upload_failed"
+    | "completion_failed"
+    | "invalid_file_metadata";
+
+// Combined error code type
+export type ErrorCode = PlanLimitErrorCode | UploadErrorCode;
+
 export interface UpdateUploadStatusRequest {
     file_hash: string | string[];
     status: UploadStatus;
     update_processing_status: boolean;
     processing_tier?: ProcessingTier;
-    error_code?: PlanLimitErrorCode;
+    error_code?: ErrorCode;
     details?: string;
 }
 
@@ -418,7 +436,7 @@ export class AttachmentsService extends ApiService {
         status: UploadStatus,
         updateProcessingStatus: boolean = false,
         processingTier?: ProcessingTier,
-        errorCode?: PlanLimitErrorCode,
+        errorCode?: ErrorCode,
         details?: string
     ): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
