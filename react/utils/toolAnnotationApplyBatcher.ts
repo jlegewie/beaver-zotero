@@ -106,10 +106,7 @@ export class ToolAnnotationApplyBatcher {
                 .forEach((annotation) => {
                     const existing = ackIndex.get(annotation.id);
                     if (existing) {
-                        logger(
-                            `AnnotationBatcher: duplicate annotation ${annotation.id} received for ack, ignoring duplicate`,
-                            2
-                        );
+                        logger(`AnnotationBatcher: duplicate annotation ${annotation.id} received for ack, ignoring duplicate`, 2);
                         return;
                     }
 
@@ -264,6 +261,14 @@ export class ToolAnnotationApplyBatcher {
                 modified_at: new Date().toISOString(),
             };
         }
+    }
+
+    public dispose(): void {
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+        this.queue = [];
     }
 }
 
