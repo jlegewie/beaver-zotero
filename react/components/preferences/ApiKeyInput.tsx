@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon } from '../icons/icons';
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { chatService, ErrorType } from '../../../src/services/chatService';
 import { ProviderType } from '../../atoms/models';
 import { logger } from "../../../src/utils/logger";
-import { validateSelectedModelAtom } from '../../atoms/models';
+import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom } from '../../atoms/models';
+import { addAPIKeyMessageAtom } from '../../utils/popupMessageUtils';
 
 
 interface ApiKeyInputProps {
@@ -39,6 +40,9 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
+    const addAPIKeyMessage = useSetAtom(addAPIKeyMessageAtom);
+    const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
 
     useEffect(() => {
         setCurrentValue(value);
@@ -60,6 +64,19 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         }
     };
 
+    const getProviderDisplayName = (provider: ProviderType): string => {
+        switch (provider) {
+            case 'google':
+                return 'Google Gemini';
+            case 'openai':
+                return 'OpenAI';
+            case 'anthropic':
+                return 'Claude';
+            default:
+                return provider.charAt(0).toUpperCase() + provider.slice(1);
+        }
+    };
+
     const handleVerify = async () => {
         setIsVerifying(true);
         setVerificationStatus('idle');
@@ -72,11 +89,24 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                 savePref(currentValue);
                 logger(`API Key for ${provider} verified and saved.`);
                 validateSelectedModel();
-                if (result.streaming_valid === false && result.streaming_error_type === 'VerificationRequiredError') {
+                
+                const hasStreamingIssue = result.streaming_valid === false && 
+                                         result.streaming_error_type === 'VerificationRequiredError';
+                
+                if (hasStreamingIssue) {
                     setStreamingVerificationFailed(true);
                 } else {
                     setStreamingVerificationFailed(false);
                 }
+
+                // Add or update the combined API key message
+                addAPIKeyMessage({
+                    provider,
+                    providerDisplayName: getProviderDisplayName(provider),
+                    hasStreamingIssue: hasStreamingIssue,
+                    currentModelUsesAppKey: isAppKeyModel,
+                    currentModelName: selectedModel?.name
+                });
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');

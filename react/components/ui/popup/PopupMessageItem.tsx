@@ -142,7 +142,9 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                             {message.customContent}
                         </div>
                     ) : (
-                        <div className='text-base font-color-tertiary'>{message.text}</div>
+                        <div className='text-base font-color-tertiary' style={{ whiteSpace: 'pre-line' }}>
+                            {message.text}
+                        </div>
                     )
                 )}
 
