@@ -105,6 +105,24 @@ export const removePopupMessageAtom = atom(
     }
 );
 
+const parseProvidersFromTitle = (title: string): string[] => {
+    const match = title.match(/^(.+?) API Keys? Added$/);
+    if (!match) {
+        return [];
+    }
+
+    const normalized = match[1]
+        .replace(/,\s+and\s+/g, ', ')
+        .replace(/\s+and\s+/g, ', ');
+
+    const providerList = normalized
+        .split(',')
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0);
+
+    return Array.from(new Set(providerList));
+};
+
 /**
  * Adds or updates an API key popup message.
  * If an API key message already exists, updates it with the new provider.
@@ -132,32 +150,25 @@ export const addAPIKeyMessageAtom = atom(
         currentModelName?: string;
     }) => {
         const messages = get(popupMessagesAtom);
-        // Look for any message with "API Key" in the title
         const existingMessage = messages.find((msg) => msg.title?.includes('API Key'));
 
-        // Build the provider list and special notes
-        let providers: string[] = [];
         let streamingNote = '';
         let appKeyNote = '';
         let existingMessageId: string | undefined;
+        const providerSet = new Set<string>();
 
-        if (existingMessage && existingMessage.title) {
+        if (existingMessage) {
             existingMessageId = existingMessage.id;
-            
-            // Extract existing providers from the title
-            // Match patterns like "OpenAI API Key Added" or "OpenAI and Claude API Keys Added"
-            const titleMatch = existingMessage.title.match(/^(.+?) API Keys? Added$/);
-            if (titleMatch) {
-                // Split by "and" or ", " to get individual providers
-                const providerText = titleMatch[1];
-                providers = providerText.split(/ and |, /).map(p => p.trim());
+
+            if (existingMessage.title) {
+                parseProvidersFromTitle(existingMessage.title).forEach((name) => providerSet.add(name));
             }
-            
+
             // Keep existing streaming note if present
             if (existingMessage.text?.includes('Verification required:')) {
                 streamingNote = '\n\nVerification required: Visit OpenAI Organization Settings to verify your organization before using OpenAI key.';
             }
-            
+
             // Keep existing app key note if present
             const appKeyMatch = existingMessage.text?.match(/The current model \((.+?)\) uses Beaver's key/);
             if (appKeyMatch) {
@@ -166,9 +177,10 @@ export const addAPIKeyMessageAtom = atom(
         }
 
         // Add new provider if not already in list
-        if (!providers.includes(providerDisplayName)) {
-            providers.push(providerDisplayName);
+        if (!providerSet.has(providerDisplayName)) {
+            providerSet.add(providerDisplayName);
         }
+        const providers = Array.from(providerSet);
 
         // Update streaming note if this is OpenAI with issues
         if (provider === 'openai' && hasStreamingIssue) {
@@ -179,7 +191,7 @@ export const addAPIKeyMessageAtom = atom(
         if (currentModelUsesAppKey && currentModelName) {
             appKeyNote = `\n\nThe current model (${currentModelName}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
         } else {
-            appKeyNote = ''; // Clear if no longer using app key
+            appKeyNote = '';
         }
 
         // Format provider list for display
