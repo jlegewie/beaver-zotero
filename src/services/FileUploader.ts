@@ -261,7 +261,7 @@ export class FileUploader {
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             if (!attachment) {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
-                await this.handlePermanentFailure(item, {
+                await this.handleTemporaryFailure(item, {
                     errorCode: 'attachment_not_found',
                     reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                 });
@@ -285,7 +285,7 @@ export class FileUploader {
                     ? 'zotero_credentials_invalid' 
                     : 'file_unavailable';
                 
-                await this.handlePermanentFailure(item, {
+                await this.handleTemporaryFailure(item, {
                     errorCode: errorCode,
                     reason: message
                 });
@@ -309,7 +309,7 @@ export class FileUploader {
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
-                    await this.handlePermanentFailure(item, {
+                    await this.handleTemporaryFailure(item, {
                         errorCode: 'file_unavailable',
                         reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
@@ -327,7 +327,7 @@ export class FileUploader {
                 } catch (readError: any) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
-                    await this.handlePermanentFailure(item, {
+                    await this.handleTemporaryFailure(item, {
                         errorCode: 'unable_to_read_file',
                         reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     });
@@ -356,7 +356,7 @@ export class FileUploader {
                 } catch (downloadError: any) {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
-                    await this.handlePermanentFailure(item, {
+                    await this.handleTemporaryFailure(item, {
                         errorCode: 'server_download_failed',
                         reason: errorMessage
                     });
@@ -378,7 +378,7 @@ export class FileUploader {
                 const fileStatus = useLocalFile ? 'local' : 'server';
                 const message = `Unable to get file data for ${fileStatus} upload: mimeType: ${mimeType}, fileSize: ${fileSize}, pageCount: ${pageCount}`;
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
-                await this.handlePermanentFailure(item, {
+                await this.handleTemporaryFailure(item, {
                     errorCode: 'invalid_file_metadata',
                     reason: message
                 });
@@ -450,7 +450,7 @@ export class FileUploader {
             Zotero.logError(error);
 
             // Treat as permanently failed with message for manual retry
-            await this.handlePermanentFailure(item, {
+            await this.handleTemporaryFailure(item, {
                 errorCode: 'storage_upload_failed',
                 reason: error instanceof Error ? error.message : "Max attempts reached"
             });
@@ -661,7 +661,7 @@ export class FileUploader {
             // Mark each item in the batch as permanently failed
             for (const batchItem of batchToSend) {
                 try {
-                    await this.handlePermanentFailure(
+                    await this.handleTemporaryFailure(
                         batchItem.item,
                         {
                             errorCode: 'completion_failed',
@@ -677,21 +677,21 @@ export class FileUploader {
     }
     
     /**
-     * Handles permanent failures by marking items as failed in the backend and removing them from the backend queue
+     * Handles temporary upload failures by marking items as failed in the backend and removing them from the backend queue
+     * 
+     * User can retry temporary failures manually.
      */
-    private async handlePermanentFailure(
+    private async handleTemporaryFailure(
         item: UploadQueueItem,
         {
-            processingTier,
             errorCode,
             reason
         }: {
-            processingTier?: ProcessingTier,
             errorCode?: UploadErrorCode | PlanLimitErrorCode,
             reason?: string
         }
     ): Promise<void> {
-        logger(`File Uploader: Permanent failure for ${item.zotero_key}: ${reason}`, 1);
+        logger(`File Uploader: Temporary upload failure for ${item.zotero_key}: ${reason}`, 1);
         
         try {
             // First, notify backend of failure with error details
@@ -699,8 +699,6 @@ export class FileUploader {
                 item.file_hash, 
                 'failed',
                 {
-                    updateProcessingStatus: processingTier !== undefined,
-                    processingTier,
                     errorCode,
                     details: reason
                 }
@@ -714,10 +712,10 @@ export class FileUploader {
                 } as ZoteroItemReference);
             }
             
-            logger(`File Uploader: Successfully marked ${item.zotero_key} as permanently failed`, 3);
+            logger(`File Uploader: Successfully marked ${item.zotero_key} as temporary upload failed`, 3);
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as failed: ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as temporary upload failed: ${failError.message}`, 2);
             Zotero.logError(failError);
             // Re-throw the error so callers know the operation failed
             // Item will remain in backend queue for retry
