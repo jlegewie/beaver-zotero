@@ -390,7 +390,7 @@ export class FileUploader {
                             reason: errorMessage
                         }
                     );
-                    store.set(zoteroServerDownloadErrorAtom, true);
+                    if(!isPermanent) store.set(zoteroServerDownloadErrorAtom, true);
                     return;
                 }
                 
