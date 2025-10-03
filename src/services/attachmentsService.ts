@@ -430,23 +430,26 @@ export class AttachmentsService extends ApiService {
      * Updates the status of an upload for the given file hash.
      * @param fileHash The hash of the file that failed to upload
      * @param status The status to update the upload to
+     * @param options Optional parameters for the status update
      * @returns Promise with the upload failed response
      */
     async updateUploadStatus(
         fileHash: string | string[],
         status: UploadStatus,
-        updateProcessingStatus: boolean = false,
-        processingTier?: ProcessingTier,
-        errorCode?: ErrorCode,
-        details?: string
+        options?: {
+            updateProcessingStatus?: boolean;
+            processingTier?: ProcessingTier;
+            errorCode?: ErrorCode;
+            details?: string;
+        }
     ): Promise<UpdateUploadStatusResponse> {
         const request: UpdateUploadStatusRequest = {
             file_hash: fileHash,
             status: status,
-            update_processing_status: updateProcessingStatus,
-            processing_tier: processingTier,
-            error_code: errorCode,
-            details: details
+            update_processing_status: options?.updateProcessingStatus ?? false,
+            processing_tier: options?.processingTier,
+            error_code: options?.errorCode,
+            details: options?.details
         };
         return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }

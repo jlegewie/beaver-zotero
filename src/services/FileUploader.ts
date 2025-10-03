@@ -698,10 +698,12 @@ export class FileUploader {
             await attachmentsService.updateUploadStatus(
                 item.file_hash, 
                 'failed',
-                processingTier !== undefined, // updateProcessingStatus
-                processingTier, // processingTier
-                errorCode, // errorCode
-                reason // details
+                {
+                    updateProcessingStatus: processingTier !== undefined,
+                    processingTier,
+                    errorCode,
+                    details: reason
+                }
             );
             
             // Error message for manual retry (only show if user has completed onboarding)
@@ -732,11 +734,13 @@ export class FileUploader {
         try {
             await attachmentsService.updateUploadStatus(
                 item.file_hash, 
-                'plan_limit', 
-                true, // updateProcessingStatus
-                processingTier, 
-                errorCode,
-                reason // details
+                'plan_limit',
+                {
+                    updateProcessingStatus: true,
+                    processingTier,
+                    errorCode,
+                    details: reason
+                }
             );
             
         } catch (failError: any) {
