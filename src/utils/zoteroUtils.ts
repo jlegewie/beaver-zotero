@@ -396,3 +396,28 @@ export async function loadParentData(items: Zotero.Item[]): Promise<void> {
         await Promise.all(parentLoadPromises);
     }
 }
+
+export async function getParentLoadPromises(item: Zotero.Item) {
+    const promises = [];
+    const seen = new Set();
+
+    // Include item
+    promises.push(item.loadAllData());
+    seen.add(item.id);
+
+    // Parents
+    let current = item;
+    while (current?.parentID) {
+        const parent = await Zotero.Items.getAsync(current.parentID);
+        if (!parent) break;
+
+        const pid = parent.id;
+        if (seen.has(pid)) break;
+        seen.add(pid);
+
+        promises.push(parent.loadAllData());
+        current = parent;
+    }
+
+    return promises;
+}

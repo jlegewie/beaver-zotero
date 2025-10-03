@@ -6,7 +6,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
+import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, getParentLoadPromises } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -1171,30 +1171,6 @@ async function getModifiedCollections(libraryID: number, sinceDate: string, unti
     return await Zotero.Collections.getAsync(ids);
 }
 
-async function getParentLoadPromises(item: Zotero.Item) {
-    const promises = [];
-    const seen = new Set();
-
-    // Include item
-    promises.push(item.loadAllData());
-    seen.add(item.id);
-
-    // Parents
-    let current = item;
-    while (current?.parentID) {
-        const parent = await Zotero.Items.getAsync(current.parentID);
-        if (!parent) break;
-
-        const pid = parent.id;
-        if (seen.has(pid)) break;
-        seen.add(pid);
-
-        promises.push(parent.loadAllData());
-        current = parent;
-    }
-
-    return promises;
-}
 
 async function getItemsToSync(
     libraryID: number,
@@ -1247,6 +1223,7 @@ async function getItemsToSync(
         items = settledItems.filter(Boolean) as Zotero.Item[];
 
         // Load parents
+        // await loadParentData(items); // optimized but untested
         const parentLoadPromisesArrays = await Promise.all(
             items.map(item => getParentLoadPromises(item))
         );
