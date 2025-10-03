@@ -68,15 +68,8 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             }
 
             // Fetch items based on processing status
-            const result: AttachmentStatusPagedResponse = errorCode
-                ? await attachmentsService.getAttachmentsByStatusAndErrorCode(
-                    statuses,
-                    errorCode,
-                    processingTier,
-                    page + 1, // API is 1-based
-                    ITEMS_PER_PAGE
-                )
-                : await attachmentsService.getAttachmentsByStatus(
+            const result: AttachmentStatusPagedResponse =
+                await attachmentsService.getAttachmentsByStatus(
                     statuses,
                     processingTier,
                     page + 1, // API is 1-based

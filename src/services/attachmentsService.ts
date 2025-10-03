@@ -318,35 +318,6 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Fetches attachments by processing status and error code.
-     * @param status The processing status to filter by
-     * @param errorCode The error code to filter by
-     * @param pipeline The pipeline type ("basic", "standard" or "advanced", default: "basic")
-     * @param page Page number (1-based, default: 1)
-     * @param pageSize Number of items per page (default: 50, max: 100)
-     * @returns Promise with paginated list of attachments with the specified status and error code
-     */
-    async getAttachmentsByStatusAndErrorCode(
-        status: ProcessingStatus[],
-        errorCode: string,
-        pipeline: "basic" | "standard" | "advanced" = "basic",
-        page: number = 1,
-        pageSize: number = 50
-    ): Promise<AttachmentStatusPagedResponse> {
-        const params = new URLSearchParams();
-        
-        // Add all parameters
-        status.forEach(s => params.append('status', s));
-        params.append('error_code', errorCode);
-        params.append('pipeline', pipeline);
-        params.append('page', page.toString());
-        params.append('page_size', pageSize.toString());
-        
-        const url = `/api/v1/attachments/by-status-and-error-code?${params.toString()}`;
-        return this.get<AttachmentStatusPagedResponse>(url);
-    }
-
-    /**
      * Fetches attachments by upload status.
      * @param status The upload status to filter by
      * @param page Page number (1-based, default: 1)
