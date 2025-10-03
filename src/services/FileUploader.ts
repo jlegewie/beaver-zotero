@@ -263,7 +263,7 @@ export class FileUploader {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
                 await this.handleUploadFailure(
                     item,
-                    false, // temporary failure
+                    true, // permanent failure
                     {
                         errorCode: 'attachment_not_found',
                         reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
@@ -283,21 +283,25 @@ export class FileUploader {
             if (!useLocalFile && !useServerFile) {
                 const message = `File not available locally or on server (useLocalFile: ${useLocalFile}, useServerFile: ${useServerFile}, validZoteroCredentials: ${validZoteroCredentials})`;
                 logger(`File Uploader uploadFile ${item.zotero_key}: ${message}`, 1);
+
+                // Check if authorization error
+                const isAuthorizationError = !useLocalFile && isServerFile && !validZoteroCredentials;
                 
-                // Determine specific error code
-                const errorCode: UploadErrorCode = (!useLocalFile && isServerFile && !validZoteroCredentials) 
-                    ? 'zotero_credentials_invalid' 
-                    : 'file_unavailable';
+                // Determine specific error code based on authorization error
+                const errorCode: UploadErrorCode = isAuthorizationError ? 'zotero_credentials_invalid' : 'file_unavailable';
                 
+                // Handle upload failure
                 await this.handleUploadFailure(
                     item,
-                    false, // temporary failure
+                    isAuthorizationError ? false : true, // handle as temporary failure if authorization error
                     {
                         errorCode: errorCode,
                         reason: message
                     }
                 );
-                if(!useLocalFile && isServerFile && !validZoteroCredentials) store.set(zoteroServerCredentialsErrorAtom, true);
+
+                // Set authorization error flag to show user message if authorization error
+                if(isAuthorizationError) store.set(zoteroServerCredentialsErrorAtom, true);
                 return;
             }
 
@@ -319,7 +323,7 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
                     await this.handleUploadFailure(
                         item,
-                        false, // temporary failure
+                        true, // permanent failure
                         {
                             errorCode: 'file_unavailable',
                             reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
@@ -341,7 +345,7 @@ export class FileUploader {
                     Zotero.logError(readError);
                     await this.handleUploadFailure(
                         item,
-                        false, // temporary failure
+                        true, // permanent failure
                         {
                             errorCode: 'unable_to_read_file',
                             reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
@@ -372,9 +376,15 @@ export class FileUploader {
                 } catch (downloadError: any) {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
+                    
+                    // Determine if this is a permanent failure
+                    const isPermanent = 
+                        downloadError.message?.includes('File not found on server (404)') || 
+                        downloadError.message?.includes('Downloaded file is empty');
+                    
                     await this.handleUploadFailure(
                         item,
-                        false, // temporary failure
+                        isPermanent, // permanent if 404 (not found) or empty file
                         {
                             errorCode: 'server_download_failed',
                             reason: errorMessage
@@ -400,7 +410,7 @@ export class FileUploader {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
                 await this.handleUploadFailure(
                     item,
-                    false, // temporary failure
+                    true, // permanent failure
                     {
                         errorCode: 'invalid_file_metadata',
                         reason: message
@@ -473,10 +483,10 @@ export class FileUploader {
             logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${error.message}`, 1);
             Zotero.logError(error);
 
-            // Treat as permanently failed with message for manual retry
+            // Treat as temporary failed with message for manual retry
             await this.handleUploadFailure(
                 item,
-                false,
+                false, // temporary failure
                 {
                     errorCode: 'storage_upload_failed',
                     reason: error instanceof Error ? error.message : "Max attempts reached"
@@ -682,11 +692,11 @@ export class FileUploader {
             }
         }
 
-        // If batch flush failed after all retries, mark all items as permanently failed
+        // If batch flush failed after all retries, mark all items as temporary failed
         if (!batchSuccess) {
-            logger(`File Uploader: Failed to flush batch after ${maxBatchAttempts} attempts, marking all items as permanently failed`, 1);
+            logger(`File Uploader: Failed to flush batch after ${maxBatchAttempts} attempts, marking all items as temporary failed`, 1);
             
-            // Mark each item in the batch as permanently failed
+            // Mark each item in the batch as temporary failed
             for (const batchItem of batchToSend) {
                 try {
                     await this.handleUploadFailure(
