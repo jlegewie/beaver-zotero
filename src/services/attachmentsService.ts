@@ -9,7 +9,7 @@ import { ProcessingTier } from '../../react/types/profile';
 // processing_status from backend
 export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
 // upload_status_literal from backend
-export type UploadStatus = "pending" | "completed" | "failed" | "plan_limit";
+export type UploadStatus = "pending" | "completed" | "failed" | "failed_user" | "plan_limit";
 
 /**
  * Request body for retrying uploads by status
