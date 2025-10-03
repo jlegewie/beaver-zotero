@@ -369,3 +369,30 @@ export async function loadFullItemDataWithAllTypes(items: Zotero.Item[] = []) {
         dataTypes: ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations", "note"]
     });
 }
+
+
+/**
+ * Load all parent data for items
+ */
+export async function loadParentData(items: Zotero.Item[]): Promise<void> {
+    const parentIdsToLoad = new Set<number>();
+
+    // Collect all unique parent IDs
+    for (const item of items) {
+        let current = item;
+        while (current?.parentID) {
+            parentIdsToLoad.add(current.parentID);
+            const parent = await Zotero.Items.getAsync(current.parentID);
+            if (!parent) break;
+            current = parent;
+        }
+    }
+
+    // Load all unique parents in parallel
+    if (parentIdsToLoad.size > 0) {
+        const parentLoadPromises = Array.from(parentIdsToLoad).map(
+            parentId => Zotero.Items.getAsync(parentId).then(p => p?.loadAllData())
+        );
+        await Promise.all(parentLoadPromises);
+    }
+}
