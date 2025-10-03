@@ -14,6 +14,7 @@ export interface FileStatus {
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
+    upload_failed_user: number;
     upload_plan_limit: number;
 
     // Basic processing status (text)
@@ -62,6 +63,7 @@ export interface FileStatusSummary {
     uploadPendingCount: number,
     uploadCompletedCount: number,
     uploadFailedCount: number,
+    uploadFailedUserCount: number,
     uploadPlanLimitCount: number,
 
     // Processing status

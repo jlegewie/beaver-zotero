@@ -24,6 +24,7 @@ const formatStatus = (statusData: any): FileStatus => ({
     upload_pending: Number(statusData.upload_pending || 0),
     upload_completed: Number(statusData.upload_completed || 0),
     upload_failed: Number(statusData.upload_failed || 0),
+    upload_failed_user: Number(statusData.upload_failed_user || 0),
     upload_plan_limit: Number(statusData.upload_plan_limit || 0),
     // Text status
     text_queued: Number(statusData.text_queued || 0),
@@ -61,7 +62,7 @@ export const fetchFileStatus = async (userId: string, processingTier?: Processin
         // Set select string based on processing tier
         let selectString = '*';
         if (processingTier) {
-            selectString = 'upload_not_uploaded,upload_pending,upload_completed,upload_failed,upload_plan_limit';
+            selectString = 'upload_not_uploaded,upload_pending,upload_completed,upload_failed,upload_failed_user,upload_plan_limit';
             if (processingTier === 'basic') {
                 selectString += ',text_queued,text_processing,text_completed,text_failed_system,text_failed_user,text_plan_limit,text_unsupported_file';
             } else if (processingTier === 'standard') {
