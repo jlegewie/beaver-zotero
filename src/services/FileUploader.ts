@@ -428,7 +428,7 @@ export class FileUploader {
                 logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
                 if (fileSizeInMB > sizeLimit) {
                     logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-                    await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, planFeatures.processingTier, "plan_limit_file_size");
+                    await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, "plan_limit_file_size");
                     return;
                 }
             }
@@ -767,15 +767,13 @@ export class FileUploader {
      * Handles plan limit failures by marking items as failed in the backend first, 
      * then removing them from the backend queue
      */
-    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, processingTier: ProcessingTier, errorCode: PlanLimitErrorCode): Promise<void> {
+    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, errorCode: PlanLimitErrorCode): Promise<void> {
         logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
         try {
             await attachmentsService.updateUploadStatus(
                 item.file_hash, 
                 'plan_limit',
                 {
-                    updateProcessingStatus: true,
-                    processingTier,
                     errorCode,
                     details: reason
                 }
