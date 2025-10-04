@@ -164,6 +164,8 @@ export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, Ag
 
 
 export const calculateFileStatusSummary = (fileStatus: FileStatus | null, processingTier: ProcessingTier) => {
+    // if(processingTier === 'none') return;
+
     // Total files
     const totalFiles = fileStatus?.total_files || 0;
 
@@ -172,64 +174,39 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
     const uploadNotUploadedCount = fileStatus?.upload_not_uploaded || 0;
     const uploadCompletedCount = fileStatus?.upload_completed || 0;
     const uploadFailedCount = fileStatus?.upload_failed || 0;           // Temporary upload failure (retryable)
-    const uploadFailedUserCount = fileStatus?.upload_failed_user || 0;  // Permanent upload failure (retryable only when file changes)
-    const uploadPlanLimitCount = fileStatus?.upload_plan_limit || 0;    // Plan limit exceeded (not retryable)
+    const uploadFailedUserCount = fileStatus?.upload_failed_user || 0;  // DEPRECATED
+    const uploadPlanLimitCount = fileStatus?.upload_plan_limit || 0;    // DEPRECATED
     const uploadProgress = fileStatus && totalFiles > 0 
         ? Math.round(((uploadNotUploadedCount + uploadCompletedCount + uploadFailedCount + uploadFailedUserCount + uploadPlanLimitCount) / totalFiles) * 1000) / 10
         : 0;
 
-    // Processing status based on plan features
-    let queuedProcessingCount = 0;
-    let processingProcessingCount = 0;
-    let completedFiles = 0;
-    let failedProcessingCount = 0;
-    let planLimitProcessingCount = 0;
-    let unsupportedFileCount = 0;
-
-    if(fileStatus && processingTier === 'none') {
-        completedFiles = uploadCompletedCount;
-        planLimitProcessingCount = uploadPlanLimitCount;
-    } else if(fileStatus && processingTier === 'basic') {
-        queuedProcessingCount = fileStatus.text_queued;
-        processingProcessingCount = (fileStatus.text_processing);
-        completedFiles = fileStatus.text_completed;
-        failedProcessingCount = fileStatus.text_failed_system + fileStatus.text_failed_user;
-        planLimitProcessingCount = fileStatus.text_plan_limit;
-        unsupportedFileCount = fileStatus.text_unsupported_file;
-    } else if(fileStatus && processingTier === 'standard') {
-        queuedProcessingCount = fileStatus.md_queued;
-        processingProcessingCount = (fileStatus.md_processing);
-        completedFiles = fileStatus.md_completed;
-        failedProcessingCount = fileStatus.md_failed_system + fileStatus.md_failed_user;
-        planLimitProcessingCount = fileStatus.md_plan_limit;
-        unsupportedFileCount = fileStatus.md_unsupported_file;
-    } else if(fileStatus && processingTier === 'advanced') {
-        queuedProcessingCount = fileStatus.docling_queued;
-        processingProcessingCount = fileStatus.docling_processing;
-        completedFiles = fileStatus.docling_completed;
-        failedProcessingCount = fileStatus.docling_failed_system + fileStatus.docling_failed_user;
-        planLimitProcessingCount = fileStatus.docling_plan_limit;
-        unsupportedFileCount = fileStatus.docling_unsupported_file;
-    }
-        
-    // Processing summary (omitting unsupported files)
-    const totalProcessingCount = queuedProcessingCount + processingProcessingCount + completedFiles + failedProcessingCount + planLimitProcessingCount;
-    const processingProgress = totalProcessingCount > 0
-        ? Math.min((completedFiles + failedProcessingCount + planLimitProcessingCount) / totalProcessingCount * 100, 100)
-        : 0;
-
+    // Processing status
+    const queuedProcessingCount = fileStatus?.md_queued || 0;
+    const processingProcessingCount = fileStatus?.md_processing || 0;
+    const completedFiles = fileStatus?.md_completed || 0;
+    const unsupportedFileCount = fileStatus?.md_unsupported_file || 0;
+    
+    // Failure categories
+    const failedUploadCount = fileStatus?.md_failed_upload || 0;    // Category 1: Temporary upload error
+    const failedUserCount = fileStatus?.md_failed_user || 0;        // Category 2: Invalid file (Client-side or server-side)
+    const failedSystemCount = fileStatus?.md_failed_system || 0;    // Category 3: System processing error
+    const planLimitCount = fileStatus?.md_plan_limit || 0;          // Category 4: Plan limit (Client-side or server-side)
+    
     // Combined counts
-    const failedCount = uploadFailedCount + uploadFailedUserCount + failedProcessingCount;
+    const failedCount = failedUploadCount + failedUserCount + failedSystemCount + planLimitCount;
     const activeCount = uploadPendingCount + processingProcessingCount;
-    const planLimitCount = uploadPlanLimitCount + planLimitProcessingCount;
+
+    // Processing summary (omitting unsupported files and failed uploads)
+    const totalProcessingCount = totalFiles - unsupportedFileCount - failedUploadCount;
     
     // Overall Progress
+    // const progress = totalFiles > 0
+    //     ? Math.min((totalFiles - uploadPendingCount - queuedProcessingCount - processingProcessingCount) / totalFiles * 100, 100)
+    //     : 0;
     const progress = totalFiles > 0
-        // ? Math.min((uploadCompletedCount + uploadFailedCount + uploadPlanLimitCount + completedFiles + failedProcessingCount + planLimitProcessingCount + unsupportedFileCount) / totalFiles * 100, 100)
-        ? Math.min((totalFiles - uploadPendingCount - queuedProcessingCount - processingProcessingCount) / totalFiles * 100, 100)
+        ? Math.min((unsupportedFileCount + completedFiles + failedCount) / totalFiles * 100, 100)
         : 0;
         
-
     return {
         fileStatusAvailable: fileStatus !== null,
 
@@ -237,28 +214,25 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
         totalFiles,
         failedCount,
         activeCount,
-        planLimitCount,
 
-        // Upload status
-        uploadNotUploadedCount,
+        // Failure categories
+        failedUploadCount,      // Category 1: Temporary upload error
+        failedUserCount,        // Category 2: Invalid file (Client-side or server-side)
+        failedSystemCount,      // Category 3: System processing error
+        planLimitCount,         // Category 4: Plan limit (Client-side or server-side)
+        
+        // Transient counts
         uploadPendingCount,
-        uploadCompletedCount,
-        uploadFailedCount,
-        uploadFailedUserCount,
-        uploadPlanLimitCount,
-
+        
         // Processing status
         queuedProcessingCount,
         processingProcessingCount,
         completedFiles,
-        failedProcessingCount,
-        planLimitProcessingCount,
         unsupportedFileCount,
 
         // Processing summary
         totalProcessingCount,
         uploadProgress,
-        processingProgress,
         progress,
     } as FileStatusSummary;
 }

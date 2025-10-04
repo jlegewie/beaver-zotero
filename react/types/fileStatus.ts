@@ -14,8 +14,8 @@ export interface FileStatus {
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
-    upload_failed_user: number;
-    upload_plan_limit: number;
+    upload_failed_user: number; // DEPRECATED
+    upload_plan_limit: number;  // DEPRECATED
 
     // Basic processing status (text)
     text_queued: number;
@@ -30,6 +30,7 @@ export interface FileStatus {
     md_queued: number;
     md_processing: number;
     md_completed: number;
+    md_failed_upload: number;
     md_failed_system: number;
     md_failed_user: number;
     md_plan_limit: number;
@@ -56,7 +57,13 @@ export interface FileStatusSummary {
     totalFiles: number,
     failedCount: number,
     activeCount: number,
-    planLimitCount: number,
+
+    // Failure categories
+    failedUploadCount: number,     // Category 1: Temporary upload error
+    failedUserCount: number,       // Category 2: Invalid file (Client-side or server-side)
+    failedSystemCount: number,     // Category 3: System processing error
+    planLimitCount: number,        // Category 4: Plan limit (Client-side or server-side)
+    unsupportedFileCount: number,
 
     // Upload status
     uploadNotUploadedCount: number,
@@ -70,13 +77,9 @@ export interface FileStatusSummary {
     queuedProcessingCount: number,
     processingProcessingCount: number,
     completedFiles: number,
-    failedProcessingCount: number,
-    planLimitProcessingCount: number,
-    unsupportedFileCount: number,
 
     // Processing summary
     totalProcessingCount: number,
     uploadProgress: number,
-    processingProgress: number,
     progress: number,
 }

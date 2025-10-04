@@ -10,7 +10,6 @@ import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedFilesSummary } from "./SkippedFilesSummary";
 import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
-import { planFeaturesAtom } from "../../atoms/profile";
 import Button from "../ui/Button";
 import { zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from "../../atoms/ui";
 
@@ -55,7 +54,6 @@ const useTimeRemaining = (targetTime: number | null) => {
 
 const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus }) => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
     const timeRemaining = useTimeRemaining(backoffUntil);
     const zoteroServerDownloadError = useAtomValue(zoteroServerDownloadErrorAtom);
@@ -64,33 +62,16 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
 
     if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
 
-    // Calculate overall statistics
-    const totalFiles = fileStats.totalFiles;
-    
-    // Files that are fully complete (either uploaded non-PDFs or processed PDFs)
-    const filesNotProcessable = fileStats.uploadCompletedCount - fileStats.totalProcessingCount;
-    const fullyCompleteFiles = filesNotProcessable + fileStats.completedFiles;
-    
-    // Files that are in progress (either uploading or processing)
-    const activeFiles = fileStats.uploadPendingCount + fileStats.processingProcessingCount;
-    
-    // Files that are failed or skipped
-    const failedOrSkippedFiles = fileStats.uploadFailedCount + fileStats.uploadPlanLimitCount + 
-                                 fileStats.failedProcessingCount + fileStats.planLimitProcessingCount;
-    
-    // Overall progress calculation
-    const overallProgress = totalFiles > 0 
-        ? Math.min(((fullyCompleteFiles + failedOrSkippedFiles) / totalFiles) * 100, 100)
-        : 0;
-
-    // Determine if everything is complete
-    const isComplete = activeFiles === 0 && fileStats.queuedProcessingCount === 0;
+    // // Overall progress calculation
+    const fullyCompleteFiles = fileStats.unsupportedFileCount + fileStats.completedFiles;
+    // // Determine if everything is complete
+    const isComplete = fileStats.activeCount === 0 && fileStats.queuedProcessingCount === 0;
     
     // Determine icon
     const getStatusIcon = (): React.ReactNode => {
         if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting' || connectionStatus === 'polling') return SpinnerIcon;
         if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return AlertIconIcon;
-        if(totalFiles === 0) return CheckmarkIconGrey;
+        if (fileStats.totalFiles === 0) return CheckmarkIconGrey;
         if (isComplete) return CheckmarkIcon;
         return SpinnerIcon;
     };
@@ -107,8 +88,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
             textParts.push(`${fullyCompleteFiles.toLocaleString()} done`);
         }
         
-        if (activeFiles > 0) {
-            textParts.push(`${activeFiles.toLocaleString()} in progress`);
+        if (fileStats.activeCount > 0) {
+            textParts.push(`${fileStats.activeCount.toLocaleString()} in progress`);
         }
 
         if (textParts.length === 0 && fileStats.queuedProcessingCount > 0) {
@@ -116,7 +97,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
         }
         
         if (textParts.length === 0) {
-            if (totalFiles === 0) return "No files";
+            if (fileStats.totalFiles === 0) return "No files";
             return "";
         }
         
@@ -126,13 +107,12 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const getTitle = (): string => {
         if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return "Connecting...";
         if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return "Unable to connect...";
-        if (totalFiles === 0) return "No files to process";
+        if (fileStats.totalFiles === 0) return "No files to process";
         return "File Processing";
     };
 
-    const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
-
-    const skippedFilesCount = fileStats.planLimitProcessingCount;
+    // Skipped files combine invalid files (Category 2) and plan limit (Category 4)
+    const skippedFilesCount = fileStats.planLimitCount + fileStats.failedUserCount;
 
     return (
         <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">
@@ -148,21 +128,21 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                         </div>
                         <div className="flex-1"/>
                         <div className="font-color-tertiary text-base">
-                            {connectionStatus === 'connected' && `${totalFiles.toLocaleString()} Files`}
+                            {connectionStatus === 'connected' && `${fileStats.totalFiles.toLocaleString()} Files`}
                         </div>
                     </div>
 
                     {/* Progress bar and text */}
-                    {totalFiles > 0 && connectionStatus === 'connected' && (
+                    {fileStats.totalFiles > 0 && connectionStatus === 'connected' && (
                         <div className="w-full">
-                            <ProgressBar progress={overallProgress} />
+                            <ProgressBar progress={fileStats.progress} />
                             <div className="display-flex flex-row gap-4">
                                 <div className="font-color-tertiary text-base">
                                     {getStatusText()}
                                 </div>
                                 <div className="flex-1"/>
                                 <div className="font-color-tertiary text-base">
-                                    {`${overallProgress.toFixed(1)}%`}
+                                    {`${fileStats.progress.toFixed(1)}%`}
                                 </div>
                             </div>
                         </div>
@@ -176,39 +156,28 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 </div>
             </div>
 
-            {/* Failed uploads */}
-            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && (
-                <PaginatedFailedUploadsList
-                    statuses={["failed"]}
-                    count={fileStats.uploadFailedCount}
-                    icon={AlertIcon}
-                    title={`Failed upload${fileStats.uploadFailedCount > 1 ? 's' : ''}`}
-                    tooltipTitle="Failed Uploads"
-                    textColorClassName="font-color-red"
-                    retryButton={true}
-                />
-            )}
-
-            {/* Skipped uploads (only shown if the user has no processing tier) */}
-            {processingTier === 'none' && fileStats.uploadPlanLimitCount > 0 && (
-                <PaginatedFailedUploadsList
-                    statuses={["plan_limit"]}
-                    count={fileStats.uploadPlanLimitCount}
-                    icon={AlertIcon}
-                    title={`Skipped upload${fileStats.uploadPlanLimitCount > 1 ? 's' : ''}`}
-                    tooltipTitle="Skipped Uploads"
-                    textColorClassName="font-color-secondary"
-                />
-            )}
-
-            {/* Failed and skipped processing (only shown if the user has a processing tier) */}
-            {processingTier !== 'none' && connectionStatus === 'connected' && (fileStats.failedProcessingCount > 0 || skippedFilesCount > 0) && (
+            {/* File upload and processing errors */}
+            {connectionStatus === 'connected' && (
                 <div className="display-flex flex-col gap-3">
-                    {/* Failed processing */}
-                    {fileStats.failedProcessingCount > 0 && (
+
+                    {/* Category 1: Temporary upload error */}
+                    {fileStats.failedUploadCount > 0 && (
                         <PaginatedFailedProcessingList
-                            statuses={["failed_user", "failed_system"]}
-                            count={fileStats.failedProcessingCount}
+                            statuses={["failed_upload"]}
+                            count={fileStats.failedUploadCount}
+                            icon={AlertIcon}
+                            title={`Failed upload${fileStats.failedUploadCount > 1 ? 's' : ''}`}
+                            tooltipTitle="Failed Uploads. Retry to upload again."
+                            textColorClassName="font-color-red"
+                            retryUploadsButton={true}
+                        />
+                    )}
+
+                    {/* Category 3: System processing error */}
+                    {fileStats.failedSystemCount > 0 && (
+                        <PaginatedFailedProcessingList
+                            statuses={["failed_system"]}
+                            count={fileStats.failedSystemCount}
                             title={`Failed processing`}
                             tooltipTitle="Processing errors"
                             tooltipContent={<FailedProcessingTooltipContent />}
@@ -217,7 +186,12 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                         />
                     )}
 
-                    {/* Skipped files (combined from upload and processing) */}
+                    {/* Skipped files
+                      * 
+                      * - Category 2: Invalid file
+                      * - Category 4: Plan limit
+                      * 
+                      */}
                     {skippedFilesCount > 0 && (
                         <div className="display-flex flex-col gap-4 min-w-0">
                             <div className="display-flex flex-row gap-4 min-w-0">
@@ -242,20 +216,20 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                             </div>
                         </div>
                     )}
-                </div>
-            )}
 
-            {/* Zotero server credentials error */}
-            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && zoteroServerCredentialsError && (
-                <div className="font-color-tertiary text-sm">
-                    Some uploads failed because the user is not logged in to Zotero. Please log in to Zotero and try again.
-                </div>
-            )}
+                    {/* Zotero server credentials error */}
+                    {fileStats.uploadFailedCount > 0 && zoteroServerCredentialsError && (
+                        <div className="font-color-tertiary text-sm">
+                            Some uploads failed because the user is not logged in to Zotero. Please log in to Zotero and try again.
+                        </div>
+                    )}
 
-            {/* Zotero server download error */}
-            {connectionStatus === 'connected' && fileStats.uploadFailedCount > 0 && !zoteroServerCredentialsError && zoteroServerDownloadError && (
-                <div className="font-color-tertiary text-sm">
-                    Some uploads failed because they could not be downloaded from Zotero's server. Please try again later.
+                    {/* Zotero server download error */}
+                    {fileStats.uploadFailedCount > 0 && !zoteroServerCredentialsError && zoteroServerDownloadError && (
+                        <div className="font-color-tertiary text-sm">
+                            Some uploads failed because they could not be downloaded from Zotero's server. Please try again later.
+                        </div>
+                    )}
                 </div>
             )}
 

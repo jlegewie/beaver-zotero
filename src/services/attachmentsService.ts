@@ -304,12 +304,10 @@ export class AttachmentsService extends ApiService {
 
     /**
      * Retries uploads for the current user by resetting their status back to 'pending'.
-     * @param status The status to retry ('failed' or 'plan_limit'). Defaults to 'failed'.
      * @returns Promise with an array of FileHashReference objects for uploads that were reset.
      */
-    async retryUploadsByStatus(status: "failed" | "plan_limit" = "failed"): Promise<FileHashReference[]> {
-        const request: RetryUploadsRequest = { status };
-        return this.post<FileHashReference[]>('/api/v1/attachments/retry-uploads-by-status', request);
+    async retryUploads(): Promise<FileHashReference[]> {
+        return this.post<FileHashReference[]>('/api/v1/attachments/retry-uploads', {});
     }
 
     /**

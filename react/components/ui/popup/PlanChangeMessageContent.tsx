@@ -64,7 +64,7 @@ const PlanChangeMessageContent: React.FC<PlanChangeMessageContentProps> = ({ mes
                         </div>
                         <div className="flex-1"/>
                         <div className="font-color-tertiary text-sm">
-                            {`${Math.min(fileStatusSummary.processingProgress, 100).toFixed(1)}%`}
+                            {`${Math.min(fileStatusSummary.progress, 100).toFixed(1)}%`}
                         </div>
                     </div>
                 </div>

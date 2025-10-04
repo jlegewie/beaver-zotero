@@ -19,26 +19,26 @@ export const useErrorCodeStats = () => {
     const errorCodeStats = useAtomValue(errorCodeStatsAtom);
     const setErrorCodeStats = useSetAtom(errorCodeStatsAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
-    const { failedProcessingCount, planLimitProcessingCount } = useAtomValue(fileStatusSummaryAtom);
+    const { failedSystemCount, failedUserCount } = useAtomValue(fileStatusSummaryAtom);
     const [lastFetchedCounts, setLastFetchedCounts] = useAtom(lastFetchedErrorCountsAtom);
 
     const setIsLoading = useSetAtom(errorCodeStatsIsLoadingAtom);
     const setError = useSetAtom(errorCodeStatsErrorAtom);
     
     // Debounce error counts to prevent excessive fetching
-    const [debouncedFailedCount, setDebouncedFailedCount] = useState(failedProcessingCount);
-    const [debouncedSkippedCount, setDebouncedSkippedCount] = useState(planLimitProcessingCount);
+    const [debouncedFailedCount, setDebouncedFailedCount] = useState(failedSystemCount);
+    const [debouncedSkippedCount, setDebouncedSkippedCount] = useState(failedUserCount);
 
     useEffect(() => {
         const handler = setTimeout(() => {
-            setDebouncedFailedCount(failedProcessingCount);
-            setDebouncedSkippedCount(planLimitProcessingCount);
+            setDebouncedFailedCount(failedSystemCount);
+            setDebouncedSkippedCount(failedUserCount);
         }, 3000); // 3000ms debounce delay
 
         return () => {
             clearTimeout(handler);
         };
-    }, [failedProcessingCount, planLimitProcessingCount]);
+    }, [failedSystemCount, failedUserCount]);
 
     // Clear stats when there are no errors (using debounced values)
     useEffect(() => {
