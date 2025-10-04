@@ -755,7 +755,7 @@ export class FileUploader {
 /**
  * Utility function to retry uploads by calling the backend and restarting the uploader
  */
-export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "failed"): Promise<void> => {
+export const retryUploads = async (): Promise<void> => {
     try {
         // check authentication status
         const isAuthenticated = store.get(isAuthenticatedAtom);
@@ -767,7 +767,7 @@ export const retryUploadsByStatus = async (status: "failed" | "plan_limit" = "fa
         }
 
         // -------- (1) Retry uploads in backend --------
-        const results: FileHashReference[] = await attachmentsService.retryUploadsByStatus(status);
+        const results: FileHashReference[] = await attachmentsService.retryUploads();
         logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
         store.set(zoteroServerDownloadErrorAtom, false);
         store.set(zoteroServerCredentialsErrorAtom, false);
