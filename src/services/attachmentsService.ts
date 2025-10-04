@@ -178,23 +178,6 @@ export type UploadErrorCode =
 // Combined error code type
 export type ErrorCode = PlanLimitErrorCode | UploadErrorCode;
 
-export interface UpdateUploadStatusRequest {
-    file_hash: string | string[];
-    status: UploadStatus;
-    update_processing_status: boolean;
-    processing_tier?: ProcessingTier;
-    error_code?: ErrorCode;
-    details?: string;
-}
-
-/**
- * Response from marking an upload as failed
- */
-export interface UpdateUploadStatusResponse {
-    success: boolean;
-    message: string;
-}
-
 
 /**
  * Request body for reporting file upload failures during processing
@@ -433,34 +416,6 @@ export class AttachmentsService extends ApiService {
      */
     async deleteQueueItem(fileHash: string): Promise<void> {
         this.delete(`/api/v1/attachments/upload-queue/${fileHash}`);
-    }
-
-    /**
-     * Updates the status of an upload for the given file hash.
-     * @param fileHash The hash of the file that failed to upload
-     * @param status The status to update the upload to
-     * @param options Optional parameters for the status update
-     * @returns Promise with the upload failed response
-     */
-    async updateUploadStatus(
-        fileHash: string | string[],
-        status: UploadStatus,
-        options?: {
-            updateProcessingStatus?: boolean;
-            processingTier?: ProcessingTier;
-            errorCode?: ErrorCode;
-            details?: string;
-        }
-    ): Promise<UpdateUploadStatusResponse> {
-        const request: UpdateUploadStatusRequest = {
-            file_hash: fileHash,
-            status: status,
-            update_processing_status: options?.updateProcessingStatus ?? false,
-            processing_tier: options?.processingTier,
-            error_code: options?.errorCode,
-            details: options?.details
-        };
-        return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
     }
 
     /**
