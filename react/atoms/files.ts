@@ -136,7 +136,7 @@ export const aggregatedErrorMessagesForFailedFilesAtom = atom<Record<string, Agg
     if (!errorCodeStats) return {};
     const aggregatedStats: Record<string, AggregatedErrorMessage> = {};
     for (const errorCodeStat of errorCodeStats) {
-        if(errorCodeStat.status !== "failed_user" && errorCodeStat.status !== "failed_system") continue;
+        if(errorCodeStat.status !== "failed_system") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
         if (!aggregatedStats[errorCodeStat.error_code]) {
             aggregatedStats[errorCodeStat.error_code] = { code: errorCodeStat.error_code, message, count: 0 };
@@ -152,7 +152,7 @@ export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, Ag
     if (!errorCodeStats) return {};
     const aggregatedStats: Record<string, AggregatedErrorMessage> = {};
     for (const errorCodeStat of errorCodeStats) {
-        if(errorCodeStat.status !== "plan_limit" && errorCodeStat.status !== "unsupported_file") continue;
+        if(errorCodeStat.status !== "plan_limit" && errorCodeStat.status !== "failed_user") continue;
         const message = errorMapping[errorCodeStat.error_code as keyof typeof errorMapping] || "Unexpected error";
         if (!aggregatedStats[errorCodeStat.error_code]) {
             aggregatedStats[errorCodeStat.error_code] = { code: errorCodeStat.error_code, message, count: 0 };
