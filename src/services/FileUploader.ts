@@ -11,7 +11,7 @@ import { getPDFPageCount, getPDFPageCountFromData, naivePdfPageCount } from '../
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode, UploadErrorCode } from './attachmentsService';
+import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode, UploadErrorCode, ErrorCode, FailureStatus } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
@@ -263,11 +263,9 @@ export class FileUploader {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
                 await this.handleUploadFailure(
                     item,
-                    true, // permanent failure
-                    {
-                        errorCode: 'attachment_not_found',
-                        reason: `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
-                    }
+                    'failed_user', // permanent failure
+                    'attachment_not_found',
+                    `Attachment not found (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                 );
                 return;
             }
@@ -293,11 +291,9 @@ export class FileUploader {
                 // Handle upload failure
                 await this.handleUploadFailure(
                     item,
-                    isAuthorizationError ? false : true, // handle as temporary failure if authorization error
-                    {
-                        errorCode: errorCode,
-                        reason: message
-                    }
+                    isAuthorizationError ? 'failed_upload' : 'failed_user', // handle as temporary failure if authorization error
+                    errorCode,
+                    message
                 );
 
                 // Set authorization error flag to show user message if authorization error
@@ -323,11 +319,9 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: File path not found`, 1);
                     await this.handleUploadFailure(
                         item,
-                        true, // permanent failure
-                        {
-                            errorCode: 'file_unavailable',
-                            reason: `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
-                        }
+                        'failed_user', // permanent failure
+                        'file_unavailable',
+                        `File path not found for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     );
                     return;
                 }
@@ -345,11 +339,9 @@ export class FileUploader {
                     Zotero.logError(readError);
                     await this.handleUploadFailure(
                         item,
-                        true, // permanent failure
-                        {
-                            errorCode: 'unable_to_read_file',
-                            reason: `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
-                        }
+                        'failed_user', // permanent failure
+                        'unable_to_read_file',
+                        `Error reading file for local upload (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                     );
                     return;
                 }
@@ -384,11 +376,9 @@ export class FileUploader {
                     
                     await this.handleUploadFailure(
                         item,
-                        isPermanent, // permanent if 404 (not found) or empty file
-                        {
-                            errorCode: 'server_download_failed',
-                            reason: errorMessage
-                        }
+                        isPermanent ? 'failed_user' : 'failed_upload', // permanent if 404 (not found) or empty file
+                        'server_download_failed',
+                        errorMessage
                     );
                     if(!isPermanent) store.set(zoteroServerDownloadErrorAtom, true);
                     return;
@@ -410,11 +400,9 @@ export class FileUploader {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: ${message}`, 1);
                 await this.handleUploadFailure(
                     item,
-                    true, // permanent failure
-                    {
-                        errorCode: 'invalid_file_metadata',
-                        reason: message
-                    }
+                    'failed_user', // permanent failure
+                    'invalid_file_metadata',
+                    message
                 );
                 if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
                 return;
@@ -427,8 +415,14 @@ export class FileUploader {
                 const sizeLimit = planFeatures.uploadFileSizeLimit;
                 logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
                 if (fileSizeInMB > sizeLimit) {
-                    logger(`File Uploader: File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB, skipping upload: ${item.zotero_key}`, 1);
-                    await this.handlePlanLimitFailure(item, `File size exceeds ${sizeLimit}MB`, "plan_limit_file_size");
+                    const message = `File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB`;
+                    logger(`File Uploader: ${message}`, 1);
+                    await this.handleUploadFailure(
+                        item,
+                        'plan_limit', // file exceeds size limit
+                        'plan_limit_file_size',
+                        message
+                    );
                     return;
                 }
             }
@@ -486,11 +480,9 @@ export class FileUploader {
             // Treat as temporary failed with message for manual retry
             await this.handleUploadFailure(
                 item,
-                false, // temporary failure
-                {
-                    errorCode: 'storage_upload_failed',
-                    reason: error instanceof Error ? error.message : "Max attempts reached"
-                }
+                'failed_upload', // temporary failure
+                'storage_upload_failed',
+                error instanceof Error ? error.message : "Max attempts reached"
             );
         }
     }
@@ -701,11 +693,9 @@ export class FileUploader {
                 try {
                     await this.handleUploadFailure(
                         batchItem.item,
-                        false, // temporary failure
-                        {
-                            errorCode: 'completion_failed',
-                            reason: `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
-                        }
+                        'failed_upload', // temporary failure
+                        'completion_failed',
+                        `Failed to mark upload as completed in backend after ${maxBatchAttempts} attempts`
                     );
                 } catch (failError: any) {
                     logger(`File Uploader: Failed to mark batch item ${batchItem.item.zotero_key} as permanently failed: ${failError.message}`, 1);
@@ -722,65 +712,41 @@ export class FileUploader {
      */
     private async handleUploadFailure(
         item: UploadQueueItem,
-        permanent: boolean,
-        {
-            errorCode,
-            reason
-        }: {
-            errorCode?: UploadErrorCode | PlanLimitErrorCode,
-            reason?: string
-        }
+        status: FailureStatus,
+        errorCode: ErrorCode,
+        reason?: string
     ): Promise<void> {
-        logger(`File Uploader: ${permanent ? 'Permanent' : 'Temporary'} upload failure for ${item.zotero_key}: ${reason}`, 1);
+        logger(`File Uploader: Failed upload. Updating status to ${status} for ${item.zotero_key} with error code ${errorCode}: ${reason}`, 1);
         
         try {
-            // First, notify backend of failure with error details
-            await attachmentsService.updateUploadStatus(
-                item.file_hash, 
-                permanent ? 'failed_user' : 'failed',
-                {
-                    errorCode,
-                    details: reason
-                }
+            // Get processing tier from plan features
+            const processingTier = store.get(planFeaturesAtom).processingTier;
+            
+            // Report failure to backend with appropriate status
+            await attachmentsService.reportFileUploadFailed(
+                item.file_hash,
+                status,
+                errorCode,
+                processingTier,
+                reason
             );
             
             // Error message for manual retry (only show if user has completed onboarding)
-            if (!permanent && store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
+            if (status === 'failed_upload' && store.get(hasCompletedOnboardingAtom) && !store.get(showFileStatusDetailsAtom)) {
                 store.set(addOrUpdateFailedUploadMessageAtom, {
                     library_id: item.library_id,
                     zotero_key: item.zotero_key
                 } as ZoteroItemReference);
             }
             
-            logger(`File Uploader: Successfully marked ${item.zotero_key} as ${permanent ? 'permanent' : 'temporary'} upload failed (status: ${permanent ? 'failed_user' : 'failed'})`, 3);
+            logger(`File Uploader: Successfully marked ${item.zotero_key} as ${status} upload failed (status: ${status})`, 3);
             
         } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as ${permanent ? 'permanent' : 'temporary'} upload failed (status: ${permanent ? 'failed_user' : 'failed'}): ${failError.message}`, 2);
+            logger(`File Uploader: Failed to mark item as ${status} upload failed (status: ${status}): ${failError.message}`, 2);
             Zotero.logError(failError);
             // Re-throw the error so callers know the operation failed
             // Item will remain in backend queue for retry
             throw failError;
-        }
-    }
-
-    /**
-     * Handles plan limit failures by marking items as failed in the backend first, 
-     * then removing them from the backend queue
-     */
-    private async handlePlanLimitFailure(item: UploadQueueItem, reason: string, errorCode: PlanLimitErrorCode): Promise<void> {
-        logger(`File Uploader: Plan limit failure for ${item.zotero_key}: ${reason}`, 1);
-        try {
-            await attachmentsService.updateUploadStatus(
-                item.file_hash, 
-                'plan_limit',
-                {
-                    errorCode,
-                    details: reason
-                }
-            );
-            
-        } catch (failError: any) {
-            logger(`File Uploader: Failed to mark item as plan limit failure: ${failError.message}`, 2);
         }
     }
 }
