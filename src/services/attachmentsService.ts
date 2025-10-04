@@ -7,9 +7,27 @@ import { fileUploader } from './FileUploader';
 import { ProcessingTier } from '../../react/types/profile';
 
 // processing_status from backend
-export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
-// upload_status_literal from backend
-export type UploadStatus = "pending" | "completed" | "failed" | "failed_user" | "plan_limit";
+export type FailureStatus =
+    "failed_upload" |    // Category 1: Temporary upload error
+    "failed_user" |      // Category 2: Invalid file (client-side or server-side)
+    "failed_system" |    // Category 3: System processing error
+    "plan_limit" |       // Category 4: Plan limit (client-side or server-side)
+    "unsupported_file";
+
+export type ProcessingStatus =
+    "queued" |
+    "processing" |
+    "completed" |
+    FailureStatus;
+
+export type UploadStatus =
+    "pending" |
+    "completed" |
+    "failed" |
+    // deprecated
+    "failed_user" |
+    "plan_limit";
+
 
 /**
  * Request body for retrying uploads by status
@@ -173,6 +191,26 @@ export interface UpdateUploadStatusRequest {
  * Response from marking an upload as failed
  */
 export interface UpdateUploadStatusResponse {
+    success: boolean;
+    message: string;
+}
+
+
+/**
+ * Request body for reporting file upload failures during processing
+ */
+export interface FileUploadFailedRequest {
+    file_hash: string | string[];
+    status: FailureStatus;
+    error_code: ErrorCode;
+    details?: string;
+    processing_tier: ProcessingTier;
+}
+
+/**
+ * Response from reporting file upload failures
+ */
+export interface FileUploadFailedResponse {
     success: boolean;
     message: string;
 }
@@ -423,6 +461,33 @@ export class AttachmentsService extends ApiService {
             details: options?.details
         };
         return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
+    }
+
+    /**
+     * Reports file upload failure during processing, setting upload_status to failed
+     * and updating the processing tier-specific status and error code
+     * @param fileHash Single file hash or array of file hashes
+     * @param status Failure status to set for the processing tier
+     * @param errorCode Error code indicating the reason for failure
+     * @param processingTier Processing tier (basic/standard/advanced) to update
+     * @param details Optional additional details about the failure
+     * @returns Promise with the operation response
+     */
+    async reportFileUploadFailed(
+        fileHash: string | string[],
+        status: FailureStatus,
+        errorCode: ErrorCode,
+        processingTier: ProcessingTier,
+        details?: string
+    ): Promise<FileUploadFailedResponse> {
+        const request: FileUploadFailedRequest = {
+            file_hash: fileHash,
+            status: status,
+            error_code: errorCode,
+            details: details,
+            processing_tier: processingTier
+        };
+        return this.post<FileUploadFailedResponse>('/api/v1/attachments/file-upload-failed', request);
     }
 
     /**
