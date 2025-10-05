@@ -98,15 +98,26 @@ export const SkippedFilesSummary: React.FC = () => {
             <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
                 {sortedGroups.map(
                     ({ name, details, count }) => (
-                        <div key={name} className="display-flex flex-col gap-0">
-                            <span className="font-color-secondary mr-4">
-                                {String(count).toLocaleString()} {makeSingularIfNeeded(name, count)}
-                            </span>
-                            {details && (
-                                <span className="font-color-tertiary mr-4">
-                                    {details}
+                        <div key={name} className="display-flex flex-row flex-1 gap-1">
+                            <div key={name} className="display-flex flex-col gap-0">
+                                <span className="font-color-secondary mr-4">
+                                    {String(count).toLocaleString()} {makeSingularIfNeeded(name, count)}
                                 </span>
-                            )}
+                                {details && (
+                                    <span className="font-color-tertiary mr-4">
+                                        {details}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex-1" />
+                            {/* <div className="font-color-tertiary">
+                                <IconButton
+                                    icon={ArrowUpRightIcon}
+                                    onClick={() => setIsDialogVisible(true)}
+                                    variant="ghost-secondary"
+                                    className="scale-11"
+                                />
+                            </div> */}
                         </div>
                     )
                 )}
