@@ -4,13 +4,12 @@ import {
     aggregatedErrorMessagesForSkippedFilesAtom,
     errorCodeStatsErrorAtom,
     errorCodeStatsIsLoadingAtom,
-    errorMappingOverview,
-    errorMappingHintAtom
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
+import { errorMappingOverview, errorMappingHintAtom } from '../../atoms/errors';
 
 /**
  * Convert plural "Files" to singular "File" when count is 1

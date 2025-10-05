@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from '../icons/icons';
 import { FailedFileReference, FailedItemReference } from '../../types/zotero';
-import { errorMapping } from '../../atoms/files';
+import { errorMapping } from '../../atoms/errors';
 import { selectItemById } from '../../../src/utils/selectItem';
 import IconButton from './IconButton';
 
