@@ -19,7 +19,7 @@ export const useErrorCodeStats = () => {
     const errorCodeStats = useAtomValue(errorCodeStatsAtom);
     const setErrorCodeStats = useSetAtom(errorCodeStatsAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
-    const { failedSystemCount, failedUserCount } = useAtomValue(fileStatusSummaryAtom);
+    const { failedSystemCount, failedUserCount, planLimitCount } = useAtomValue(fileStatusSummaryAtom);
     const [lastFetchedCounts, setLastFetchedCounts] = useAtom(lastFetchedErrorCountsAtom);
 
     const setIsLoading = useSetAtom(errorCodeStatsIsLoadingAtom);
@@ -38,7 +38,7 @@ export const useErrorCodeStats = () => {
         return () => {
             clearTimeout(handler);
         };
-    }, [failedSystemCount, failedUserCount]);
+    }, [failedSystemCount, failedUserCount, planLimitCount]);
 
     // Clear stats when there are no errors (using debounced values)
     useEffect(() => {
