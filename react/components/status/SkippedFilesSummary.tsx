@@ -9,7 +9,7 @@ import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
-import { errorMappingOverview, errorMappingHintAtom } from '../../atoms/errors';
+import { errorGroupsAtom } from '../../atoms/errors';
 
 /**
  * Convert plural "Files" to singular "File" when count is 1
@@ -31,7 +31,7 @@ export const SkippedFilesSummary: React.FC = () => {
     const aggregatedMessages = useAtomValue(
         aggregatedErrorMessagesForSkippedFilesAtom
     );
-    const errorHint = useAtomValue(errorMappingHintAtom);
+    const errorGroups = useAtomValue(errorGroupsAtom);
     const setIsDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
 
     React.useEffect(() => {
@@ -40,6 +40,11 @@ export const SkippedFilesSummary: React.FC = () => {
 
     const handleShowFiles = () => {
         setIsDialogVisible(true);
+    };
+
+    // Helper function to find error group for a given error code
+    const getErrorGroup = (errorCode: string) => {
+        return errorGroups.find(group => group.errorCodes.includes(errorCode as any));
     };
 
     const hasData = Object.keys(aggregatedMessages).length > 0;
@@ -78,21 +83,24 @@ export const SkippedFilesSummary: React.FC = () => {
         <div className="display-flex flex-col gap-3 w-full ml-1">
             <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
                 {sortedEntries.map(
-                    ([errorCode, { message, count }]) => (
-                        <div key={errorCode} className="display-flex flex-col gap-0">
-                            <span className="font-color-secondary mr-4">
-                                {String(count).toLocaleString()} {makeSingularIfNeeded(
-                                    String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview]),
-                                    count
-                                )}
-                            </span>
-                            {errorHint[errorCode as keyof typeof errorHint] && (
-                                <span className="font-color-tertiary mr-4">
-                                    {errorHint[errorCode as keyof typeof errorHint]}
+                    ([errorCode, { message, count }]) => {
+                        const errorGroup = getErrorGroup(errorCode);
+                        return (
+                            <div key={errorCode} className="display-flex flex-col gap-0">
+                                <span className="font-color-secondary mr-4">
+                                    {String(count).toLocaleString()} {makeSingularIfNeeded(
+                                        errorGroup?.name || "Unknown error",
+                                        count
+                                    )}
                                 </span>
-                            )}
-                        </div>
-                    )
+                                {errorGroup?.details && (
+                                    <span className="font-color-tertiary mr-4">
+                                        {errorGroup.details}
+                                    </span>
+                                )}
+                            </div>
+                        );
+                    }
                 )}
             </div>
             <div className="display-flex justify-between items-center ml-2">
