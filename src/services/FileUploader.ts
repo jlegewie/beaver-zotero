@@ -473,7 +473,8 @@ export class FileUploader {
             await this.addCompletionToBatch(item, mimeType, fileSize, pageCount, user_id);
 
         } catch (error: any) {
-            logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${error.message}`, 1);
+            const errorMessage = error instanceof Error ? error.message : String(error) || "Unknown error";
+            logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${errorMessage}`, 1);
             Zotero.logError(error);
 
             // Treat as temporary failed with message for manual retry
@@ -481,7 +482,7 @@ export class FileUploader {
                 item,
                 'failed_upload', // temporary failure
                 'storage_upload_failed',
-                error instanceof Error ? error.message : "Max attempts reached"
+                errorMessage
             );
         }
     }
