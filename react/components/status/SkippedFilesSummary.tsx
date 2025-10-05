@@ -4,13 +4,12 @@ import {
     aggregatedErrorMessagesForSkippedFilesAtom,
     errorCodeStatsErrorAtom,
     errorCodeStatsIsLoadingAtom,
-    errorMappingOverview,
-    errorMappingHintAtom
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
+import { errorGroupsAtom } from '../../atoms/errors';
 
 /**
  * Convert plural "Files" to singular "File" when count is 1
@@ -32,7 +31,7 @@ export const SkippedFilesSummary: React.FC = () => {
     const aggregatedMessages = useAtomValue(
         aggregatedErrorMessagesForSkippedFilesAtom
     );
-    const errorHint = useAtomValue(errorMappingHintAtom);
+    const errorGroups = useAtomValue(errorGroupsAtom);
     const setIsDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
 
     React.useEffect(() => {
@@ -70,28 +69,55 @@ export const SkippedFilesSummary: React.FC = () => {
         return null;
     }
 
-    // Sort entries by count (highest first)
-    const sortedEntries = Object.entries(aggregatedMessages).sort(
-        ([, a], [, b]) => b.count - a.count
+    // Group error codes by their error group and sum counts
+    const groupedByErrorGroup = Object.entries(aggregatedMessages).reduce((acc, [errorCode, { count }]) => {
+        const errorGroup = errorGroups.find(group => group.errorCodes.includes(errorCode as any));
+        
+        if (errorGroup) {
+            const groupKey = errorGroup.name;
+            if (!acc[groupKey]) {
+                acc[groupKey] = {
+                    name: errorGroup.name,
+                    details: errorGroup.details,
+                    count: 0
+                };
+            }
+            acc[groupKey].count += count;
+        }
+        
+        return acc;
+    }, {} as Record<string, { name: string; details: string; count: number }>);
+
+    // Sort groups by count (highest first)
+    const sortedGroups = Object.values(groupedByErrorGroup).sort(
+        (a, b) => b.count - a.count
     );
 
     return (
         <div className="display-flex flex-col gap-3 w-full ml-1">
             <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
-                {sortedEntries.map(
-                    ([errorCode, { message, count }]) => (
-                        <div key={errorCode} className="display-flex flex-col gap-0">
-                            <span className="font-color-secondary mr-4">
-                                {String(count).toLocaleString()} {makeSingularIfNeeded(
-                                    String(errorMappingOverview[errorCode as keyof typeof errorMappingOverview]),
-                                    count
-                                )}
-                            </span>
-                            {errorHint[errorCode as keyof typeof errorHint] && (
-                                <span className="font-color-tertiary mr-4">
-                                    {errorHint[errorCode as keyof typeof errorHint]}
+                {sortedGroups.map(
+                    ({ name, details, count }) => (
+                        <div key={name} className="display-flex flex-row flex-1 gap-1">
+                            <div key={name} className="display-flex flex-col gap-0">
+                                <span className="font-color-secondary mr-4">
+                                    {String(count).toLocaleString()} {makeSingularIfNeeded(name, count)}
                                 </span>
-                            )}
+                                {details && (
+                                    <span className="font-color-tertiary mr-4">
+                                        {details}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex-1" />
+                            {/* <div className="font-color-tertiary">
+                                <IconButton
+                                    icon={ArrowUpRightIcon}
+                                    onClick={() => setIsDialogVisible(true)}
+                                    variant="ghost-secondary"
+                                    className="scale-11"
+                                />
+                            </div> */}
                         </div>
                     )
                 )}

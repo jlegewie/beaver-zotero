@@ -10,6 +10,8 @@ import Tooltip from '../ui/Tooltip';
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import { getMimeType, loadFullItemData } from '../../../src/utils/zoteroUtils';
+import IconButton from '../ui/IconButton';
+import { retryUploads } from '../../../src/services/FileUploader';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -25,6 +27,7 @@ interface PaginatedFailedProcessingListProps {
     show?: boolean;
     collapseable?: boolean;
     maxHeight?: string | number;
+    retryUploadsButton?: boolean;
 }
 
 const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps> = ({
@@ -39,6 +42,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
     show = false,
     collapseable = true,
     maxHeight = '250px',
+    retryUploadsButton = false,
 }) => {
     const [showList, setShowList] = useState(collapseable ? show : true);
     const [attachments, setAttachments] = useState<FailedFileReference[]>([]);
@@ -68,15 +72,8 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             }
 
             // Fetch items based on processing status
-            const result: AttachmentStatusPagedResponse = errorCode
-                ? await attachmentsService.getAttachmentsByStatusAndErrorCode(
-                    statuses,
-                    errorCode,
-                    processingTier,
-                    page + 1, // API is 1-based
-                    ITEMS_PER_PAGE
-                )
-                : await attachmentsService.getAttachmentsByStatus(
+            const result: AttachmentStatusPagedResponse =
+                await attachmentsService.getAttachmentsByStatus(
                     statuses,
                     processingTier,
                     page + 1, // API is 1-based
@@ -199,6 +196,18 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                                 </Button>
                             </Tooltip>
                             <div className="flex-1" />
+                            {retryUploadsButton && (
+                                <IconButton
+                                    variant="ghost"
+                                    onClick={async () => {
+                                        await retryUploads();
+                                        setShowList(false);
+                                    }}
+                                    icon={RepeatIcon}
+                                    iconClassName="font-color-secondary"
+                                    className="scale-11"
+                                />
+                            )}
                         </div>
                     )}
                     {showList && (

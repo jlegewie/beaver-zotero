@@ -449,9 +449,9 @@ class SourceValidationManager {
                 }
             }
 
-            // ------ Step 3: Upload if needed and enabled ------
+            // ------ Step 3: Upload if needed and enabled (only if file is processed) ------
             let uploaded = false;
-            if (requiresUpload && enableUpload && backendResponse.signed_upload_url && backendResponse.storage_path) {
+            if (requiresUpload && enableUpload && backendResponse.signed_upload_url && backendResponse.storage_path && backendResponse.processed) {
                 try {
                     logger(`SourceValidationManager: Starting file upload for ${source.itemKey}`, 3);
                     await this.uploadFile(source, backendResponse.signed_upload_url, backendResponse.storage_path, backendResponse.upload_metadata || {});

@@ -7,9 +7,27 @@ import { fileUploader } from './FileUploader';
 import { ProcessingTier } from '../../react/types/profile';
 
 // processing_status from backend
-export type ProcessingStatus = "queued" | "processing" | "completed" | "failed_system" | "failed_user" | "plan_limit" | "unsupported_file";
-// upload_status_literal from backend
-export type UploadStatus = "pending" | "completed" | "failed" | "plan_limit";
+export type FailureStatus =
+    "failed_upload" |    // Category 1: Temporary upload error
+    "failed_user" |      // Category 2: Invalid file (client-side or server-side)
+    "failed_system" |    // Category 3: System processing error
+    "plan_limit" |       // Category 4: Plan limit (client-side or server-side)
+    "unsupported_file";
+
+export type ProcessingStatus =
+    "queued" |
+    "processing" |
+    "completed" |
+    FailureStatus;
+
+export type UploadStatus =
+    "pending" |
+    "completed" |
+    "failed" |
+    // deprecated
+    "failed_user" |
+    "plan_limit";
+
 
 /**
  * Request body for retrying uploads by status
@@ -79,6 +97,7 @@ export interface AttachmentStatusResponse {
     text_error_code?: string
     md_error_code?: string
     docling_error_code?: string
+    upload_error_code?: string
 }
 
 /**
@@ -140,20 +159,41 @@ export interface ReadUploadQueueResponse {
 /**
  * Request body for marking an upload as failed
  */
-export type PlanLimitErrorCode = "plan_limit_unsupported_file" | "plan_limit_max_pages" | "plan_limit_file_size";
-export interface UpdateUploadStatusRequest {
+export type PlanLimitErrorCode =
+    | "plan_limit_unsupported_file"
+    | "plan_limit_max_pages"
+    | "plan_limit_file_size";
+
+// Add upload failure error codes
+export type UploadErrorCode = 
+    | "attachment_not_found"
+    | "file_unavailable"
+    | "zotero_credentials_invalid"
+    | "server_download_failed"
+    | "unable_to_read_file"
+    | "storage_upload_failed"
+    | "completion_failed"
+    | "invalid_file_metadata";
+
+// Combined error code type
+export type ErrorCode = PlanLimitErrorCode | UploadErrorCode;
+
+
+/**
+ * Request body for reporting file upload failures during processing
+ */
+export interface FileUploadFailedRequest {
     file_hash: string | string[];
-    status: UploadStatus;
-    update_processing_status: boolean;
-    processing_tier?: ProcessingTier;
-    error_code?: PlanLimitErrorCode;
+    status: FailureStatus;
+    error_code: ErrorCode;
     details?: string;
+    processing_tier: ProcessingTier;
 }
 
 /**
- * Response from marking an upload as failed
+ * Response from reporting file upload failures
  */
-export interface UpdateUploadStatusResponse {
+export interface FileUploadFailedResponse {
     success: boolean;
     message: string;
 }
@@ -264,12 +304,10 @@ export class AttachmentsService extends ApiService {
 
     /**
      * Retries uploads for the current user by resetting their status back to 'pending'.
-     * @param status The status to retry ('failed' or 'plan_limit'). Defaults to 'failed'.
      * @returns Promise with an array of FileHashReference objects for uploads that were reset.
      */
-    async retryUploadsByStatus(status: "failed" | "plan_limit" = "failed"): Promise<FileHashReference[]> {
-        const request: RetryUploadsRequest = { status };
-        return this.post<FileHashReference[]>('/api/v1/attachments/retry-uploads-by-status', request);
+    async retryUploads(): Promise<FileHashReference[]> {
+        return this.post<FileHashReference[]>('/api/v1/attachments/retry-uploads', {});
     }
 
     /**
@@ -295,35 +333,6 @@ export class AttachmentsService extends ApiService {
         params.append('page_size', pageSize.toString());
         
         const url = `/api/v1/attachments/by-status?${params.toString()}`;
-        return this.get<AttachmentStatusPagedResponse>(url);
-    }
-
-    /**
-     * Fetches attachments by processing status and error code.
-     * @param status The processing status to filter by
-     * @param errorCode The error code to filter by
-     * @param pipeline The pipeline type ("basic", "standard" or "advanced", default: "basic")
-     * @param page Page number (1-based, default: 1)
-     * @param pageSize Number of items per page (default: 50, max: 100)
-     * @returns Promise with paginated list of attachments with the specified status and error code
-     */
-    async getAttachmentsByStatusAndErrorCode(
-        status: ProcessingStatus[],
-        errorCode: string,
-        pipeline: "basic" | "standard" | "advanced" = "basic",
-        page: number = 1,
-        pageSize: number = 50
-    ): Promise<AttachmentStatusPagedResponse> {
-        const params = new URLSearchParams();
-        
-        // Add all parameters
-        status.forEach(s => params.append('status', s));
-        params.append('error_code', errorCode);
-        params.append('pipeline', pipeline);
-        params.append('page', page.toString());
-        params.append('page_size', pageSize.toString());
-        
-        const url = `/api/v1/attachments/by-status-and-error-code?${params.toString()}`;
         return this.get<AttachmentStatusPagedResponse>(url);
     }
 
@@ -408,28 +417,30 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Updates the status of an upload for the given file hash.
-     * @param fileHash The hash of the file that failed to upload
-     * @param status The status to update the upload to
-     * @returns Promise with the upload failed response
+     * Reports file upload failure during processing, setting upload_status to failed
+     * and updating the processing tier-specific status and error code
+     * @param fileHash Single file hash or array of file hashes
+     * @param status Failure status to set for the processing tier
+     * @param errorCode Error code indicating the reason for failure
+     * @param processingTier Processing tier (basic/standard/advanced) to update
+     * @param details Optional additional details about the failure
+     * @returns Promise with the operation response
      */
-    async updateUploadStatus(
+    async reportFileUploadFailed(
         fileHash: string | string[],
-        status: UploadStatus,
-        updateProcessingStatus: boolean = false,
-        processingTier?: ProcessingTier,
-        errorCode?: PlanLimitErrorCode,
+        status: FailureStatus,
+        errorCode: ErrorCode,
+        processingTier: ProcessingTier,
         details?: string
-    ): Promise<UpdateUploadStatusResponse> {
-        const request: UpdateUploadStatusRequest = {
+    ): Promise<FileUploadFailedResponse> {
+        const request: FileUploadFailedRequest = {
             file_hash: fileHash,
             status: status,
-            update_processing_status: updateProcessingStatus,
-            processing_tier: processingTier,
             error_code: errorCode,
-            details: details
+            details: details,
+            processing_tier: processingTier
         };
-        return this.post<UpdateUploadStatusResponse>('/api/v1/attachments/upload-status', request);
+        return this.post<FileUploadFailedResponse>('/api/v1/attachments/file-upload-failed', request);
     }
 
     /**

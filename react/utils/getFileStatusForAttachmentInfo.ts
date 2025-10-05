@@ -1,7 +1,7 @@
 import { syncingItemFilter } from '../../src/utils/sync';
 import { fileUploader } from '../../src/services/FileUploader';
 import { logger } from '../../src/utils/logger';
-import { errorMapping } from '../atoms/files';
+import { errorMapping } from '../atoms/errors';
 import { AttachmentStatusResponse, attachmentsService } from '../../src/services/attachmentsService';
 import { store } from '../store';
 import { userAtom } from '../atoms/auth';
