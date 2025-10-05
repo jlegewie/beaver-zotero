@@ -94,12 +94,14 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
     const totalProcessingCount = totalFiles - unsupportedFileCount - failedUploadCount;
     
     // Overall Progress
-    // const progress = totalFiles > 0
-    //     ? Math.min((totalFiles - uploadPendingCount - queuedProcessingCount - processingProcessingCount) / totalFiles * 100, 100)
-    //     : 0;
     const progress = totalFiles > 0
-        ? Math.min((unsupportedFileCount + completedFiles + failedCount) / totalFiles * 100, 100)
+        ? Math.min((totalFiles - uploadPendingCount - queuedProcessingCount - processingProcessingCount) / totalFiles * 100, 100)
         : 0;
+
+    // Difference: md_status is null (shouldn't happen)
+    // const progress = totalFiles > 0
+    //     ? Math.min((unsupportedFileCount + completedFiles + failedCount) / totalFiles * 100, 100)
+    //     : 0;
         
     return {
         fileStatusAvailable: fileStatus !== null,
