@@ -319,7 +319,7 @@ export class FileUploader {
 
                 // Get the file path for the attachment
                 const filePath: string | null = await attachment.getFilePathAsync() || null;
-                context.filePath = filePath;
+                context.hasFilePath = Boolean(filePath)
                 
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
