@@ -31,7 +31,7 @@ const SkippedFilesDialog: React.FC = () => {
         setIsVisible(false);
     };
 
-    const skippedFilesCount = fileStats.planLimitProcessingCount;
+    const skippedFilesCount = fileStats.planLimitCount + fileStats.failedUserCount;
 
     return (
         <div
@@ -57,7 +57,7 @@ const SkippedFilesDialog: React.FC = () => {
             {/* Content */}
             <div className="px-4 pb-4 display-flex flex-col gap-4">
                 <PaginatedFailedProcessingList
-                    statuses={['plan_limit']}
+                    statuses={['plan_limit', "failed_user"]}
                     count={skippedFilesCount}
                     title="Skipped files"
                     tooltipTitle="Reasons for skipping files"
