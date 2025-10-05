@@ -50,7 +50,7 @@ export const errorMapping = {
     "unable_to_read_file": "Unable to read file",
     "storage_upload_failed": "Upload failed",
     "completion_failed": "Upload failed",
-    "invalid_file_metadata": "Invalid file metadata"
+    "invalid_file_metadata": "Unable to read"
 }
 
 
