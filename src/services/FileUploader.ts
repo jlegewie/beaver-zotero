@@ -246,6 +246,10 @@ export class FileUploader {
      * On success, the item is added to the completion batch; on failure, we may retry or fail permanently.
      */
     private async uploadFile(item: UploadQueueItem, user_id: string): Promise<void> {
+        const context: { [key: string]: any } = {};
+        context.library_id = item.library_id;
+        context.zotero_key = item.zotero_key;
+        context.file_hash = item.file_hash;
         try {
             logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
 
@@ -271,11 +275,14 @@ export class FileUploader {
 
             // Check if file exists locally
             const useLocalFile = await attachment.fileExists();
+            context.useLocalFile = useLocalFile;
             
             // Check if file exists on server
             const validZoteroCredentials = Boolean(Zotero.Users.getCurrentUserID()) && Boolean(await Zotero.Sync.Data.Local.getAPIKey())
+            context.validZoteroCredentials = validZoteroCredentials;
             const isServerFile = isAttachmentOnServer(attachment);
             const useServerFile = !useLocalFile && isServerFile && validZoteroCredentials;
+            context.useServerFile = useServerFile;
 
             if (!useLocalFile && !useServerFile) {
                 const message = `File not available locally or on server (useLocalFile: ${useLocalFile}, useServerFile: ${useServerFile}, validZoteroCredentials: ${validZoteroCredentials})`;
@@ -312,6 +319,7 @@ export class FileUploader {
 
                 // Get the file path for the attachment
                 const filePath: string | null = await attachment.getFilePathAsync() || null;
+                context.filePath = filePath;
                 
                 // File check: if file path is not found, we can't upload it
                 if (!filePath) {
@@ -327,8 +335,11 @@ export class FileUploader {
 
                 // File metadata
                 mimeType = await getMimeType(attachment, filePath);
+                context.mimeType = mimeType;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+                context.pageCount = pageCount;
                 fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+                context.fileSize = fileSize;
 
                 // Read file content
                 try {
@@ -385,8 +396,11 @@ export class FileUploader {
                 
                 // File metadata
                 mimeType = getMimeTypeFromData(attachment, fileArrayBuffer);
+                context.mimeType = mimeType;
                 fileSize = fileArrayBuffer.length;
+                context.fileSize = fileSize;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCountFromData(fileArrayBuffer) : null;
+                context.pageCount = pageCount;
 
             }
 
@@ -473,8 +487,9 @@ export class FileUploader {
             await this.addCompletionToBatch(item, mimeType, fileSize, pageCount, user_id);
 
         } catch (error: any) {
-            const errorMessage = error instanceof Error ? error.message : String(error) || "Unknown error";
-            logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${errorMessage}`, 1);
+            const reason = error instanceof Error ? error.message : String(error) || "Unknown error";
+            const contextString = JSON.stringify(context);
+            logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${reason} | context=${contextString}`, 1);
             Zotero.logError(error);
 
             // Treat as temporary failed with message for manual retry
@@ -482,7 +497,7 @@ export class FileUploader {
                 item,
                 'failed_upload', // temporary failure
                 'storage_upload_failed',
-                errorMessage
+                `${reason} | context=${contextString}`
             );
         }
     }
