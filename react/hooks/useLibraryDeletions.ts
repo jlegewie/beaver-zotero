@@ -1,10 +1,12 @@
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { deletionJobsAtom, DeletionJob, DeletionStatus } from '../atoms/sync';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { scheduleLibraryDeletion } from '../../src/utils/sync';
 import { syncService, DeletionStatusRequestItem, DeletionStatusResponse, DeleteLibraryTask } from '../../src/services/syncService';
 import { logger } from '../../src/utils/logger';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { isAuthenticatedAtom } from '../atoms/auth';
 
 const PREF_KEY = 'deletionJobs';
 
@@ -91,6 +93,9 @@ export async function scheduleSingleLibraryDeletion(
 
 export function useLibraryDeletions() {
     const [jobs, setJobs] = useAtom(deletionJobsAtom);
+    const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
+    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const timerRef = useRef<number | null>(null);
     const jobsRef = useRef(jobs);
     const pollIntervalRef = useRef(5000); // Start at 5 seconds
@@ -218,8 +223,13 @@ export function useLibraryDeletions() {
         }, pollIntervalRef.current) as unknown as number;
     }, []); // ← No dependencies! Uses refs instead
 
-    // Only start polling when active jobs count changes
+    // Only start polling when active jobs count changes AND user is authenticated
     useEffect(() => {
+        // Guard: only poll if authenticated
+        if (!isAuthenticated) return;
+        if (!isAuthorized) return;
+        if (!isDeviceAuthorized) return;
+        
         const hasActiveJobs = activeJobs.length > 0;
         
         if (hasActiveJobs) {
@@ -236,7 +246,7 @@ export function useLibraryDeletions() {
         return () => { 
             if (timerRef.current) clearTimeout(timerRef.current); 
         };
-    }, [activeJobs.length, scheduleNextPoll]); // ← Only re-run when count changes
+    }, [activeJobs.length, scheduleNextPoll, isAuthenticated, isAuthorized, isDeviceAuthorized]);
 
     const activeDeletionIds = useMemo(
         () => new Set(activeJobs.map(j => j.libraryID)),
