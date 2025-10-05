@@ -42,11 +42,6 @@ export const SkippedFilesSummary: React.FC = () => {
         setIsDialogVisible(true);
     };
 
-    // Helper function to find error group for a given error code
-    const getErrorGroup = (errorCode: string) => {
-        return errorGroups.find(group => group.errorCodes.includes(errorCode as any));
-    };
-
     const hasData = Object.keys(aggregatedMessages).length > 0;
 
     if (isLoading && !hasData) {
@@ -74,33 +69,46 @@ export const SkippedFilesSummary: React.FC = () => {
         return null;
     }
 
-    // Sort entries by count (highest first)
-    const sortedEntries = Object.entries(aggregatedMessages).sort(
-        ([, a], [, b]) => b.count - a.count
+    // Group error codes by their error group and sum counts
+    const groupedByErrorGroup = Object.entries(aggregatedMessages).reduce((acc, [errorCode, { count }]) => {
+        const errorGroup = errorGroups.find(group => group.errorCodes.includes(errorCode as any));
+        
+        if (errorGroup) {
+            const groupKey = errorGroup.name;
+            if (!acc[groupKey]) {
+                acc[groupKey] = {
+                    name: errorGroup.name,
+                    details: errorGroup.details,
+                    count: 0
+                };
+            }
+            acc[groupKey].count += count;
+        }
+        
+        return acc;
+    }, {} as Record<string, { name: string; details: string; count: number }>);
+
+    // Sort groups by count (highest first)
+    const sortedGroups = Object.values(groupedByErrorGroup).sort(
+        (a, b) => b.count - a.count
     );
 
     return (
         <div className="display-flex flex-col gap-3 w-full ml-1">
             <div className="display-flex flex-col border-left-quarternary px-2 gap-4">
-                {sortedEntries.map(
-                    ([errorCode, { message, count }]) => {
-                        const errorGroup = getErrorGroup(errorCode);
-                        return (
-                            <div key={errorCode} className="display-flex flex-col gap-0">
-                                <span className="font-color-secondary mr-4">
-                                    {String(count).toLocaleString()} {makeSingularIfNeeded(
-                                        errorGroup?.name || "Unknown error",
-                                        count
-                                    )}
+                {sortedGroups.map(
+                    ({ name, details, count }) => (
+                        <div key={name} className="display-flex flex-col gap-0">
+                            <span className="font-color-secondary mr-4">
+                                {String(count).toLocaleString()} {makeSingularIfNeeded(name, count)}
+                            </span>
+                            {details && (
+                                <span className="font-color-tertiary mr-4">
+                                    {details}
                                 </span>
-                                {errorGroup?.details && (
-                                    <span className="font-color-tertiary mr-4">
-                                        {errorGroup.details}
-                                    </span>
-                                )}
-                            </div>
-                        );
-                    }
+                            )}
+                        </div>
+                    )
                 )}
             </div>
             <div className="display-flex justify-between items-center ml-2">
