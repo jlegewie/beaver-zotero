@@ -347,16 +347,16 @@ export class FileUploader {
                 }
 
                 // If page count is still null for PDFs, try naive method with file data
-                if (mimeType === 'application/pdf' && !pageCount && fileArrayBuffer) {
-                    try {
-                        pageCount = naivePdfPageCount(fileArrayBuffer);
-                    } catch (e) {
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Error getting page count using naive method`, 1);
-                    }
-                    if (pageCount) {
-                        logger(`File Uploader uploadFile ${item.zotero_key}: Got page count ${pageCount} using naive method`, 3);
-                    }
-                }
+                // if (mimeType === 'application/pdf' && !pageCount && fileArrayBuffer) {
+                //     try {
+                //         pageCount = naivePdfPageCount(fileArrayBuffer);
+                //     } catch (e) {
+                //         logger(`File Uploader uploadFile ${item.zotero_key}: Error getting page count using naive method`, 1);
+                //     }
+                //     if (pageCount) {
+                //         logger(`File Uploader uploadFile ${item.zotero_key}: Got page count ${pageCount} using naive method`, 3);
+                //     }
+                // }
 
             // File exists on server
             } else if (useServerFile) {
