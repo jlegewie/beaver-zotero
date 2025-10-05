@@ -11,7 +11,7 @@ import { getPDFPageCount, getPDFPageCountFromData, naivePdfPageCount } from '../
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
-import { attachmentsService, UploadQueueItem, CompleteUploadRequest, PlanLimitErrorCode, UploadErrorCode, ErrorCode, FailureStatus } from './attachmentsService';
+import { attachmentsService, UploadQueueItem, CompleteUploadRequest, UploadErrorCode, ErrorCode, FailureStatus } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
@@ -19,7 +19,6 @@ import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
-import { ProcessingTier } from '../../react/types/profile';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
 
 /**
