@@ -75,7 +75,8 @@ export type ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: num
 export const isSupportedItem = (item: Zotero.Item | false) => {
     if (!item) return false;
     if (item.isRegularItem()) return true;
-    if (item.isPDFAttachment() || item.isImageAttachment()) return true;
+    // if (item.isPDFAttachment() || item.isImageAttachment()) return true;
+    if (item.isPDFAttachment()) return true;
     return false;
 };
 
