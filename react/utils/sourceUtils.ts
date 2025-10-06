@@ -242,7 +242,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
         // Use the same comprehensive filter as sync
         if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "File not available for sync"};
+            return {valid: false, error: "Attachment not synced with Beaver"};
         }
 
         // Confirm upload status
