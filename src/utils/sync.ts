@@ -1255,7 +1255,7 @@ async function getItemsToSync(
     // Get items to delete: Excluded by filter function
     const itemsToDelete = items
         .filter((_) => !isInitialSync) // Only delete items if not initial sync
-        .filter((item) => item.isRegularItem() || item.isPDFAttachment())
+        .filter(isSupportedItem)
         .filter((item) => !filterFunction(item))
         .map(item => ({
             action: 'delete',
