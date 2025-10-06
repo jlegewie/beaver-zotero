@@ -65,7 +65,7 @@ export const isLibraryValidForSyncWithServerCheck = async (
 /**
  * Interface for item filter function
  */
-export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
+export type ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => boolean;
 
 /**
  * Filter function for supported items
@@ -88,10 +88,14 @@ export const isSupportedItem = (item: Zotero.Item | false) => {
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => {
     if (!item) return false;
     if (!isSupportedItem(item)) return false;
     if (item.isInTrash()) return false;
+    if (collectionIds) {
+        const itemCollections = new Set(item.getCollections());
+        return collectionIds.some(id => itemCollections.has(id));
+    }
     return true;
 };
 
@@ -104,9 +108,9 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
  * @param item Zotero item
  * @returns Promise resolving to true if the item should be synced
  */
-export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
+export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionIds?: number[]): Promise<boolean> => {
     if (!item) return false;
-    if (!syncingItemFilter(item)) return false;
+    if (!syncingItemFilter(item, collectionIds)) return false;
     if (item.isRegularItem()) return true;
     if (item.isAttachment()) {
         // Item is available locally or on server
@@ -1244,7 +1248,7 @@ async function getItemsToSync(
     
     // Get items to upsert: Included by filter function
     const itemsToUpsert = items
-        .filter(filterFunction)
+        .filter(item => filterFunction(item))
         .map(item => ({
             action: 'upsert',
             item
@@ -1348,7 +1352,7 @@ export async function getAllItemsToSync(
     filterFunction: ItemFilterFunction = syncingItemFilter
 ): Promise<Zotero.Item[]> {
     const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
-    const itemsToSync = allItems.filter(filterFunction);
+    const itemsToSync = allItems.filter(item => filterFunction(item));
     return itemsToSync;
 }
 
