@@ -39,7 +39,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
                 text: 'Unsupported file type',
                 showButton: true,
                 buttonIcon: 'chrome://beaver/content/icons/info.svg',
-                buttonTooltip: 'Beaver only supports PDF and image files',
+                buttonTooltip: 'Beaver only supports PDF attachments',
                 buttonDisabled: true
             };
         }
