@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { InputSource } from '../types/sources';
 import { truncateText } from './stringUtils';
-import { syncingItemFilter, syncingItemFilterAsync } from '../../src/utils/sync';
+import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
@@ -234,15 +234,15 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
-        if (!(item.isPDFAttachment() || item.isImageAttachment())) {
-            return {valid: false, error: "Beaver only supports PDF and image files"};
+        if (!isSupportedItem(item)) {
+            return {valid: false, error: "Beaver only supports PDF attachments"};
         }
 
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         // Use the same comprehensive filter as sync
         if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "File not available for sync"};
+            return {valid: false, error: "Attachment not synced with Beaver"};
         }
 
         // Confirm upload status

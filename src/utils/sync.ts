@@ -65,7 +65,20 @@ export const isLibraryValidForSyncWithServerCheck = async (
 /**
  * Interface for item filter function
  */
-export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
+export type ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => boolean;
+
+/**
+ * Filter function for supported items
+ * @param item Zotero item
+ * @returns true if the item is supported
+ */
+export const isSupportedItem = (item: Zotero.Item | false) => {
+    if (!item) return false;
+    if (item.isRegularItem()) return true;
+    // if (item.isPDFAttachment() || item.isImageAttachment()) return true;
+    if (item.isPDFAttachment()) return true;
+    return false;
+};
 
 /**
  * Filter function for syncing items based on item type and trash status
@@ -76,12 +89,15 @@ export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: numb
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
+export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => {
     if (!item) return false;
+    if (!isSupportedItem(item)) return false;
     if (item.isInTrash()) return false;
-    if (item.isRegularItem()) return true;
-    if (item.isPDFAttachment() || item.isImageAttachment()) return true;
-    return false;
+    if (collectionIds) {
+        const itemCollections = new Set(item.getCollections());
+        return collectionIds.some(id => itemCollections.has(id));
+    }
+    return true;
 };
 
 /**
@@ -93,11 +109,11 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
  * @param item Zotero item
  * @returns Promise resolving to true if the item should be synced
  */
-export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
+export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionIds?: number[]): Promise<boolean> => {
     if (!item) return false;
-    if (item.isInTrash()) return false;
+    if (!syncingItemFilter(item, collectionIds)) return false;
     if (item.isRegularItem()) return true;
-    if (item.isPDFAttachment() || item.isImageAttachment()) {
+    if (item.isAttachment()) {
         // Item is available locally or on server
         return isAttachmentOnServer(item) || await item.fileExists();
     }
@@ -1233,7 +1249,7 @@ async function getItemsToSync(
     
     // Get items to upsert: Included by filter function
     const itemsToUpsert = items
-        .filter(filterFunction)
+        .filter(item => filterFunction(item))
         .map(item => ({
             action: 'upsert',
             item
@@ -1244,7 +1260,7 @@ async function getItemsToSync(
     // Get items to delete: Excluded by filter function
     const itemsToDelete = items
         .filter((_) => !isInitialSync) // Only delete items if not initial sync
-        .filter((item) => item.isRegularItem() || item.isPDFAttachment())
+        .filter(isSupportedItem)
         .filter((item) => !filterFunction(item))
         .map(item => ({
             action: 'delete',
@@ -1337,7 +1353,7 @@ export async function getAllItemsToSync(
     filterFunction: ItemFilterFunction = syncingItemFilter
 ): Promise<Zotero.Item[]> {
     const allItems = await Zotero.Items.getAll(libraryID, false, false, false);
-    const itemsToSync = allItems.filter(filterFunction);
+    const itemsToSync = allItems.filter(item => filterFunction(item));
     return itemsToSync;
 }
 
