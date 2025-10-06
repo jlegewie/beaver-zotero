@@ -120,7 +120,7 @@ export async function performConsistencyCheck(
 
             // Get zotero items and clientDateModified for all items
             const zoteroItemsPromises = backendItems.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
-            const zoteroItems = (await Promise.all(zoteroItemsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroItems = (await Promise.all(zoteroItemsPromises)).filter(item => syncingItemFilter(item)) as Zotero.Item[];
             const zoteroItemsMap = new Map(zoteroItems.map(item => [item.key, item]));
             const clientDateModifiedMap = await getClientDateModifiedBatch(zoteroItems);
 
@@ -164,7 +164,7 @@ export async function performConsistencyCheck(
 
             // Get zotero items and clientDateModified for all attachments
             const zoteroAttachmentsPromises = backendAttachments.map((item) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, item.zotero_key));
-            const zoteroAttachments = (await Promise.all(zoteroAttachmentsPromises)).filter(syncingItemFilter) as Zotero.Item[];
+            const zoteroAttachments = (await Promise.all(zoteroAttachmentsPromises)).filter(item => syncingItemFilter(item)) as Zotero.Item[];
             const zoteroAttachmentsMap = new Map(zoteroAttachments.map(item => [item.key, item]));
             const clientDateModifiedMapAttachments = await getClientDateModifiedBatch(zoteroAttachments);
 
@@ -303,7 +303,9 @@ export async function performConsistencyCheck(
     if (sendUpdates && localItemKeys.size > 0) {
         // TODO: This includes attachments with missing files. They are excluded from the actual sync but counted here.
         const zoteroItems = await Promise.all(Array.from(localItemKeys).map((key) => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key)));
-        const newItemsToSync: SyncItem[] = zoteroItems.filter(syncingItemFilter).map((item) => ({ action: 'upsert', item } as SyncItem));
+        const newItemsToSync: SyncItem[] = zoteroItems
+            .filter(item => syncingItemFilter(item))
+            .map((item) => ({ action: 'upsert', item } as SyncItem));
         const newItemKeys = newItemsToSync.map((item) => item.item.key)
 
         logger(`Beaver Consistency Check '${consistencyId}': Found ${newItemsToSync.length} new items to add (${newItemKeys.join(', ')})`, 3);
