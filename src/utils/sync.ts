@@ -68,6 +68,18 @@ export const isLibraryValidForSyncWithServerCheck = async (
 export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => boolean;
 
 /**
+ * Filter function for supported items
+ * @param item Zotero item
+ * @returns true if the item is supported
+ */
+export const isSupportedItem = (item: Zotero.Item | false) => {
+    if (!item) return false;
+    if (item.isRegularItem()) return true;
+    if (item.isPDFAttachment() || item.isImageAttachment()) return true;
+    return false;
+};
+
+/**
  * Filter function for syncing items based on item type and trash status
  * 
  * This filter only checks for item type and trash status.
@@ -78,10 +90,9 @@ export type ItemFilterFunction = (item: Zotero.Item | false, collectionId?: numb
  */
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionId?: number) => {
     if (!item) return false;
+    if (!isSupportedItem(item)) return false;
     if (item.isInTrash()) return false;
-    if (item.isRegularItem()) return true;
-    if (item.isPDFAttachment() || item.isImageAttachment()) return true;
-    return false;
+    return true;
 };
 
 /**
@@ -95,9 +106,9 @@ export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false,
  */
 export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionId?: number): Promise<boolean> => {
     if (!item) return false;
-    if (item.isInTrash()) return false;
+    if (!syncingItemFilter(item)) return false;
     if (item.isRegularItem()) return true;
-    if (item.isPDFAttachment() || item.isImageAttachment()) {
+    if (item.isAttachment()) {
         // Item is available locally or on server
         return isAttachmentOnServer(item) || await item.fileExists();
     }
