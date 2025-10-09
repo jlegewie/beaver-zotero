@@ -12,6 +12,12 @@ export interface WarningMessage {
     attachments?: ZoteroItemReference[];
 }
 
+// ErrorMessage messages
+export interface ErrorMessage {
+    id: string;
+    type: string;
+    message?: string;
+}
 
 // Thread types
 export interface ThreadData {
@@ -31,6 +37,7 @@ export interface ChatMessage {
     tool_calls?: ToolCall[];
     status: MessageStatus;
     errorType?: string;
+    error?: ErrorMessage;
     warnings?: WarningMessage[];
 }
 

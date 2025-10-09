@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { ChatMessage } from '../../types/chat/uiTypes';
+import { v4 as uuidv4 } from 'uuid';
+import { ChatMessage, ErrorMessage } from '../../types/chat/uiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
@@ -74,7 +75,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
 
                 {/* Error */}
                 {message.status === 'error' &&
-                    <ErrorDisplay errorType={message.errorType || 'unknown'} />
+                    <ErrorDisplay error={message.error || ({ id: uuidv4(), type: message.errorType || 'unknown' } as ErrorMessage)} />
                 }
 
             {/* Text selection context menu */}
