@@ -1,5 +1,6 @@
 import { atom } from "jotai";
-import { ChatMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
+import { v4 as uuidv4 } from 'uuid';
+import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
 import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
@@ -277,7 +278,7 @@ export const streamReasoningToMessageAtom = atom(
 
 export const setMessageStatusAtom = atom(
     null,
-    (get, set, { id, status, errorType, warnings }: { id: string; status?: ChatMessage['status']; errorType?: string; warnings?: WarningMessage[] }) => {
+    (get, set, { id, status, error, warnings }: { id: string; status?: ChatMessage['status']; error?: ErrorMessage; warnings?: WarningMessage[] }) => {
         const messages = get(threadMessagesAtom);
         const message = messages.find(message => message.id === id);
         if (!message) return;
@@ -293,7 +294,7 @@ export const setMessageStatusAtom = atom(
                 ? {
                     ...message,
                     ...(status && { status }),
-                    ...(errorType && { errorType }),
+                    ...(error && { error }),
                     ...(warnings && { 
                         warnings: [
                             ...(message.warnings || []), // Spread existing warnings or empty array if undefined

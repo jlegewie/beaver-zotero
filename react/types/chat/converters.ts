@@ -1,4 +1,5 @@
 import { MessageModel, ToolCall } from './apiTypes';
+import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../chat/uiTypes';
 import { SourceAttachment } from '../attachments/apiTypes';
 
@@ -23,11 +24,24 @@ export function toMessageUI(message: MessageModel): ChatMessage {
             return normalized;
         });
     }
+
+    // Set error type and error object if error is present
     if (message.error) {
         const errorParts = message.error.split(':');
-        if (errorParts.length > 0) {
-            chatMessage.errorType = errorParts[0];
+        const errorType = errorParts.length > 0 ? errorParts[0] : 'unknown';
+        let errorMessage = errorParts.length > 1 ? errorParts.slice(1).join(':').trim() : undefined;
+        
+        // Remove details part if present (format: "message | details: ...")
+        if (errorMessage && errorMessage.includes(' | details:')) {
+            errorMessage = errorMessage.split(' | details:')[0].trim();
         }
+
+        chatMessage.errorType = errorType;
+        chatMessage.error = {
+            id: uuidv4(),
+            type: errorType,
+            message: errorMessage,
+        };
     }
     return chatMessage;
 }

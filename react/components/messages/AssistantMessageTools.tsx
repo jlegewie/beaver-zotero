@@ -107,6 +107,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ messageId: _me
             if(toolCall.function.name === 'tag_search') return SearchIcon;
             if(toolCall.function.name === 'search_references_by_topic') return SearchIcon;
             if(toolCall.function.name === 'get_fulltext_content') return numResults ? ViewIcon : AlertIcon;
+            if(toolCall.function.name === 'read_attachments') return ViewIcon;
             if(toolCall.function.name === 'search_metadata') return SearchIcon;
             if(toolCall.function.name === 'search_references_by_metadata') return SearchIcon;
             if(toolCall.function.name === 'view_page_images') return ViewIcon;

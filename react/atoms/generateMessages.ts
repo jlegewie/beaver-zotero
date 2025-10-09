@@ -249,7 +249,10 @@ export const generateResponseAtom = atom(
             set(setMessageStatusAtom, {
                 id: assistantMsg.id,
                 status: 'error',
-                errorType: 'invalid_model'
+                error: {
+                    id: uuidv4(),
+                    type: 'invalid_model'
+                }
             });
             return;
         }
@@ -538,7 +541,10 @@ async function _processChatCompletionViaBackend(
         set(setMessageStatusAtom, {
             id: assistantMessageId,
             status: 'error',
-            errorType: 'user_key_not_set'
+            error: {
+                id: uuidv4(),
+                type: 'user_key_not_set'
+            }
         });
         return;
     }
@@ -752,8 +758,8 @@ async function _processChatCompletionViaBackend(
                     set(isCancellableAtom, false);
                 }
             },
-            onError: (messageId: string | null, errorType: string) => {
-                logger(`event 'onError': ${messageId} - ${errorType}`, 1);
+            onError: (messageId: string | null, errorType: string, errorMessage?: string) => {
+                logger(`event 'onError': ${messageId} - ${errorType} - ${errorMessage}`, 1);
                 set(isChatRequestPendingAtom, false);
                 // If the message ID is not provided, use the current assistant message ID
                 const currentMessageId = messageId || get(currentAssistantMessageIdAtom);
@@ -768,7 +774,11 @@ async function _processChatCompletionViaBackend(
                     set(setMessageStatusAtom, {
                         id: currentMessageId,
                         status: 'error',
-                        errorType
+                        error: {
+                            id: uuidv4(),
+                            type: errorType,
+                            message: errorMessage
+                        }
                     });
                 }
                 // Clear the holder and the cancellable state

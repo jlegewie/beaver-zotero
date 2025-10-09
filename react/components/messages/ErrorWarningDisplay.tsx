@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChatMessage, WarningMessage } from '../../types/chat/uiTypes';
+import { v4 as uuidv4 } from 'uuid';
+import { ChatMessage, ErrorMessage, WarningMessage } from '../../types/chat/uiTypes';
 import { Icon, AlertIcon, KeyIcon, CancelIcon, SettingsIcon } from '../icons/icons';
 import { useSetAtom } from 'jotai';
 import Button from '../ui/Button';
@@ -52,21 +53,91 @@ const getErrorMessage = (errorType: string) => {
             return "Your API key for this model is not set. Please set it in the settings.";
         case 'server_error':
             return "AI service error. Please try again later.";
+        // case 'context_window_exceeded':
+        //     return "Your conversation is too long for this model. Please try starting a new thread. Future versions of Beaver will handle this better.";
         default:
             return "Response failed. Please try again.";
     }
 };
 
-export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => {
+/**
+ * Parse text to support newlines and HTML anchor tags
+ * @param text Text that may contain newlines and <a> tags
+ * @returns React elements with proper formatting and clickable links
+ */
+const parseTextWithLinksAndNewlines = (text: string): React.ReactNode => {
+    const htmlLinkRegex = /<a\s+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi;
+    
+    return text.split('\n').map((line, lineIndex, lines) => {
+        const parts: React.ReactNode[] = [];
+        let lastIndex = 0;
+        let match: RegExpExecArray | null = null;
+        
+        // Reset regex
+        htmlLinkRegex.lastIndex = 0;
+        
+        while ((match = htmlLinkRegex.exec(line)) !== null) {
+            // Add text before the link
+            if (match.index > lastIndex) {
+                parts.push(
+                    <span key={`text-${lastIndex}`}>
+                        {line.substring(lastIndex, match.index)}
+                    </span>
+                );
+            }
+            
+            // Capture match values to avoid closure issue
+            const url = match[1];
+            const linkText = match[2];
+            const matchIndex = match.index;
+            const matchLength = match[0].length;
+            
+            // Add the clickable link
+            parts.push(
+                <a
+                    key={`link-${matchIndex}`}
+                    href="#"
+                    className="text-link"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        Zotero.launchURL(url);
+                    }}
+                >
+                    {linkText}
+                </a>
+            );
+            
+            lastIndex = matchIndex + matchLength;
+        }
+        
+        // Add remaining text after all links
+        if (lastIndex < line.length) {
+            parts.push(
+                <span key={`text-${lastIndex}`}>
+                    {line.substring(lastIndex)}
+                </span>
+            );
+        }
+        
+        return (
+            <React.Fragment key={lineIndex}>
+                {parts.length > 0 ? parts : line}
+                {lineIndex < lines.length - 1 && <br />}
+            </React.Fragment>
+        );
+    });
+};
+
+export const ErrorDisplay: React.FC<{ error: ErrorMessage }> = ({ error }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     
-    const showSettingsButton = errorType === 'inactive_subscription';
+    const showSettingsButton = error && error.type === 'inactive_subscription';
     const showApiKeyButton =
-        errorType === 'app_key_limit_exceeded' ||
-        errorType === 'user_key_failed_unexpected' ||
-        errorType === 'user_key_rate_limit_exceeded' ||
-        errorType === 'user_key_failed' ||
-        errorType === 'user_key_not_set';
+        error.type === 'app_key_limit_exceeded' ||
+        error.type === 'user_key_failed_unexpected' ||
+        error.type === 'user_key_rate_limit_exceeded' ||
+        error.type === 'user_key_failed' ||
+        error.type === 'user_key_not_set';
 
     return (
         <div
@@ -77,14 +148,18 @@ export const ErrorDisplay: React.FC<{ errorType: string }> = ({ errorType }) => 
                 <Icon icon={AlertIcon} className="scale-11 mt-020" />
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-start">
-                        <div className="text-base">{getErrorMessage(errorType)}</div>
+                        {/* <div className="text-base">{error ? error.message : getErrorMessage(errorType)}</div> */}
+                        {/* <div className="text-base" style={{ whiteSpace: 'pre-line' }}>{error ? error.message : getErrorMessage(errorType)}</div> */}
+                        <div className="text-base">
+                            {parseTextWithLinksAndNewlines(error && error.message ? error.message : getErrorMessage(error.type))}
+                        </div>
                     </div>
                 </div>
             </div>
-            {(showSettingsButton || showApiKeyButton || errorType === 'streaming_verification_error') && (
+        {(showSettingsButton || showApiKeyButton || error.type === 'streaming_verification_error') && (
                 <div className="font-color-red display-flex flex-row gap-3 items-start">
                     <div className="flex-1"/>
-                    {errorType === 'streaming_verification_error' && (
+                    {error.type === 'streaming_verification_error' && (
                         <Button
                             variant="outline"
                             className="border-error font-color-red mr-1"
@@ -195,7 +270,7 @@ export const MessageErrorWarningDisplay: React.FC<{ message: ChatMessage }> = ({
                 <WarningDisplay key={message.id} messageId={message.id} warning={warning} />
             ))}
             {message.status === 'error' &&
-                <ErrorDisplay errorType={message.errorType || 'unknown'} />
+                <ErrorDisplay error={message.error || ({ id: uuidv4(), type: message.errorType || 'unknown' } as ErrorMessage)} />
             }
         </div>
     );

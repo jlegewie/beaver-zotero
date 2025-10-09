@@ -95,7 +95,7 @@ export interface SSECallbacks {
      * @param messageId ID of the message to mark as error, or null to create a temporary error message
      * @param errorType Type of error that occurred
      */
-    onError: (messageId: string | null, errorType: string) => void;
+    onError: (messageId: string | null, errorType: string, errorMessage?: string) => void;
     
     /**
      * Handles "warning" event when a non-fatal issue occurs
@@ -359,7 +359,7 @@ export class ChatService extends ApiService {
             ) => Promise<void>;
             onComplete: (messageId: string) => void;
             onDone: (messageId: string | null) => void;
-            onError: (messageId: string | null, errorType: string) => void;
+            onError: (messageId: string | null, errorType: string, errorMessage?: string) => void;
             onWarning: (messageId: string | null, warningType: string, message: string, data: any) => Promise<void>;
         }
     ): Promise<void> {
@@ -450,7 +450,7 @@ export class ChatService extends ApiService {
                 onDone(parsedData?.messageId || null);
                 break;
             case 'error':
-                onError(parsedData?.messageId || null, parsedData?.type || 'server_error');
+                onError(parsedData?.messageId || null, parsedData?.type || 'server_error', parsedData?.message || undefined);
                 break;
             case 'warning':
                 if (parsedData?.type && parsedData?.message) {
@@ -468,7 +468,7 @@ export class ChatService extends ApiService {
      * 
      * Classify an XHR error code into a known errorType, then call onError.
      */
-    private handleXHRError(xhr: XMLHttpRequest, onError: (messageId: string | null, errorType: string) => void) {
+    private handleXHRError(xhr: XMLHttpRequest, onError: (messageId: string | null, errorType: string, errorMessage?: string) => void) {
         let errorType = 'unknown';
         const status = xhr.status;
         if (status === 0) {
