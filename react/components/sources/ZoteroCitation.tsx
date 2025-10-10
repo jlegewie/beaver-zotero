@@ -9,6 +9,7 @@ import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
+import { getPageViewportInfo } from '../../utils/pdfUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
@@ -164,9 +165,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             for (const [page, allBboxesOnPage] of pageGroups) {
                 const pageIndex = page - 1; // Convert to 0-based index
 
-                // Get the exact viewport used by the reader for this page
-                const pageView = reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer._pages[pageIndex];
-                const viewBox = pageView.viewport.viewBox; // [xMin, yMin, xMax, yMax]
+                // Get viewport info directly from PDF document (no need for rendered page)
+                const { viewBox } = await getPageViewportInfo(reader, pageIndex);
                 const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
                 
                 // Combine all bboxes on this page
