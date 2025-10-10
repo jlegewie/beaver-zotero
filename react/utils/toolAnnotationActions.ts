@@ -7,6 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
+import { getPageViewportInfo } from './pdfUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -19,11 +20,20 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
     red: '#ff6666',
     orange: '#ff9f43',
     yellow: '#ffd400',
-    green: '#4cd964',
+    green: '#90ee90',
     blue: '#5ac8fa',
-    purple: '#af52de',
+    purple: '#d4a5ff',
+    gray: '#d3d3d3',
+    pink: '#ff66c4',
+    brown: '#e6a86e',
+    cyan: '#7fdbff',
+    lime: '#b4ff69',
+    mint: '#b2f7d3',
+    coral: '#ff9999',
+    navy: '#6495ed',
+    olive: '#e6e68a',
+    teal: '#7fffd4',
 };
-
 const NOTE_RECT_SIZE = 18;
 
 function resolveHighlightColor(color?: string | null): string {
@@ -70,24 +80,16 @@ function convertBoundingBoxToBottomLeft(
     return converted;
 }
 
-function convertLocationToRects(
+async function convertLocationToRects(
     reader: ZoteroReader,
     location: ToolAnnotationHighlightLocation
-): number[][] {
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
-    const pdfViewer = iframeWindow?.PDFViewerApplication?.pdfViewer;
-    const pages = pdfViewer?._pages;
-    if (!pages) {
-        throw new Error('PDF pages unavailable');
-    }
+): Promise<number[][]> {
+    // Get viewport info directly from PDF document (no need for rendered page)
+    const { viewBox, height } = await getPageViewportInfo(reader, location.pageIndex);
+    const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
 
-    const pageView = pages[location.pageIndex];
-    if (!pageView) {
-        throw new Error(`Page index ${location.pageIndex} not available`);
-    }
-
-    const viewport = pageView.viewport;
-    const viewBoxLL: [number, number] = [viewport.viewBox[0], viewport.viewBox[1]];
+    // Create viewport object for coordinate conversion
+    const viewport = { height };
 
     const rects = location.boxes
         .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
@@ -122,17 +124,16 @@ async function createHighlightAnnotation(
     );
 
     if (!allSamePage) {
-        logger(
-            'Highlight annotation spans multiple pages; applying first page only for now',
-            2
-        );
+        logger('Highlight annotation spans multiple pages; applying first page only for now', 2);
     }
 
     const rects = allSamePage
-        ? annotation.highlight_locations.flatMap((loc) =>
-              convertLocationToRects(reader, loc)
-          )
-        : convertLocationToRects(reader, primaryLocation);
+        ? (await Promise.all(
+            annotation.highlight_locations.map(loc =>
+            convertLocationToRects(reader, loc)
+            )
+        )).flat()
+        : await convertLocationToRects(reader, primaryLocation);
     if (rects.length === 0) {
         throw new Error('Highlight annotation failed to compute rectangles');
     }
@@ -171,34 +172,32 @@ async function createHighlightAnnotation(
     return annotationResult.id;
 }
 
-function convertNotePositionToRect(
+async function convertNotePositionToRect(
     reader: ZoteroReader,
     annotation: ToolAnnotation
-): { pageIndex: number; rect: number[] } {
+): Promise<{ pageIndex: number; rect: number[] }> {
     if (!annotation.note_position) {
         throw new Error('Note annotation missing position');
     }
 
     const { pageIndex, side, y } = annotation.note_position;
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
-    const pdfViewer = iframeWindow?.PDFViewerApplication?.pdfViewer;
-    const pageView = pdfViewer?._pages?.[pageIndex];
-    if (!pageView) {
-        throw new Error(`Page index ${pageIndex} not available for note annotation`);
-    }
-
-    const viewport = pageView.viewport;
-    const viewBoxLL: [number, number] = [viewport.viewBox[0], viewport.viewBox[1]];
+    
+    // Get viewport info directly from PDF document (no need for rendered page)
+    const { viewBox, height } = await getPageViewportInfo(reader, pageIndex);
+    const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
     
     // Calculate x position based on side
     let x: number;
     if (side === 'right') {
         // Use xMax from viewBox directly, minus margin and note size
-        x = viewport.viewBox[2] - NOTE_RECT_SIZE - 15;
+        x = viewBox[2] - NOTE_RECT_SIZE - 15;
     } else {
         // Use xMin from viewBox plus margin
-        x = viewport.viewBox[0] + 10;
+        x = viewBox[0] + 10;
     }
+
+    // Create viewport object for coordinate conversion
+    const viewport = { height };
 
     const converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
@@ -221,7 +220,7 @@ async function createNoteAnnotation(
     reader: ZoteroReader,
     annotation: ToolAnnotation
 ): Promise<string> {
-    const { pageIndex, rect } = convertNotePositionToRect(reader, annotation);
+    const { pageIndex, rect } = await convertNotePositionToRect(reader, annotation);
     const sortIndex = generateSortIndex(pageIndex, rect);
 
     const now = (new Date()).toISOString();
