@@ -23,19 +23,18 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
     green: '#4cd964',
     blue: '#5ac8fa',
     purple: '#af52de',
-    gray: '#808080',
+    gray: '#d3d3d3',
     pink: '#ff66c4',
-    brown: '#a52a2a',
-    cyan: '#00ffff',
-    lime: '#00ff00',
-    maroon: '#800000',
-    navy: '#000080',
-    olive: '#808000',
-    teal: '#008080',
-    indigo: '#4b0082',
-    violet: '#9400d3',
+    brown: '#d2691e',
+    cyan: '#7fdbff',
+    lime: '#b4ff69',
+    maroon: '#cd5c5c',
+    navy: '#6495ed',
+    olive: '#c0c060',
+    teal: '#20b2aa',
+    indigo: '#9370db',
+    violet: '#da70d6',
 };
-
 const NOTE_RECT_SIZE = 18;
 
 function resolveHighlightColor(color?: string | null): string {
