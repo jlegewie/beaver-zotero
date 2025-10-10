@@ -23,6 +23,17 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
     green: '#4cd964',
     blue: '#5ac8fa',
     purple: '#af52de',
+    gray: '#808080',
+    pink: '#ff66c4',
+    brown: '#a52a2a',
+    cyan: '#00ffff',
+    lime: '#00ff00',
+    maroon: '#800000',
+    navy: '#000080',
+    olive: '#808000',
+    teal: '#008080',
+    indigo: '#4b0082',
+    violet: '#9400d3',
 };
 
 const NOTE_RECT_SIZE = 18;
