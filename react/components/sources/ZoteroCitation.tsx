@@ -349,7 +349,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             
             // Fallback: try to use the original URL-based approach
             if (url.includes('zotero://')) {
-                window.location.href = url;
+                Zotero.getMainWindow().location.href = url;
             }
         }
     };
