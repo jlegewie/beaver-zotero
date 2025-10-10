@@ -1,4 +1,5 @@
 import { logger } from "../../src/utils/logger";
+import { ZoteroReader } from "./annotationUtils";
 
 /**
  * Get the total number of pages for a PDF attachment
@@ -28,6 +29,45 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
     }
 }
 
+/**
+ * Get page viewport information directly from PDF document
+ * This works even if the page hasn't been rendered in the viewer yet
+ */
+export async function getPageViewportInfo(
+    reader: ZoteroReader,
+    pageIndex: number
+): Promise<{ viewBox: number[]; height: number; width: number }> {
+    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
+    const pdfDocument = iframeWindow?.PDFViewerApplication?.pdfDocument;
+    
+    if (!pdfDocument) {
+        throw new Error('PDF document not available');
+    }
+    
+    // Get page directly from document (1-based index)
+    const page = await pdfDocument.getPage(pageIndex + 1);
+    
+    // Extract viewport info from _pageInfo
+    const view = page._pageInfo.view;
+    const viewBox = [view[0], view[1], view[2], view[3]];
+    
+    // Calculate dimensions from viewBox
+    const width = view[2] - view[0];
+    const height = view[3] - view[1];
+    
+    return { viewBox, height, width };
+}
+
+
+/**
+ * Get the number of pages from a PDF's binary data.
+ * This function handles data that is either an ArrayBuffer (from local files) or a
+ * Uint8Array (from network requests).
+ *
+ * @param {ArrayBuffer|Uint8Array} pdfData - The binary content of the PDF file.
+ * @returns {Promise<number|null>} A promise that resolves with the total number
+ *   of pages, or null if the page count could not be determined.
+ */
 export function naivePdfPageCount(bytes: Uint8Array): number | null {
     // Fallback: count '/Type /Page' markers (works for most PDFs)
     const text = new TextDecoder('latin1').decode(bytes);
