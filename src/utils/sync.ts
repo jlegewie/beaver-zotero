@@ -689,7 +689,7 @@ export async function syncItemsToBackend(
             );
             
             // Extract item and attachment data
-            let [batchItemsData, batchAttachmentsData] = await Promise.all([
+            const [batchItemsData, tempBatchAttachmentsData] = await Promise.all([
                 // Items
                 Promise.all(
                     regularItems.map((item) =>
@@ -703,12 +703,13 @@ export async function syncItemsToBackend(
                     data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
             ]);
+            let batchAttachmentsData = tempBatchAttachmentsData
 
             // ------- Fetch file hashes for attachments that need them -------
             const attachmentsNeedingHashes = batchAttachmentsData.filter(
                 att => att && att.file_hash === NEEDS_HASH
             );
-            let attachmentsWithHashes = batchAttachmentsData.filter(
+            const attachmentsWithHashes = batchAttachmentsData.filter(
                 att => att && att.file_hash !== NEEDS_HASH,
             );
 
@@ -1379,8 +1380,8 @@ async function getRegularAndAttachmentIDs(libraryID: number, includeDeleted = fa
     const noteItemTypeID = Zotero.ItemTypes.getID('note');
     const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
     
-    var params = [libraryID, noteItemTypeID, annotationItemTypeID];
-    var sql = `SELECT A.itemID FROM items A WHERE A.libraryID = ? AND A.itemTypeID NOT IN (?, ?)`;
+    const params = [libraryID, noteItemTypeID, annotationItemTypeID];
+    let sql = `SELECT A.itemID FROM items A WHERE A.libraryID = ? AND A.itemTypeID NOT IN (?, ?)`;
     
     if (!includeDeleted) {
         sql += " AND A.itemID NOT IN (SELECT itemID FROM deletedItems)";
