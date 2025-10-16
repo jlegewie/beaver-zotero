@@ -94,7 +94,7 @@ export const errorGroupsAtom = atom((get) => {
         },
         {
             name: "Files with insufficient text",
-            details: "File may be primarily images",
+            details: "File may require OCR",
             errorCodes: ["insufficient_text"],
         },
         {
