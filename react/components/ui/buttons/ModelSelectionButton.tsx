@@ -11,7 +11,7 @@ import {
   isAgentModelAtom
 } from '../../../atoms/models';
 
-const MAX_MODEL_NAME_LENGTH = 17;
+const MAX_MODEL_NAME_LENGTH = 25;
 
 /**
  * Component for displaying a model menu item
@@ -169,7 +169,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const dynamicStyle = {
         padding: '2px 0px',
         fontSize: '0.80rem',
-        maxWidth: isAgentModel ? '250px' : '120px',
+        maxWidth: '250px',
     };
 
 
