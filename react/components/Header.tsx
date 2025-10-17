@@ -1,5 +1,5 @@
 import React from 'react';
-import { CancelIcon, PlusSignIcon, SettingsIcon, UserIcon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, SettingsIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
@@ -72,7 +72,11 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             {/* Database status and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && hasCompletedOnboarding && <DatabaseStatusButton />}
+                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                        <Tooltip content="Sync with Beaver" showArrow singleLine>
+                            <DatabaseStatusButton />
+                        </Tooltip>
+                    }
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
