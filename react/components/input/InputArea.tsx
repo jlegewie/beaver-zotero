@@ -8,7 +8,6 @@ import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { isAgentModelAtom } from '../../atoms/models';
 import { getCustomPromptsFromPreferences } from '../../types/settings';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom } from '../../atoms/ui';
@@ -21,7 +20,6 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
-    const isAgentModel = useAtomValue(isAgentModelAtom);
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentSources = useAtomValue(currentSourcesAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
@@ -86,11 +84,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         logger('Adding context item');
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (!isAgentModel && ((Zotero.isMac && e.key === 'Meta') || (!Zotero.isMac && e.key === 'Control'))) {
-            setIsCommandPressed(true);
-        }
-        
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {        
         // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
@@ -192,21 +186,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} />
                     <div className="flex-1" />
                     <div className="display-flex gap-2">
-                        {!isAgentModel && 
-                            <Button
-                                type={(isCommandPressed && !isStreaming && messageContent.length > 0) ? "button" : undefined}
-                                variant={(isCommandPressed && !isStreaming) ? 'solid' : 'outline'}
-                                // className={`mr-1 ${isCommandPressed ? '' : 'opacity-50'}`}
-                                className="mr-1"
-                                onClick={(e) => handleSubmit(e as any)}
-                                disabled={isStreaming || messageContent.length === 0 || !selectedModel}
-                            >
-                                Library Search
-                                <span className="opacity-50">
-                                    {Zotero.isMac ? '⌘' : '⌃'}⏎
-                                </span>
-                            </Button>
-                        }
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
                             type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
