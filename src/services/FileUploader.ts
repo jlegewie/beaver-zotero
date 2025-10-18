@@ -39,6 +39,7 @@ export class FileUploader {
     // queue reads
     private readonly BATCH_SIZE: number = 20;
     private readonly VISIBILITY_TIMEOUT_SECONDS: number = 300; // 5 minutes timeout for backend queue reads
+    private readonly EMPTY_QUEUE_POLL_DELAY: number = 1000;    // 1 second delay when backend queue is empty
 
     // completion batching
     private completionBatch: Array<{ item: UploadQueueItem, request: CompleteUploadRequest }> = [];
@@ -57,7 +58,12 @@ export class FileUploader {
         return Math.min(this.BATCH_SIZE, this.MAX_CONCURRENT + this.REFILL_BUFFER);
     }
 
-    private async waitForQueueCapacity(limit: number): Promise<void> {
+    /**
+     * Waits for queue capacity to drop below the specified limit
+     * @param limit Maximum queue load (size + pending) threshold
+     * @param timeoutMs Timeout in milliseconds (default: 30000)
+     */
+    private async waitForQueueCapacity(limit: number, timeoutMs: number = 30000): Promise<void> {
         if (!this.uploadQueue || !this.isRunning) {
             return;
         }
@@ -67,6 +73,8 @@ export class FileUploader {
         }
 
         await new Promise<void>((resolve) => {
+            let timeoutHandle: NodeJS.Timeout | null = null;
+
             const checkCapacity = () => {
                 if (!this.isRunning || this.getQueueLoad() < limit) {
                     cleanup();
@@ -75,6 +83,10 @@ export class FileUploader {
             };
 
             const cleanup = () => {
+                if (timeoutHandle) {
+                    clearTimeout(timeoutHandle);
+                    timeoutHandle = null;
+                }
                 if (!this.uploadQueue) {
                     return;
                 }
@@ -82,6 +94,13 @@ export class FileUploader {
                 this.uploadQueue.off('idle', checkCapacity);
                 this.uploadQueue.off('error', checkCapacity);
             };
+
+            // Set timeout as a safety net
+            timeoutHandle = setTimeout(() => {
+                cleanup();
+                logger(`File Uploader: Queue capacity wait timed out after ${timeoutMs}ms`, 2);
+                resolve();
+            }, timeoutMs);
 
             this.uploadQueue.on('next', checkCapacity);
             this.uploadQueue.on('idle', checkCapacity);
@@ -209,6 +228,9 @@ export class FileUploader {
 
                 const remainingCapacity = this.BATCH_SIZE - queueLoad;
 
+                // Log queue metrics for observability
+                logger(`File Uploader Queue: Queue load: ${queueLoad}/${refillThreshold}, fetching: ${remainingCapacity}`, 4);
+
                 // Read items from backend queue with visibility timeout
                 const response = await attachmentsService.readUploadQueue(
                     this.VISIBILITY_TIMEOUT_SECONDS,
@@ -226,7 +248,7 @@ export class FileUploader {
                     // Wait for in-flight uploads to finish, then add a small delay before
                     // polling again to avoid hammering the backend when queue is empty
                     await this.uploadQueue.onIdle();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, this.EMPTY_QUEUE_POLL_DELAY));
                     continue;
                 }
 
