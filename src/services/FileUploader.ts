@@ -196,6 +196,10 @@ export class FileUploader {
         let consecutiveErrors = 0;
         let errorBackoffTime = ERROR_BACKOFF_TIME;
 
+        // Empty read tracking to avoid unnecessary backend calls
+        const MAX_EMPTY_READS = 1; // Only retry once after getting 0 items
+        let consecutiveEmptyReads = 0;
+
         while (this.isRunning) {
             try {
                 // check authentication status
@@ -240,19 +244,31 @@ export class FileUploader {
 
                 logger(`File Uploader Queue: Read ${items.length} items from backend queue`, 3);
 
-                // If no items, we're done
+                // If no items, handle based on queue state and retry count
                 if (items.length === 0) {
-                    if (this.getQueueLoad() === 0) {
+                    consecutiveEmptyReads++;
+                    
+                    const currentQueueLoad = this.getQueueLoad();
+                    
+                    // If queue is empty and we've already tried once, stop
+                    if (currentQueueLoad === 0 && consecutiveEmptyReads > MAX_EMPTY_READS) {
+                        logger('File Uploader Queue: No items found after retry, stopping', 3);
                         break;
                     }
-                    // Wait for in-flight uploads to finish, then add a small delay before
-                    // polling again to avoid hammering the backend when queue is empty
-                    await this.uploadQueue.onIdle();
+                    
+                    // If queue has items, wait for them to finish before retrying
+                    if (currentQueueLoad > 0) {
+                        logger(`File Uploader Queue: No new items, waiting for ${currentQueueLoad} in-flight uploads to finish`, 3);
+                        await this.uploadQueue.onIdle();
+                    }
+                    
+                    // Small delay before next check
                     await new Promise(resolve => setTimeout(resolve, this.EMPTY_QUEUE_POLL_DELAY));
                     continue;
                 }
 
-                // Reset idle and error counters on successful queue read
+                // Reset counters on successful queue read with items
+                consecutiveEmptyReads = 0;
                 consecutiveErrors = 0;
                 errorBackoffTime = ERROR_BACKOFF_TIME;
                 store.set(fileUploaderBackoffUntilAtom, null);
