@@ -7,7 +7,7 @@
  */
 
 import PQueue from 'p-queue';
-import { getPDFPageCount, getPDFPageCountFromData, naivePdfPageCount } from '../../react/utils/pdfUtils';
+import { getPDFPageCount, getPDFPageCountFromData } from '../../react/utils/pdfUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
@@ -31,7 +31,11 @@ export class FileUploader {
     // upload concurrency
     private readonly MAX_CONCURRENT: number = 3;
 
-    // upload batching
+    // Queue refill buffer: Maintain a small backlog beyond active uploads to ensure
+    // continuous throughput. With MAX_CONCURRENT=3 and REFILL_BUFFER=3, we refill when
+    // the queue drops below 6 items (min of BATCH_SIZE and MAX_CONCURRENT + REFILL_BUFFER)
+    private readonly REFILL_BUFFER: number = 3;
+
     // queue reads
     private readonly BATCH_SIZE: number = 20;
     private readonly VISIBILITY_TIMEOUT_SECONDS: number = 300; // 5 minutes timeout for backend queue reads
@@ -39,8 +43,53 @@ export class FileUploader {
     // completion batching
     private completionBatch: Array<{ item: UploadQueueItem, request: CompleteUploadRequest }> = [];
     private batchTimer: NodeJS.Timeout | null = null;
-    private readonly BATCH_SEND_SIZE: number = 5; // Send after 5 completions
+    private readonly BATCH_SEND_SIZE: number = 5;       // Send after 5 completions
     private readonly BATCH_SEND_TIMEOUT: number = 1500; // Send after 1.5 seconds
+
+    private getQueueLoad(): number {
+        if (!this.uploadQueue) {
+            return 0;
+        }
+        return this.uploadQueue.size + this.uploadQueue.pending;
+    }
+
+    private getRefillThreshold(): number {
+        return Math.min(this.BATCH_SIZE, this.MAX_CONCURRENT + this.REFILL_BUFFER);
+    }
+
+    private async waitForQueueCapacity(limit: number): Promise<void> {
+        if (!this.uploadQueue || !this.isRunning) {
+            return;
+        }
+
+        if (this.getQueueLoad() < limit) {
+            return;
+        }
+
+        await new Promise<void>((resolve) => {
+            const checkCapacity = () => {
+                if (!this.isRunning || this.getQueueLoad() < limit) {
+                    cleanup();
+                    resolve();
+                }
+            };
+
+            const cleanup = () => {
+                if (!this.uploadQueue) {
+                    return;
+                }
+                this.uploadQueue.off('next', checkCapacity);
+                this.uploadQueue.off('idle', checkCapacity);
+                this.uploadQueue.off('error', checkCapacity);
+            };
+
+            this.uploadQueue.on('next', checkCapacity);
+            this.uploadQueue.on('idle', checkCapacity);
+            this.uploadQueue.on('error', checkCapacity);
+
+            checkCapacity();
+        });
+    }
 
     /**
      * Starts the file uploader if it's not already running.
@@ -149,10 +198,21 @@ export class FileUploader {
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
 
+                // Ensure we do not exceed the maximum queue load before reading more items
+                const queueLoad = this.getQueueLoad();
+                const refillThreshold = this.getRefillThreshold();
+
+                if (queueLoad >= refillThreshold) {
+                    await this.waitForQueueCapacity(refillThreshold);
+                    continue;
+                }
+
+                const remainingCapacity = this.BATCH_SIZE - queueLoad;
+
                 // Read items from backend queue with visibility timeout
                 const response = await attachmentsService.readUploadQueue(
                     this.VISIBILITY_TIMEOUT_SECONDS,
-                    this.BATCH_SIZE
+                    remainingCapacity
                 );
                 const items = response.items;
 
@@ -160,7 +220,14 @@ export class FileUploader {
 
                 // If no items, we're done
                 if (items.length === 0) {
-                    break;
+                    if (this.getQueueLoad() === 0) {
+                        break;
+                    }
+                    // Wait for in-flight uploads to finish, then add a small delay before
+                    // polling again to avoid hammering the backend when queue is empty
+                    await this.uploadQueue.onIdle();
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
                 }
 
                 // Reset idle and error counters on successful queue read
@@ -173,8 +240,6 @@ export class FileUploader {
                     this.uploadQueue.add(() => this.uploadFile(item, user.id));
                 }
 
-                // Wait for these uploads to finish before reading the next batch
-                await this.uploadQueue.onIdle();
             } catch (error: any) {
                 logger('File Uploader Queue: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
@@ -190,6 +255,13 @@ export class FileUploader {
                 // Continue with backoff...
                 await new Promise(resolve => setTimeout(resolve, 30000));
             }
+        }
+
+        try {
+            await this.uploadQueue.onIdle();
+        } catch (error: any) {
+            logger('File Uploader Queue: Error while waiting for queue to idle: ' + error.message, 1);
+            Zotero.logError(error);
         }
 
         // Mark all items in the queue as failed
