@@ -200,6 +200,9 @@ export class FileUploader {
         const MAX_EMPTY_READS = 1; // Only retry once after getting 0 items
         let consecutiveEmptyReads = 0;
 
+        // Track whether last fetch was partial (indicates no more items in backend queue)
+        let lastFetchWasPartial = false;
+
         while (this.isRunning) {
             try {
                 // check authentication status
@@ -225,15 +228,20 @@ export class FileUploader {
                 const queueLoad = this.getQueueLoad();
                 const refillThreshold = this.getRefillThreshold();
 
-                if (queueLoad >= refillThreshold) {
-                    await this.waitForQueueCapacity(refillThreshold);
+                // If last fetch was partial (got fewer items than requested), we know there are
+                // no more items in the backend queue. Only fetch again when queue is completely empty.
+                const effectiveThreshold = lastFetchWasPartial ? 0 : refillThreshold;
+
+                if (queueLoad > effectiveThreshold) {
+                    await this.waitForQueueCapacity(effectiveThreshold + 1);
                     continue;
                 }
 
                 const remainingCapacity = this.BATCH_SIZE - queueLoad;
 
                 // Log queue metrics for observability
-                logger(`File Uploader Queue: Queue load: ${queueLoad}/${refillThreshold}, fetching: ${remainingCapacity}`, 4);
+                const thresholdInfo = lastFetchWasPartial ? `${effectiveThreshold} (partial fetch)` : `${refillThreshold}`;
+                logger(`File Uploader Queue: Queue load: ${queueLoad}/${thresholdInfo}, fetching: ${remainingCapacity}`, 4);
 
                 // Read items from backend queue with visibility timeout
                 const response = await attachmentsService.readUploadQueue(
@@ -243,6 +251,13 @@ export class FileUploader {
                 const items = response.items;
 
                 logger(`File Uploader Queue: Read ${items.length} items from backend queue`, 3);
+
+                // Track if this was a partial fetch (got fewer items than requested)
+                // This indicates there are no more items in the backend queue
+                lastFetchWasPartial = items.length < remainingCapacity;
+                if (lastFetchWasPartial && items.length > 0) {
+                    logger(`File Uploader Queue: Partial fetch detected (${items.length}/${remainingCapacity}), will only refill when queue is empty`, 4);
+                }
 
                 // If no items, handle based on queue state and retry count
                 if (items.length === 0) {
