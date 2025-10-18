@@ -197,7 +197,7 @@ export class FileUploader {
         let errorBackoffTime = ERROR_BACKOFF_TIME;
 
         // Empty read tracking to avoid unnecessary backend calls
-        const MAX_EMPTY_READS = 1; // Only retry once after getting 0 items
+        const MAX_EMPTY_READS = 0; // Don't retry after getting 0 items
         let consecutiveEmptyReads = 0;
 
         // Track whether last fetch was partial (indicates no more items in backend queue)
