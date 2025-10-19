@@ -26,6 +26,7 @@ declare namespace _ZoteroTypes {
       "openAiApiKey": string;
       "anthropicApiKey": string;
       "lastUsedModel": string;
+      "customChatModels": string;
       "recentItems": string;
       "citationFormat": string;
       "citationStyle": string;

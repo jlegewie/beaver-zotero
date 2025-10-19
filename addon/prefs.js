@@ -24,6 +24,7 @@ pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
 pref("anthropicApiKey", "");
 pref("lastUsedModel", "");
+pref("customChatModels", "[]");
 
 // Search
 pref("recentItems", "[]");
