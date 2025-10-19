@@ -1,5 +1,70 @@
 import { getPref } from "../../src/utils/prefs";
 
+export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
+
+export type CustomModelReasoningEffort = "low" | "medium" | "high";
+
+export interface CustomChatModel {
+    provider: ModelProvider;
+    api_base: string;
+    api_key: string;
+    name: string;
+    snapshot: string;
+    reasoning_effort?: CustomModelReasoningEffort;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null;
+};
+
+const isModelProvider = (value: unknown): value is ModelProvider => {
+    return value === "anthropic" ||
+        value === "google" ||
+        value === "openai" ||
+        value === "mistralai" ||
+        value === "meta-llama" ||
+        value === "deepseek-ai" ||
+        value === "groq";
+};
+
+const isReasoningEffort = (value: unknown): value is CustomModelReasoningEffort => {
+    return value === "low" || value === "medium" || value === "high";
+};
+
+export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
+    if (!isObject(obj)) return false;
+
+    const { provider, api_base, api_key, name, snapshot, reasoning_effort } = obj as Record<string, unknown>;
+
+    return (
+        // isModelProvider(provider) &&
+        typeof api_base === 'string' &&
+        api_base.length > 0 &&
+        typeof api_key === 'string' &&
+        api_key.length > 0 &&
+        typeof name === 'string' &&
+        name.length > 0 &&
+        typeof snapshot === 'string' &&
+        snapshot.length > 0 &&
+        (reasoning_effort === undefined || isReasoningEffort(reasoning_effort))
+    );
+};
+
+export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
+    try {
+        const raw = getPref('customChatModels');
+        if (raw && typeof raw === 'string') {
+            const parsed = JSON.parse(raw as string);
+            if (!Array.isArray(parsed)) throw new Error("customChatModels preference must be an array");
+            return parsed.filter(isCustomChatModel);
+        }
+    } catch (e) {
+        console.error("Error parsing customChatModels:", e);
+        return [];
+    }
+    return [];
+};
+
 export interface CustomPrompt {
     title: string;
     text: string;
@@ -19,10 +84,9 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         typeof obj.requiresAttachment === 'boolean' &&
         (obj.id_model === undefined || typeof obj.id_model === 'string')
     );
-}
+};
 
 export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
-
     try {
         const raw = getPref('customPrompts');
         if (raw && typeof raw === 'string') {
@@ -40,4 +104,4 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
         return [];
     }
     return [];
-}
+};
