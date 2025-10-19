@@ -468,7 +468,7 @@ export const regenerateFromMessageAtom = atom(
 
 function getUserApiKey(model: FullModelConfig): string | undefined {
     // Only relevant for models that require a user API key
-    if (model.use_app_key) return undefined;
+    if (model.use_app_key || model.is_custom) return undefined;
 
     if (model.provider === 'google') {
         return getPref('googleGenerativeAiApiKey') || undefined;
@@ -536,7 +536,7 @@ async function _processChatCompletionViaBackend(
     const userApiKey = getUserApiKey(model);
 
     // If a user-key model is selected but no key is configured, surface UI error
-    if (!model.use_app_key && !userApiKey) {
+    if (!model.use_app_key && !model.is_custom && !userApiKey) {
         set(isChatRequestPendingAtom, false);
         set(setMessageStatusAtom, {
             id: assistantMessageId,
@@ -573,20 +573,29 @@ async function _processChatCompletionViaBackend(
     }
 
     // Set payload
-    const payload = {
+    const payload: ChatCompletionRequestBody = {
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
-        thread_id: threadId,
+        thread_id: threadId ?? undefined,
         library_ids: libraryIds,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
-        user_api_key: userApiKey,
-        model_id: model.id,
-        access_id: model.access_id,
+        user_api_key: model.is_custom ? undefined : userApiKey,
+        model_id: model.is_custom ? undefined : model.id,
+        access_id: model.is_custom ? undefined : model.access_id,
+        custom_model: model.is_custom ? model.custom_model : undefined,
         frontend_version: Zotero.Beaver.pluginVersion || ''
-    } as ChatCompletionRequestBody;
+    };
 
-    logger(`generateMessages: payload: ${JSON.stringify(payload)}`, 1);
+    const payloadForLog = {
+        ...payload,
+        user_api_key: payload.user_api_key ? '***' : undefined,
+        custom_model: payload.custom_model
+            ? { ...payload.custom_model, api_key: '***' }
+            : undefined
+    };
+
+    logger(`generateMessages: payload: ${JSON.stringify(payloadForLog)}`, 1);
 
     // request chat completion
     chatService.requestChatCompletion(
