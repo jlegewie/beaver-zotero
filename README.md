@@ -153,7 +153,7 @@ The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The ba
 
 ### Does Beaver provide other model providers?
 
-Beaver includes an advanced setting to define custom models. These models are untested and not all features might be supported. Working with custom models can lead to unexpected errors. Do not expect useful error messages or other helpful guidelines for custom models. If you run into unexpected errors or problems, ALWAYS try the same with one of the fully supported models to see whether the issue is specific to your custom model.
+Beaver includes an advanced setting to define custom models. These models are untested and not all features might be supported. Working with custom models can lead to unexpected errors or unexpected behavior. This might include certain functionality that simply doesn't work, errors without helpful messages or even wrong and misleading error messages, or model output that is undesirable (e.g. gpt-oss tends to include sentence ids such as '<s29‐s33>' in model responses). If you run into unexpected errors or problems, ALWAYS try the same with one of the fully supported models to see whether the issue is specific to your custom model.
 
 You can add custom models under Zotero -> Preferences -> Advanced -> Config Editor → Search for "beaver.customChatModels". The field must be a valid JSON array where each object contains the following fields:
 
@@ -163,6 +163,8 @@ You can add custom models under Zotero -> Preferences -> Advanced -> Config Edit
 - `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
 
 To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
+
+Important: After changing the "beaver.customChatModels" config, always open and close Beaver settings. This is required to update the list of models in the model selector.
 
 Example setting to add GLM 4.6 and gpt-oss-120b:
 
