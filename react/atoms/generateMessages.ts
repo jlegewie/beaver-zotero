@@ -335,14 +335,14 @@ export const generateResponseAtom = atom(
         // Get current reader state and add to message attachments if valid and not already in the thread
         let readerState: ReaderState | null = null;
         if (validReaderSource) {
+            // Always get reader state with page and text selection when reader source is valid
+            readerState = getCurrentReaderState();
+            
             const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
             if (!currentUserAttachmentKeys.includes(`${validReaderSource.libraryID}-${validReaderSource.itemKey}`)) {
                 logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${validReaderSource.libraryID}, zotero_key: ${validReaderSource.itemKey})`);
                 
-                // Get reader state with page and text selection
-                readerState = getCurrentReaderState();
-                
-                // Add as SourceAttachment
+                // Add as SourceAttachment (only if not already in thread)
                 // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
                 messageAttachments.push({
                     library_id: validReaderSource.libraryID,
