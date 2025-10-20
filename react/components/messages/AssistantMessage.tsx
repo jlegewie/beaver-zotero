@@ -50,6 +50,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                         thinkingContent={message.reasoning_content}
                         isThinking={message.status === 'thinking'}
                         previousMessageHasToolCalls={previousMessageHasToolCalls}
+                        messageHasContent={message.content && message.content.trim() !== '' ? true : false}
                     />
                 )}
                 
