@@ -55,7 +55,6 @@ const createCustomModelId = (model: CustomChatModel): string => {
     return [
         CUSTOM_MODEL_ID_PREFIX,
         model.provider,
-        encodeURIComponent(model.api_base),
         encodeURIComponent(model.snapshot),
         encodeURIComponent(model.name)
     ].join(':');
@@ -69,19 +68,16 @@ const mapCustomModelsToConfigs = (): FullModelConfig[] => {
 
         return {
             id,
-            provider: model.provider,
+            provider: model.provider as ProviderType,
             name: model.name,
             snapshot: model.snapshot,
             is_agent: false,
-            reasoning_model: model.reasoning_effort !== undefined,
-            reasoning_effort: model.reasoning_effort,
+            reasoning_model: false,
             pricing: {
                 input: 0,
                 output: 0,
             },
-            kwargs: {
-                api_base: model.api_base
-            },
+            kwargs: {},
             access_id: id,
             use_app_key: false,
             credit_cost: 0,

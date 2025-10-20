@@ -2,51 +2,32 @@ import { getPref } from "../../src/utils/prefs";
 
 export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
 
-export type CustomModelReasoningEffort = "low" | "medium" | "high";
-
 export interface CustomChatModel {
-    provider: ModelProvider;
-    api_base: string;
+    provider: string;
     api_key: string;
     name: string;
     snapshot: string;
-    reasoning_effort?: CustomModelReasoningEffort;
+    api_base?: string;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null;
 };
 
-const isModelProvider = (value: unknown): value is ModelProvider => {
-    return value === "anthropic" ||
-        value === "google" ||
-        value === "openai" ||
-        value === "mistralai" ||
-        value === "meta-llama" ||
-        value === "deepseek-ai" ||
-        value === "groq";
-};
-
-const isReasoningEffort = (value: unknown): value is CustomModelReasoningEffort => {
-    return value === "low" || value === "medium" || value === "high";
-};
-
 export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     if (!isObject(obj)) return false;
 
-    const { provider, api_base, api_key, name, snapshot, reasoning_effort } = obj as Record<string, unknown>;
+    const { provider, api_key, name, snapshot } = obj as Record<string, unknown>;
 
     return (
-        // isModelProvider(provider) &&
-        typeof api_base === 'string' &&
-        api_base.length > 0 &&
+        typeof provider === 'string' &&
+        provider.length > 0 &&
         typeof api_key === 'string' &&
         api_key.length > 0 &&
         typeof name === 'string' &&
         name.length > 0 &&
         typeof snapshot === 'string' &&
-        snapshot.length > 0 &&
-        (reasoning_effort === undefined || isReasoningEffort(reasoning_effort))
+        snapshot.length > 0
     );
 };
 
