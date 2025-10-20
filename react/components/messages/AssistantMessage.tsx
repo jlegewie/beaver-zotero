@@ -54,7 +54,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 )}
                 
                 {/* Content */}
-                {message.content && (
+                {message.content && message.content.trim() !== '' && (
                     <MarkdownRenderer className="markdown" content={message.content} />
                 )}
 
