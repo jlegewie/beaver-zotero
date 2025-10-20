@@ -141,12 +141,6 @@ If you are trying to use your own OpenAI API key, you might run into to the veri
 
 If this requirement motivates you to try a different provider, I suggest adding an API key for Gemini ([link](https://aistudio.google.com/app/apikey)).
 
-## System Requirements
-
-- Zotero 7.0 or later
-- Internet connection for cloud features
-- Modern web browser for account management
-
 ### Is Beaver open source?
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
@@ -184,3 +178,9 @@ Example setting to add GLM 4.6 and gpt-oss-120b:
   }
 ]
 ```
+
+## System Requirements
+
+- Zotero 7.0 or later
+- Internet connection for cloud features
+- Modern web browser for account management
