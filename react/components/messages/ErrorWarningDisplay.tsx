@@ -220,7 +220,7 @@ export const WarningDisplay: React.FC<{ messageId: string, warning: WarningMessa
                 <Icon icon={AlertIcon} className="scale-11 mt-020"/>
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-start">
-                        <div className="text-base">{warning.message}</div>
+                        <div className="text-base" style={{ whiteSpace: 'pre-line' }}>{warning.message}</div>
                         <div className="flex-1"/>
                         <IconButton
                             variant="ghost-secondary"

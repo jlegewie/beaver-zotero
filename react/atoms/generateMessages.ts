@@ -269,7 +269,16 @@ export const generateResponseAtom = atom(
 
         // Prepare sources
         const flattenedSources = flattenSources(payload.sources);
-        const { validSources: validatedSources, invalidSources } = await validateSources(flattenedSources);
+        
+        // Get current reader source and include it in validation
+        const readerSource = get(currentReaderAttachmentAtom);
+        const sourcesToValidate = readerSource ? [...flattenedSources, readerSource] : flattenedSources;
+        
+        const { validSources: validatedSources, invalidSources } = await validateSources(sourcesToValidate);
+
+        // Separate reader source from other validated sources
+        const validReaderSource = validatedSources.find(s => s.type === "reader");
+        const validNonReaderSources = validatedSources.filter(s => s.type !== "reader");
 
         // If some sources were removed, add a warning
         if (invalidSources.length > 0) {
@@ -284,7 +293,17 @@ export const generateResponseAtom = atom(
                     const reason = invalidSources[0].reason;
                     message = `${invalidSources.length} sources were removed: ${reason}`;
                 } else {
-                    message = `${invalidSources.length} sources were removed because they are invalid.`;
+                    // Group sources by reason and show counts
+                    const reasonCounts = new Map<string, number>();
+                    invalidSources.forEach(s => {
+                        reasonCounts.set(s.reason, (reasonCounts.get(s.reason) || 0) + 1);
+                    });
+                    
+                    const reasonLines = Array.from(reasonCounts.entries())
+                        .map(([reason, count]) => `  - ${count} source${count > 1 ? 's' : ''}: ${reason}`)
+                        .join('\n');
+                    
+                    message = `${invalidSources.length} sources were removed:\n${reasonLines}`;
                 }
             }
             
@@ -308,23 +327,30 @@ export const generateResponseAtom = atom(
 
         // Convert sources to MessageAttachments and process image annotations
         const messageAttachments = await Promise.all(
-            validatedSources
+            validNonReaderSources
                 .map(async (s) => await toMessageAttachment(s)))
                 .then(attachments => processImageAnnotations([...attachments.flat()])
         );
 
-        // Get current reader state and add to message attachments if not already in the thread
-        const readerState = getCurrentReaderState();
-        const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
-        if(readerState && !currentUserAttachmentKeys.includes(`${readerState.library_id}-${readerState.zotero_key}`)) {
-            logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${readerState.library_id}, zotero_key: ${readerState.zotero_key})`);
-            // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
-            messageAttachments.push({
-                library_id: readerState.library_id,
-                zotero_key: readerState.zotero_key,
-                type: "source",
-                include: "fulltext"
-            } as SourceAttachment);
+        // Get current reader state and add to message attachments if valid and not already in the thread
+        let readerState: ReaderState | null = null;
+        if (validReaderSource) {
+            // Always get reader state with page and text selection when reader source is valid
+            readerState = getCurrentReaderState();
+            
+            const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
+            if (!currentUserAttachmentKeys.includes(`${validReaderSource.libraryID}-${validReaderSource.itemKey}`)) {
+                logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${validReaderSource.libraryID}, zotero_key: ${validReaderSource.itemKey})`);
+                
+                // Add as SourceAttachment (only if not already in thread)
+                // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
+                messageAttachments.push({
+                    library_id: validReaderSource.libraryID,
+                    zotero_key: validReaderSource.itemKey,
+                    type: "source",
+                    include: "fulltext"
+                } as SourceAttachment);
+            }
         }
 
         // Update user attachments
