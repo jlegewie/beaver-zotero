@@ -150,3 +150,35 @@ If this requirement motivates you to try a different provider, I suggest adding 
 ## Is Beaver open source?
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
+
+### Does Beaver provide other model providers?
+
+Beaver includes an advanced setting to define custom models. These models are untested and not all features might be supported. Working with custom models can lead to unexpected errors. Do not expect useful error messages or other helpful guidelines for custom models. If you run into unexpected errors or problems, ALWAYS try the same with one of the fully supported models to see whether the issue is specific to your custom model.
+
+You can add custom models under Zotero -> Preferences -> Advanced -> Config Editor → Search for "beaver.customChatModels". The field must be a valid JSON array where each object contains the following fields:
+
+- `provider`: Model provider. Currently only is supported provider is 'openrouter'
+- `api_key`: API kep for the provider
+- `name`: The model name as it appears in the model selector
+- `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
+
+To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
+
+Example setting to add GLM 4.6 and gpt-oss-120b:
+
+```json
+[
+  {
+    "provider": "openrouter",
+    "api_key": "XXX",
+    "name": "GLM 4.6",
+    "snapshot": "z-ai/glm-4.6"
+  },
+  {
+    "provider": "openrouter",
+    "api_key": "XXX",
+    "name": "GLM 4.6",
+    "snapshot": "openai/gpt-oss-120b"
+  }
+]
+```
