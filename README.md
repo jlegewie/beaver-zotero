@@ -147,7 +147,7 @@ If this requirement motivates you to try a different provider, I suggest adding 
 - Internet connection for cloud features
 - Modern web browser for account management
 
-## Is Beaver open source?
+### Is Beaver open source?
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
 
