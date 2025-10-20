@@ -293,7 +293,17 @@ export const generateResponseAtom = atom(
                     const reason = invalidSources[0].reason;
                     message = `${invalidSources.length} sources were removed: ${reason}`;
                 } else {
-                    message = `${invalidSources.length} sources were removed because they are invalid.`;
+                    // Group sources by reason and show counts
+                    const reasonCounts = new Map<string, number>();
+                    invalidSources.forEach(s => {
+                        reasonCounts.set(s.reason, (reasonCounts.get(s.reason) || 0) + 1);
+                    });
+                    
+                    const reasonLines = Array.from(reasonCounts.entries())
+                        .map(([reason, count]) => `  - ${count} source${count > 1 ? 's' : ''}: ${reason}`)
+                        .join('\n');
+                    
+                    message = `${invalidSources.length} sources were removed:\n${reasonLines}`;
                 }
             }
             
