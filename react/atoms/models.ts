@@ -1,11 +1,11 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
+import { getCustomChatModelsFromPreferences, CustomChatModel, ModelProvider } from '../types/settings';
 import { logger } from '../../src/utils/logger';
 
-/**
- * Supported AI model provider types
- */
-export type ProviderType = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
+const CUSTOM_MODEL_ID_PREFIX = 'custom';
+
+export type ProviderType = ModelProvider;
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 export type Verbosity = "low" | "medium" | "high";
 
@@ -47,7 +47,60 @@ export interface FullModelConfig extends ModelConfig {
     use_app_key: boolean;
     credit_cost: number;
     is_default: boolean;
+    is_custom?: boolean;             // frontend only
+    custom_model?: CustomChatModel;  // frontend only
 }
+
+const createCustomModelId = (model: CustomChatModel): string => {
+    return [
+        CUSTOM_MODEL_ID_PREFIX,
+        model.provider,
+        encodeURIComponent(model.snapshot),
+        encodeURIComponent(model.name)
+    ].join(':');
+};
+
+const mapCustomModelsToConfigs = (): FullModelConfig[] => {
+    const customModels = getCustomChatModelsFromPreferences();
+
+    return customModels.map((model) => {
+        const id = createCustomModelId(model);
+
+        return {
+            id,
+            provider: model.provider as ProviderType,
+            name: model.name,
+            snapshot: model.snapshot,
+            is_agent: false,
+            reasoning_model: false,
+            pricing: {
+                input: 0,
+                output: 0,
+            },
+            kwargs: {},
+            access_id: id,
+            use_app_key: false,
+            credit_cost: 0,
+            is_default: false,
+            is_custom: true,
+            custom_model: model,
+        };
+    });
+};
+
+const initialCustomModels = mapCustomModelsToConfigs();
+
+const withCustomModels = (models: FullModelConfig[]): FullModelConfig[] => {
+    const customModels = mapCustomModelsToConfigs();
+    const merged = new Map<string, FullModelConfig>();
+
+    [...models, ...customModels].forEach((model) => {
+        const key = `${model.id}:${model.access_id}`;
+        merged.set(key, model);
+    });
+
+    return Array.from(merged.values());
+};
 
 /**
  * Core atoms for model state management
@@ -58,12 +111,17 @@ const googleApiKeyAtom = atom(getPref('googleGenerativeAiApiKey') ?? '');
 const openAiApiKeyAtom = atom(getPref('openAiApiKey') ?? '');
 const anthropicApiKeyAtom = atom(getPref('anthropicApiKey') ?? '');
 
-export const supportedModelsAtom = atom<FullModelConfig[]>([]);
+export const supportedModelsAtom = atom<FullModelConfig[]>(initialCustomModels);
 
 // Stores the currently selected model
 let lastUsedModel = null;
 try {
-    lastUsedModel = JSON.parse(getPref('lastUsedModel')) as FullModelConfig;
+    const stored = JSON.parse(getPref('lastUsedModel')) as FullModelConfig;
+    if (stored?.is_custom) {
+        lastUsedModel = initialCustomModels.find(model => model.id === stored.id) || stored;
+    } else {
+        lastUsedModel = stored;
+    }
 } catch (error) {
     lastUsedModel = null
 }
@@ -95,6 +153,7 @@ export const availableModelsAtom = atom(
         };
         
         return supportedModels.filter(model => {
+            if (model.is_custom) return true;
             if (model.use_app_key) return true;
             if (!model.use_app_key && model.provider === 'google' && apiKeys.google) return true;
             if (!model.use_app_key && model.provider === 'openai' && apiKeys.openai) return true;
@@ -137,9 +196,9 @@ export const validateSelectedModelAtom = atom(
  */
 export const setModelsAtom = atom(
     null,
-    (get, set, models: FullModelConfig[]) => {
+    (_get, set, models: FullModelConfig[]) => {
         // Update supported models
-        set(supportedModelsAtom, models);
+        set(supportedModelsAtom, withCustomModels(models));
 
         // Validate and update selected model if needed
         set(validateSelectedModelAtom);

@@ -150,3 +150,37 @@ If this requirement motivates you to try a different provider, I suggest adding 
 ## Is Beaver open source?
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
+
+### Does Beaver support other model providers?
+
+Beaver includes an advanced setting to define custom models. These models are untested and not all features are be supported. Working with custom models can lead to unexpected errors and unexpected behavior. This might include certain functionality that simply doesn't work, errors without helpful messages or even wrong and misleading error messages, or model output that is undesirable (e.g. gpt-oss tends to include sentence ids such as '<s29‐s33>' in model responses). If you run into unexpected errors or problems, ALWAYS try the same with one of the fully supported models to see whether the issue is specific to your custom model. One important limitation is that custom models currently do not support image input. That means the model does not 'see' any page that is open in the Zotero file reader and "Area" annotations to a thread will likely fail.
+
+You can add custom models under Zotero -> Preferences -> Advanced -> Config Editor → Search for "beaver.customChatModels". The field must be a valid JSON array where each object contains the following fields:
+
+- `provider`: Model provider. Currently only is supported provider is 'openrouter'
+- `api_key`: API kep for the provider
+- `name`: The model name as it appears in the model selector
+- `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
+
+To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
+
+Important: After changing the "beaver.customChatModels" config, always open and close Beaver settings. This is required to update the list of models in the model selector.
+
+Example setting to add GLM 4.6 and gpt-oss-120b:
+
+```json
+[
+  {
+    "provider": "openrouter",
+    "api_key": "XXX",
+    "name": "GLM 4.6",
+    "snapshot": "z-ai/glm-4.6"
+  },
+  {
+    "provider": "openrouter",
+    "api_key": "XXX",
+    "name": "GLM 4.6",
+    "snapshot": "openai/gpt-oss-120b"
+  }
+]
+```

@@ -2,6 +2,7 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiTypes';
 import { ProviderType } from '../../react/atoms/models';
+import { CustomChatModel } from '../../react/types/settings';
 import { CitationMetadata } from '../../react/types/citations';
 
 export interface ToolRequest {
@@ -24,8 +25,10 @@ export interface ChatCompletionRequestBody {
     library_ids?: number[] | null;
     user_api_key?: string;
     model_id?: string;
+    access_id?: string;
     custom_instructions?: string;
     frontend_version?: string;
+    custom_model?: CustomChatModel;
 }
 
 export type DeltaType = "reasoning" | "content";

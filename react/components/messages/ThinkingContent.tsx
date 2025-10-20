@@ -8,9 +8,10 @@ interface ThinkingContentProps {
     thinkingContent: string;
     isThinking: boolean;
     previousMessageHasToolCalls: boolean;
+    messageHasContent: boolean;
 }
 
-const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isThinking, previousMessageHasToolCalls }) => {
+const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isThinking, previousMessageHasToolCalls, messageHasContent }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
     const loadingDots = useLoadingDots(isThinking);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -29,7 +30,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isTh
     return (
         <div className={`
             ${resultsVisible ? 'border-popup' : 'border-transparent'} 
-            rounded-md flex flex-col min-w-0 display-flex flex-col py-1 mb-2
+            rounded-md flex flex-col min-w-0 display-flex flex-col py-1 ${messageHasContent ? 'mb-2' : 'mb-15'}
             ${previousMessageHasToolCalls ? '-mt-2' : ''}
         `}>
             <Button

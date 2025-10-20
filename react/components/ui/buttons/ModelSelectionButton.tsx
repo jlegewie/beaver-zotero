@@ -64,15 +64,18 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
-        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_agent);
-        const byok_models_agent = availableModels.filter((model) => !model.use_app_key && model.is_agent);
-        const included_models = availableModels.filter((model) => model.use_app_key) || [];
+        const custom_models = availableModels.filter((model) => model.is_custom);
+        const included_models = availableModels.filter((model) => model.use_app_key && !model.is_custom) || [];
+        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_agent && !model.is_custom);
+        const byok_models_agent = availableModels.filter((model) => !model.use_app_key && model.is_agent && !model.is_custom);
 
-        items.push({
-            label: 'Included Models',
-            isGroupHeader: true,
-            onClick: () => {},
-        });
+        if (included_models.length > 0) {
+            items.push({
+                label: 'Included Models',
+                isGroupHeader: true,
+                onClick: () => {},
+            });
+        }
 
         included_models.sort((a, b) => Number(b.is_default) - Number(a.is_default)).forEach((model) => {
             items.push({
@@ -89,6 +92,30 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 )
             });
         });
+
+        if (custom_models.length > 0) {
+            items.push({
+                label: 'Custom Models',
+                isGroupHeader: true,
+                onClick: () => {},
+            });
+
+            custom_models.forEach((model) => {
+                items.push({
+                    label: model.name,
+                    onClick: () => {
+                        updateSelectedModel(model);
+                    },
+                    icon: model.reasoning_model ? BrainIcon : undefined,
+                    customContent: (
+                        <ModelMenuItemContent 
+                            model={model} 
+                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
+                        />
+                    )
+                });
+            });
+        }
 
         if (byok_models.length > 0) {
             items.push({
