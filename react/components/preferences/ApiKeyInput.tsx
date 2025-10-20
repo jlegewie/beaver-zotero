@@ -38,6 +38,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [streamingVerificationFailed, setStreamingVerificationFailed] = useState(false);
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
+    const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
     const setApiKey = useSetAtom(setApiKeyAtom);
@@ -49,6 +50,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         setCurrentValue(value);
         setVerificationStatus('idle');
         setVerificationError(null);
+        setVerificationMessage(null);
     }, [value]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,6 +65,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         if (verificationStatus !== 'idle') {
             setVerificationStatus('idle');
             setVerificationError(null);
+            setVerificationMessage(null);
         }
     };
 
@@ -83,6 +86,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         setIsVerifying(true);
         setVerificationStatus('idle');
         setVerificationError(null);
+        setVerificationMessage(null);
 
         try {
             const result = await chatService.verifyApiKey(provider, currentValue);
@@ -113,12 +117,14 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
             } else {
                 setVerificationStatus('error');
                 setVerificationError(result.error_type || 'UnexpectedError');
+                setVerificationMessage(result.message ?? null);
                 console.error(`API Key verification failed for ${provider}: ${result.error_type}`);
             }
         } catch (error) {
             console.error("Error during API key verification:", error);
             setVerificationStatus('error');
             setVerificationError('UnexpectedError');
+            setVerificationMessage(null);
         } finally {
             setIsVerifying(false);
         }
@@ -184,6 +190,11 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         {buttonText}
                     </Button>
                 </div>
+                {verificationStatus === 'error' && verificationMessage && (
+                    <div className="text-sm font-color-error" role="alert">
+                        {verificationMessage}
+                    </div>
+                )}
                 {streamingVerificationFailed && (
                     <div className="display-flex flex-row items-start gap-2 flex-1 w-full">
                         <Icon icon={AlertIcon} className="scale-10 mt-010 font-color-secondary" />
