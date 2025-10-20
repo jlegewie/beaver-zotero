@@ -61,6 +61,10 @@ export interface NoteAttachment extends BaseMessageAttachment {
 
 /**
  * ReaderState represents the state of a reader.
+ * 
+ * Note: current_page is 1-based (first page = 1). This is set by getCurrentPage()
+ * which returns pdfViewer.currentPageNumber from PDF.js. When navigating to a page,
+ * the code converts to 0-based indexing using pageIndex: page - 1.
  */
 export interface ReaderState {
     library_id: number;
@@ -72,6 +76,8 @@ export interface ReaderState {
 
 /**
  * TextSelection represents a text selection in a reader.
+ * 
+ * Note: page is 1-based (first page = 1), matching ReaderState.current_page.
  */
 export interface TextSelection {
     text: string;
