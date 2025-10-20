@@ -6,7 +6,7 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { chatService, ErrorType } from '../../../src/services/chatService';
 import { ProviderType } from '../../atoms/models';
 import { logger } from "../../../src/utils/logger";
-import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom } from '../../atoms/models';
+import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom, setApiKeyAtom } from '../../atoms/models';
 import { addAPIKeyMessageAtom } from '../../utils/popupMessageUtils';
 
 
@@ -40,6 +40,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     const [verificationError, setVerificationError] = useState<ErrorType | null>(null);
     const [currentValue, setCurrentValue] = useState(value);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
+    const setApiKey = useSetAtom(setApiKeyAtom);
     const addAPIKeyMessage = useSetAtom(addAPIKeyMessageAtom);
     const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
@@ -56,6 +57,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         onChange(newValue);
         if (newValue === '') {
             savePref(newValue);
+            setApiKey({ provider, value: newValue });
             validateSelectedModel();
         }
         if (verificationStatus !== 'idle') {
@@ -87,6 +89,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
             if (result.valid) {
                 setVerificationStatus('success');
                 savePref(currentValue);
+                setApiKey({ provider, value: currentValue });
                 logger(`API Key for ${provider} verified and saved.`);
                 validateSelectedModel();
                 

@@ -1,8 +1,6 @@
 import { atom } from 'jotai';
-import { accountService } from '../../src/services/accountService';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
-import { planIdAtom } from './profile';
 
 /**
  * Supported AI model provider types
@@ -56,6 +54,10 @@ export interface FullModelConfig extends ModelConfig {
  */
 
 // Stores all models supported by the backend
+const googleApiKeyAtom = atom(getPref('googleGenerativeAiApiKey') ?? '');
+const openAiApiKeyAtom = atom(getPref('openAiApiKey') ?? '');
+const anthropicApiKeyAtom = atom(getPref('anthropicApiKey') ?? '');
+
 export const supportedModelsAtom = atom<FullModelConfig[]>([]);
 
 // Stores the currently selected model
@@ -87,9 +89,9 @@ export const availableModelsAtom = atom(
     get => {
         const supportedModels = get(supportedModelsAtom);
         const apiKeys = {
-            google: !!getPref('googleGenerativeAiApiKey'),
-            openai: !!getPref('openAiApiKey'),
-            anthropic: !!getPref('anthropicApiKey')
+            google: !!get(googleApiKeyAtom),
+            openai: !!get(openAiApiKeyAtom),
+            anthropic: !!get(anthropicApiKeyAtom)
         };
         
         return supportedModels.filter(model => {
@@ -151,5 +153,25 @@ export const updateSelectedModelAtom = atom(
     (_, set, model: FullModelConfig) => {
         set(selectedModelAtom, model);
         setPref('lastUsedModel', JSON.stringify(model));
+    }
+);
+
+export const setApiKeyAtom = atom(
+    null,
+    (_, set, { provider, value }: { provider: ProviderType; value: string }) => {
+        switch (provider) {
+            case 'google':
+                set(googleApiKeyAtom, value ?? '');
+                break;
+            case 'openai':
+                set(openAiApiKeyAtom, value ?? '');
+                break;
+            case 'anthropic':
+                set(anthropicApiKeyAtom, value ?? '');
+                break;
+            default:
+                logger(`Unsupported provider passed to setApiKeyAtom: ${provider}`, 1);
+                break;
+        }
     }
 );
