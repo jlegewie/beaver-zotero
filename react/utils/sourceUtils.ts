@@ -31,7 +31,7 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     
     if (item.isNote()) {
         displayName = `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`;
-    } if(item.isAttachment() && !item.parentItem) {
+    } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
         const firstCreator = item.firstCreator || 'Unknown Author';
