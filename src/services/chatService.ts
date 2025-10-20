@@ -116,6 +116,7 @@ export interface VerifyKeyRequest {
 
 export interface VerifyKeyResponse {
     valid: boolean;
+    message?: string;
     error_type?: ErrorType;
     streaming_valid?: boolean;
     streaming_error_type?: ErrorType;
