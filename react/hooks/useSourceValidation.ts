@@ -18,6 +18,7 @@ export interface UseSourceValidationOptions {
     source: InputSource;
     validationType?: SourceValidationType;
     forceRefresh?: boolean;
+    enabled?: boolean;
 }
 
 /**
@@ -26,7 +27,8 @@ export interface UseSourceValidationOptions {
 export function useSourceValidation({
     source,
     validationType = SourceValidationType.PROCESSED_FILE,
-    forceRefresh = false
+    forceRefresh = false,
+    enabled = true
 }: UseSourceValidationOptions): SourceValidationResult & {
     refresh: () => void;
     invalidate: () => void;
@@ -44,6 +46,11 @@ export function useSourceValidation({
 
     // Validation function
     const validateSource = useCallback(async (force = false) => {
+
+        // Skip validation if disabled
+        if (!enabled) {
+            return;
+        }
 
         // If not authenticated, assume invalid and return
         if (!isAuthenticated) {
@@ -77,7 +84,7 @@ export function useSourceValidation({
                 isValidating: false
             }));
         }
-    }, [source, validationType, forceRefresh, isAuthenticated, syncLibraryIds]);
+    }, [source, validationType, forceRefresh, isAuthenticated, syncLibraryIds, enabled]);
 
     // Run validation when dependencies change
     useEffect(() => {

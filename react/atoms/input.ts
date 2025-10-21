@@ -46,6 +46,26 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
 });
 
 /**
+* Current Zotero selection as Zotero.Item[]
+* Limits to 5 items to prevent overwhelming the system with too many items
+*/
+export const currentZoteroSelectionAtom = atom<Zotero.Item[]>([]);
+
+/**
+* Current Zotero selection converted to InputSource[]
+*/
+export const currentZoteroSelectionSourcesAtom = atom(async (get) => {
+    const items = get(currentZoteroSelectionAtom);
+    const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
+    
+    const sources = await Promise.all(
+        items.map(item => createSourceFromItem(item, false, userAddedAttachmentKeys))
+    );
+    
+    return sources;
+});
+
+/**
 * Count of input attachments
 * 
 * Counts the number of attachments in the current sources and reader attachment.

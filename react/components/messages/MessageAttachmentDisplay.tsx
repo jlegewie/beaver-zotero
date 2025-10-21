@@ -1,13 +1,14 @@
 import React from 'react'
 import { SourceButton } from '../sources/SourceButton';
 import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, currentLibraryIdsAtom } from '../../atoms/input';
+import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, currentLibraryIdsAtom, currentZoteroSelectionSourcesAtom } from '../../atoms/input';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { AnnotationButton } from '../input/AnnotationButton';
 import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 import { LibraryButton } from '../library/LibraryButton';
+import { InputSource } from '../../types/sources';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -26,7 +27,7 @@ const MessageAttachmentDisplay = ({
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
-
+    const currentZoteroSelectionSources = useAtomValue(currentZoteroSelectionSourcesAtom);
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
         .filter(lib => lib) as Zotero.Library[];
@@ -95,6 +96,15 @@ const MessageAttachmentDisplay = ({
             {readerTextSelection && (
                 <TextSelectionButton selection={readerTextSelection} />
             )}
+
+            {/* Current Zotero selection */}
+            {currentZoteroSelectionSources.slice(0,1).map((item: InputSource) => (
+                <SourceButton
+                    source={item}
+                    validationType={SourceValidationType.FULL_FILE}
+                    ghostAttachment={true}
+                />
+            ))}
             
         </div>
     )

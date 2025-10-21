@@ -2,7 +2,7 @@ import React, { useEffect, useState, forwardRef } from 'react'
 import { CSSItemTypeIcon, CSSIcon, Spinner } from "../icons/icons"
 import { InputSource } from '../../types/sources'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom } from '../../atoms/input'
+import { currentReaderAttachmentKeyAtom, removeSourceAtom, togglePinSourceAtom, currentSourcesAtom } from '../../atoms/input'
 import { getDisplayNameFromItem, getZoteroItem } from '../../utils/sourceUtils'
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { truncateText } from '../../utils/stringUtils'
@@ -23,6 +23,7 @@ interface SourceButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonEl
     canEdit?: boolean
     disabled?: boolean
     validationType?: SourceValidationType
+    ghostAttachment?: boolean
 }
 
 export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
@@ -33,21 +34,27 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
             disabled = false,
             canEdit = true,
             validationType = SourceValidationType.PROCESSED_FILE,
+            ghostAttachment = false,
             ...rest
         } = props
 
-        // Validate source attachment
-        const validation = useSourceValidation({ source, validationType });
+        // Validate source attachment (skip validation for ghost attachments)
+        const validation = useSourceValidation({ 
+            source, 
+            validationType, 
+            enabled: !ghostAttachment 
+        });
 
         const [displayName, setDisplayName] = useState<string>('');
         const removeSource = useSetAtom(removeSourceAtom);
         const setActivePreview = useSetAtom(activePreviewAtom);
         const togglePinSource = useSetAtom(togglePinSourceAtom);
+        const setCurrentSources = useSetAtom(currentSourcesAtom);
         const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
 
         // Use the custom hook for hover preview logic
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            validation.isValid ? { type: 'source', content: source } : null,
+            validation.isValid && !ghostAttachment ? { type: 'source', content: source } : null,
             { isEnabled: !disabled }
         );
 
@@ -81,6 +88,20 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
+            
+            // If it's a ghost attachment, add it to current sources
+            if (ghostAttachment) {
+                setCurrentSources((prev: InputSource[]) => {
+                    // Check if source already exists
+                    if (prev.some(s => s.id === source.id)) {
+                        return prev;
+                    }
+                    // Add the source with pinned=true
+                    return [...prev, { ...source, pinned: true }];
+                });
+                return;
+            }
+            
             if (validation.isValid && canEdit && updateSourcesFromZoteroSelection) {
                 togglePinSource(source.id);
             }
@@ -98,8 +119,8 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
                 </CSSIcon>
             }
 
-            // Show remove icon on hover (if not current reader attachment)
-            if (isHovered && canEdit && currentReaderAttachmentKey != source.itemKey) {
+            // Show remove icon on hover (if not current reader attachment and not ghost)
+            if (isHovered && canEdit && currentReaderAttachmentKey != source.itemKey && !ghostAttachment) {
                 return (
                     <span role="button" className="source-remove" onClick={handleRemove}>
                         <CSSIcon name="x-8" className="icon-16" />
@@ -120,6 +141,11 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
         const getButtonClasses = () => {
             const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
             
+            // Ghost attachments have dashed border and are semi-transparent
+            if (ghostAttachment) {
+                return `${baseClasses} opacity-60` + ' border-dashed';
+            }
+            
             if (!validation.isValid) {
                 return `${baseClasses} border-red`;
             }
@@ -137,6 +163,9 @@ export const SourceButton = forwardRef<HTMLButtonElement, SourceButtonProps>(
 
         // Simplified tooltip logic
         const getTooltipTitle = () => {
+            if (ghostAttachment) {
+                return 'Click to add this suggested attachment';
+            }
             if (validation.isValidating) {
                 return 'Validating and uploading if needed...';
             }

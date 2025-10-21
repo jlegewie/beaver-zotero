@@ -10,19 +10,13 @@ import { getPref } from '../../src/utils/prefs';
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
 
-    // Update sources from Zotero selection
-    if(getPref("updateSourcesFromZoteroSelection")) {
-        // Event handler for Zotero selection
-        useZoteroSelection();
-    } else {
-        // Only update sources based on current selection
-        const resetCurrentSources = useSetAtom(resetCurrentSourcesAtom);
-        const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
-        resetCurrentSources();
-        const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-        if (addSelectedItemsOnOpen) {
-            updateSourcesFromZoteroSelection(true);
-        }
+    useZoteroSelection();
+    const resetCurrentSources = useSetAtom(resetCurrentSourcesAtom);
+    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
+    resetCurrentSources();
+    const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
+    if (addSelectedItemsOnOpen) {
+        updateSourcesFromZoteroSelection(true);
     }
 
     // Watch for pane collapse
