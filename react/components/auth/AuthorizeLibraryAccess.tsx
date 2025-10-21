@@ -1,4 +1,5 @@
 import React, { Dispatch, SetStateAction } from "react";
+import { AlertIcon, Icon } from "../icons/icons";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import ConsentToggle from "../preferences/ConsentToggle";
@@ -46,8 +47,11 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
 
             {/* Beta Account */}
             {planName === 'beta' && (
-                <div className="font-color-tertiary text-sm px-2">
-                    Beta accounts include unlimited metadata and related reference search. Full-document search is limited to 75,000 pages total, with PDFs up to 500 pages (50MB) per file.
+                <div className="display-flex flex-row gap-1 items-start">
+                    <Icon icon={AlertIcon} className="font-color-secondary scale-11  mt-020" />
+                    <div className="font-color-secondary text-sm px-2">
+                        Beta accounts are limited to 75,000 pages total, with PDFs up to 500 pages (50MB) per file. If you have large libraries, start by selecting just one or two smaller ones.
+                    </div>
                 </div>
             )}
 
