@@ -169,11 +169,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
                 const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
                 
-                // Combine all bboxes on this page and apply rotation transformation
+                // Combine all bboxes on this page and apply rotation transformation only if rotated
                 const combinedBboxes = allBboxesOnPage.flat();
-                const rects = combinedBboxes
-                    .map(b => applyRotationToBoundingBox(b, rotation, width, height))
-                    .map(b => toZoteroRectFromBBox(b, viewBoxLL));
+                const rects = rotation !== 0
+                    ? combinedBboxes
+                        .map(b => applyRotationToBoundingBox(b, rotation, width, height))
+                        .map(b => toZoteroRectFromBBox(b, viewBoxLL))
+                    : combinedBboxes.map(b => toZoteroRectFromBBox(b, viewBoxLL));
                 
                 // Create unique IDs for the temporary annotation
                 const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
