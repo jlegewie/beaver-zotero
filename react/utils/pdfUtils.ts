@@ -41,7 +41,7 @@ export async function getPageViewportInfo(
     const pdfDocument = iframeWindow?.PDFViewerApplication?.pdfDocument;
     
     if (!pdfDocument) {
-        throw new Error('PDF document not available');
+        throw new Error('PDF document not available - reader may be closed or PDF not loaded');
     }
     
     // Get page directly from document (1-based index)
@@ -56,6 +56,40 @@ export async function getPageViewportInfo(
     const height = view[3] - view[1];
     
     return { viewBox, height, width };
+}
+
+/**
+ * Check if PDF document is available in reader
+ */
+export function isPDFDocumentAvailable(reader: ZoteroReader): boolean {
+    try {
+        const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
+        const pdfDocument = iframeWindow?.PDFViewerApplication?.pdfDocument;
+        return Boolean(pdfDocument);
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Wait for PDF document to become available in reader
+ * @param reader The reader to check
+ * @param timeoutMs Maximum time to wait in milliseconds (default 5000ms)
+ * @returns Promise that resolves to true if PDF becomes available, false if timeout
+ */
+export async function waitForPDFDocument(reader: ZoteroReader, timeoutMs: number = 5000): Promise<boolean> {
+    const startTime = Date.now();
+    const checkInterval = 100; // Check every 100ms
+    
+    while (Date.now() - startTime < timeoutMs) {
+        if (isPDFDocumentAvailable(reader)) {
+            return true;
+        }
+        // Wait before checking again
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+    
+    return false;
 }
 
 
