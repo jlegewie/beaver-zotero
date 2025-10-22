@@ -75,16 +75,186 @@ export interface UpdateAnnotationResponse {
     annotation: AnnotationResponse;
 }
 
+export interface UpdateAnnotationBatchRequestItem {
+    annotation_id: string;
+    updates: UpdateAnnotationRequest;
+}
+
+export interface UpdateAnnotationBatchResponseItem {
+    annotation_id: string;
+    success: boolean;
+    annotation?: AnnotationResponse;
+    error_message?: string;
+}
+
+export interface UpdateAnnotationBatchResponse {
+    results: UpdateAnnotationBatchResponseItem[];
+}
+
+type UpdateResolution = {
+    resolve: (value: UpdateAnnotationResponse) => void;
+    reject: (reason: unknown) => void;
+};
+
+type PendingAnnotationUpdate = {
+    updates: UpdateAnnotationRequest;
+    requests: UpdateResolution[];
+};
+
+const UPDATE_FLUSH_INTERVAL_MS = 50;
+const MAX_PENDING_UPDATE_ENTRIES = 25;
+
+type BatchedAnnotationUpdate = {
+    annotationId: string;
+    updates: UpdateAnnotationRequest;
+    requests: UpdateResolution[];
+};
+
+class AnnotationUpdateBatcher {
+    private pendingUpdates = new Map<string, PendingAnnotationUpdate>();
+    private timer: NodeJS.Timeout | null = null;
+    private isFlushing = false;
+    private flushRequestedWhileRunning = false;
+
+    constructor(
+        private readonly dispatchUpdates: (
+            updates: BatchedAnnotationUpdate[]
+        ) => Promise<UpdateAnnotationBatchResponse>
+    ) {}
+
+    enqueue(annotationId: string, updates: UpdateAnnotationRequest): Promise<UpdateAnnotationResponse> {
+        const mergedUpdates = { ...updates };
+
+        return new Promise<UpdateAnnotationResponse>((resolve, reject) => {
+            const existing = this.pendingUpdates.get(annotationId);
+            if (existing) {
+                existing.updates = { ...existing.updates, ...mergedUpdates };
+                existing.requests.push({ resolve, reject });
+            } else {
+                this.pendingUpdates.set(annotationId, {
+                    updates: mergedUpdates,
+                    requests: [{ resolve, reject }]
+                });
+            }
+
+            if (this.pendingUpdates.size >= MAX_PENDING_UPDATE_ENTRIES) {
+                this.triggerImmediateFlush();
+            } else {
+                this.scheduleFlush();
+            }
+        });
+    }
+
+    private scheduleFlush(): void {
+        if (this.timer) {
+            return;
+        }
+
+        this.timer = setTimeout(() => {
+            this.timer = null;
+            this.flush().catch((error) => {
+                logger(`AnnotationUpdateBatcher: flush error: ${error?.message || error}`, 1);
+            });
+        }, UPDATE_FLUSH_INTERVAL_MS);
+    }
+
+    private triggerImmediateFlush(): void {
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+
+        this.flush().catch((error) => {
+            logger(`AnnotationUpdateBatcher: immediate flush error: ${error?.message || error}`, 1);
+        });
+    }
+
+    private async flush(): Promise<void> {
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+
+        if (this.isFlushing) {
+            this.flushRequestedWhileRunning = true;
+            return;
+        }
+
+        this.isFlushing = true;
+        try {
+            while (this.pendingUpdates.size > 0) {
+                const batchedEntries = Array.from(this.pendingUpdates.entries()).map(
+                    ([annotationId, entry]): BatchedAnnotationUpdate => ({
+                        annotationId,
+                        updates: entry.updates,
+                        requests: entry.requests
+                    })
+                );
+                this.pendingUpdates.clear();
+
+                await this.dispatchAndResolve(batchedEntries);
+            }
+        } finally {
+            this.isFlushing = false;
+            if (this.flushRequestedWhileRunning) {
+                this.flushRequestedWhileRunning = false;
+                if (this.pendingUpdates.size > 0) {
+                    await this.flush();
+                }
+            }
+        }
+    }
+
+    private async dispatchAndResolve(entries: BatchedAnnotationUpdate[]): Promise<void> {
+        if (entries.length === 0) {
+            return;
+        }
+
+        try {
+            const response = await this.dispatchUpdates(entries);
+
+            const resultMap = new Map<string, UpdateAnnotationBatchResponseItem>();
+            response.results.forEach(result => {
+                resultMap.set(result.annotation_id, result);
+            });
+
+            entries.forEach(entry => {
+                const result = resultMap.get(entry.annotationId);
+                if (result && result.success && result.annotation) {
+                    const updateResponse: UpdateAnnotationResponse = {
+                        success: true,
+                        annotation: result.annotation
+                    };
+                    entry.requests.forEach(({ resolve }) => resolve(updateResponse));
+                } else {
+                    const errorMessage =
+                        result?.error_message ||
+                        `Failed to update annotation ${entry.annotationId}`;
+                    const error = new Error(errorMessage);
+                    entry.requests.forEach(({ reject }) => reject(error));
+                }
+            });
+        } catch (error) {
+            entries.forEach(entry => entry.requests.forEach(({ reject }) => reject(error)));
+        }
+    }
+}
+
 /**
  * Tool annotations-specific API service that extends the base API service
  */
 export class ToolAnnotationsService extends ApiService {
+    private readonly annotationUpdateBatcher: AnnotationUpdateBatcher;
+
     /**
      * Creates a new ToolAnnotationsService instance
      * @param backendUrl The base URL of the backend API
      */
     constructor(backendUrl: string) {
         super(backendUrl);
+        this.annotationUpdateBatcher = new AnnotationUpdateBatcher((entries) =>
+            this.dispatchAnnotationUpdates(entries)
+        );
     }
 
     /**
@@ -136,13 +306,10 @@ export class ToolAnnotationsService extends ApiService {
     ): Promise<UpdateAnnotationResponse> {
         logger(`updateAnnotation: Updating annotation ${annotationId} with fields: ${Object.keys(updates).join(', ')}`);
         
-        const response = await this.patch<UpdateAnnotationResponse>(
-            `/api/v1/tool-annotations/${annotationId}`,
-            updates
-        );
-        
-        logger(`updateAnnotation: Successfully updated annotation ${annotationId}`);
-        return response;
+        return this.annotationUpdateBatcher.enqueue(annotationId, updates).then((response) => {
+            logger(`updateAnnotation: Successfully updated annotation ${annotationId}`);
+            return response;
+        });
     }
 
     /**
@@ -214,6 +381,20 @@ export class ToolAnnotationsService extends ApiService {
      */
     async markAnnotationsDeleted(annotationIds: string[]): Promise<UpdateAnnotationResponse[]> {
         return this.updateAnnotationStatusBatch(annotationIds, 'deleted');
+    }
+
+    private async dispatchAnnotationUpdates(
+        entries: BatchedAnnotationUpdate[]
+    ): Promise<UpdateAnnotationBatchResponse> {
+        const request: UpdateAnnotationBatchRequestItem[] = entries.map(({ annotationId, updates }) => ({
+            annotation_id: annotationId,
+            updates
+        }));
+
+        return super.patch<UpdateAnnotationBatchResponse>(
+            '/api/v1/tool-annotations/batch',
+            { updates: request }
+        );
     }
 }
 
