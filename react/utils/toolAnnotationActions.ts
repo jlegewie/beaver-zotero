@@ -183,17 +183,18 @@ async function convertNotePositionToRect(
     const { pageIndex, side, y } = annotation.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height } = await getPageViewportInfo(reader, pageIndex);
+    const { viewBox, height, width } = await getPageViewportInfo(reader, pageIndex);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
     
     // Calculate x position based on side
+    // Note: Use absolute page coordinates (viewBox[0] is the left edge, viewBox[0] + width is the right edge)
     let x: number;
     if (side === 'right') {
-        // Use xMax from viewBox directly, minus margin and note size
-        x = viewBox[2] - NOTE_RECT_SIZE - 15;
+        // Position at right edge of page, accounting for margin and note size
+        x = width - NOTE_RECT_SIZE - 12;
     } else {
-        // Use xMin from viewBox plus margin
-        x = viewBox[0] + 10;
+        // Position at left edge of page with small margin
+        x = 12;
     }
 
     // Create viewport object for coordinate conversion
