@@ -36,16 +36,16 @@ export async function getPDFPageCount(item: Zotero.Item): Promise<number | null>
  * Zotero's PDF.js viewer respects original rotation, so we need to transform coordinates.
  * 
  * @param bbox - Bounding box in unrotated coordinate system (bottom-left origin)
- * @param rotation - Page rotation in degrees (0, 90, 180, 270)
- * @param width - Page width in unrotated coordinate system
- * @param height - Page height in unrotated coordinate system
+ * @param rotation - Page rotation in degrees (0, 90, 180, 270) - counter-clockwise
+ * @param rotatedWidth - Page width as reported by PDF.js (may be rotated)
+ * @param rotatedHeight - Page height as reported by PDF.js (may be rotated)
  * @returns Transformed bounding box
  */
 export function applyRotationToBoundingBox(
     bbox: BoundingBox,
     rotation: number,
-    width: number,
-    height: number
+    rotatedWidth: number,
+    rotatedHeight: number
 ): BoundingBox {
     // Normalize rotation to 0-360 range
     rotation = ((rotation % 360) + 360) % 360;
@@ -54,31 +54,42 @@ export function applyRotationToBoundingBox(
         return bbox;
     }
     
-    // Apply rotation transformation
+    // For 90° and 270° rotations, dimensions are swapped by PDF.js
+    // We need to get the unrotated dimensions for the transformation
+    let unrotatedWidth: number, unrotatedHeight: number;
+    if (rotation === 90 || rotation === 270) {
+        unrotatedWidth = rotatedHeight;
+        unrotatedHeight = rotatedWidth;
+    } else {
+        unrotatedWidth = rotatedWidth;
+        unrotatedHeight = rotatedHeight;
+    }
+    
+    // Apply counter-clockwise rotation transformation using unrotated dimensions
     // Coordinates are in bottom-left origin system
     let l: number, b: number, r: number, t: number;
     
     switch (rotation) {
         case 90:
-            // 90° clockwise: (x, y) -> (y, width - x)
-            l = bbox.b;
-            b = width - bbox.r;
-            r = bbox.t;
-            t = width - bbox.l;
+            // 90° counter-clockwise: (x, y) -> (height - y, x)
+            l = unrotatedHeight - bbox.t;
+            b = bbox.l;
+            r = unrotatedHeight - bbox.b;
+            t = bbox.r;
             break;
         case 180:
             // 180°: (x, y) -> (width - x, height - y)
-            l = width - bbox.r;
-            b = height - bbox.t;
-            r = width - bbox.l;
-            t = height - bbox.b;
+            l = unrotatedWidth - bbox.r;
+            b = unrotatedHeight - bbox.t;
+            r = unrotatedWidth - bbox.l;
+            t = unrotatedHeight - bbox.b;
             break;
         case 270:
-            // 270° clockwise: (x, y) -> (height - y, x)
-            l = height - bbox.t;
-            b = bbox.l;
-            r = height - bbox.b;
-            t = bbox.r;
+            // 270° counter-clockwise (= 90° clockwise): (x, y) -> (y, width - x)
+            l = bbox.b;
+            b = unrotatedWidth - bbox.r;
+            r = bbox.t;
+            t = unrotatedWidth - bbox.l;
             break;
         default:
             return bbox;
