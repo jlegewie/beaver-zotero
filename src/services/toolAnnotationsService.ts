@@ -75,20 +75,45 @@ export interface UpdateAnnotationResponse {
     annotation: AnnotationResponse;
 }
 
-export interface UpdateAnnotationBatchRequestItem {
+/**
+ * Single item in a batch update request
+ * Matches backend BatchUpdateItem model
+ */
+export interface BatchUpdateItem {
     annotation_id: string;
-    updates: UpdateAnnotationRequest;
+    status?: AnnotationStatus;
+    error_message?: string | null;
+    color?: ToolAnnotationColor | null;
+    comment?: string;
+    zotero_key?: string | null;
 }
 
-export interface UpdateAnnotationBatchResponseItem {
+/**
+ * Request body for batch annotation updates
+ * Matches backend BatchUpdateRequest model
+ */
+export interface BatchUpdateRequest {
+    updates: BatchUpdateItem[];
+}
+
+/**
+ * Error details for individual annotation update failures
+ * Matches backend BatchUpdateError model
+ */
+export interface BatchUpdateError {
     annotation_id: string;
+    code: 'not_found' | 'no_fields' | 'db_error';
+    detail: string;
+}
+
+/**
+ * Response from batch update endpoint
+ * Matches backend BatchUpdateResponse model
+ */
+export interface BatchUpdateResponse {
     success: boolean;
-    annotation?: AnnotationResponse;
-    error_message?: string;
-}
-
-export interface UpdateAnnotationBatchResponse {
-    results: UpdateAnnotationBatchResponseItem[];
+    updated: number;
+    errors: BatchUpdateError[];
 }
 
 type UpdateResolution = {
@@ -119,7 +144,7 @@ class AnnotationUpdateBatcher {
     constructor(
         private readonly dispatchUpdates: (
             updates: BatchedAnnotationUpdate[]
-        ) => Promise<UpdateAnnotationBatchResponse>
+        ) => Promise<BatchUpdateResponse>
     ) {}
 
     enqueue(annotationId: string, updates: UpdateAnnotationRequest): Promise<UpdateAnnotationResponse> {
@@ -213,28 +238,48 @@ class AnnotationUpdateBatcher {
         try {
             const response = await this.dispatchUpdates(entries);
 
-            const resultMap = new Map<string, UpdateAnnotationBatchResponseItem>();
-            response.results.forEach(result => {
-                resultMap.set(result.annotation_id, result);
+            // Build a map of errors by annotation_id for quick lookup
+            const errorMap = new Map<string, BatchUpdateError>();
+            response.errors.forEach(error => {
+                errorMap.set(error.annotation_id, error);
             });
 
+            // Process each entry - if it's in the error map, reject it; otherwise resolve it
             entries.forEach(entry => {
-                const result = resultMap.get(entry.annotationId);
-                if (result && result.success && result.annotation) {
+                const error = errorMap.get(entry.annotationId);
+                if (error) {
+                    // This annotation failed to update
+                    const errorMessage = `${error.code}: ${error.detail}`;
+                    const err = new Error(errorMessage);
+                    entry.requests.forEach(({ reject }) => reject(err));
+                } else {
+                    // This annotation was successfully updated
+                    // We don't get the full annotation back, so we construct a minimal response
+                    // with the updates that were applied
                     const updateResponse: UpdateAnnotationResponse = {
                         success: true,
-                        annotation: result.annotation
+                        annotation: {
+                            id: entry.annotationId,
+                            // These fields would ideally come from the backend, but the backend
+                            // doesn't return the full annotation. We'll set minimal required fields.
+                            message_id: '',
+                            status: entry.updates.status || 'pending',
+                            library_id: 0,
+                            attachment_key: '',
+                            annotation_type: '',
+                            title: '',
+                            comment: entry.updates.comment || '',
+                            created_at: '',
+                            modified_at: new Date().toISOString(),
+                            ...(entry.updates.color && { color: entry.updates.color }),
+                            ...(entry.updates.zotero_key && { zotero_key: entry.updates.zotero_key })
+                        }
                     };
                     entry.requests.forEach(({ resolve }) => resolve(updateResponse));
-                } else {
-                    const errorMessage =
-                        result?.error_message ||
-                        `Failed to update annotation ${entry.annotationId}`;
-                    const error = new Error(errorMessage);
-                    entry.requests.forEach(({ reject }) => reject(error));
                 }
             });
         } catch (error) {
+            // Network or other error - reject all entries
             entries.forEach(entry => entry.requests.forEach(({ reject }) => reject(error)));
         }
     }
@@ -385,15 +430,20 @@ export class ToolAnnotationsService extends ApiService {
 
     private async dispatchAnnotationUpdates(
         entries: BatchedAnnotationUpdate[]
-    ): Promise<UpdateAnnotationBatchResponse> {
-        const request: UpdateAnnotationBatchRequestItem[] = entries.map(({ annotationId, updates }) => ({
+    ): Promise<BatchUpdateResponse> {
+        // Flatten the updates directly into each item to match backend BatchUpdateItem format
+        const request: BatchUpdateItem[] = entries.map(({ annotationId, updates }) => ({
             annotation_id: annotationId,
-            updates
+            ...updates // Spread the updates directly - no nesting
         }));
 
-        return super.patch<UpdateAnnotationBatchResponse>(
+        const body: BatchUpdateRequest = {
+            updates: request
+        };
+
+        return super.patch<BatchUpdateResponse>(
             '/api/v1/tool-annotations/batch',
-            { updates: request }
+            body
         );
     }
 }
