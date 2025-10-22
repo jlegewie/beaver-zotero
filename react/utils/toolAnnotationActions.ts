@@ -90,11 +90,22 @@ async function convertLocationToRects(
     // Create viewport object for coordinate conversion
     const viewport = { height };
 
-    const rects = location.boxes
-        .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
-        .map((box) => applyRotationToBoundingBox(box, rotation, width, height))
-        .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
-        .filter((rect) => Array.isArray(rect) && rect.length === 4);
+    // Only apply rotation transformation if page is actually rotated
+    const rects = rotation !== 0
+        ? location.boxes
+            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => {
+                logger(`Applying rotation ${rotation}° to box: l=${box.l}, b=${box.b}, r=${box.r}, t=${box.t}, rotated dims: w=${width}, h=${height}`, 2);
+                const rotated = applyRotationToBoundingBox(box, rotation, width, height);
+                logger(`Result: l=${rotated.l}, b=${rotated.b}, r=${rotated.r}, t=${rotated.t}`, 2);
+                return rotated;
+            })
+            .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
+            .filter((rect) => Array.isArray(rect) && rect.length === 4)
+        : location.boxes
+            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
+            .filter((rect) => Array.isArray(rect) && rect.length === 4);
 
     return rects;
 }
@@ -211,8 +222,11 @@ async function convertNotePositionToRect(
         viewport
     );
     
-    // Apply rotation transformation
-    converted = applyRotationToBoundingBox(converted, rotation, width, height);
+    // Apply rotation transformation only if page is rotated
+    if (rotation !== 0) {
+        logger(`Applying rotation ${rotation}° to note position`, 2);
+        converted = applyRotationToBoundingBox(converted, rotation, width, height);
+    }
 
     return {
         pageIndex,
