@@ -100,6 +100,10 @@ export class ToolAnnotationApplyBatcher {
         this.queue = [];
 
         const currentReaderKey = store.get(currentReaderAttachmentKeyAtom);
+        if (!currentReaderKey) {
+            logger('AnnotationBatcher: no current reader, skipping annotation application', 2);
+        }
+
         const ackRequests = new Map<string, AckEntry[]>();
         const ackIndex = new Map<string, AckEntry>();
         const errorAnnotationsToPersist: Array<{ annotation: ToolAnnotation }> = [];

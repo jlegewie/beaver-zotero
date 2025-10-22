@@ -7,7 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
-import { getPageViewportInfo } from './pdfUtils';
+import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument } from './pdfUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -183,17 +183,18 @@ async function convertNotePositionToRect(
     const { pageIndex, side, y } = annotation.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height } = await getPageViewportInfo(reader, pageIndex);
+    const { viewBox, height, width } = await getPageViewportInfo(reader, pageIndex);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
     
     // Calculate x position based on side
+    // Note: Use absolute page coordinates (viewBox[0] is the left edge, viewBox[0] + width is the right edge)
     let x: number;
     if (side === 'right') {
-        // Use xMax from viewBox directly, minus margin and note size
-        x = viewBox[2] - NOTE_RECT_SIZE - 15;
+        // Position at right edge of page, accounting for margin and note size
+        x = width - NOTE_RECT_SIZE - 12;
     } else {
-        // Use xMin from viewBox plus margin
-        x = viewBox[0] + 10;
+        // Position at left edge of page with small margin
+        x = 12;
     }
 
     // Create viewport object for coordinate conversion
@@ -282,8 +283,8 @@ export async function applyAnnotation(
     annotation: ToolAnnotation,
     reader?: ZoteroReader
 ): Promise<ApplyAnnotationResult> {
-    // Get the current reader if not provided
-    reader = reader ?? (await getCurrentReaderAndWaitForView() as ZoteroReader | undefined);
+    // Get the current reader if not provided, and wait for PDF document to be loaded
+    reader = reader ?? (await getCurrentReaderAndWaitForView(undefined, true) as ZoteroReader | undefined);
     if (!reader) {
         return {
             updated: false,
@@ -296,6 +297,16 @@ export async function applyAnnotation(
         // Check if the reader is still correct
         if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
             throw new Error('Reader changed to another attachment');
+        }
+        
+        // Final check: ensure PDF document is available
+        // (in case reader was provided directly without going through getCurrentReaderAndWaitForView)
+        if (!isPDFDocumentAvailable(reader)) {
+            logger(`applyAnnotation: PDF document not available, attempting to wait...`, 2);
+            const pdfAvailable = await waitForPDFDocument(reader, 3000);
+            if (!pdfAvailable) {
+                throw new Error('PDF document not available - reader may be closed or PDF failed to load');
+            }
         }
         
         // Create the annotation
