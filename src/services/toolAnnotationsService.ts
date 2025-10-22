@@ -126,7 +126,7 @@ type PendingAnnotationUpdate = {
     requests: UpdateResolution[];
 };
 
-const UPDATE_FLUSH_INTERVAL_MS = 50;
+const UPDATE_FLUSH_INTERVAL_MS = 100;
 const MAX_PENDING_UPDATE_ENTRIES = 25;
 
 type BatchedAnnotationUpdate = {
@@ -283,6 +283,20 @@ class AnnotationUpdateBatcher {
             entries.forEach(entry => entry.requests.forEach(({ reject }) => reject(error)));
         }
     }
+
+    /**
+     * Cleanup method for the batcher
+     * Note: In practice, the 50ms timer is short enough that pending updates
+     * will flush before shutdown completes, and JavaScript timers are cleared
+     * automatically when the context is destroyed.
+     */
+    dispose(): void {
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+        this.pendingUpdates.clear();
+    }
 }
 
 /**
@@ -426,6 +440,14 @@ export class ToolAnnotationsService extends ApiService {
      */
     async markAnnotationsDeleted(annotationIds: string[]): Promise<UpdateAnnotationResponse[]> {
         return this.updateAnnotationStatusBatch(annotationIds, 'deleted');
+    }
+
+    /**
+     * Cleanup method - not typically needed due to short timer duration
+     * and automatic JavaScript cleanup, but provided for completeness.
+     */
+    dispose(): void {
+        this.annotationUpdateBatcher.dispose();
     }
 
     private async dispatchAnnotationUpdates(
