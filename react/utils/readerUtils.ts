@@ -1,7 +1,7 @@
-import { createSourceIdentifier } from './sourceUtils';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { logger } from '../../src/utils/logger';
 import { ZoteroReader } from './annotationUtils';
+import { waitForPDFDocument } from './pdfUtils';
 
 
 /**
@@ -19,9 +19,10 @@ function getCurrentReader(window?: Window): any | undefined {
  * Retrieves the current reader instance and waits for the view to be initialized.
  * 
  * @param window - The window to get the reader from.
+ * @param waitForPDF - If true, also waits for the PDF document to be loaded (default: false for backwards compatibility)
  * @returns The current reader instance or undefined if no reader is found.
  */
-async function getCurrentReaderAndWaitForView(window?: Window): Promise<any | undefined> {
+async function getCurrentReaderAndWaitForView(window?: Window, waitForPDF: boolean = false): Promise<any | undefined> {
     // Get reader
     const reader = getCurrentReader(window)
     if (!reader) return undefined;
@@ -29,6 +30,16 @@ async function getCurrentReaderAndWaitForView(window?: Window): Promise<any | un
     // Wait for reader to be initialized
     await reader._initPromise;
     await reader._internalReader?._primaryView?.initializedPromise;
+    
+    // Optionally wait for PDF document to be loaded
+    if (waitForPDF && reader.type === 'pdf') {
+        
+        const pdfLoaded = await waitForPDFDocument(reader, 3000);
+        if (!pdfLoaded) {
+            logger(`getCurrentReaderAndWaitForView: PDF document failed to load within timeout`, 1);
+        }
+    }
+    
     return reader;
 }
 

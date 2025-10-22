@@ -7,7 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
-import { getPageViewportInfo } from './pdfUtils';
+import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument } from './pdfUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -282,8 +282,8 @@ export async function applyAnnotation(
     annotation: ToolAnnotation,
     reader?: ZoteroReader
 ): Promise<ApplyAnnotationResult> {
-    // Get the current reader if not provided
-    reader = reader ?? (await getCurrentReaderAndWaitForView() as ZoteroReader | undefined);
+    // Get the current reader if not provided, and wait for PDF document to be loaded
+    reader = reader ?? (await getCurrentReaderAndWaitForView(undefined, true) as ZoteroReader | undefined);
     if (!reader) {
         return {
             updated: false,
@@ -296,6 +296,16 @@ export async function applyAnnotation(
         // Check if the reader is still correct
         if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
             throw new Error('Reader changed to another attachment');
+        }
+        
+        // Final check: ensure PDF document is available
+        // (in case reader was provided directly without going through getCurrentReaderAndWaitForView)
+        if (!isPDFDocumentAvailable(reader)) {
+            logger(`applyAnnotation: PDF document not available, attempting to wait...`, 2);
+            const pdfAvailable = await waitForPDFDocument(reader, 3000);
+            if (!pdfAvailable) {
+                throw new Error('PDF document not available - reader may be closed or PDF failed to load');
+            }
         }
         
         // Create the annotation
