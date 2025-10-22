@@ -7,7 +7,7 @@ import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citatio
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
-import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument } from './pdfUtils';
+import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -60,7 +60,6 @@ function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: st
     return (reader as any)._item === undefined || (reader as any)._item?.key === attachmentKey;
 }
 
-
 function convertBoundingBoxToBottomLeft(
     bbox: BoundingBox,
     viewport: any
@@ -85,7 +84,7 @@ async function convertLocationToRects(
     location: ToolAnnotationHighlightLocation
 ): Promise<number[][]> {
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height } = await getPageViewportInfo(reader, location.pageIndex);
+    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.pageIndex);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
 
     // Create viewport object for coordinate conversion
@@ -93,6 +92,7 @@ async function convertLocationToRects(
 
     const rects = location.boxes
         .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+        .map((box) => applyRotationToBoundingBox(box, rotation, width, height))
         .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
         .filter((rect) => Array.isArray(rect) && rect.length === 4);
 
@@ -183,7 +183,7 @@ async function convertNotePositionToRect(
     const { pageIndex, side, y } = annotation.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height, width } = await getPageViewportInfo(reader, pageIndex);
+    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, pageIndex);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
     
     // Calculate x position based on side
@@ -200,7 +200,7 @@ async function convertNotePositionToRect(
     // Create viewport object for coordinate conversion
     const viewport = { height };
 
-    const converted: BoundingBox = convertBoundingBoxToBottomLeft(
+    let converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
             l: x,
             b: y,
@@ -210,6 +210,9 @@ async function convertNotePositionToRect(
         },
         viewport
     );
+    
+    // Apply rotation transformation
+    converted = applyRotationToBoundingBox(converted, rotation, width, height);
 
     return {
         pageIndex,

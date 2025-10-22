@@ -9,7 +9,7 @@ import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
-import { getPageViewportInfo } from '../../utils/pdfUtils';
+import { getPageViewportInfo, applyRotationToBoundingBox } from '../../utils/pdfUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
@@ -166,12 +166,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const pageIndex = page - 1; // Convert to 0-based index
 
                 // Get viewport info directly from PDF document (no need for rendered page)
-                const { viewBox } = await getPageViewportInfo(reader, pageIndex);
+                const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
                 const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
                 
-                // Combine all bboxes on this page
+                // Combine all bboxes on this page and apply rotation transformation
                 const combinedBboxes = allBboxesOnPage.flat();
-                const rects = combinedBboxes.map(b => toZoteroRectFromBBox(b, viewBoxLL));
+                const rects = combinedBboxes
+                    .map(b => applyRotationToBoundingBox(b, rotation, width, height))
+                    .map(b => toZoteroRectFromBBox(b, viewBoxLL));
                 
                 // Create unique IDs for the temporary annotation
                 const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
