@@ -115,7 +115,7 @@ function getCurrentPage(reader?: any): number | null {
         const currentPageIndex = pdfViewer.currentPageNumber - 1;
         
         // Return the 1-based page number (more user-friendly)
-        return pdfViewer.currentPageNumber;
+        return pdfViewer.currentPageNumber || null;
     }
     catch (e) {
         console.error('Error getting current page:', e);
