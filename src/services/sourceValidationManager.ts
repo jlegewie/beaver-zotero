@@ -434,6 +434,8 @@ class SourceValidationManager {
                 // Processed file: pass if file is processed
                 isValid = backendResponse.processed;
                 if (!isValid) {
+                    // TODO: "File not synced" response needs a better message. I think it means that the file exists 
+                    // in Zotero and should be synced (passes local validation) but doesn't exist in Beaver DB. Sync error?
                     reason = backendResponse.details || 'File not available';
                 }
             } else {
