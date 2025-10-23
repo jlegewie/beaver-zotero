@@ -69,7 +69,7 @@ export interface NoteAttachment extends BaseMessageAttachment {
 export interface ReaderState {
     library_id: number;
     zotero_key: string;
-    current_page: number;
+    current_page: number | null;
     text_selection?: TextSelection;
     annotations?: Annotation[];
 }    

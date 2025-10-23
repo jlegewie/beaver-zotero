@@ -140,7 +140,7 @@ export function getCurrentReaderState(): ReaderState | null {
     return {
         library_id: readerSource.libraryID,
         zotero_key: readerSource.itemKey,
-        current_page: getCurrentPage() || 0,
+        current_page: getCurrentPage() || null,
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
 }
