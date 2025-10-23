@@ -34,7 +34,7 @@ export async function getFileStatusForAttachmentInfo(attachmentItem: Zotero.Item
             return { text: 'Library not synced', showButton: false };
         }
         if (!syncingItemFilter(attachmentItem)) {
-            if (attachmentItem.isInTrash()) return {text: 'File not synced', showButton: false };
+            if (attachmentItem.isInTrash()) return {text: 'File in trash', showButton: false };
             return {
                 text: 'Unsupported file type',
                 showButton: true,
