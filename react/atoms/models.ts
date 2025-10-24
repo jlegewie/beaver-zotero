@@ -23,6 +23,7 @@ export interface ModelPricing {
  * @property provider - The provider of the model (anthropic, google, openai)
  * @property snapshot - The provider's model identifier used in API calls
  * @property is_agent - Whether the model supports agent capabilities
+ * @property context_window - The context window of the model (defaults to 128,000)
  * @property reasoning_model - Whether the model provides reasoning capabilities
  * @property reasoning_effort - The effort of the model for reasoning
  * @property verbosity - The verbosity of the model
@@ -35,6 +36,7 @@ export interface ModelConfig {
     name: string;
     snapshot: string;
     is_agent: boolean;
+    context_window?: number;
     reasoning_model?: boolean;
     reasoning_effort?: ReasoningEffort;
     verbosity?: Verbosity;
@@ -71,6 +73,7 @@ const mapCustomModelsToConfigs = (): FullModelConfig[] => {
             provider: model.provider as ProviderType,
             name: model.name,
             snapshot: model.snapshot,
+            context_window: model.context_window,
             is_agent: false,
             reasoning_model: false,
             pricing: {

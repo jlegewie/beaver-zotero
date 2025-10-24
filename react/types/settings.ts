@@ -7,6 +7,7 @@ export interface CustomChatModel {
     api_key: string;
     name: string;
     snapshot: string;
+    context_window?: number;
     api_base?: string;
 }
 
@@ -17,7 +18,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => {
 export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     if (!isObject(obj)) return false;
 
-    const { provider, api_key, name, snapshot } = obj as Record<string, unknown>;
+    const { provider, api_key, name, snapshot, context_window } = obj as Record<string, unknown>;
 
     return (
         typeof provider === 'string' &&
@@ -27,7 +28,8 @@ export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
         typeof name === 'string' &&
         name.length > 0 &&
         typeof snapshot === 'string' &&
-        snapshot.length > 0
+        snapshot.length > 0 &&
+        (context_window === undefined || typeof context_window === 'number')
     );
 };
 
