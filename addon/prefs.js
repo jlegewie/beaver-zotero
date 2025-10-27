@@ -45,3 +45,4 @@ pref("skippedItems", "[]")
 
 // Flag to run consistency check on upgrade
 pref("runConsistencyCheck", false);
+pref("pendingVersionNotifications", "[]");

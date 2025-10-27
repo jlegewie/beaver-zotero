@@ -2,7 +2,12 @@ import { FileStatusSummary } from "./fileStatus";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update';
+
+export interface PopupMessageFeature {
+    title: string;
+    description?: string;
+}
 
 export interface PopupMessage {
     id: string;
@@ -21,4 +26,7 @@ export interface PopupMessage {
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
     showGoToFileStatusButton?: boolean;
     showSettingsButton?: boolean;
+    featureList?: PopupMessageFeature[];
+    learnMoreUrl?: string;
+    learnMoreLabel?: string;
 }

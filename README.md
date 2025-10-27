@@ -29,7 +29,7 @@ We welcome feedback on GitHub. Access to the preview release may be limited base
 
 5. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
 
-6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 75,000 pages (~2,500 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 125,000 pages (~4,000 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
 
 ## Evaluations
 
@@ -70,7 +70,7 @@ Beaver uses hybrid search with reranking to search the content of your documents
 
 <!-- During the preview, the implementation of full-text search will change repeatedly as we continue to improve Beaver. -->
 
-During the preview, full-document search is free for up to 75,000 pages (~2,500 articles).
+During the preview, full-document search is free for up to 125,000 pages (~4,000 articles).
 
 Together these tools allow the agent explore your library to find relevant references, documents, and specific paragraphs/pages.
 
@@ -103,11 +103,9 @@ Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/
 
 ### Which models do you recommand?
 
-Beaver uses Gemini 2.5 Flash as the default model because it delivers great performance at a low price. GPT-5 Mini is a strong alternative at a similar cost, though our system prompt is not yet fully optimized for GPT-5, so occasional undesirable behavior may occur.
+Beaver support models from OpenAI, Google and Anthropic. Advanced users can also use models from Openrouter (see details below). We recommend frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4.5 for optimal performance. Haiku 4.5 is a great alternative at lower costs. Gemini 2.5 Flash also works well at a very low price-point for simpler requets that do not require multiple step reasoning or searches.
 
-Frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4 offer even higher performance. The difference is noticeable especially for complex questions and tasks.
-
-Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase quickly. This is particularly true for Claude Sonnet 4 because it does not offer discounted rates for cached input tokens by default (we might add support later). A single request with Sonnet 4 can easily cost $0.5 or more. In contrast, OpenAI and Google reduce the cost of reusing the same input within 5 minutes by up to 90%, which is a significant advantage for agentic workflows.
+Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase.
 
 ### How do chat credits work?
 
@@ -155,6 +153,7 @@ You can add custom models under Zotero -> Preferences -> Advanced -> Config Edit
 - `api_key`: API kep for the provider
 - `name`: The model name as it appears in the model selector
 - `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
+- `context_window`: (Optional) The context window of the model (defaults to 128,000). This is used to compress the context when the input tokens exceed a certain threshold. You can also intentionally set this lower to encourage context compression, which reduces API costs and can avoid running into rate limit errors. Anything below 128k is pretty untested though.
 
 To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
 
@@ -168,13 +167,15 @@ Example setting to add GLM 4.6 and gpt-oss-120b:
     "provider": "openrouter",
     "api_key": "XXX",
     "name": "GLM 4.6",
-    "snapshot": "z-ai/glm-4.6"
+    "snapshot": "z-ai/glm-4.6",
+    "context_window": 200000
   },
   {
     "provider": "openrouter",
     "api_key": "XXX",
     "name": "GLM 4.6",
-    "snapshot": "openai/gpt-oss-120b"
+    "snapshot": "openai/gpt-oss-120b",
+    "context_window": 128000
   }
 ]
 ```

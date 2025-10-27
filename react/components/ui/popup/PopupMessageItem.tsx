@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon } from '../../icons/icons';
+import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import IconButton from '../IconButton';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
+import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
 import Button from "../Button";
@@ -69,6 +70,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             case 'plan_change':
             case 'indexing_complete':
                 return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
+            case 'version_update':
+                return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-secondary" />;
@@ -87,6 +90,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         case 'warning':
         case 'plan_change':
         case 'indexing_complete':
+        case 'version_update':
         default:
             fontColor = 'font-color-secondary';
             backgroundColor = 'var(--material-mix-quarternary)';
@@ -156,6 +160,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 {/* Content for indexing_complete */}
                 {message.type === 'indexing_complete' && (
                     <IndexingCompleteMessageContent message={message} />
+                )}
+
+                {message.type === 'version_update' && (
+                    <VersionUpdateMessageContent message={message} />
                 )}
 
                 {message.showGoToFileStatusButton && (

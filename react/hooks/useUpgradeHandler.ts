@@ -1,11 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { performConsistencyCheck } from '../../src/utils/syncConsistency';
 import { version } from '../../package.json';
 import { logger } from '../../src/utils/logger';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
+import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -13,17 +16,19 @@ import { logger } from '../../src/utils/logger';
  */
 export const useUpgradeHandler = () => {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const hasRunCheckRef = useRef(false);
+    const hasRunConsistencyCheckRef = useRef(false);
+    const processedVersionsRef = useRef<Set<string>>(new Set());
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     useEffect(() => {
         const runUpgradeTasks = async () => {
-            if (!isAuthenticated || hasRunCheckRef.current) return;
+            if (!isAuthenticated || hasRunConsistencyCheckRef.current) return;
 
             const needsCheck = getPref('runConsistencyCheck');
             if (!needsCheck) return;
             
             // Mark as run to prevent re-execution in the same session
-            hasRunCheckRef.current = true;
+            hasRunConsistencyCheckRef.current = true;
             logger(`useUpgradeHandler: Running consistency check for synced libraries after upgrade to ${version}.`);
 
             try {
@@ -47,4 +52,45 @@ export const useUpgradeHandler = () => {
         runUpgradeTasks();
 
     }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+
+        const pendingVersions = getPendingVersionNotifications();
+        if (!pendingVersions.length) {
+            return;
+        }
+
+        pendingVersions.forEach((pendingVersion) => {
+            const config = getVersionUpdateMessageConfig(pendingVersion);
+            if (!config) {
+                logger(`useUpgradeHandler: No popup configuration found for version ${pendingVersion}. Removing pending entry.`, 2);
+                removePendingVersionNotification(pendingVersion);
+                return;
+            }
+
+            if (processedVersionsRef.current.has(config.version)) {
+                removePendingVersionNotification(pendingVersion);
+                return;
+            }
+
+            processedVersionsRef.current.add(config.version);
+            logger(`useUpgradeHandler: Displaying release notes popup for version ${config.version}.`, 3);
+
+            addPopupMessage({
+                type: 'version_update',
+                title: config.title,
+                text: config.text,
+                featureList: config.featureList,
+                learnMoreUrl: config.learnMoreUrl,
+                learnMoreLabel: config.learnMoreLabel,
+                expire: false,
+            });
+
+            removePendingVersionNotification(pendingVersion);
+        });
+
+    }, [isAuthenticated, addPopupMessage]);
 };

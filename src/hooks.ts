@@ -9,6 +9,8 @@ import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
 import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 import { getPref, setPref } from "./utils/prefs";
+import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
+import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 
 // const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
@@ -38,13 +40,24 @@ function compareVersions(v1: string, v2: string): number {
  * @param currentVersion The current plugin version
  */
 async function handleUpgrade(lastVersion: string, currentVersion: string) {
+    const knownVersions = getAllVersionUpdateMessageVersions();
+    if (knownVersions.length && lastVersion) {
+        const versionsToNotify = knownVersions
+            .filter((versionToNotify) =>
+                compareVersions(lastVersion, versionToNotify) < 0 &&
+                compareVersions(currentVersion, versionToNotify) >= 0,
+            )
+            .sort(compareVersions);
+
+        versionsToNotify.forEach((versionToNotify) => {
+            addPendingVersionNotification(versionToNotify);
+            ztoolkit.log(`handleUpgrade: Queued version notification for ${versionToNotify}.`);
+        });
+    }
+
 	// Upgrade to 0.5.0 or newer from a version before 0.5.0
     if (compareVersions(lastVersion, '0.5.0') < 0 && compareVersions(currentVersion, '0.5.0') >= 0) {
-        
-        // a) Show changelog
-        Zotero.launchURL("https://www.beaverapp.ai/changelog/v0.5");
-
-        // b) Set flag to run consistency check from UI context
+        // Set flag to run consistency check from UI context
         setPref('runConsistencyCheck', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for consistency check.`);
     }
@@ -103,6 +116,7 @@ async function onStartup() {
 	if (lastVersion && lastVersion !== version) {
 		await handleUpgrade(lastVersion, version);
 	}
+
 
 	// -------- Set installed version --------
 	setPref('installedVersion', version);
