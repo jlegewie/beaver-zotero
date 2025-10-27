@@ -103,11 +103,9 @@ Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/
 
 ### Which models do you recommand?
 
-Beaver uses Gemini 2.5 Flash as the default model because it delivers great performance at a low price. GPT-5 Mini is a strong alternative at a similar cost, though our system prompt is not yet fully optimized for GPT-5, so occasional undesirable behavior may occur.
+Beaver support models from OpenAI, Google and Anthropic. Advanced users can also use models from Openrouter (see details below). We recommend frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4.5 for optimal performance. Haiku 4.5 is a great alternative at lower costs. Gemini 2.5 Flash also works well at a very low price-point for simpler requets that do not require multiple step reasoning or searches.
 
-Frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4 offer even higher performance. The difference is noticeable especially for complex questions and tasks.
-
-Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase quickly. This is particularly true for Claude Sonnet 4 because it does not offer discounted rates for cached input tokens by default (we might add support later). A single request with Sonnet 4 can easily cost $0.5 or more. In contrast, OpenAI and Google reduce the cost of reusing the same input within 5 minutes by up to 90%, which is a significant advantage for agentic workflows.
+Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase.
 
 ### How do chat credits work?
 
