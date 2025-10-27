@@ -100,12 +100,11 @@ async function onStartup() {
 
 	// -------- Handle plugin upgrade --------
 	const lastVersion = getPref('installedVersion');
-	// if (lastVersion && lastVersion !== version) {
-		// await handleUpgrade(lastVersion, version);
-		await handleUpgrade(lastVersion, "0.5.0");
-	// }
+	if (lastVersion && lastVersion !== version) {
+		await handleUpgrade(lastVersion, version);
+	}
 
-	
+
 	// -------- Set installed version --------
 	setPref('installedVersion', version);
 	ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
