@@ -79,7 +79,7 @@ export const errorGroupsAtom = atom((get) => {
         // },
         {
             name: "Files exceed your page balance",
-            details: "Full-document search limited to 75k pages for Beta",
+            details: "Full-document search limited to 125k pages for Beta",
             errorCodes: ["plan_limit_insufficient_balance"],
         },
         {

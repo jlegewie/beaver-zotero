@@ -29,7 +29,7 @@ We welcome feedback on GitHub. Access to the preview release may be limited base
 
 5. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
 
-6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 75,000 pages (~2,500 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 125,000 pages (~4,000 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
 
 ## Evaluations
 
@@ -70,7 +70,7 @@ Beaver uses hybrid search with reranking to search the content of your documents
 
 <!-- During the preview, the implementation of full-text search will change repeatedly as we continue to improve Beaver. -->
 
-During the preview, full-document search is free for up to 75,000 pages (~2,500 articles).
+During the preview, full-document search is free for up to 125,000 pages (~4,000 articles).
 
 Together these tools allow the agent explore your library to find relevant references, documents, and specific paragraphs/pages.
 
@@ -155,6 +155,7 @@ You can add custom models under Zotero -> Preferences -> Advanced -> Config Edit
 - `api_key`: API kep for the provider
 - `name`: The model name as it appears in the model selector
 - `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
+- `context_window`: (Optional) The context window of the model (defaults to 128,000). This is used to compress the context when the input tokens exceed a certain threshold. You can also intentionally set this lower to encourage context compression, which reduces API costs and can avoid running into rate limit errors. Anything below 128k is pretty untested though.
 
 To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
 
@@ -168,13 +169,15 @@ Example setting to add GLM 4.6 and gpt-oss-120b:
     "provider": "openrouter",
     "api_key": "XXX",
     "name": "GLM 4.6",
-    "snapshot": "z-ai/glm-4.6"
+    "snapshot": "z-ai/glm-4.6",
+    "context_window": 200000
   },
   {
     "provider": "openrouter",
     "api_key": "XXX",
     "name": "GLM 4.6",
-    "snapshot": "openai/gpt-oss-120b"
+    "snapshot": "openai/gpt-oss-120b",
+    "context_window": 128000
   }
 ]
 ```
