@@ -35,6 +35,7 @@ declare namespace _ZoteroTypes {
       "deletionJobs": string;
       "skippedItems": string;
       "runConsistencyCheck": boolean;
+      "pendingVersionNotifications": string;
     };
   }
 }
