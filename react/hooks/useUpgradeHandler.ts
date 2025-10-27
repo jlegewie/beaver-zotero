@@ -64,10 +64,6 @@ export const useUpgradeHandler = () => {
         }
 
         pendingVersions.forEach((pendingVersion) => {
-            if (processedVersionsRef.current.has(pendingVersion)) {
-                return;
-            }
-
             const config = getVersionUpdateMessageConfig(pendingVersion);
             if (!config) {
                 logger(`useUpgradeHandler: No popup configuration found for version ${pendingVersion}. Removing pending entry.`, 2);
@@ -75,7 +71,12 @@ export const useUpgradeHandler = () => {
                 return;
             }
 
-            processedVersionsRef.current.add(pendingVersion);
+            if (processedVersionsRef.current.has(config.version)) {
+                removePendingVersionNotification(pendingVersion);
+                return;
+            }
+
+            processedVersionsRef.current.add(config.version);
             logger(`useUpgradeHandler: Displaying release notes popup for version ${config.version}.`, 3);
 
             addPopupMessage({
