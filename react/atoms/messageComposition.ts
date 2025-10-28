@@ -1,7 +1,10 @@
 import { atom } from "jotai";
+import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
+import { getItemValidationAtom } from './itemValidation';
+import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 
 
 /**
@@ -84,25 +87,29 @@ async function validateItemsInBackground(
 
         // Remove invalid items from currentMessageItemsAtom
         if (invalidItems.length > 0) {
+            // Remove invalid items from currentMessageItemsAtom
             const currentItems = get(currentMessageItemsAtom);
             const invalidKeys = new Set(invalidItems.map(({ item }) => item.key));
             const validItems = currentItems.filter((item: Zotero.Item) => !invalidKeys.has(item.key));
             set(currentMessageItemsAtom, validItems);
 
-            // Show error message
-            const message = invalidItems.length === 1
-                ? `Removed invalid item: ${invalidItems[0].validation?.reason || 'Unknown error'}`
-                : `Removed ${invalidItems.length} invalid items:\n${
-                    invalidItems.map(({ validation }) => 
-                        `• ${validation?.reason || 'Unknown error'}`
-                    ).join('\n')
-                }`;
+            // Show error message with custom content
+            const title = invalidItems.length === 1 
+                ? 'Item Removed' 
+                : `${invalidItems.length} Items Removed`;
+            
+            const invalidItemsData = invalidItems.map(({ item, validation }) => ({
+                item,
+                reason: validation?.reason || 'Unknown error'
+            }));
             
             set(addPopupMessageAtom, {
                 type: 'error',
-                title: 'Items Removed',
-                text: message,
-                expire: true
+                title,
+                customContent: createElement(InvalidItemsMessageContent, { 
+                    invalidItems: invalidItemsData 
+                }),
+                expire: false
             });
         }
     } catch (error: any) {
