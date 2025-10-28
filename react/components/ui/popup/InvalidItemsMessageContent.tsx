@@ -46,18 +46,18 @@ export const InvalidItemsMessageContent: React.FC<InvalidItemsMessageContentProp
                 const displayName = getDisplayName(item);
                 
                 return (
-                    <div key={item.key || index} className="display-flex flex-col gap-2">
+                    <div key={item.key || index} className="display-flex flex-col gap-1">
                         <div className="display-flex flex-row items-start gap-2">
                             {iconName && (
                                 <div className="flex-shrink-0 -mt-010 scale-95">
                                     <CSSItemTypeIcon itemType={iconName} />
                                 </div>
                             )}
-                            <div className="display-flex flex-col min-w-0 gap-1">
+                            {/* <div className="display-flex flex-col min-w-0 gap-1"> */}
                                 <div className="font-color-secondary text-md truncate">{displayName}</div>
-                                <div className="font-color-tertiary text-md">{reason}</div>
-                            </div>
+                            {/* </div> */}
                         </div>
+                        <div className="font-color-tertiary text-md ml-05">{reason}</div>
                     </div>
                 );
             })}
