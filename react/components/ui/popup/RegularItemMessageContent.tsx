@@ -52,23 +52,32 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
         <div className="display-flex flex-col gap-3">
             <div id="parent-item" className="display-flex flex-col gap-3">
                 <div className="display-flex flex-col font-color-secondary text-md gap-2">
-                    <div className="display-flex items-center font-color-secondary mb-1 mt-1">
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.ATTACHMENTS} 
-                            size={15} 
-                            color="--accent-green"
-                            className="mr-2"
-                        />
-                        <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} added</span>
-                        
-                        <span className="mx-1"></span>
-                        
-                        <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
-                        <span>{invalidAttachments.length} attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
-                    </div>
-                    {validAttachments === 0 && (
+                    {(validAttachments > 0 || invalidAttachments.length > 0) && (
+                        <div className="display-flex items-center font-color-secondary mb-1 mt-1">
+                            <ZoteroIcon 
+                                icon={ZOTERO_ICONS.ATTACHMENTS} 
+                                size={15} 
+                                color="--accent-green"
+                                className="mr-2"
+                            />
+                            <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} added</span>
+                            
+                            {invalidAttachments.length > 0 && (
+                                <span className="mx-1">
+                                    <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
+                                    <span>{invalidAttachments.length} attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
+                                </span>
+                            )}
+                        </div>
+                    )}
+                    {validAttachments === 0 && invalidAttachments.length > 0 && (
                         <div className="font-color-secondary text-md">
                             All attachments are invalid. Only item metadata (title, authors, etc.) will be shared with the model.
+                        </div>
+                    )}
+                    {validAttachments === 0 && invalidAttachments.length === 0 && (
+                        <div className="font-color-secondary text-md">
+                            No attachments added. Only item metadata (title, authors, etc.) will be shared with the model.
                         </div>
                     )}
                 </div>
