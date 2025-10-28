@@ -59,7 +59,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             color="--accent-green"
                             className="mr-2"
                         />
-                        <span>{validAttachments} Attachment{attachments.length !== 1 ? 's' : ''} added</span>
+                        <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} added</span>
                         
                         <span className="mx-1"></span>
                         
@@ -71,9 +71,6 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             All attachments are invalid. Only item metadata (title, authors, etc.) will be shared with the model.
                         </div>
                     )}
-                    <div className="font-color-secondary text-md">
-                        All attachments are invalid. Only item metadata (title, authors, etc.) will be shared with the model.
-                    </div>
                 </div>
                 {invalidAttachments.length > 0 && (
                     <Button
