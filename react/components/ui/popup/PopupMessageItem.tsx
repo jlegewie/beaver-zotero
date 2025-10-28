@@ -142,11 +142,11 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 {/* Content for info, warning, error */}
                 {['info', 'warning', 'error'].includes(message.type) && (
                     message.customContent ? (
-                        <div>
+                        <div className="w-full">
                             {message.customContent}
                         </div>
                     ) : (
-                        <div className='text-base font-color-tertiary' style={{ whiteSpace: 'pre-line' }}>
+                        <div className='text-base font-color-tertiary'>
                             {message.text}
                         </div>
                     )
