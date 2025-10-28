@@ -5,6 +5,7 @@ import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
+import { syncingItemFilter } from "../../src/utils/sync";
 
 
 /**
@@ -46,8 +47,12 @@ export const addItemsToCurrentMessageItemsAtom = atom(
         
         if (newItems.length === 0) return;
 
+        // Pre-filter items using sync filter to avoid unnecessary state change
+        // (validation still runs to show error message)
+        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i));
+
         // Add items immediately (optimistic update)
-        set(currentMessageItemsAtom, [...currentItems, ...newItems]);
+        set(currentMessageItemsAtom, [...currentItems, ...preValidatedItems]);
 
         // Validate items in background (non-blocking)
         // This will update itemValidationResultsAtom as validation progresses
