@@ -1,34 +1,26 @@
-import { attachmentsService, ValidationResponse } from './attachmentsService';
-import { fileUploader } from './FileUploader';
+import { attachmentsService } from './attachmentsService';
 import { isValidZoteroItem } from '../../react/utils/sourceUtils';
-import { getMimeType } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { planFeaturesAtom } from '../../react/atoms/profile';
 import { isAttachmentOnServer } from '../utils/webAPI';
 
 /**
- * Types of source validation
+ * Types of item validation
  */
 export enum ItemValidationType {
-    LOCAL_ONLY = 'local_only',          // only local validation
-    PROCESSED_FILE = 'processed_file',  // processed file suffices (file_exists OR processed passes)
-    FULL_FILE = 'full_file',            // requires full file (upload if missing)
-    CACHED = 'cached',                  // use any available cached result (FULL_FILE > PROCESSED_FILE > LOCAL_ONLY), fallback to LOCAL_ONLY
+    LOCAL_ONLY = 'local_only',   // only local validation (fast)
+    BACKEND = 'backend',         // check backend processed status
+    CACHED = 'cached',           // use cached result if available, fallback to LOCAL_ONLY
 }
 
 /**
- * Result of source validation
+ * Result of item validation
  */
 export interface ItemValidationResult {
     isValid: boolean;
     reason?: string;
-    validationType: ItemValidationType;
     backendChecked: boolean;
-    uploaded: boolean;
-    isValidating: boolean;
-    canUpload?: boolean;
-    requiresUpload?: boolean;
 }
 
 /**
@@ -49,7 +41,14 @@ export interface ItemValidationOptions {
 }
 
 /**
- * Manages item validation with backend integration and file upload capabilities
+ * Manages item validation with caching and deduplication
+ * 
+ * Purpose: Business logic layer for validation
+ * - Performs local and backend validation
+ * - Caches results with file hash validation
+ * - Deduplicates concurrent validation requests
+ * 
+ * Note: UI state (isValidating, etc.) is managed by atoms
  */
 class ItemValidationManager {
     private validationCache = new Map<string, ValidationCacheEntry>();
@@ -160,77 +159,39 @@ class ItemValidationManager {
 
     /**
      * Perform backend validation
+     * Checks if the item has been processed on the backend
      */
     private async performBackendValidation(
-        item: Zotero.Item, 
-        validationType: ItemValidationType,
+        item: Zotero.Item,
         fileHash: string
-    ): Promise<{ backendResponse: ValidationResponse; shouldUpload: boolean }> {
-        const requestUrl = validationType === ItemValidationType.FULL_FILE;
-        
+    ): Promise<{ isValid: boolean; reason?: string }> {
         try {
             const backendResponse = await attachmentsService.validateAttachment(
                 item.libraryID,
                 item.key,
                 fileHash,
-                requestUrl
+                false // don't request upload URL
             );
 
-            let shouldUpload = false;
-            
-            if (validationType === ItemValidationType.PROCESSED_FILE) {
-                // For processed file validation, we pass if file exists OR is processed
-                // No upload required
-            } else {
-                // For full validation, we need the file to exist
-                // If it doesn't exist but we have an upload URL, we should upload
-                shouldUpload = !backendResponse.file_exists && !!backendResponse.signed_upload_url;
-            }
+            // Item is valid if processed on backend
+            const isValid = backendResponse.processed;
+            const reason = isValid ? undefined : (backendResponse.details || 'File not processed');
 
-            return { backendResponse, shouldUpload };
+            return { isValid, reason };
         } catch (error: any) {
             logger(`ItemValidationManager: Backend validation failed for ${item.libraryID}-${item.key}: ${error.message}`, 2);
             throw new Error(`Backend validation failed: ${error.message}`);
         }
     }
 
-    /**
-     * Upload file using temporary upload
-     */
-    private async uploadFile(item: Zotero.Item, uploadUrl: string, storagePath: string, uploadMetadata: Record<string, string>): Promise<void> {
-        if (!item || !item.isAttachment()) {
-            throw new Error('Cannot upload non-attachment item');
-        }
-
-        const filePath = await item.getFilePathAsync();
-        if (!filePath) {
-            throw new Error('File path not available for upload');
-        }
-
-        const mimeType = await getMimeType(item, filePath);
-
-        logger(`ItemValidationManager: Uploading file for ${item.libraryID}-${item.key}`, 3);
-        
-        await fileUploader.uploadTemporaryFile(
-            filePath,
-            uploadUrl,
-            storagePath,
-            uploadMetadata.filehash,
-            mimeType,
-            uploadMetadata
-        );
-
-        logger(`ItemValidationManager: Successfully uploaded file for ${item.libraryID}-${item.key}`, 3);
-    }
 
     /**
      * Check for cached results in priority order for CACHED validation type
      */
     private async checkCachedResultsInPriority(item: Zotero.Item): Promise<ItemValidationResult | null> {
-        // Priority order: FULL_FILE -> PROCESSED_FILE -> LOCAL_ONLY
+        // Priority order: BACKEND -> LOCAL_ONLY
         const priorityOrder = [
-            ItemValidationType.FULL_FILE,
-            ItemValidationType.PROCESSED_FILE,
+            ItemValidationType.BACKEND,
             ItemValidationType.LOCAL_ONLY
         ];
 
@@ -250,11 +211,7 @@ class ItemValidationManager {
             
             if (cachedEntry && this.isCacheValid(cachedEntry, currentFileHash)) {
                 logger(`ItemValidationManager: Found cached result for ${item.libraryID}-${item.key} with type ${validationType}`, 4);
-                // Return the cached result but with the CACHED validation type
-                return {
-                    ...cachedEntry.result,
-                    validationType: ItemValidationType.CACHED
-                };
+                return cachedEntry.result;
             }
         }
 
@@ -285,7 +242,6 @@ class ItemValidationManager {
             });
         }
 
-        const enableUpload = validationType === ItemValidationType.FULL_FILE;
         const cacheKey = this.getCacheKey(item, validationType);
 
         // Clean cache periodically
@@ -306,18 +262,18 @@ class ItemValidationManager {
                 }
 
                 if (this.isCacheValid(cachedEntry, currentFileHash)) {
-                    // For cached results from backend validation, don't re-check local validation
-                    // as it may differ (file exists locally but not in backend)
-                    if (cachedEntry.result.validationType === ItemValidationType.LOCAL_ONLY) {
+                    // For local-only cached results, re-check to ensure still valid
+                    // Backend validation results are authoritative and don't need re-checking
+                    if (!cachedEntry.result.backendChecked) {
                         const localValidationResult = await this.performLocalValidation(item);
-                        if (localValidationResult.isValid == cachedEntry.result.isValid) {
+                        if (localValidationResult.isValid === cachedEntry.result.isValid) {
                             return cachedEntry.result;
                         }
+                        logger(`ItemValidationManager: Cached local validation changed for ${item.libraryID}-${item.key}`, 4);
                     } else {
                         // Backend validation results are authoritative
                         return cachedEntry.result;
                     }
-                    logger(`ItemValidationManager: Cached validation is different from local validation for ${item.libraryID}-${item.key}`, 4);
                 }
             }
         }
@@ -329,7 +285,7 @@ class ItemValidationManager {
         }
 
         // Start new validation
-        const validationPromise = this.performValidation(item, validationType, enableUpload);
+        const validationPromise = this.performValidation(item, validationType);
         this.pendingValidations.set(cacheKey, validationPromise);
 
         try {
@@ -362,29 +318,19 @@ class ItemValidationManager {
      */
     private async performValidation(
         item: Zotero.Item, 
-        validationType: ItemValidationType,
-        enableUpload: boolean
+        validationType: ItemValidationType
     ): Promise<ItemValidationResult> {
-        const baseResult: ItemValidationResult = {
-            isValid: false,
-            validationType,
-            backendChecked: false,
-            uploaded: false,
-            isValidating: true
-        };
-
         try {
             // ------ Step 1: Local validation ------
             logger(`ItemValidationManager: Starting local validation for ${item.libraryID}-${item.key}`, 4);
             const localValidation = await this.performLocalValidation(item);
             
-            // Return if local validation is invalid or validation type is local only
+            // Return if local validation fails or validation type is local only
             if (!localValidation.isValid || validationType === ItemValidationType.LOCAL_ONLY) {
                 return {
-                    ...baseResult,
                     isValid: localValidation.isValid,
                     reason: localValidation.reason,
-                    isValidating: false
+                    backendChecked: false
                 };
             }
 
@@ -393,9 +339,8 @@ class ItemValidationManager {
                 // TODO: This sets regular items to valid WITHOUT checking the attachments! Validate all attachments!?
                 // Non-attachments that pass local validation are considered valid
                 return {
-                    ...baseResult,
                     isValid: true,
-                    isValidating: false
+                    backendChecked: false
                 };
             }
 
@@ -405,91 +350,43 @@ class ItemValidationManager {
                 // Note: file hash can be undefined for missing files
                 fileHash = await item.attachmentHash || '';
             } catch (error: any) {
-                logger(`ItemValidationManager: Unable to get file details for ${item.libraryID}-${item.key}: ${error.message}`, 1);
+                logger(`ItemValidationManager: Unable to get file hash for ${item.libraryID}-${item.key}: ${error.message}`, 1);
                 return {
-                    ...baseResult,
                     isValid: false,
                     reason: 'Unable to get file details',
-                    isValidating: false
+                    backendChecked: false
                 };
             }
 
             // Perform backend validation
             logger(`ItemValidationManager: Starting backend validation for ${item.libraryID}-${item.key}`, 4);
-            const { backendResponse, shouldUpload } = await this.performBackendValidation(item, validationType, fileHash);
-
-            // Determine if valid based on validation type
-            let isValid = false;
-            let reason: string | undefined;
-            let requiresUpload = false;
-
-            if (validationType === ItemValidationType.PROCESSED_FILE) {
-                // Processed file: pass if file is processed
-                isValid = backendResponse.processed;
-                if (!isValid) {
-                    // TODO: "File not synced" response needs a better message. I think it means that the file exists 
-                    // in Zotero and should be synced (passes local validation) but doesn't exist in Beaver DB. Sync error?
-                    reason = backendResponse.details || 'File not available';
-                }
-            } else {
-                // Require file: require file to exist and be processed
-                isValid = backendResponse.file_exists && backendResponse.processed;
-                requiresUpload = shouldUpload;
-                if (!isValid && !backendResponse.processed) {
-                    reason = backendResponse.details || 'File not available';
-                } else if (!isValid && !requiresUpload) {
-                    reason = 'File upload failed';
-                } else if (!isValid && requiresUpload) {
-                    reason = 'File upload failed';
-                }
-            }
-
-            // ------ Step 3: Upload if needed and enabled (only if file is processed) ------
-            let uploaded = false;
-            if (requiresUpload && enableUpload && backendResponse.signed_upload_url && backendResponse.storage_path && backendResponse.processed) {
-                try {
-                    logger(`ItemValidationManager: Starting file upload for ${item.libraryID}-${item.key}`, 3);
-                    await this.uploadFile(item, backendResponse.signed_upload_url, backendResponse.storage_path, backendResponse.upload_metadata || {});
-                    uploaded = true;
-                    isValid = true;
-                    reason = undefined;
-                } catch (uploadError: any) {
-                    logger(`ItemValidationManager: Upload failed for ${item.libraryID}-${item.key}: ${uploadError.message}`, 1);
-                    reason = 'File upload failed';
-                }
-            }
+            const { isValid, reason } = await this.performBackendValidation(item, fileHash);
 
             return {
-                ...baseResult,
                 isValid,
                 reason,
-                backendChecked: true,
-                uploaded,
-                isValidating: false,
-                canUpload: !!backendResponse.signed_upload_url,
-                requiresUpload
+                backendChecked: true
             };
 
         } catch (error: any) {
             logger(`ItemValidationManager: Validation failed for ${item.libraryID}-${item.key}: ${error.message}`, 1);
             return {
-                ...baseResult,
                 isValid: false,
                 reason: `Validation error: ${error.message}`,
-                isValidating: false
+                backendChecked: false
             };
         }
     }
 
     /**
-     * Invalidate cache for a specific source
+     * Invalidate cache for a specific item
      */
     invalidateItem(item: Zotero.Item): void {
-        const processedFileKey = this.getCacheKey(item, ItemValidationType.PROCESSED_FILE);
-        const requireFileKey = this.getCacheKey(item, ItemValidationType.FULL_FILE);
+        const localKey = this.getCacheKey(item, ItemValidationType.LOCAL_ONLY);
+        const backendKey = this.getCacheKey(item, ItemValidationType.BACKEND);
         
-        this.validationCache.delete(processedFileKey);
-        this.validationCache.delete(requireFileKey);
+        this.validationCache.delete(localKey);
+        this.validationCache.delete(backendKey);
         
         logger(`ItemValidationManager: Invalidated cache for ${item.libraryID}-${item.key}`, 4);
     }
