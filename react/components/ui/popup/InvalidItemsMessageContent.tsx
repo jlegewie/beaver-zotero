@@ -53,11 +53,9 @@ export const InvalidItemsMessageContent: React.FC<InvalidItemsMessageContentProp
                                     <CSSItemTypeIcon itemType={iconName} />
                                 </div>
                             )}
-                            <div className="display-flex flex-col min-w-0">
+                            <div className="display-flex flex-col min-w-0 gap-1">
                                 <div className="font-color-secondary text-md truncate">{displayName}</div>
-                                <div className="font-color-tertiary text-md">
-                                    {reason}
-                                </div>
+                                <div className="font-color-tertiary text-md">{reason}</div>
                             </div>
                         </div>
                     </div>
