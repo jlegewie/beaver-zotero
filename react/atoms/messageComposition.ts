@@ -123,7 +123,8 @@ async function validateItemsInBackground(
                 customContent: createElement(InvalidItemsMessageContent, { 
                     invalidItems: invalidItemsData 
                 }),
-                expire: false
+                expire: true,
+                duration: 3000
             });
         }
 
@@ -134,37 +135,30 @@ async function validateItemsInBackground(
         const invalidItemIds = new Set(invalidItemsWithAttachments.map(({ item }) => item.id));
         const regularItems = items.filter((i) => i.isRegularItem() && !invalidItemIds.has(i.id));
         for (const item of regularItems) {
-            const showNoPDFAttachmentsWarning = !item.getAttachments().some((id: number) => Zotero.Items.get(id).isPDFAttachment());
-            const showInvalidAttachmentsWarning = item.getAttachments().some((id: number) => invalidItemIds.has(id));
 
-            if (showNoPDFAttachmentsWarning) {
-                
-                set(addPopupMessageAtom, {
-                    type: 'info',
-                    icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
-                    title: truncateText(item.getDisplayTitle(), 68),
-                    text: 'No PDF attachments found. Only item metadata (title, authors, etc.) will be shared with the model.',
-                    expire: false
-                });
-            } else if (showInvalidAttachmentsWarning) {
-                const invalidAttachments = item.getAttachments().filter((id: number) => invalidItemIds.has(id));
-                const invalidAttachmentsData = invalidAttachments.map((id: number) => ({
-                    item: Zotero.Items.get(id),
-                    reason: getValidation(Zotero.Items.get(id))?.reason || 'Unknown error'
-                }));
-                
-                set(addPopupMessageAtom, {
-                    type: 'info',
-                    icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
-                    title: truncateText(item.getDisplayTitle(), 68),
-                    customContent: createElement(RegularItemMessageContent, { 
-                        item: item,
-                        attachments: item.getAttachments().map((id: number) => Zotero.Items.get(id) as Zotero.Item),
-                        invalidAttachments: invalidAttachmentsData 
-                    }),
-                    expire: false
-                });
-            }
+            const invalidAttachments = item.getAttachments().filter((id: number) => invalidItemIds.has(id));
+            const invalidAttachmentsData = invalidAttachments.map((id: number) => ({
+                item: Zotero.Items.get(id),
+                reason: getValidation(Zotero.Items.get(id))?.reason || 'Unknown error'
+            }));
+
+            const showRegularItemPopup = (
+                !item.getAttachments().some((id: number) => Zotero.Items.get(id).isPDFAttachment()) ||
+                item.getAttachments().some((id: number) => invalidItemIds.has(id))
+            );
+            
+            set(addPopupMessageAtom, {
+                type: 'info',
+                icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
+                title: truncateText(item.getDisplayTitle(), 68),
+                customContent: createElement(RegularItemMessageContent, { 
+                    item: item,
+                    attachments: item.getAttachments().map((id: number) => Zotero.Items.get(id) as Zotero.Item),
+                    invalidAttachments: invalidAttachmentsData 
+                }),
+                expire: true,
+                duration: showRegularItemPopup ? 4000 : 3000
+            });
 
         }
 
