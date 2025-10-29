@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
 import { activePreviewAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
-import SourcePreviewContent from './SourcePreviewContent';
 import TextSelectionPreviewContent from './TextSelectionPreviewContent';
 import AnnotationPreviewContent from './AnnotationPreviewContent';
 import ItemPreviewContent from './ItemPreviewContent';
@@ -108,14 +107,12 @@ const PreviewContainer: React.FC = () => {
     // Determine which content component to render
     const renderPreviewContent = () => {
         switch (activePreview.type) {
-            case 'source':
-                return <SourcePreviewContent source={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'item':
                 return <ItemPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'textSelection':
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'annotation':
-                return <AnnotationPreviewContent attachment={activePreview.content} maxContentHeight={maxContentHeight} />;
+                return <AnnotationPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }

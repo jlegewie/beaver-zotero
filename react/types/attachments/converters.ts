@@ -1,12 +1,10 @@
-import { InputSource } from '../sources';
-import { getZoteroItem } from '../../utils/sourceUtils';
 import {
     MessageAttachment,
     SourceAttachment,
     AnnotationAttachment,
-    NoteAttachment,
     Annotation,
-    AnnotationPosition
+    AnnotationPosition,
+    ItemMetadataAttachment
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
 
@@ -41,55 +39,34 @@ export function toAnnotation(item: Zotero.Item): Annotation | null {
 }
 
 
-export async function toMessageAttachment(source: InputSource): Promise<MessageAttachment[]> {
-    // Get the Zotero item from the source
-    const item = getZoteroItem(source);
-    if(!item) return [];
-
+export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null {
     // Convert to MessageAttachment (backend models)
     const zoteroItemReference = {
-        library_id: source.libraryID,
-        zotero_key: source.itemKey
+        library_id: item.libraryID,
+        zotero_key: item.key
     } as ZoteroItemReference;
     
-    if(source.type === "regularItem" && item.isRegularItem()) {
-        return source.childItemKeys.map((key) => {
-            const item = Zotero.Items.getIDFromLibraryAndKey(source.libraryID, key)
-            if(!item) return null;
-            return {
-                type: "source",
-                include: "fulltext",
-                library_id: source.libraryID,
-                zotero_key: key,
-            } as SourceAttachment;
-        }).filter(Boolean) as SourceAttachment[];
-    } else if (source.type === "attachment" && item.isAttachment()) {
-        return [{
+    if(item.isRegularItem()) {
+        return {
+            type: "item",
+            ...zoteroItemReference
+        } as ItemMetadataAttachment;
+
+    } else if (item.isAttachment()) {
+        return {
             type: "source",
             include: "fulltext",
             ...zoteroItemReference
-        }] as SourceAttachment[];
-    } else if (source.type === "note" && item.isNote()) {
-        return [{
-            type: "note",
-            ...zoteroItemReference,
-            ...(source.parentKey && { parent_key: source.parentKey }),
-            note_content: item.getField("content"),
-            date_modified: item.getField("dateModified")
-        }] as NoteAttachment[];
-    } else if (source.type === "annotation" && item.isAnnotation()) {
-        return [{
+        } as SourceAttachment;
+
+    } else if (item.isAnnotation()) {
+        return {
             type: "annotation",
             ...zoteroItemReference,
             ...toAnnotation(item)
-        }] as AnnotationAttachment[];
-    } else if (source.type === "reader" && item.isAttachment()) {
-        return [{
-            ...zoteroItemReference,
-            type: "source",
-            include: "fulltext"
-        }] as SourceAttachment[];
+        } as AnnotationAttachment;
+
     } else {
-        return [];
+        return null;
     }
 }

@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { userAttachmentKeysAtom } from "./threads";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom } from "../utils/popupMessageUtils";
@@ -6,6 +7,7 @@ import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { syncingItemFilter } from "../../src/utils/sync";
+import { getCurrentReader } from "../utils/readerUtils";
 
 
 /**
@@ -13,6 +15,45 @@ import { syncingItemFilter } from "../../src/utils/sync";
 * Items that are currently being added to the message
 */
 export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
+
+/**
+* Current reader attachment
+*/
+export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);
+
+/*
+* Current reader attachment key
+*/
+export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
+    const item = get(currentReaderAttachmentAtom);
+    return item?.key || null;
+});
+
+/**
+* Count of input attachments
+* 
+* Counts the number of attachments in the current sources and reader attachment.
+* The reader attachment is only counted if it's not already in the user-added sources.
+* 
+*/
+export const inputAttachmentCountAtom = atom<number>((get) => {
+    // Input attachments
+    const itemKeys = get(currentMessageItemsAtom)
+        .filter((item => item.isRegularItem() || item.isAttachment()))
+        .map((item) => item.key);
+    // Reader attachment
+    const readerAttachmentKey = get(currentReaderAttachmentKeyAtom);
+    if (readerAttachmentKey) {
+        itemKeys.push(readerAttachmentKey);
+    }
+    // Exclude user-added sources already in thread
+    const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
+    const filteredInputAttachmentKeys = itemKeys.filter((key) => !userAddedAttachmentKeys.includes(key));
+    // Return total of attachments
+    return [...new Set(filteredInputAttachmentKeys)].length;
+});
+
+
 
 /**
 * Remove item from currentMessageItemsAtom
@@ -156,3 +197,37 @@ async function validateItemsInBackground(
         }
 }
 
+/**
+* Update sources based on Zotero selection
+*/
+export const updateMessageItemsFromZoteroSelectionAtom = atom(
+    null,
+    async (get, set, pinned: boolean = false) => {
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        await set(addItemsToCurrentMessageItemsAtom, items);
+    }
+);
+
+
+/**
+* Update current reader attachment
+*/
+export const updateReaderAttachmentAtom = atom(
+    null,
+    async (_, set, reader?: any) => {
+        // also gets the current reader item (parent item)
+        // Zotero.getActiveZoteroPane().getSelectedItems()
+        // Get current reader
+        reader = reader || getCurrentReader();
+        if (!reader) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        // Get reader item
+        const item = await Zotero.Items.getAsync(reader.itemID);
+        if (item) {
+            logger(`Updating reader attachment to ${item.key}`);
+            set(currentReaderAttachmentAtom, item);
+        }
+    }
+);

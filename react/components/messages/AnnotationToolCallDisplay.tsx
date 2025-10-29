@@ -25,7 +25,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { toolAnnotationsService } from '../../../src/services/toolAnnotationsService';
 

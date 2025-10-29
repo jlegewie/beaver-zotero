@@ -1,16 +1,8 @@
 import React from 'react';
-import { useMemo, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import { SourceButton } from "../sources/SourceButton";
+import { useRef } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { userAttachmentsAtom } from '../../atoms/threads';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
-import { InputSource } from '../../types/sources';
-import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
-import { AnnotationButton } from '../input/AnnotationButton';
-import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -19,13 +11,7 @@ interface UserMessageDisplayProps {
 const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     message
 }) => {
-    const userAttachments = useAtomValue(userAttachmentsAtom);
-    const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-
-    const messageSources: InputSource[] = useMemo(() => {
-        return organizeSourcesByRegularItems(userAttachments.filter(s => s.messageId === message.id));
-    }, [userAttachments, currentReaderAttachmentKey]);
 
     const {
         isMenuOpen: isSelectionMenuOpen, 
@@ -39,7 +25,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         <div id={`message-${message.id}`} className="px-3 py-1">
             <div className="user-message-display">
                 {/* Message sources */}
-                {messageSources.length > 0 && (
+                {/* {messageSources.length > 0 && (
                     <div className="display-flex flex-wrap gap-3 mb-2">
                         {messageSources.map((source, index) => (
                             source.type === "annotation" ? (
@@ -58,7 +44,7 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
                             )
                         ))}
                     </div>
-                )}
+                )} */}
                 
 
                 {/* Message content */}

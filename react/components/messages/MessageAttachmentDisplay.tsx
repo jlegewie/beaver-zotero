@@ -1,13 +1,13 @@
 import React from 'react'
-import { SourceButton } from '../sources/SourceButton';
-import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, currentLibraryIdsAtom } from '../../atoms/input';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { readerTextSelectionAtom, currentLibraryIdsAtom } from '../../atoms/input';
+import { currentReaderAttachmentAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
-import { AnnotationButton } from '../input/AnnotationButton';
-import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 import { LibraryButton } from '../library/LibraryButton';
+import { MessageItemButton } from '../input/MessageItemButton';
+import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -22,10 +22,10 @@ const MessageAttachmentDisplay = ({
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLTextAreaElement>;
 }) => {
-    const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
+    const [currentMessageItems, setCurrentMessageItems] = useAtom<Zotero.Item[]>(currentMessageItemsAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
@@ -34,8 +34,8 @@ const MessageAttachmentDisplay = ({
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
-                // showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentSources.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
+                // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -67,14 +67,11 @@ const MessageAttachmentDisplay = ({
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
-                <SourceButton
-                    source={currentReaderAttachment}
-                    validationType={SourceValidationType.FULL_FILE}
-                />
+                <MessageItemButton item={currentReaderAttachment} canEdit={false} isReaderAttachment={true} />
             )}
 
             {/* Current attachments */}
-            {currentSources
+            {/* {currentSources
                 .filter((attachment) => !currentReaderAttachment || attachment.itemKey !== currentReaderAttachment.itemKey)
                 .map((source, index) => (
                     source.type === "annotation" ? (
@@ -89,7 +86,17 @@ const MessageAttachmentDisplay = ({
                         />
                     )
                 ))
-            }
+            } */}
+
+            {/* Current message items */}
+            {currentMessageItems.filter((item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key).map((item, index) => (
+                <MessageItemButton
+                    key={index} item={item}
+                    onRemove={(item) => {
+                        setCurrentMessageItems(currentMessageItems.filter((i) => i.key !== item.key));
+                    }}
+                />
+            ))}
 
             {/* Current text selection */}
             {readerTextSelection && (

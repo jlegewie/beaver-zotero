@@ -3,11 +3,11 @@ import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../ic
 import { useAtomValue } from 'jotai';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
-import { getDisplayNameFromItem, createSourceFromAttachmentOrNoteOrAnnotation } from '../../utils/sourceUtils';
+import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { navigateToAnnotation } from '../../utils/readerUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 
 const MAX_ITEM_TEXT_LENGTH = 20;
@@ -19,7 +19,7 @@ const ANNOTATION_TEXT_BY_TYPE = {
     image: 'Area',
 }
 
-const ANNOTATION_ICON_BY_TYPE = {
+export const ANNOTATION_ICON_BY_TYPE = {
     highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
     underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
     note: ZOTERO_ICONS.ANNOTATE_NOTE,
@@ -32,6 +32,7 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
+    isReaderAttachment?: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
+            isReaderAttachment = false,
             ...rest
         } = props;
 
@@ -62,7 +64,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const validation = getValidation(item);
 
         // Use the custom hook for hover preview logic
-        // For annotations, use 'annotation' type preview with proper InputSource
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
             isAnnotation 
                 ? { type: 'annotation', content: item }
@@ -188,7 +189,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             >
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
-                    {displayName || '...'}
+                    {isReaderAttachment ? 'Current File' : displayName || '...'}
                 </span>
                 
                 {/* Show arrow icon for annotations not in current reader */}

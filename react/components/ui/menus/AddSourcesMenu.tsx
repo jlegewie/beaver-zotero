@@ -4,7 +4,8 @@ import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon 
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { inputAttachmentCountAtom, currentLibraryIdsAtom } from '../../../atoms/input';
+import { currentLibraryIdsAtom } from '../../../atoms/input';
+import { inputAttachmentCountAtom } from '../../../atoms/messageComposition';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';

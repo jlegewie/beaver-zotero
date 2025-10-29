@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, currentReaderAttachmentAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroItemsAtom, currentSourcesAtom } from '../atoms/input';
+import { readerTextSelectionAtom } from '../atoms/input';
+import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
@@ -24,8 +25,8 @@ export function useReaderTabSelection() {
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
-    const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
-    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
+    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
+    const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -203,7 +204,7 @@ export function useReaderTabSelection() {
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                         if (store.get(allAnnotationsAtom).some((a) => a.zotero_key === item.key)) return;
                         if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
-                        await updateSourcesFromZoteroItems([item], true);
+                        await addItemToCurrentMessageItems(item);
                     }
                     // Delete events
                     if (event === 'delete') {
@@ -211,8 +212,8 @@ export function useReaderTabSelection() {
                             if (extraData && extraData[id]) {
                                 const { libraryID, key } = extraData[id];
                                 if (libraryID && key) {
-                                    setCurrentSourcesAtom((prev) =>
-                                        prev.filter((s) => !(s.libraryID === libraryID && s.itemKey === key)
+                                    setCurrentMessageItems((prev) =>
+                                        prev.filter((i) => !(i.libraryID === libraryID && i.key === key)
                                     ));
                                 }
                             }

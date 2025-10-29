@@ -1,7 +1,7 @@
 import { atom } from "jotai";
-import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
-import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
+import { currentMessageContentAtom } from "./input";
+import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
@@ -132,16 +132,16 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
+        set(currentMessageItemsAtom, []);
         set(citationMetadataAtom, []);
         set(toolCallAnnotationsAtom, new Map());
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
-        set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
-        // Update sources from Zotero selection or reader
+        // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
         if (isLibraryTab && addSelectedItemsOnNewThread) {
-            set(updateSourcesFromZoteroSelectionAtom);
+            set(updateMessageItemsFromZoteroSelectionAtom);
         }
         if (!isLibraryTab) {
             await set(updateReaderAttachmentAtom);
@@ -243,7 +243,7 @@ export const loadThreadAtom = atom(
             set(isLoadingThreadAtom, false);
         }
         // Clear sources for now
-        set(currentSourcesAtom, []);
+        set(currentMessageItemsAtom, []);
         set(currentMessageContentAtom, '');
     }
 );

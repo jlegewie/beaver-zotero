@@ -311,7 +311,7 @@ export const addRegularItemsSummaryPopupAtom = atom(
             customContent: createElement(RegularItemsSummaryContent, { 
                 items: itemsSummary 
             }),
-            expire: false,
+            expire: true,
             duration: hasIssues ? 4000 : 3000
         });
     }

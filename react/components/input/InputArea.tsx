@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { StopIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
-import { currentSourcesAtom, currentMessageContentAtom } from '../../atoms/input';
+import { currentMessageContentAtom } from '../../atoms/input';
+import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { generateResponseAtom } from '../../atoms/generateMessages';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
@@ -21,7 +22,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const currentSources = useAtomValue(currentSourcesAtom);
+    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
     const isStreaming = useAtomValue(isStreamingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
@@ -59,7 +60,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         // Generate response
         generateResponse({
             content: query,
-            sources: currentSources
+            items: currentMessageItems
         });
 
         logger(`Chat completion: ${query}`);
@@ -104,8 +105,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         const customPrompts = getCustomPromptsFromPreferences();
         if (!customPrompts[i - 1]) return;
         const customPrompt = customPrompts[i - 1];
-        logger(`Custom prompt: ${i} ${customPrompt.text} ${currentSources.length}`);
-        if (customPrompt && (!customPrompt.requiresAttachment || currentSources.length > 0)) {
+        logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
+        if (customPrompt && (!customPrompt.requiresAttachment || currentMessageItems.length > 0)) {
             chatCompletion(customPrompt.text);
         }
     }

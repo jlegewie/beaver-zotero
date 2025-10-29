@@ -23,9 +23,9 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { InputSource } from '../types/sources';
-import { createSourceFromAttachmentOrNoteOrAnnotation, getChildItems, isSourceValid } from '../utils/sourceUtils';
-import { resetCurrentSourcesAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentSourcesAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentReaderAttachmentKeyAtom } from './input';
+import { currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
+import { currentMessageItemsAtom } from './messageComposition';
+import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
@@ -40,125 +40,26 @@ import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
-import { sourceValidationManager, SourceValidationType } from '../../src/services/sourceValidationManager';
 import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
-/**
- * Flattens sources from regular items, attachments, notes, and annotations.
- * 
- * @param inputSources - Array of InputSource objects to be flattened
- * @returns Array of InputSource objects
- */
-function flattenSources(
-    inputSources: InputSource[]
-): InputSource[] {
-    // Flatten regular item attachments
-    const sourcesFromRegularItems = inputSources
-        .filter((s) => s.type === "regularItem")
-        .flatMap((s) => getChildItems(s).map((item) => {
-            const source = createSourceFromAttachmentOrNoteOrAnnotation(item);
-            return {...source, timestamp: s.timestamp};
-        })) as InputSource[];
-    
-    // Source, note, and annotation attachments
-    const otherSources = (inputSources
-        .filter((s) => s.type === "attachment" || s.type === "note"  || s.type === "annotation")) as InputSource[];
-    
-    // Return flattened sources
-    return [...sourcesFromRegularItems, ...otherSources];
-}
-
-/**
- * Validates sources using the validation manager and removes invalid ones.
- * Uses cached validation results when available to avoid redundant backend calls.
- * 
- * @param sources - Array of InputSource objects to be validated
- * @returns An object containing arrays of valid and invalid sources
- */
-async function validateSources(
-    sources: InputSource[]
-): Promise<{ validSources: InputSource[], invalidSources: { source: InputSource, reason: string }[] }> {
-    logger(`validateSources: Validating ${sources.length} sources before sending message`, 3);
-    
-    const validations = await Promise.all(sources.map(async (source) => {
-        try {
-            // Use cached validation to check if source is usable
-            const result = await sourceValidationManager.validateSource(source, {
-                validationType: SourceValidationType.CACHED,
-                forceRefresh: false
-            });
-
-            // If still validating, we'll consider it valid to avoid delays
-            const isValid = result.isValid || result.isValidating;
-            
-            if (!isValid && result.reason) {
-                logger(`validateSources: Source ${source.itemKey} is invalid: ${result.reason}`, 2);
-            }
-            
-            return { source, isValid, reason: result.reason };
-        } catch (error: any) {
-            logger(`validateSources: Error validating source ${source.itemKey}: ${error.message}`, 1);
-            // Fall back to local validation if manager fails
-            const fallbackResult = await isSourceValid(source);
-            return { source, isValid: fallbackResult.valid, reason: fallbackResult.error };
-        }
-    }));
-
-    const validSources = validations
-        .filter(v => v.isValid)
-        .map(v => v.source);
-    
-    const invalidSources = validations
-        .filter(v => !v.isValid)
-        .map(v => ({ source: v.source, reason: v.reason || 'Unknown reason' }));
-
-    const invalidCount = invalidSources.length;
-    if (invalidCount > 0) {
-        logger(`validateSources: Filtered out ${invalidCount} invalid sources`, 2);
-    }
-
-    return { 
-        validSources: validSources.sort((a, b) => a.timestamp - b.timestamp),
-        invalidSources
-    };
-}
-
 
 export function getCurrentReaderState(): ReaderState | null {
     // Get current reader attachment
-    const readerSource = store.get(currentReaderAttachmentAtom);
-    if (!readerSource || readerSource.type !== "reader") {
-        return null;
-    }
+    const readerAttachment = store.get(currentReaderAttachmentAtom);
+    if (!readerAttachment) return null;
 
     // Text selection
     const currentTextSelection = store.get(readerTextSelectionAtom);
     
     // Return ReaderState
     return {
-        library_id: readerSource.libraryID,
-        zotero_key: readerSource.itemKey,
+        library_id: readerAttachment.libraryID,
+        zotero_key: readerAttachment.key,
         current_page: getCurrentPage() || null,
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
-}
-
-
-export async function getCurrentMessageAttachments(sources?: InputSource[]): Promise<MessageAttachment[]> {
-    // Get attachments
-    sources = sources || store.get(currentSourcesAtom);
-    
-    // Message attachments
-    const attachments: MessageAttachment[] = [];
-    
-    // Source attachments
-    for(const source of sources) {
-        if (source.type === "reader") continue;
-        attachments.push(...await toMessageAttachment(source));
-    }
-    return attachments;
 }
 
 /**
@@ -229,7 +130,7 @@ export const generateResponseAtom = atom(
     null,
     async (get, set, payload: {
         content: string;
-        sources: InputSource[];
+        items: Zotero.Item[];
     }) => {
         set(isChatRequestPendingAtom, true);
 
@@ -267,89 +168,33 @@ export const generateResponseAtom = atom(
         set(threadMessagesAtom, newMessages);
         set(currentAssistantMessageIdAtom, assistantMsg.id);
 
-        // Prepare sources
-        const flattenedSources = flattenSources(payload.sources);
-        
-        // Get current reader source and include it in validation
-        const readerSource = get(currentReaderAttachmentAtom);
-        const sourcesToValidate = readerSource ? [...flattenedSources, readerSource] : flattenedSources;
-        
-        const { validSources: validatedSources, invalidSources } = await validateSources(sourcesToValidate);
-
-        // Separate reader source from other validated sources
-        const validReaderSource = validatedSources.find(s => s.type === "reader");
-        const validNonReaderSources = validatedSources.filter(s => s.type !== "reader");
-
-        // If some sources were removed, add a warning
-        if (invalidSources.length > 0) {
-            logger(`generateResponseAtom: Filtered out ${invalidSources.length} invalid sources`, 2);
-            
-            let message: string;
-            if (invalidSources.length === 1) {
-                message = `1 source was removed: ${invalidSources[0].reason}`;
-            } else {
-                const reasons = new Set(invalidSources.map(s => s.reason));
-                if (reasons.size === 1) {
-                    const reason = invalidSources[0].reason;
-                    message = `${invalidSources.length} sources were removed: ${reason}`;
-                } else {
-                    // Group sources by reason and show counts
-                    const reasonCounts = new Map<string, number>();
-                    invalidSources.forEach(s => {
-                        reasonCounts.set(s.reason, (reasonCounts.get(s.reason) || 0) + 1);
-                    });
-                    
-                    const reasonLines = Array.from(reasonCounts.entries())
-                        .map(([reason, count]) => `  - ${count} source${count > 1 ? 's' : ''}: ${reason}`)
-                        .join('\n');
-                    
-                    message = `${invalidSources.length} sources were removed:\n${reasonLines}`;
-                }
-            }
-            
-            const warning = {
-                id: uuidv4(), 
-                type: "missing_attachments", 
-                message
-            } as WarningMessage;
-            
-            // warning.attachments = invalidSources.map(s => ({
-            //     library_id: s.source.libraryID, 
-            //     zotero_key: s.source.itemKey
-            // }) as ZoteroItemReference);
-            
-            // Add the warning message for the assistant message
-            set(setMessageStatusAtom, {
-                id: assistantMsg.id,
-                warnings: [warning]
-            });
-        }
-
         // Convert sources to MessageAttachments and process image annotations
-        const messageAttachments = await Promise.all(
-            validNonReaderSources
-                .map(async (s) => await toMessageAttachment(s)))
-                .then(attachments => processImageAnnotations([...attachments.flat()])
-        );
+        const messageAttachments: MessageAttachment[] =
+            payload.items
+                .map(item => toMessageAttachment(item))
+                .filter(attachment => attachment !== null);
+        const processedAttachments: MessageAttachment[] = await processImageAnnotations(messageAttachments);
 
         // Get current reader state and add to message attachments if valid and not already in the thread
+        const readerAttachment = get(currentReaderAttachmentAtom);
         let readerState: ReaderState | null = null;
-        if (validReaderSource) {
+        if (readerAttachment) {
             // Always get reader state with page and text selection when reader source is valid
             readerState = getCurrentReaderState();
-            
-            const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
-            if (!currentUserAttachmentKeys.includes(`${validReaderSource.libraryID}-${validReaderSource.itemKey}`)) {
-                logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${validReaderSource.libraryID}, zotero_key: ${validReaderSource.itemKey})`);
-                
-                // Add as SourceAttachment (only if not already in thread)
-                // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
-                messageAttachments.push({
-                    library_id: validReaderSource.libraryID,
-                    zotero_key: validReaderSource.itemKey,
-                    type: "source",
-                    include: "fulltext"
-                } as SourceAttachment);
+            if (readerState) {
+                const currentUserAttachmentKeys = get(userAttachmentsAtom).map(getUniqueKey);
+                if (!currentUserAttachmentKeys.includes(`${readerAttachment.libraryID}-${readerAttachment.key}`)) {
+                    logger(`generateResponseAtom: Adding reader state to message attachments (library_id: ${readerAttachment.libraryID}, zotero_key: ${readerAttachment.key})`);
+                    
+                    // Add as SourceAttachment (only if not already in thread)
+                    // TODO: we could use SourceAttachment with include "page_images" here instead of including the page image via the reader state
+                    messageAttachments.push({
+                        library_id: readerAttachment.libraryID,
+                        zotero_key: readerAttachment.key,
+                        type: "source",
+                        include: "fulltext"
+                    } as SourceAttachment);
+                }
             }
         }
 
@@ -364,8 +209,8 @@ export const generateResponseAtom = atom(
         });
         
         // Reset user message and source after adding to message
-        set(resetCurrentSourcesAtom);
         set(currentMessageContentAtom, '');
+        set(currentMessageItemsAtom, []);
         
         // Execute chat completion
         await _processChatCompletionViaBackend(

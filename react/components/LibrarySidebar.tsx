@@ -1,29 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from "jotai";
 import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
-import { useZoteroSelection } from '../hooks/useZoteroSelection';
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
-import { resetCurrentSourcesAtom, updateSourcesFromZoteroSelectionAtom } from '../atoms/input';
 import { getPref } from '../../src/utils/prefs';
+import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
-
-    // Update sources from Zotero selection
-    if(getPref("updateSourcesFromZoteroSelection")) {
-        // Event handler for Zotero selection
-        useZoteroSelection();
-    } else {
-        // Only update sources based on current selection
-        const resetCurrentSources = useSetAtom(resetCurrentSourcesAtom);
-        const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
-        resetCurrentSources();
-        const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-        if (addSelectedItemsOnOpen) {
-            updateSourcesFromZoteroSelection(true);
-        }
-    }
 
     // Watch for pane collapse
     useObservePaneCollapse("library");
@@ -36,6 +20,18 @@ const LibrarySidebarContent = () => {
 const LibrarySidebar = () => {
     const isVisible = useAtomValue(isSidebarVisibleAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
+
+    // Update sources from Zotero selection when opening the library sidebar
+    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
+    const updateMessageItemsFromZoteroSelection = useSetAtom(updateMessageItemsFromZoteroSelectionAtom);
+    useEffect(() => {
+        if (!isVisible) return;
+        setCurrentMessageItems([]);
+        const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
+        if (addSelectedItemsOnOpen) {
+            updateMessageItemsFromZoteroSelection(true);
+        }
+    }, [isVisible]);
 
     // Return the sidebar if it is visible and the currently selected tab is a library tab
     return isVisible && isLibraryTab ? <LibrarySidebarContent /> : null;
