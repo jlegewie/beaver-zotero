@@ -218,7 +218,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // Is library synced?
     const libraryIds = store.get(syncLibraryIdsAtom);
-    if (!libraryIds.includes(item.libraryID)) return {valid: false, error: "This item's library is not synced with Beaver."};
+    if (!libraryIds.includes(item.libraryID)) return {valid: false, error: "This library is not synced with Beaver."};
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
