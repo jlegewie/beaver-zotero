@@ -10,7 +10,8 @@ import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMes
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
 import { truncateText } from '../utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
-import type { ItemValidationResult } from '../../src/services/itemValidationManager';
+import type { ItemValidationState } from '../atoms/itemValidation';
+import { buildMessageItemSummary } from '../hooks/useMessageItemSummary';
 
 /**
  * Adds a new popup message to the list.
@@ -253,27 +254,9 @@ export const addRegularItemPopupAtom = atom(
         getValidation 
     }: { 
         item: Zotero.Item; 
-        getValidation: (item: Zotero.Item) => ItemValidationResult | null;
+        getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
-        // Get all attachments and their validation status
-        const attachmentItems = item.getAttachments().map((id: number) => Zotero.Items.get(id));
-        const invalidAttachments = attachmentItems
-            .map(attachment => ({
-                item: attachment,
-                validation: getValidation(attachment)
-            }))
-            .filter(({ validation }) => validation && !validation.isValid)
-            .map(({ item, validation }) => ({
-                item,
-                reason: validation?.reason || 'Unknown error'
-            }));
-
-        // Determine if there are any issues (no PDF attachments OR invalid attachments)
-        // This affects the popup duration (longer if there are issues)
-        const hasPDFAttachment = attachmentItems.some((attachment: Zotero.Item) => 
-            attachment.isPDFAttachment && attachment.isPDFAttachment()
-        );
-        const hasIssues = !hasPDFAttachment || invalidAttachments.length > 0;
+        const summary = buildMessageItemSummary(item, getValidation);
 
         // Always show popup for regular items
         set(addPopupMessageAtom, {
@@ -281,12 +264,11 @@ export const addRegularItemPopupAtom = atom(
             icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
             title: truncateText(getDisplayNameFromItem(item), 68),
             customContent: createElement(RegularItemMessageContent, { 
-                item: item,
-                attachments: attachmentItems,
-                invalidAttachments: invalidAttachments 
+                item,
+                summary
             }),
             expire: true,
-            duration: hasIssues ? 4000 : 3000
+            duration: summary.hasIssues ? 4000 : 3000
         });
     }
 );
@@ -304,22 +286,16 @@ export const addRegularItemsSummaryPopupAtom = atom(
         getValidation 
     }: { 
         items: Zotero.Item[]; 
-        getValidation: (item: Zotero.Item) => ItemValidationResult | null;
+        getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
         // Build summary data for each item
         const itemsSummary = items.map(item => {
-            const attachmentItems = item.getAttachments().map((id: number) => Zotero.Items.get(id));
-            const invalidAttachments = attachmentItems
-                .map(attachment => ({
-                    item: attachment,
-                    validation: getValidation(attachment)
-                }))
-                .filter(({ validation }) => validation && !validation.isValid);
+            const summary = buildMessageItemSummary(item, getValidation);
             
             return {
                 item,
-                totalAttachments: attachmentItems.length - invalidAttachments.length,
-                invalidAttachments: invalidAttachments.length
+                totalAttachments: summary.validAttachmentCount,
+                invalidAttachments: summary.invalidAttachmentCount
             };
         });
 

@@ -3,29 +3,27 @@ import { truncateText } from '../../../utils/stringUtils';
 import { CSSIcon, CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import Button from '../Button';
-
-interface InvalidItemInfo {
-    item: Zotero.Item;
-    reason?: string;
-}
+import { MessageItemSummary, useMessageItemSummary } from '../../../hooks/useMessageItemSummary';
 
 interface RegularItemMessageContentProps {
     item: Zotero.Item;
-    attachments: Zotero.Item[];
-    invalidAttachments: InvalidItemInfo[];
+    summary?: MessageItemSummary | null;
 }
 
 /**
  * Custom popup content for displaying invalid items that were removed
  * Shows item icon, display name, and reason for removal
  */
-export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps> = ({ item, attachments, invalidAttachments }) => {
+export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps> = ({ item, summary: summaryOverride }) => {
     const [validAttachmentsVisible, setValidAttachmentsVisible] = useState<boolean>(false);
     const [invalidAttachmentsVisible, setInvalidAttachmentsVisible] = useState<boolean>(false);
 
-    const validAttachmentsCount = attachments.length - invalidAttachments.length;
-    const invalidAttachmentKeys = new Set(invalidAttachments.map(({ item }) => item.key));
-    const validAttachmentsList = attachments.filter(att => !invalidAttachmentKeys.has(att.key));
+    const computedSummary = useMessageItemSummary(item);
+    const summary = summaryOverride ?? computedSummary;
+
+    const validAttachmentsCount = summary?.validAttachmentCount ?? 0;
+    const invalidAttachments = summary?.invalidAttachments ?? [];
+    const validAttachmentsList = summary?.validAttachments ?? [];
 
     const toggleValidAttachments = () => {
         setValidAttachmentsVisible((prev: boolean) => !prev);
@@ -45,14 +43,6 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
             return name;
         } catch (error) {
             return 'Unknown Item';
-        }
-    };
-
-    const getIconName = (item: Zotero.Item): React.ReactNode | null => {
-        try {
-            return item.getItemTypeIconName();
-        } catch (error) {
-            return null;
         }
     };
 
@@ -139,4 +129,3 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
         </div>
     );
 };
-
