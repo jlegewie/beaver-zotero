@@ -19,9 +19,16 @@ interface RegularItemMessageContentProps {
  * Shows item icon, display name, and reason for removal
  */
 export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps> = ({ item, attachments, invalidAttachments }) => {
+    const [validAttachmentsVisible, setValidAttachmentsVisible] = useState<boolean>(false);
     const [invalidAttachmentsVisible, setInvalidAttachmentsVisible] = useState<boolean>(false);
 
-    const validAttachments = attachments.length - invalidAttachments.length;
+    const validAttachmentsCount = attachments.length - invalidAttachments.length;
+    const invalidAttachmentKeys = new Set(invalidAttachments.map(({ item }) => item.key));
+    const validAttachmentsList = attachments.filter(att => !invalidAttachmentKeys.has(att.key));
+
+    const toggleValidAttachments = () => {
+        setValidAttachmentsVisible((prev: boolean) => !prev);
+    };
 
     const toggleInvalidAttachments = () => {
         setInvalidAttachmentsVisible((prev: boolean) => !prev);
@@ -40,7 +47,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
         }
     };
 
-    const getIconName = (item: Zotero.Item): string | null => {
+    const getIconName = (item: Zotero.Item): React.ReactNode | null => {
         try {
             return item.getItemTypeIconName();
         } catch (error) {
@@ -49,70 +56,84 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
     };
 
     return (
-        <div className="display-flex flex-col gap-3">
-            <div id="parent-item" className="display-flex flex-col gap-3">
-                <div className="display-flex flex-col font-color-secondary text-md gap-2">
-                    {(validAttachments > 0 || invalidAttachments.length > 0) && (
-                        <div className="display-flex items-center font-color-secondary mb-1 mt-1">
-                            <ZoteroIcon 
-                                icon={ZOTERO_ICONS.ATTACHMENTS} 
-                                size={15} 
-                                color="--accent-green"
-                                className="mr-2"
-                            />
-                            <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} available</span>
-                            
-                            {invalidAttachments.length > 0 && (
-                                <span className="mx-1">
-                                    <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
-                                    <span>{invalidAttachments.length} attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
-                                </span>
-                            )}
-                        </div>
-                    )}
-                    {validAttachments === 0 && invalidAttachments.length > 0 && (
-                        <div className="font-color-secondary text-md">
-                            All attachments are invalid. Only item metadata (title, authors, etc.) will be shared with the model.
-                        </div>
-                    )}
-                    {validAttachments === 0 && invalidAttachments.length === 0 && (
-                        <div className="font-color-secondary text-md">
-                            No attachments added. Only item metadata (title, authors, etc.) will be shared with the model.
-                        </div>
-                    )}
-                </div>
-                {invalidAttachments.length > 0 && (
-                    <Button
-                        variant="ghost-secondary"
-                        onClick={toggleInvalidAttachments}
-                        icon={invalidAttachmentsVisible ? ArrowDownIcon : ArrowRightIcon}
-                        iconClassName="mr-0 scale-12 -ml-1"
-                    >
-                        <span>
-                            Show skipped attachment{invalidAttachments.length === 1 ? '' : 's'}
-                        </span>
-                    </Button>
-                )}
-                {invalidAttachmentsVisible && invalidAttachments.map(({ item, reason }, index) => {
-                    const displayName = getDisplayName(item);
+        <div className="display-flex flex-col gap-3 -ml-1">
+            <div className="display-flex flex-row items-center gap-2 ml-15">
+                <div className="font-color-secondary text-md">{item.getDisplayTitle()}</div>
+            </div>
+            <div id="parent-item" className="display-flex flex-col gap-2">
+                {/* Valid Attachments Section */}
+                <Button
+                    variant="ghost-secondary"
+                    onClick={toggleValidAttachments}
+                    rightIcon={validAttachmentsVisible ? ArrowDownIcon : validAttachmentsCount === 0 ? undefined : ArrowRightIcon}
+                    iconClassName="scale-12 -ml-1"
+                    disabled={validAttachmentsCount === 0}
+                >
+                    <ZoteroIcon 
+                        icon={ZOTERO_ICONS.ATTACHMENTS} 
+                        size={15} 
+                        color="--accent-green"
+                        className="mr-1"
+                    />
+                    <span className="font-color-secondary">{validAttachmentsCount} Attachment{validAttachmentsCount !== 1 ? 's' : ''} available</span>
+                </Button>
+                {validAttachmentsVisible && validAttachmentsList.map((attachment, index) => {
+                    const displayName = getDisplayName(attachment);
                     
                     return (
-                        <div key={item.key || index} className="display-flex flex-col gap-1 ml-1">
+                        <div key={attachment.key || index} className="display-flex flex-col gap-1 ml-4">
                             <div className="display-flex flex-row items-start gap-1">
                                 <div className="flex-shrink-0 -mt-010 scale-80">
-                                    {/* <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/> */}
-                                    <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
+                                    <CSSItemTypeIcon itemType={attachment.getItemTypeIconName()} />
                                 </div>
                                 <div className="display-flex flex-col min-w-0 gap-1 text-sm">
                                     <div className="font-color-secondary text-md truncate">{displayName}</div>
                                 </div>
                             </div>
-                            {reason && (
-                                <div className="font-color-tertiary text-md ml-1 text-sm">{reason}</div>
-                            )}
                         </div>
                     );
                 })}
+
+                {/* Invalid Attachments Section */}
+                {invalidAttachments.length > 0 && (
+                    <>
+                        <Button
+                            variant="ghost-secondary"
+                            onClick={toggleInvalidAttachments}
+                            rightIcon={invalidAttachmentsVisible ? ArrowDownIcon : ArrowRightIcon}
+                            iconClassName="scale-12 -ml-1"
+                        >
+                            <CSSIcon name="x-8" className="icon-16 font-color-error scale-11 mr-1" style={{ fill: 'red' }}/>
+                            <span>{invalidAttachments.length} Attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
+                        </Button>
+                        {invalidAttachmentsVisible && invalidAttachments.map(({ item, reason }, index) => {
+                            const displayName = getDisplayName(item);
+                            
+                            return (
+                                <div key={item.key || index} className="display-flex flex-col gap-1 ml-4">
+                                    <div className="display-flex flex-row items-start gap-1">
+                                        <div className="flex-shrink-0 -mt-010 scale-80">
+                                            <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
+                                        </div>
+                                        <div className="display-flex flex-col min-w-0 gap-1 text-sm">
+                                            <div className="font-color-secondary text-md truncate">{displayName}</div>
+                                        </div>
+                                    </div>
+                                    {reason && (
+                                        <div className="font-color-tertiary text-md ml-1 text-sm">{reason}</div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </>
+                )}
+
+                {/* No attachments message */}
+                {validAttachmentsCount === 0 && (
+                    <div className="font-color-tertiary text-md ml-15">
+                        Metadata (title, authors, etc.) will be shared with the model.
+                    </div>
+                )}
             </div>
         </div>
     );
