@@ -105,67 +105,16 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             const invalidChildren = children
                 .map(item => ({ item, validation: getValidation(item) }))
                 .filter(({ validation }) => validation && !validation.isValid);
-            const validItemIds = children.filter(child => !invalidChildren.some(invalidChild => invalidChild.item.id === child.id)).map(child => child.id);
-            const invalidCount = invalidChildren.length;
-            const validCount = children.length - invalidCount;
-            // return (
-            //     <div className="p-3 display-flex flex-col items-start gap-2">
-            //         <PopupMessageHeader
-            //             icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
-            //             title={getDisplayNameFromItem(item)}
-            //             handleDismiss={() => setActivePreview(null)}
-            //         />
-            //         <RegularItemMessageContent item={item} attachments={children} invalidAttachments={invalidChildren} />
-            //     </div>
-            // );
             return (
-                <div className="mt-3">
-                    <div className="display-flex items-center font-color-secondary mb-2">
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.ATTACHMENTS} 
-                            size={15} 
-                            color="--accent-green"
-                            className="mr-2"
-                        />
-                        <span>{validCount} Attachment{validCount !== 1 ? 's' : ''}</span>
-                        
-                        <span className="mx-1"></span>
-                        
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.NOTES}
-                            size={15}
-                            color="--accent-yellow"
-                            className="mr-2"
-                        />
-                        <span>{invalidCount} Note{invalidCount !== 1 ? 's' : ''}</span>
-                    </div>
-                    
-                    <div className="ml-6 display-flex flex-col gap-2">
-                        {/* Attachments List */}
-                        {children.map((child: Zotero.Item) => (
-                            <div 
-                                key={`att-${child.id}`}
-                                className={`display-flex items-center ${validItemIds.includes(child.id) ? 'font-color-secondary' : 'font-color-red'}`}
-                            >
-                                <span className="mr-1 fit-content">
-                                    {validItemIds.includes(child.id) ? (
-                                    <CSSItemTypeIcon className="scale-85" itemType={child.getItemTypeIconName()} />
-                                    ) : (
-                                    <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
-                                    )}
-                                </span>
-                                {child.getDisplayTitle()}
-                            </div>
-                        ))}
-                        
-                        {/* Show message if no attachments or notes */}
-                        {/* {attachmentNumber === 0 && noteNumber === 0 && (
-                            <div className="text-gray-400 italic">No attachments or notes</div>
-                        )} */}
-                    </div>
+                <div className="p-3 display-flex flex-col items-start gap-2">
+                    <PopupMessageHeader
+                        icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+                        title={getDisplayNameFromItem(item)}
+                        handleDismiss={() => setActivePreview(null)}
+                    />
+                    <RegularItemMessageContent item={item} attachments={children} invalidAttachments={invalidChildren} />
                 </div>
-            )
-
+            );
         } else if (item.isAttachment()) {
             // Show attachment info
             const validation = getValidation(item);
@@ -232,50 +181,7 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
 
     return (
         <>
-            {/* Content Area */}
-            <div 
-                className="source-content p-3"
-                style={{ maxHeight: `${maxContentHeight}px` }}
-            >
-                {renderContent()}
-            </div>
-
-            {/* Action buttons */}
-            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
-                <div className="gap-3 display-flex">
-                    <Button
-                        variant="ghost"
-                        onClick={handleOpen}
-                        disabled={!canOpen}
-                    >
-                        <ZoteroIcon 
-                            icon={ZOTERO_ICONS.OPEN} 
-                            size={12}
-                        />
-                        Open
-                    </Button>
-                    {canRemove && (
-                        <Button 
-                            variant="ghost"
-                            onClick={handleRemove}
-                        >
-                            <ZoteroIcon 
-                                icon={ZOTERO_ICONS.TRASH} 
-                                size={12}
-                            />
-                            Remove
-                        </Button>
-                    )}
-                </div>
-                <div className="flex-1"/>
-                <div className="display-flex">
-                    <IconButton
-                        icon={CancelIcon}
-                        variant="ghost"
-                        onClick={() => setActivePreview(null)}
-                    />
-                </div>
-            </div>
+            {renderContent()}
         </>
     );
 };
