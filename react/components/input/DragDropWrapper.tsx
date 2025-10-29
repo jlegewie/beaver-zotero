@@ -1,10 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
-import { FILE_SIZE_LIMIT, VALID_MIME_TYPES } from '../../utils/sourceUtils';
+import { CSSItemTypeIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
-import { updateSourcesFromZoteroItemsAtom } from '../../atoms/input';
-import { store } from '../../store';
+import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom } from '../../atoms/messageComposition';
 import { getPref } from '../../../src/utils/prefs';
 import { useSetAtom } from 'jotai';
 
@@ -24,7 +22,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const [dragCount, setDragCount] = useState<number>(0);
     const [dragType, setDragType] = useState<'item' | 'annotation' | null>(null);
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
+    const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
+    const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
 
     // Show error message temporarily
     const showErrorMessage = (message: string) => {
@@ -201,8 +200,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 const ids = itemIDs.split(',').map(id => parseInt(id));
                 const items = await Zotero.Items.getAsync(ids);
                 
-                // Update sources from Zotero items
-                await updateSourcesFromZoteroItems(items, true);
+                // Add items to current message items
+                await addItemsToCurrentMessageItems(items);
             }
             return;
         }
@@ -210,14 +209,13 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         // Handle Zotero annotations
         if (e.dataTransfer.types.includes("zotero/annotation")) {
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
-            console.log('annotationData', annotationData[0])
             for (const data of annotationData) {
                 const attachment = Zotero.Items.get(data.attachmentItemID);
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.libraryID, data.id);
                 // Skip if item is not an annotation or has an invalid annotation type
                 if(!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
-                // Add the annotation to the sources atom
-                await store.set(updateSourcesFromZoteroItemsAtom, [item], true);
+                // Add the annotation to the current message items
+                await addItemToCurrentMessageItems(item);
             }
             return;
         }
