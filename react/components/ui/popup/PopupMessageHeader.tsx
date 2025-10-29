@@ -6,13 +6,21 @@ interface PopupMessageHeaderProps {
     icon: React.ReactNode;
     title?: string;
     handleDismiss: () => void;
-    fontColor: string;
+    fontColor?: string;
     count?: number;
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void;
 }
 
-const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({ icon, title, count, buttonIcon, buttonOnClick, fontColor, handleDismiss }) => {
+const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
+    icon,
+    title,
+    count,
+    buttonIcon,
+    buttonOnClick,
+    fontColor = 'font-color-secondary',
+    handleDismiss
+}) => {
 
     return (
         <div className="display-flex flex-row items-start w-full gap-3">
