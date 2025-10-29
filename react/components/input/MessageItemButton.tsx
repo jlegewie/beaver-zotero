@@ -65,7 +65,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // For annotations, use 'annotation' type preview with proper InputSource
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
             isAnnotation 
-                ? { type: 'annotation', content: createSourceFromAttachmentOrNoteOrAnnotation(item) }
+                ? { type: 'annotation', content: item }
                 : { type: 'item', content: item },
             { isEnabled: !disabled }
         );
@@ -121,7 +121,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             // Show remove icon on hover (if editable)
             if (isHovered && canEdit && !disabled) {
                 return (
-                    <span role="button" className="source-remove" onClick={handleRemove}>
+                    <span role="button" className={`source-remove ${isAnnotation ? '-ml-015' : ''}`} onClick={handleRemove}>
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
                 );
