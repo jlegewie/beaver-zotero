@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
 import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -22,12 +22,16 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
+    
+    const [isHovering, setIsHovering] = useState(false);
+    const [timerExpired, setTimerExpired] = useState(false);
 
+    // Timer effect - sets the timerExpired flag when duration elapses
     useEffect(() => {
         let timerId: number | null = null;
         if (message.expire !== false) { // Default to true if undefined
             timerId = Zotero.getMainWindow().setTimeout(() => {
-                removeMessage(message.id);
+                setTimerExpired(true);
             }, message.duration || POPUP_MESSAGE_DURATION);
         }
 
@@ -36,7 +40,14 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 Zotero.getMainWindow().clearTimeout(timerId);
             }
         };
-    }, [message, removeMessage]);
+    }, [message]);
+
+    // Remove message when timer expires and not hovering
+    useEffect(() => {
+        if (timerExpired && !isHovering && message.expire !== false) {
+            removeMessage(message.id);
+        }
+    }, [timerExpired, isHovering, message.expire, message.id, removeMessage]);
 
     const handleDismiss = () => {
         removeMessage(message.id);
@@ -106,6 +117,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 backdropFilter: 'blur(6px)',
                 border: `1px solid ${borderColor}`,
             }}
+            onMouseEnter={() => setIsHovering(true)}
+            onMouseLeave={() => setIsHovering(false)}
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
                 <PopupMessageHeader
