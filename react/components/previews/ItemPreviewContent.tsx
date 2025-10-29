@@ -9,6 +9,7 @@ import { RegularItemMessageContent } from '../ui/popup/RegularItemMessageContent
 import PopupMessageHeader from '../ui/popup/PopupMessageHeader';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { useMessageItemSummary } from '../../hooks/useMessageItemSummary';
+import { truncateText } from '../../utils/stringUtils';
 
 interface ItemPreviewContentProps {
     item: Zotero.Item;
@@ -99,38 +100,21 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             const validation = getValidation(item);
             const isInvalid = validation && !validation.isValid && !validation.isValidating;
             
-            try {
-                const filename = item.attachmentFilename || 'Unnamed attachment';
-                const contentType = item.attachmentContentType || 'Unknown type';
-                const parentItem = item.parentItem;
-                
-                return (
-                    <div className="space-y-2">
-                        <div className="display-flex items-start gap-2">
-                            <span className="mt-1 flex-shrink-0">
-                                {renderValidationIcon(item)}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                                <div className={`font-weight-medium ${isInvalid ? 'font-color-red' : ''}`}>
-                                    {filename}
-                                </div>
-                                <div className="text-sm font-color-secondary">{contentType}</div>
-                            </div>
+            return (
+                <div className="p-3 display-flex flex-col items-start gap-2">
+                    <PopupMessageHeader
+                        icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+                        title={getDisplayNameFromItem(item)}
+                        // title={item.getDisplayTitle()}
+                        handleDismiss={() => setActivePreview(null)}
+                    />
+                    <div className="display-flex flex-col gap-3 -ml-1">
+                        <div className="display-flex flex-row items-center gap-2 ml-15">
+                            <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 100)}</div>
                         </div>
-                        {isInvalid && validation.reason && (
-                            <div className="text-sm font-color-error mt-2">{validation.reason}</div>
-                        )}
-                        {parentItem && (
-                            <div className="mt-2">
-                                <div className="text-sm font-color-tertiary">Parent:</div>
-                                <div className="text-sm">{parentItem.getField('title') as string}</div>
-                            </div>
-                        )}
                     </div>
-                );
-            } catch (error) {
-                return <div className="font-color-secondary">Unable to load attachment details</div>;
-            }
+                </div>
+            );
         } else if (item.isNote()) {
             // Show note preview
             try {
