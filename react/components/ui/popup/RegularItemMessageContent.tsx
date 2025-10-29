@@ -5,7 +5,7 @@ import Button from '../Button';
 
 interface InvalidItemInfo {
     item: Zotero.Item;
-    reason: string;
+    reason?: string;
 }
 
 interface RegularItemMessageContentProps {
@@ -107,7 +107,9 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                                     <div className="font-color-secondary text-md truncate">{displayName}</div>
                                 </div>
                             </div>
-                            <div className="font-color-tertiary text-md ml-1 text-sm">{reason}</div>
+                            {reason && (
+                                <div className="font-color-tertiary text-md ml-1 text-sm">{reason}</div>
+                            )}
                         </div>
                     );
                 })}
