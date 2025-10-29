@@ -60,7 +60,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                                 color="--accent-green"
                                 className="mr-2"
                             />
-                            <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} added</span>
+                            <span>{validAttachments} Attachment{validAttachments !== 1 ? 's' : ''} available</span>
                             
                             {invalidAttachments.length > 0 && (
                                 <span className="mx-1">
