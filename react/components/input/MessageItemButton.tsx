@@ -1,12 +1,31 @@
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
-import { getDisplayNameFromItem } from '../../utils/sourceUtils';
+import { getDisplayNameFromItem, createSourceFromAttachmentOrNoteOrAnnotation } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
+import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { navigateToAnnotation } from '../../utils/readerUtils';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
+import { toAnnotation } from '../../types/attachments/converters';
 
 const MAX_ITEM_TEXT_LENGTH = 20;
+
+const ANNOTATION_TEXT_BY_TYPE = {
+    highlight: 'Highlight',
+    underline: 'Underline',
+    note: 'Note',
+    image: 'Area',
+}
+
+const ANNOTATION_ICON_BY_TYPE = {
+    highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
+    underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
+    note: ZOTERO_ICONS.ANNOTATE_NOTE,
+    text: ZOTERO_ICONS.ANNOTATE_TEXT,
+    image: ZOTERO_ICONS.ANNOTATE_AREA,
+}
 
 interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'item'> {
     item: Zotero.Item;
@@ -17,7 +36,8 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
 
 /**
  * Button component for displaying a Zotero item in message composition
- * Shows validation state, item icon, and allows removal
+ * Supports both regular items and annotations
+ * Shows validation state, item/annotation icon, and allows removal
  */
 export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButtonProps>(
     function MessageItemButton(props: MessageItemButtonProps, ref: React.ForwardedRef<HTMLButtonElement>) {
@@ -30,17 +50,32 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             ...rest
         } = props;
 
+        // Check if item is an annotation
+        const isAnnotation = item.isAnnotation();
+        const annotation = isAnnotation ? toAnnotation(item) : null;
+
+        // Get current reader attachment key for annotation display
+        const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
+
         // Get validation state
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
 
         // Use the custom hook for hover preview logic
+        // For annotations, use 'annotation' type preview with proper InputSource
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            { type: 'item', content: item },
+            isAnnotation 
+                ? { type: 'annotation', content: createSourceFromAttachmentOrNoteOrAnnotation(item) }
+                : { type: 'item', content: item },
             { isEnabled: !disabled }
         );
 
-        const displayName = item.isRegularItem() ? getDisplayNameFromItem(item) : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
+        // Determine display name based on item type
+        const displayName = isAnnotation && annotation
+            ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
+            : item.isRegularItem() 
+                ? getDisplayNameFromItem(item) 
+                : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
         const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
@@ -54,8 +89,14 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
-            // TODO: Navigate to item in Zotero
-            // For now, just select the item
+            
+            // For annotations, navigate to the annotation in the reader
+            if (isAnnotation) {
+                navigateToAnnotation(item);
+                return;
+            }
+            
+            // For regular items, select in Zotero
             try {
                 const win = Zotero.getMainWindow();
                 if (win && win.ZoteroPane) {
@@ -83,6 +124,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     <span role="button" className="source-remove" onClick={handleRemove}>
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
+                );
+            }
+
+            // Show annotation-specific icon
+            if (isAnnotation && annotation) {
+                return (
+                    <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14} />
                 );
             }
 
@@ -142,6 +190,11 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
                     {displayName || '...'}
                 </span>
+                
+                {/* Show arrow icon for annotations not in current reader */}
+                {isAnnotation && annotation && currentReaderAttachmentKey !== annotation.parent_key && (
+                    <Icon icon={ArrowUpRightIcon} className="scale-11" />
+                )}
                 
                 {/* Validation status indicator */}
                 {validation?.backendChecked && (
