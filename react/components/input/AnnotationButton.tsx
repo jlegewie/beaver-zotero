@@ -54,7 +54,7 @@ export const AnnotationButton = forwardRef<HTMLButtonElement, AnnotationButtonPr
 
         // Use the custom hook for hover preview logic
         const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            { type: 'annotation', content: source },
+            { type: 'annotation', content: getZoteroItem(source)! },
             // Options: Disable if derivedAnnotation undefined, button disabled, not editable, or invalid
             { isEnabled: !disabled && canEdit && !!derivedAnnotation && isValid }
         )
