@@ -1,15 +1,15 @@
 import React, { useEffect } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, CancelIcon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
+import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
-import IconButton from '../IconButton';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
 import Button from "../Button";
+import PopupMessageHeader from './PopupMessageHeader';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -108,36 +108,15 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             }}
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
-                {/* Icon, Title and close button */}
-                <div className="display-flex flex-row items-start w-full gap-3">
-                    <div className="flex-shrink-0">
-                        {message.icon || getDefaultIcon()}
-                    </div>
-                    <div className={`flex-1 text-base font-medium ${fontColor}`}>
-                        {`${message.title} ${message.count ? `(${message.count})` : ''}`}
-                    </div>
-                    <div className="display-flex flex-row gap-2 flex-shrink-0">
-                        {message.buttonIcon && message.buttonOnClick && (
-                            <IconButton
-                                variant="ghost"
-                                icon={message.buttonIcon}
-                                onClick={() => {
-                                    if(message.buttonOnClick) {
-                                        message.buttonOnClick();
-                                        handleDismiss();
-                                    }
-                                }}
-                                iconClassName="font-color-secondary scale-11"
-                            />
-                        )}
-                        <IconButton
-                            icon={CancelIcon}
-                            variant="ghost-secondary"
-                            onClick={handleDismiss}
-                            // iconClassName={`${fontColor}`}
-                        />
-                    </div>
-                </div>
+                <PopupMessageHeader
+                    icon={message.icon || getDefaultIcon()}
+                    title={message.title || ''}
+                    count={message.count}
+                    buttonIcon={message.buttonIcon}
+                    buttonOnClick={message.buttonOnClick}
+                    fontColor={fontColor || 'font-color-secondary'}
+                    handleDismiss={handleDismiss}
+                />
 
                 {/* Content for info, warning, error */}
                 {['info', 'warning', 'error'].includes(message.type) && (
