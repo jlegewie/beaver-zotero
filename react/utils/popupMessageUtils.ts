@@ -7,6 +7,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
 import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
+import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
 import { truncateText } from '../utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import type { ItemValidationResult } from '../../src/services/itemValidationManager';
@@ -285,6 +286,56 @@ export const addRegularItemPopupAtom = atom(
                 invalidAttachments: invalidAttachments 
             }),
             expire: true,
+            duration: hasIssues ? 4000 : 3000
+        });
+    }
+);
+
+/**
+ * Adds a summary popup message for multiple regular items showing their attachment status.
+ * 
+ * @param items Array of regular Zotero items
+ * @param getValidation Function to get validation results for items
+ */
+export const addRegularItemsSummaryPopupAtom = atom(
+    null,
+    (get, set, { 
+        items, 
+        getValidation 
+    }: { 
+        items: Zotero.Item[]; 
+        getValidation: (item: Zotero.Item) => ItemValidationResult | null;
+    }) => {
+        // Build summary data for each item
+        const itemsSummary = items.map(item => {
+            const attachmentItems = item.getAttachments().map((id: number) => Zotero.Items.get(id));
+            const invalidAttachments = attachmentItems
+                .map(attachment => ({
+                    item: attachment,
+                    validation: getValidation(attachment)
+                }))
+                .filter(({ validation }) => validation && !validation.isValid);
+            
+            return {
+                item,
+                totalAttachments: attachmentItems.length - invalidAttachments.length,
+                invalidAttachments: invalidAttachments.length
+            };
+        });
+
+        // Determine if there are any issues
+        const hasIssues = itemsSummary.some(summary => 
+            summary.totalAttachments === 0 || summary.invalidAttachments > 0
+        );
+
+        // Show summary popup
+        set(addPopupMessageAtom, {
+            type: 'info',
+            title: `${items.length} Items Added`,
+            customContent: createElement(RegularItemsSummaryContent, { 
+                items: itemsSummary 
+            }),
+            expire: false,
             duration: hasIssues ? 4000 : 3000
         });
     }
