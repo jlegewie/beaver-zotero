@@ -2,12 +2,10 @@ import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
-import { getDisplayNameFromItem, isSourceValid } from '../../../utils/sourceUtils';
-import { createSourceFromItem } from '../../../utils/sourceUtils';
+import { getDisplayNameFromItem, isValidZoteroItem } from '../../../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { currentSourcesAtom, inputAttachmentCountAtom, currentLibraryIdsAtom } from '../../../atoms/input';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { InputSource } from '../../../types/sources';
+import { inputAttachmentCountAtom, currentLibraryIdsAtom } from '../../../atoms/input';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
@@ -17,6 +15,8 @@ import { threadAttachmentCountAtom } from '../../../atoms/threads';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { isAppKeyModelAtom } from '../../../atoms/models';
 import { store } from '../../../store';
+import { addItemToCurrentMessageItemsAtom } from '../../../atoms/messageComposition';
+import { currentMessageItemsAtom } from '../../../atoms/messageComposition';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -87,7 +87,6 @@ const AddSourcesMenu: React.FC<{
     setMenuPosition: (position: MenuPosition) => void
 }> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition }) => {
     const [isLoading, setIsLoading] = useState(false);
-    const [sources, setSources] = useAtom(currentSourcesAtom);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
@@ -101,7 +100,10 @@ const AddSourcesMenu: React.FC<{
     const setPopupMessage = useSetAtom(addPopupMessageAtom);
     const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
     const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
-    
+    const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
+
     // Add ref for tracking the current search request
     const currentSearchRef = useRef<string>('');
 
@@ -209,26 +211,21 @@ const AddSourcesMenu: React.FC<{
             const menuItemsLibraries = syncLibraryIds.length > 1 ? [selectLibrariesMenuItem, librariesHeader] : [];
 
             // 1. Get all initial items
-            const currentSourcesItems = await Promise.all(
-                sources
-                    .filter((s) => s.type !== "annotation")
-                    .map(async (source) => await Zotero.Items.getByLibraryAndKeyAsync(source.libraryID, source.itemKey))
-            );
-            const currentSourcesItemsFiltered = currentSourcesItems.filter((item): item is Zotero.Item => Boolean(item));
+            const currentMessageItemsFiltered = currentMessageItems.filter((i) => !i.isAnnotation());
             const recentItems: Zotero.Item[] = await getRecentItems();
             const recentlyModifiedItems = await getRecentAsync(1, { limit: RECENT_ITEMS_LIMIT * 3 }) as Zotero.Item[];
 
-            const allItems = [...currentSourcesItemsFiltered, ...recentItems, ...recentlyModifiedItems]
+            const allItems = [...currentMessageItemsFiltered, ...recentItems, ...recentlyModifiedItems]
                 .filter((item): item is Zotero.Item => Boolean(item));
 
             await loadFullItemData(allItems);
 
             // 5. Process items
-            const currentSourcesHeader = { label: "Current Sources", isGroupHeader: true, onClick: () => {} };
-            const menuItemsCurrentSources = await Promise.all(
-                currentSourcesItemsFiltered.map(async (item) => await createMenuItemFromZoteroItem(item, sources))
+            const currentItemsHeader = { label: "Current Items", isGroupHeader: true, onClick: () => {} };
+            const menuItemsCurrentItems = await Promise.all(
+                currentMessageItemsFiltered.map(async (item) => await createMenuItemFromZoteroItem(item))
             );
-            const menuItemsCurrentSourcesWithHeader = menuItemsCurrentSources.length > 0 ? [...menuItemsCurrentSources, currentSourcesHeader] : [];
+            const menuItemsCurrentItemsWithHeader = menuItemsCurrentItems.length > 0 ? [...menuItemsCurrentItems, currentItemsHeader] : [];
 
             // Recently used items
             const recentItemsHeader = { label: "Recent Items", isGroupHeader: true, onClick: () => {} };
@@ -242,13 +239,13 @@ const AddSourcesMenu: React.FC<{
             const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
                 .filter((item, index, self) =>
                     index === self.findIndex((t) => t.id === item.id) &&
-                    !sources.some((source) => source.itemKey === item.key && source.libraryID === item.libraryID)
+                    !currentMessageItems.some((i) => i.id === item.id)
                 )
-                .slice(0, Math.max(RECENT_ITEMS_LIMIT - menuItemsCurrentSources.length, 0));
+                .slice(0, Math.max(RECENT_ITEMS_LIMIT - menuItemsCurrentItems.length, 0));
             
             // Create menu items from combined items (data already loaded)
             const menuItemsRecentItems = await Promise.all(
-                combinedItems.map(async (item) => await createMenuItemFromZoteroItem(item, sources))
+                combinedItems.map(async (item) => await createMenuItemFromZoteroItem(item))
             );
 
             const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0
@@ -258,7 +255,7 @@ const AddSourcesMenu: React.FC<{
             // Combine all menu items
             const allMenuItems = [
                 ...menuItemsLibraries,
-                ...menuItemsCurrentSourcesWithHeader, 
+                ...menuItemsCurrentItemsWithHeader, 
                 ...menuItemsRecentItemsWithHeader
             ];
 
@@ -266,7 +263,7 @@ const AddSourcesMenu: React.FC<{
             setMenuItems(allMenuItems);
         }
         getMenuItems();
-    }, [isMenuOpen, menuMode, sources, syncLibraryIds]);
+    }, [isMenuOpen, menuMode, currentMessageItems, syncLibraryIds]);
 
     // Libraries mode: fetch libraries when entering this mode
     useEffect(() => {
@@ -294,27 +291,23 @@ const AddSourcesMenu: React.FC<{
 
     // createMenuItemFromZoteroItem is a memoized function that creates a menu item from a Zotero item
     const createMenuItemFromZoteroItem = useCallback(async (
-        item: Zotero.Item, 
-        sources: InputSource[]
+        item: Zotero.Item
     ): Promise<SearchMenuItem> => {
         
         const title = item.getDisplayTitle();
-        
-        // Create a source from the item
-        const source: InputSource = await createSourceFromItem(item, true);
-        
+                
         // Determine item status
-        const {valid: isValid} = await isSourceValid(source);
-        const isInSources = sources.some(
-            (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
+        const {valid: isValid} = await isValidZoteroItem(item);
+        const isInCurrentMessageItems = currentMessageItems.some(
+            (i) => i.id === item.id
         );
 
         // Handle menu item click
-        const handleMenuItemClick = async (source: InputSource, isValid: boolean) => {
+        const handleMenuItemClick = async (item: Zotero.Item, isValid: boolean) => {
             if (!isValid) return;
             // Check if source already exists
-            const exists = sources.some(
-                (res) => res.libraryID === source.libraryID && res.itemKey === source.itemKey
+            const exists = currentMessageItems.some(
+                (i) => i.id === item.id
             );
             
             if (!exists) {
@@ -333,12 +326,12 @@ const AddSourcesMenu: React.FC<{
                 }
                 
                 // Add source to sources atom
-                updateRecentItems([{ zotero_key: source.itemKey, library_id: source.libraryID }]);
-                setSources((prevSources) => [...prevSources, source]);
+                updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
+                addItemToCurrentMessageItems(item);
             } else {
                 // Remove source from sources atom
-                setSources((prevSources) => prevSources.filter(
-                    (res) => res.libraryID !== source.libraryID || res.itemKey !== source.itemKey
+                setCurrentMessageItems((prevItems: Zotero.Item[]) => prevItems.filter(
+                    (i) => i.id !== item.id
                 ));
             }
             // Close after selection in sources mode
@@ -359,7 +352,7 @@ const AddSourcesMenu: React.FC<{
         // Create the menu item
         return {
             label: getDisplayNameFromItem(item) + " " + title,
-            onClick: async () => await handleMenuItemClick(source, isValid),
+            onClick: async () => await handleMenuItemClick(item, isValid),
             customContent: (
                 <div className={`display-flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
                     {getIconElement(item)}
@@ -368,7 +361,7 @@ const AddSourcesMenu: React.FC<{
                             <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
                                 {getDisplayNameFromItem(item)}
                             </span>
-                            {isInSources && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                            {isInCurrentMessageItems && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                         </div>
                         <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                             {title}
@@ -428,7 +421,7 @@ const AddSourcesMenu: React.FC<{
                     result.zotero_key
                 );
                 if (!item) continue;
-                const menuItem = await createMenuItemFromZoteroItem(item, sources);
+                const menuItem = await createMenuItemFromZoteroItem(item);
                 if (menuItem) {
                     menuItems.push(menuItem);
                 }
@@ -436,7 +429,7 @@ const AddSourcesMenu: React.FC<{
             setMenuItems(menuItems.length > 0 ? [...menuItems, header] : []);
         }
         searchToMenuItems(searchResults);
-    }, [searchResults, sources, createMenuItemFromZoteroItem, menuMode]);
+    }, [searchResults, currentMessageItems, createMenuItemFromZoteroItem, menuMode]);
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
