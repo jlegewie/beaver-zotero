@@ -3,14 +3,11 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
 import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom } from '../../atoms/messageComposition';
-import { getPref } from '../../../src/utils/prefs';
 import { useSetAtom } from 'jotai';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
 }
-
-const updateSourcesFromZoteroSelection = getPref("updateSourcesFromZoteroSelection");
 
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
     children
@@ -66,7 +63,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         // Set appropriate drop effect
         if (
             e.dataTransfer.types.includes('zotero/annotation') || 
-            (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item'))
+            e.dataTransfer.types.includes('zotero/item')
         ) {
             e.dataTransfer.dropEffect = 'copy';
         }
@@ -94,7 +91,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
         
         // Handle Zotero items
-        else if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
+        else if (e.dataTransfer.types.includes('zotero/item')) {
             try {
                 const itemIDs = e.dataTransfer.getData('zotero/item');
                 if (itemIDs) {
@@ -145,7 +142,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
         
         // Handle Zotero items
-        else if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
+        else if (e.dataTransfer.types.includes('zotero/item')) {
             try {
                 const itemIDs = e.dataTransfer.getData('zotero/item');
                 if (itemIDs) {
@@ -193,7 +190,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         setDragCount(0);
 
         // Handle Zotero items
-        if (!updateSourcesFromZoteroSelection && e.dataTransfer.types.includes('zotero/item')) {
+        if (e.dataTransfer.types.includes('zotero/item')) {
             const itemIDs = e.dataTransfer.getData('zotero/item');
             if (itemIDs) {
                 // Convert comma-separated IDs to an array of integers
