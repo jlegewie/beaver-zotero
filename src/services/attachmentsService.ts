@@ -137,6 +137,7 @@ export interface ValidationResponse {
     storage_path?: string;
     upload_metadata?: Record<string, string>;
     details?: string;
+    is_primary: boolean;
 }
 
 // Types that match the backend models
