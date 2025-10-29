@@ -1,8 +1,9 @@
-import React, { useEffect, useState, forwardRef } from 'react';
+import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
-import { truncateText } from '../../utils/stringUtils';
+import { usePreviewHover } from '../../hooks/usePreviewHover';
+import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 
 const MAX_ITEM_TEXT_LENGTH = 20;
 
@@ -32,29 +33,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
 
-        const [displayName, setDisplayName] = useState<string>('');
-        const [isHovered, setIsHovered] = useState(false);
-
-        // Update display name when item changes
-        useEffect(() => {
-            if (!item) {
-                setDisplayName('Unknown Item');
-                return;
-            }
-
-            try {
-                // Get title or fallback to item type
-                let name = item.getField('title') as string;
-                if (!name || name.trim() === '') {
-                    name = Zotero.ItemTypes.getLocalizedString(item.itemTypeID);
-                }
-                
-                const truncatedName = truncateText(name, MAX_ITEM_TEXT_LENGTH);
-                setDisplayName(truncatedName);
-            } catch (error) {
-                setDisplayName('Unknown Item');
-            }
-        }, [item]);
+        const displayName = getDisplayNameFromItem(item);
 
         // Handle remove
         const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
