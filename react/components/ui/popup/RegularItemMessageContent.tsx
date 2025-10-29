@@ -131,7 +131,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                 {/* No attachments message */}
                 {validAttachmentsCount === 0 && (
                     <div className="font-color-tertiary text-md ml-15">
-                        Metadata (title, authors, etc.) shared with the model.
+                        Only metadata (title etc.) shared with the model
                     </div>
                 )}
             </div>
