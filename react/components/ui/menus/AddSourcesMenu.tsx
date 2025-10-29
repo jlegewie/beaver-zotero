@@ -370,7 +370,7 @@ const AddSourcesMenu: React.FC<{
                 </div>
             ),
         };
-    }, [planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage, isAppKeyModel]);
+    }, [currentMessageItems, planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage, isAppKeyModel, addItemToCurrentMessageItems, setCurrentMessageItems]);
 
     // Create menu item for a library (libraries sub-menu)
     const createMenuItemFromLibrary = useCallback((
