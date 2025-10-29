@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { truncateText } from '../../../utils/stringUtils';
 import { CSSIcon, CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import Button from '../Button';
@@ -58,7 +59,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
     return (
         <div className="display-flex flex-col gap-3 -ml-1">
             <div className="display-flex flex-row items-center gap-2 ml-15">
-                <div className="font-color-secondary text-md">{item.getDisplayTitle()}</div>
+                <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 100)}</div>
             </div>
             <div id="parent-item" className="display-flex flex-col gap-2">
                 {/* Valid Attachments Section */}
