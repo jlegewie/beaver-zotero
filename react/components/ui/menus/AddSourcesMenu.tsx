@@ -457,7 +457,7 @@ const AddSourcesMenu: React.FC<{
         <>
             <button
                 className="variant-outline source-button"
-                style={{ height: '22px !important', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
                 ref={buttonRef}
                 onClick={handleButtonClick}
                 aria-label="Add Sources"
