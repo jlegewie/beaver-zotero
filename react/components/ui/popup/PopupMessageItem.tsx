@@ -110,11 +110,11 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             <div className="p-3 display-flex flex-col items-start gap-2">
                 <PopupMessageHeader
                     icon={message.icon || getDefaultIcon()}
-                    title={message.title || ''}
+                    title={message.title}
                     count={message.count}
                     buttonIcon={message.buttonIcon}
                     buttonOnClick={message.buttonOnClick}
-                    fontColor={fontColor || 'font-color-secondary'}
+                    fontColor={fontColor}
                     handleDismiss={handleDismiss}
                 />
 

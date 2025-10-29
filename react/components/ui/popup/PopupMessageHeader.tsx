@@ -4,7 +4,7 @@ import IconButton from '../IconButton';
 
 interface PopupMessageHeaderProps {
     icon: React.ReactNode;
-    title: string;
+    title?: string;
     handleDismiss: () => void;
     fontColor: string;
     count?: number;
