@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
+import { truncateText } from '../../utils/stringUtils';
 
 const MAX_ITEM_TEXT_LENGTH = 20;
 
@@ -33,7 +34,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
 
-        const displayName = getDisplayNameFromItem(item);
+        const displayName = item.isRegularItem() ? getDisplayNameFromItem(item) : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
         const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
