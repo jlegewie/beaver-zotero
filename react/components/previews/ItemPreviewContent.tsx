@@ -104,7 +104,7 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
                 <div className="p-3 display-flex flex-col items-start gap-2">
                     <PopupMessageHeader
                         icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
-                        title={getDisplayNameFromItem(item)}
+                        title={getDisplayNameFromItem(item.parentItem ?? item)}
                         // title={item.getDisplayTitle()}
                         handleDismiss={() => setActivePreview(null)}
                     />
