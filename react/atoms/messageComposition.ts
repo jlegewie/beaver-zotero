@@ -9,6 +9,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { syncingItemFilter } from "../../src/utils/sync";
 import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
 import { truncateText } from '../utils/stringUtils';
+import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
 
 /**
@@ -63,6 +64,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 
         // Pre-filter items using sync filter to avoid unnecessary state change
         // (validation still runs to show error message)
+        // TODO: This excludes annotations
         const preValidatedItems = newItems.filter((i) => syncingItemFilter(i));
 
         // Add items immediately (optimistic update)
@@ -161,7 +163,7 @@ async function validateItemsInBackground(
             set(addPopupMessageAtom, {
                 type: 'info',
                 icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
-                title: truncateText(item.getDisplayTitle(), 68),
+                title: truncateText(getDisplayNameFromItem(item), 68),
                 customContent: createElement(RegularItemMessageContent, { 
                     item: item,
                     attachments: item.getAttachments().map((id: number) => Zotero.Items.get(id) as Zotero.Item),
