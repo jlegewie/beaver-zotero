@@ -18,6 +18,17 @@ import { truncateText } from '../utils/stringUtils';
 export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
 
 /**
+* Remove item from currentMessageItemsAtom
+*/
+export const removeItemFromMessageAtom = atom(
+    null,
+    (get, set, item: Zotero.Item) => {
+        const currentItems = get(currentMessageItemsAtom);
+        set(currentMessageItemsAtom, currentItems.filter((i) => i.key !== item.key));
+    }
+);
+
+/**
 * Add single item to currentMessageItemsAtom
 * Validates in background and removes if invalid
 */
