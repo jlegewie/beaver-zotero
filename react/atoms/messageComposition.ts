@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom, addRegularItemPopupAtom } from "../utils/popupMessageUtils";
+import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
