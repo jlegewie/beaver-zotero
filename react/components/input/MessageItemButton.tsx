@@ -34,11 +34,18 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
 
+        // Use the custom hook for hover preview logic
+        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
+            { type: 'item', content: item },
+            { isEnabled: !disabled }
+        );
+
         const displayName = item.isRegularItem() ? getDisplayNameFromItem(item) : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
         const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
             e.stopPropagation();
+            cancelTimers();
             if (onRemove) {
                 onRemove(item);
             }
@@ -125,8 +132,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ref={ref}
                 style={{ height: '22px' }}
                 title={getTooltipTitle()}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
+                {...hoverEventHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
                 onClick={handleButtonClick}
