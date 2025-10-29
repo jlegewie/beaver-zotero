@@ -372,7 +372,7 @@ class ItemValidationManager {
             logger(`ItemValidationManager: Validation failed for ${item.libraryID}-${item.key}: ${error.message}`, 1);
             return {
                 isValid: false,
-                reason: `Validation error: ${error.message}`,
+                reason: `Unexpected error`,
                 backendChecked: false
             };
         }
