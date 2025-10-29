@@ -1,10 +1,15 @@
 import { atom } from 'jotai';
+import { createElement } from 'react';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroItemReference } from '../types/zotero';
-import { RepeatIcon } from '../components/icons/icons';
+import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
+import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
+import { truncateText } from '../utils/stringUtils';
+import { getDisplayNameFromItem } from '../utils/sourceUtils';
+import type { ItemValidationResult } from '../../src/services/itemValidationManager';
 
 /**
  * Adds a new popup message to the list.
@@ -230,5 +235,57 @@ export const addAPIKeyMessageAtom = atom(
                 expire: false
             });
         }
+    }
+);
+
+/**
+ * Adds a popup message for a regular item showing its attachment status.
+ * Always shows popup; duration is longer if there are issues (no PDF or invalid attachments).
+ * 
+ * @param item The regular Zotero item
+ * @param getValidation Function to get validation results for items
+ */
+export const addRegularItemPopupAtom = atom(
+    null,
+    (get, set, { 
+        item, 
+        getValidation 
+    }: { 
+        item: Zotero.Item; 
+        getValidation: (item: Zotero.Item) => ItemValidationResult | null;
+    }) => {
+        // Get all attachments and their validation status
+        const attachmentItems = item.getAttachments().map((id: number) => Zotero.Items.get(id));
+        const invalidAttachments = attachmentItems
+            .map(attachment => ({
+                item: attachment,
+                validation: getValidation(attachment)
+            }))
+            .filter(({ validation }) => validation && !validation.isValid)
+            .map(({ item, validation }) => ({
+                item,
+                reason: validation?.reason || 'Unknown error'
+            }));
+
+        // Determine if there are any issues (no PDF attachments OR invalid attachments)
+        // This affects the popup duration (longer if there are issues)
+        const hasPDFAttachment = attachmentItems.some((attachment: Zotero.Item) => 
+            attachment.isPDFAttachment && attachment.isPDFAttachment()
+        );
+        const hasIssues = !hasPDFAttachment || invalidAttachments.length > 0;
+
+        // Always show popup for regular items
+        set(addPopupMessageAtom, {
+            type: 'info',
+            icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
+            title: truncateText(getDisplayNameFromItem(item), 68),
+            customContent: createElement(RegularItemMessageContent, { 
+                item: item,
+                attachments: attachmentItems,
+                invalidAttachments: invalidAttachments 
+            }),
+            expire: true,
+            duration: hasIssues ? 4000 : 3000
+        });
     }
 );

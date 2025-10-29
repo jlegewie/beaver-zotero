@@ -1,15 +1,11 @@
 import { atom } from "jotai";
 import { createElement } from 'react';
-import { CSSItemTypeIcon } from '../components/icons/icons';
 import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom } from "../utils/popupMessageUtils";
+import { addPopupMessageAtom, addRegularItemPopupAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { syncingItemFilter } from "../../src/utils/sync";
-import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
-import { truncateText } from '../utils/stringUtils';
-import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
 
 /**
@@ -141,38 +137,15 @@ async function validateItemsInBackground(
             });
         }
 
-        // Show warning if regular item has invalid attachments or no PDF attachments
+        // Show popup for regular items with invalid attachments or no PDF attachments
         const invalidItemsWithAttachments = itemsToValidate
             .map(item => ({ item, validation: getValidation(item) }))
             .filter(({ validation }) => validation && !validation.isValid);
         const invalidItemIds = new Set(invalidItemsWithAttachments.map(({ item }) => item.id));
         const regularItems = items.filter((i) => i.isRegularItem() && !invalidItemIds.has(i.id));
+        
         for (const item of regularItems) {
-
-            const invalidAttachments = item.getAttachments().filter((id: number) => invalidItemIds.has(id));
-            const invalidAttachmentsData = invalidAttachments.map((id: number) => ({
-                item: Zotero.Items.get(id),
-                reason: getValidation(Zotero.Items.get(id))?.reason || 'Unknown error'
-            }));
-
-            const showRegularItemPopup = (
-                !item.getAttachments().some((id: number) => Zotero.Items.get(id).isPDFAttachment()) ||
-                item.getAttachments().some((id: number) => invalidItemIds.has(id))
-            );
-            
-            set(addPopupMessageAtom, {
-                type: 'info',
-                icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
-                title: truncateText(getDisplayNameFromItem(item), 68),
-                customContent: createElement(RegularItemMessageContent, { 
-                    item: item,
-                    attachments: item.getAttachments().map((id: number) => Zotero.Items.get(id) as Zotero.Item),
-                    invalidAttachments: invalidAttachmentsData 
-                }),
-                expire: true,
-                duration: showRegularItemPopup ? 4000 : 3000
-            });
-
+            set(addRegularItemPopupAtom, { item, getValidation });
         }
 
         } catch (error: any) {
