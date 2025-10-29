@@ -60,8 +60,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 
         // Pre-filter items using sync filter to avoid unnecessary state change
         // (validation still runs to show error message)
-        // TODO: This excludes annotations
-        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i));
+        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i) || i.isAnnotation());
 
         // Add items immediately (optimistic update)
         set(currentMessageItemsAtom, [...currentItems, ...preValidatedItems]);
