@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { createElement, useEffect, useState } from 'react';
 import { CancelIcon, CSSItemTypeIcon, CSSIcon } from '../icons/icons';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
@@ -6,9 +6,11 @@ import { removeItemFromMessageAtom } from '../../atoms/messageComposition';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { openPDFInNewWindow } from '../../utils/openPDFInNewWindow';
-import { truncateText } from '../../utils/stringUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
+import { RegularItemMessageContent } from '../ui/popup/RegularItemMessageContent';
+import PopupMessageHeader from '../ui/popup/PopupMessageHeader';
+import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 
 interface ItemPreviewContentProps {
     item: Zotero.Item;
@@ -100,93 +102,70 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
         const isRegularItem = item.isRegularItem();
         
         if (isRegularItem) {
-            // Show item metadata with heading
-            try {
-                const title = item.getField('title') as string || 'Untitled';
-                const creators = item.getCreators();
-                const year = item.getField('year') as string;
-                const itemType = Zotero.ItemTypes.getLocalizedString(item.itemTypeID);
-                
-                // Format creators
-                const creatorsText = creators.length > 0
-                    ? creators.map(c => `${c.firstName} ${c.lastName}`.trim()).filter(Boolean).join(', ')
-                    : '';
-                
-                return (
-                    <>
-                        {/* Item heading */}
-                        <div className="mb-3">
-                            <div className="display-flex items-start gap-2 mb-2">
-                                <span className="mt-1 flex-shrink-0">
-                                    <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                    <div className="text-sm font-color-tertiary mb-1">{itemType}</div>
-                                    <h3 className="text-base font-weight-medium mb-1">{title}</h3>
-                                    {creatorsText && (
-                                        <div className="text-sm font-color-secondary">{creatorsText}</div>
+            const invalidChildren = children
+                .map(item => ({ item, validation: getValidation(item) }))
+                .filter(({ validation }) => validation && !validation.isValid);
+            const validItemIds = children.filter(child => !invalidChildren.some(invalidChild => invalidChild.item.id === child.id)).map(child => child.id);
+            const invalidCount = invalidChildren.length;
+            const validCount = children.length - invalidCount;
+            // return (
+            //     <div className="p-3 display-flex flex-col items-start gap-2">
+            //         <PopupMessageHeader
+            //             icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+            //             title={getDisplayNameFromItem(item)}
+            //             handleDismiss={() => setActivePreview(null)}
+            //         />
+            //         <RegularItemMessageContent item={item} attachments={children} invalidAttachments={invalidChildren} />
+            //     </div>
+            // );
+            return (
+                <div className="mt-3">
+                    <div className="display-flex items-center font-color-secondary mb-2">
+                        <ZoteroIcon 
+                            icon={ZOTERO_ICONS.ATTACHMENTS} 
+                            size={15} 
+                            color="--accent-green"
+                            className="mr-2"
+                        />
+                        <span>{validCount} Attachment{validCount !== 1 ? 's' : ''}</span>
+                        
+                        <span className="mx-1"></span>
+                        
+                        <ZoteroIcon 
+                            icon={ZOTERO_ICONS.NOTES}
+                            size={15}
+                            color="--accent-yellow"
+                            className="mr-2"
+                        />
+                        <span>{invalidCount} Note{invalidCount !== 1 ? 's' : ''}</span>
+                    </div>
+                    
+                    <div className="ml-6 display-flex flex-col gap-2">
+                        {/* Attachments List */}
+                        {children.map((child: Zotero.Item) => (
+                            <div 
+                                key={`att-${child.id}`}
+                                className={`display-flex items-center ${validItemIds.includes(child.id) ? 'font-color-secondary' : 'font-color-red'}`}
+                            >
+                                <span className="mr-1 fit-content">
+                                    {validItemIds.includes(child.id) ? (
+                                    <CSSItemTypeIcon className="scale-85" itemType={child.getItemTypeIconName()} />
+                                    ) : (
+                                    <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
                                     )}
-                                    {year && <div className="text-sm font-color-secondary">{year}</div>}
-                                </div>
+                                </span>
+                                {child.getDisplayTitle()}
                             </div>
-                        </div>
+                        ))}
                         
-                        {/* Attachments and Notes Section */}
-                        {(attachmentCount > 0 || noteCount > 0) && (
-                            <div className="mt-3">
-                                <div className="display-flex items-center font-color-secondary mb-2">
-                                    <ZoteroIcon 
-                                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                                        size={15} 
-                                        color="--accent-green"
-                                        className="mr-2"
-                                    />
-                                    <span>{attachmentCount} Attachment{attachmentCount !== 1 ? 's' : ''}</span>
-                                    
-                                    <span className="mx-1"></span>
-                                    
-                                    <ZoteroIcon 
-                                        icon={ZOTERO_ICONS.NOTES}
-                                        size={15}
-                                        color="--accent-yellow"
-                                        className="mr-2"
-                                    />
-                                    <span>{noteCount} Note{noteCount !== 1 ? 's' : ''}</span>
-                                </div>
-                                
-                                <div className="ml-6 space-y-1">
-                                    {children.map((child: Zotero.Item) => {
-                                        const validation = getValidation(child);
-                                        const isInvalid = validation && !validation.isValid && !validation.isValidating;
-                                        
-                                        return (
-                                            <div 
-                                                key={`child-${child.id}`}
-                                                className={`display-flex p-2 items-center attachment-item ${
-                                                    isInvalid ? 'font-color-error' : 'font-color-secondary'
-                                                }`}
-                                            >
-                                                <span className="mr-2 fit-content">
-                                                    {renderValidationIcon(child)}
-                                                </span>
-                                                <span className={isInvalid ? 'font-color-error' : ''}>
-                                                    {truncateText(child.getDisplayTitle(), 32)}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                        
-                        {attachmentCount === 0 && noteCount === 0 && (
-                            <div className="text-sm font-color-tertiary italic mt-2">No attachments or notes</div>
-                        )}
-                    </>
-                );
-            } catch (error) {
-                return <div className="font-color-secondary">Unable to load item details</div>;
-            }
+                        {/* Show message if no attachments or notes */}
+                        {/* {attachmentNumber === 0 && noteNumber === 0 && (
+                            <div className="text-gray-400 italic">No attachments or notes</div>
+                        )} */}
+                    </div>
+                </div>
+            )
+
         } else if (item.isAttachment()) {
             // Show attachment info
             const validation = getValidation(item);
