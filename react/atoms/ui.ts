@@ -44,6 +44,7 @@ export const previewCloseTimeoutAtom = atom<number | null>(null)
 // Active preview
 export type ActivePreview = 
     | { type: 'source'; content: InputSource }
+    | { type: 'item'; content: Zotero.Item }
     | { type: 'textSelection'; content: TextSelection }
     | { type: 'annotation'; content: InputSource }
     | null;
