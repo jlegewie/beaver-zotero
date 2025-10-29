@@ -9,6 +9,8 @@ import { LibraryButton } from '../library/LibraryButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 
+const MAX_ATTACHMENTS = 4;
+
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
     setIsAddAttachmentMenuOpen,
@@ -49,54 +51,24 @@ const MessageAttachmentDisplay = ({
             {selectedLibraries.map(library => (
                 <LibraryButton key={library.libraryID} library={library} />
             ))}
-            {/* {threadSourceCount > 0 && (
-                <button
-                    className="sources-info"
-                    disabled={true}
-                    title={`This thread has ${threadSourceCount} sources.`}
-                >
-                    <ZoteroIcon 
-                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                        size={14} 
-                        color="--accent-green"
-                        className="mr-1"
-                    />
-                    {threadSourceCount}
-                </button>
-            )} */}
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
                 <MessageItemButton item={currentReaderAttachment} canEdit={false} isReaderAttachment={true} />
             )}
 
-            {/* Current attachments */}
-            {/* {currentSources
-                .filter((attachment) => !currentReaderAttachment || attachment.itemKey !== currentReaderAttachment.itemKey)
-                .map((source, index) => (
-                    source.type === "annotation" ? (
-                        <AnnotationButton
-                            key={index}
-                            source={source}
-                        />
-                    ) : (
-                        <SourceButton
-                            key={index}
-                            source={source}
-                        />
-                    )
-                ))
-            } */}
-
             {/* Current message items */}
-            {currentMessageItems.filter((item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key).map((item, index) => (
-                <MessageItemButton
-                    key={index} item={item}
-                    onRemove={(item) => {
-                        setCurrentMessageItems(currentMessageItems.filter((i) => i.key !== item.key));
-                    }}
-                />
-            ))}
+            {currentMessageItems
+                .filter((item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key)
+                .map((item, index) => (
+                    <MessageItemButton
+                        key={index} item={item}
+                        onRemove={(item) => {
+                            setCurrentMessageItems(currentMessageItems.filter((i) => i.key !== item.key));
+                        }}
+                    />
+                ))
+            }
 
             {/* Current text selection */}
             {readerTextSelection && (
