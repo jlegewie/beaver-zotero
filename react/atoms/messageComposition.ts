@@ -144,8 +144,12 @@ async function validateItemsInBackground(
         const invalidItemIds = new Set(invalidItemsWithAttachments.map(({ item }) => item.id));
         const regularItems = items.filter((i) => i.isRegularItem() && !invalidItemIds.has(i.id));
         
-        for (const item of regularItems) {
-            set(addRegularItemPopupAtom, { item, getValidation });
+        // Show individual popup for single item, summary popup for multiple items
+        // for (const item of regularItems) set(addRegularItemPopupAtom, { item, getValidation });
+        if (regularItems.length === 1) {
+            set(addRegularItemPopupAtom, { item: regularItems[0], getValidation });
+        } else if (regularItems.length > 1) {
+            set(addRegularItemsSummaryPopupAtom, { items: regularItems, getValidation });
         }
 
         } catch (error: any) {
