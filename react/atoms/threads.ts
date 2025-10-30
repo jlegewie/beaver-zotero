@@ -166,7 +166,6 @@ export const loadThreadAtom = atom(
             
             if (!statefulChat) {
                 const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
-                logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
                 const messages = messagesDB.map(toMessageUI);
                 
                 // Extract user attachments from messages
