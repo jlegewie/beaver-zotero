@@ -32,8 +32,10 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
                             <div className="flex-shrink-0 mt-0.5">
                                 <CSSItemTypeIcon itemType={itemType} />
                             </div>
-                            <div className="truncate">
-                                {displayName}
+                            <div className="display-flex flex-col gap-1">
+                                <div className="truncate">
+                                    {displayName}
+                                </div>
                             </div>
                         </div>
                             {/* <div className="text-xs text-gray-600 dark:text-gray-400">
@@ -44,27 +46,28 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
                                     </span>
                                 )}
                             </div> */}
-                        
-                        {itemSummary.item.isRegularItem() && (
-                            <div className="display-flex items-center flex-row font-color-secondary gap-1 opacity-50">
-                                <div className="display-flex items-center flex-row">
-                                    <ZoteroIcon 
-                                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                                        size={15} 
-                                        color="--accent-green"
-                                        className="mr-2"
-                                    />
-                                    <span>{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''}</span>
-                                </div>
-
-                                {itemSummary.invalidAttachments > 0 && (
+                            {itemSummary.item.isRegularItem() && (
+                                <div className="display-flex flex-row font-color-tertiary gap-1">
                                     <div className="display-flex items-center flex-row">
-                                        <CSSIcon name="x-8" className="icon-16 font-color-error scale-11" style={{ fill: 'red' }}/>
-                                        <span>{itemSummary.invalidAttachments} attachment{itemSummary.invalidAttachments !== 1 ? 's' : ''} skipped</span>
+                                        <ZoteroIcon 
+                                            icon={ZOTERO_ICONS.ATTACHMENTS} 
+                                            size={14} 
+                                            color="--fill-tertiary"
+                                            className="mr-2"
+                                        />
+                                        <span>{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''}</span>
                                     </div>
-                                )}
-                            </div>
-                        )}
+
+                                    {itemSummary.invalidAttachments > 0 && (
+                                        <div className="display-flex items-center flex-row">
+                                            <CSSIcon name="x-8" className="icon-16 scale-11" style={{ fill: 'var(--tag-red)' }}/>
+                                            <span>{itemSummary.invalidAttachments} skipped</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        
+                        
                     </div>
                 );
             })}
