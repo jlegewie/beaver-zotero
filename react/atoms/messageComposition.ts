@@ -248,20 +248,23 @@ export const updateReaderAttachmentAtom = atom(
     async (get, set, reader?: any) => {
         // also gets the current reader item (parent item)
         // Zotero.getActiveZoteroPane().getSelectedItems()
+        
+        // Remove popup message for current reader attachment
+        const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
+        if (currentReaderAttachmentKey) {
+            set(removePopupMessageAtom, currentReaderAttachmentKey);
+        }
+
         // Get current reader
         reader = reader || getCurrentReader();
         if (!reader) {
             set(currentReaderAttachmentAtom, null);
             return;
         }
+
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
         if (item) {
-            const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
-            if (currentReaderAttachmentKey) {
-                set(removePopupMessageAtom, currentReaderAttachmentKey);
-            }
-            logger(`Updating reader attachment to ${item.key}`);
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item]);
         }
