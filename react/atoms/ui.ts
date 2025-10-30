@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { TextSelection } from '../types/attachments/apiTypes';
-import { PopupMessage } from '../types/popupMessage';
+import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -50,3 +50,13 @@ export const activePreviewAtom = atom<ActivePreview>(null);
 
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
+
+// Remove popup messages by type
+export const removePopupMessagesByTypeAtom = atom(
+    null,
+    (get, set, types: PopupMessageType[]) => {
+        set(popupMessagesAtom, (prevMessages) =>
+            prevMessages.filter((msg) => !types.includes(msg.type))
+        );   
+    }
+);
