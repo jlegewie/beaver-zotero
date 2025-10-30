@@ -201,11 +201,10 @@ async function validateItemsInBackground(
             // Show error message with custom content
             let title = `${invalidItems.length} Items Removed`;
             if (invalidItems.length === 1) {
-                const label = isReaderAttachment ? 'Invalid File' : 'Removed';
                 const name = invalidItems[0].item.isAnnotation()
                     ? 'Annotation'
                     : invalidItems[0].item.isNote() ? 'Note' : `"${invalidItems[0].item.getDisplayTitle()}"`
-                title = `${label} ${name}`
+                title = `Invalid File ${name}`
             }
             
             const invalidItemsData = invalidItems.map(({ item, validation }) => ({
