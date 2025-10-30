@@ -310,22 +310,8 @@ const AddSourcesMenu: React.FC<{
                 (i) => i.id === item.id
             );
             
+            // Add source to current message items
             if (!exists) {
-                // Check attachment limit before adding
-                const maxUserAttachments = isAppKeyModel ? planFeatures.maxUserAttachments : getPref("maxAttachments");
-                const availableAttachments = maxUserAttachments - (inputAttachmentCount + threadAttachmentCount);
-                
-                if (availableAttachments <= 0) {
-                    setPopupMessage({
-                        type: 'warning',
-                        title: 'Attachment Limit Exceeded',
-                        text: `Maximum of ${maxUserAttachments} attachments reached. Remove attachments from the current message to add more.`,
-                        expire: true
-                    });
-                    return;
-                }
-                
-                // Add source to sources atom
                 updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
                 addItemToCurrentMessageItems(item);
             } else {
