@@ -185,7 +185,7 @@ async function validateItemsInBackground(
 
             // Show error message with custom content
             const title = invalidItems.length === 1 
-                ? 'Item Removed' 
+                ? `Removed "${invalidItems[0].item.getDisplayTitle()}"`
                 : `${invalidItems.length} Items Removed`;
             
             const invalidItemsData = invalidItems.map(({ item, validation }) => ({
