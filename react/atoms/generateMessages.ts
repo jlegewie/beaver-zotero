@@ -23,8 +23,8 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
-import { currentMessageItemsAtom } from './messageComposition';
+import { readerTextSelectionAtom, currentLibraryIdsAtom } from './input';
+import { currentMessageItemsAtom, currentMessageContentAtom} from './messageComposition';
 import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';

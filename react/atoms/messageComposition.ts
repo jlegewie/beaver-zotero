@@ -11,6 +11,12 @@ import { getCurrentReader } from "../utils/readerUtils";
 
 
 /**
+* Current user message and sources
+*/
+export const currentMessageContentAtom = atom<string>('');
+
+
+/**
 * Current message items
 * Items that are currently being added to the message
 */

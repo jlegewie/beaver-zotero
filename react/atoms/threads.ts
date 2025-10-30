@@ -1,7 +1,6 @@
 import { atom } from "jotai";
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
-import { currentMessageContentAtom } from "./input";
-import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";

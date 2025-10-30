@@ -19,10 +19,6 @@ export const removeLibraryIdAtom = atom(
     }
 );
 
-/**
-* Current user message and sources
-*/
-export const currentMessageContentAtom = atom<string>('');
 
 /**
  * Current reader text selection
