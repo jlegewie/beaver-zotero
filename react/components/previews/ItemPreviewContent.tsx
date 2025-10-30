@@ -103,14 +103,20 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             return (
                 <div className="p-3 display-flex flex-col items-start gap-2">
                     <PopupMessageHeader
-                        icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+                        icon={!isInvalid
+                            ? createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })
+                            : <Icon icon={AlertIcon} className="font-color-error scale-11 mt-020" />
+                        }
                         title={getDisplayNameFromItem(item.parentItem ?? item)}
                         // title={item.getDisplayTitle()}
                         handleDismiss={() => setActivePreview(null)}
+                        fontColor={isInvalid ? 'font-color-error' : 'font-color-secondary'}
                     />
                     <div className="display-flex flex-col gap-3 -ml-1">
                         <div className="display-flex flex-row items-center gap-2 ml-15">
-                            <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 100)}</div>
+                            <div className={`text-md ${isInvalid ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                {!isInvalid ? truncateText(item.getDisplayTitle(), 100) : validation?.reason}
+                            </div>
                         </div>
                     </div>
                 </div>
