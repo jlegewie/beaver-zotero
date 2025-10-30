@@ -260,6 +260,7 @@ export const addRegularItemPopupAtom = atom(
 
         // Always show popup for regular items
         set(addPopupMessageAtom, {
+            id: item.key,
             type: 'items_summary',
             icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
             title: truncateText(getDisplayNameFromItem(item), 68),
