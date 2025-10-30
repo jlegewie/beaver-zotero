@@ -197,6 +197,7 @@ async function validateItemsInBackground(
             }));
             
             set(addPopupMessageAtom, {
+                id: items.map((item) => item.key).join(','),
                 type: 'error',
                 title,
                 customContent: createElement(InvalidItemsMessageContent, { 
@@ -256,6 +257,10 @@ export const updateReaderAttachmentAtom = atom(
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
         if (item) {
+            const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
+            if (currentReaderAttachmentKey) {
+                set(removePopupMessageAtom, currentReaderAttachmentKey);
+            }
             logger(`Updating reader attachment to ${item.key}`);
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item]);
