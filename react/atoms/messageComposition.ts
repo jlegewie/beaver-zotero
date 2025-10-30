@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import { userAttachmentKeysAtom } from "./threads";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom } from "../utils/popupMessageUtils";
+import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
@@ -87,9 +87,11 @@ export const removeLibraryIdAtom = atom(
 */
 export const removeItemFromMessageAtom = atom(
     null,
-    (get, set, item: Zotero.Item) => {
-        const currentItems = get(currentMessageItemsAtom);
-        set(currentMessageItemsAtom, currentItems.filter((i) => i.key !== item.key));
+    (_, set, item: Zotero.Item) => {
+        set(currentMessageItemsAtom, (prevItems) =>
+            prevItems.filter((i) => i.key !== item.key)
+        );
+        set(removePopupMessageAtom, item.key);
     }
 );
 
