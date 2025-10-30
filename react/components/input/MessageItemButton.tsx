@@ -190,7 +190,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
                     {isReaderAttachment
-                        ? validation?.isValid ? 'Current File' : 'Invalid File'
+                        ? (validation && !validation.isValid) ? 'Invalid File' : 'Current File'
                         : displayName || '...'}
                 </span>
                 
