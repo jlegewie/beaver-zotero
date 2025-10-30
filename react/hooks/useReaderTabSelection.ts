@@ -120,6 +120,7 @@ export function useReaderTabSelection() {
                 const validation = getValidation(item);
                 if (validation && !validation.isValid) {
                     logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is invalid. Skipping setup.`);
+                    setReaderTextSelection(null);
                     return;
                 }
             }
