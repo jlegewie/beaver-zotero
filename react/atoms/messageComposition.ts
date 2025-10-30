@@ -204,7 +204,7 @@ async function validateItemsInBackground(
                 const label = isReaderAttachment ? 'Invalid File' : 'Removed';
                 const name = invalidItems[0].item.isAnnotation()
                     ? 'Annotation'
-                    : `"${invalidItems[0].item.getDisplayTitle()}"`
+                    : invalidItems[0].item.isNote() ? 'Note' : `"${invalidItems[0].item.getDisplayTitle()}"`
                 title = `${label} ${name}`
             }
             
