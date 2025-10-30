@@ -196,8 +196,10 @@ async function validateItemsInBackground(
                 reason: validation?.reason || 'Unknown error'
             }));
             
+            const popupMessageId = items.map((item) => item.key).join(',');
+            set(removePopupMessageAtom, popupMessageId);
             set(addPopupMessageAtom, {
-                id: items.map((item) => item.key).join(','),
+                id: popupMessageId,
                 type: 'error',
                 title,
                 customContent: createElement(InvalidItemsMessageContent, { 
