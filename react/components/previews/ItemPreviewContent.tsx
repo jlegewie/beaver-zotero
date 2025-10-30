@@ -1,5 +1,5 @@
 import React, { createElement } from 'react';
-import { CSSItemTypeIcon, CSSIcon } from '../icons/icons';
+import { CSSItemTypeIcon, CSSIcon, AlertIcon, Icon } from '../icons/icons';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { removeItemFromMessageAtom } from '../../atoms/messageComposition';
