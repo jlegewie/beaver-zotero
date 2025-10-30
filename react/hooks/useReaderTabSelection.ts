@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { readerTextSelectionAtom } from '../atoms/input';
+import { readerTextSelectionAtom } from '../atoms/messageComposition';
 import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';

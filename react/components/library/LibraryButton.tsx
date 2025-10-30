@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { removeLibraryIdAtom, currentLibraryIdsAtom } from '../../atoms/input';
+import { removeLibraryIdAtom, currentLibraryIdsAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectLibrary } from '../../../src/utils/selectItem';
 

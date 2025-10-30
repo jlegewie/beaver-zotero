@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react'
 import { CSSIcon, Icon, TextAlignLeftIcon } from "../icons/icons"
 import { useSetAtom } from 'jotai'
-import { readerTextSelectionAtom } from '../../atoms/input'
+import { readerTextSelectionAtom } from '../../atoms/messageComposition'
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
 import { usePreviewHover } from '../../hooks/usePreviewHover'
 import { activePreviewAtom } from '../../atoms/ui'

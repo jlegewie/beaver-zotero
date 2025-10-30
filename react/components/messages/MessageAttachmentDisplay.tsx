@@ -1,7 +1,6 @@
 import React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { readerTextSelectionAtom, currentLibraryIdsAtom } from '../../atoms/input';
-import { currentReaderAttachmentAtom } from '../../atoms/messageComposition';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';

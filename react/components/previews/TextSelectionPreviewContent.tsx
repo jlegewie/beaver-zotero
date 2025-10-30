@@ -2,7 +2,7 @@ import React from 'react';
 import { CancelIcon, TextAlignLeftIcon, Icon } from '../icons/icons';
 import { useSetAtom, useAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
-import { readerTextSelectionAtom } from '../../atoms/input';
+import { readerTextSelectionAtom } from '../../atoms/messageComposition';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
