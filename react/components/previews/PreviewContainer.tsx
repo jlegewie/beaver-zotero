@@ -6,6 +6,11 @@ import AnnotationPreviewContent from './AnnotationPreviewContent';
 import ItemPreviewContent from './ItemPreviewContent';
 import ItemsSummaryPreviewContent from './ItemsSummaryPreviewContent';
 
+interface PreviewContainerProps {
+    className?: string;
+    hasAboveOverlay?: boolean;
+}
+
 // Preview height constants
 const MIN_HEIGHT = 100;
 const MAX_HEIGHT = 380;
@@ -16,7 +21,7 @@ const SHOW_DELAY = 100;
 const HIDE_DELAY = 350;
 
 // Preview container component
-const PreviewContainer: React.FC = () => {
+const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAboveOverlay = false }) => {
     const previewRef = useRef<HTMLDivElement>(null);
     const [activePreview, setActivePreview] = useAtom(activePreviewAtom);
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
@@ -105,6 +110,10 @@ const PreviewContainer: React.FC = () => {
         return null; // Render nothing if no active preview or height not calculated yet
     }
 
+    const containerClassName = ['w-full', hasAboveOverlay ? 'mt-2' : '', className]
+        .filter(Boolean)
+        .join(' ');
+
     // Determine which content component to render
     const renderPreviewContent = () => {
         switch (activePreview.type) {
@@ -122,7 +131,7 @@ const PreviewContainer: React.FC = () => {
     };
 
     return (
-        <div className="absolute -top-4 inset-x-0 -translate-y-full px-3">
+        <div className={containerClassName}>
             <div
                 ref={previewRef}
                 className="source-preview border-popup shadow-md mx-0"

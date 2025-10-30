@@ -13,14 +13,13 @@ import OnboardingPage from './pages/OnboardingPage';
 import PreferencePage from './pages/PreferencePage';
 import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import PreviewContainer from './previews/PreviewContainer';
 import DragDropWrapper from './input/DragDropWrapper';
-import PopupMessageContainer from './ui/popup/PopupMessageContainer';
 import DialogContainer from './dialog/DialogContainer';
 import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
+import PreviewAndPopupContainer from './PreviewAndPopupContainer';
 
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -132,9 +131,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                <PopupMessageContainer />
+                <PreviewAndPopupContainer />
                 <ScrollDownButton onClick={handleScrollToBottom} />
-                <PreviewContainer />
                 <DragDropWrapper>
                     <InputArea inputRef={inputRef} />
                 </DragDropWrapper>

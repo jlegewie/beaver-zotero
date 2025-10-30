@@ -111,7 +111,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
 
     return (
         <div
-            className="source-preview border-popup shadow-md mx-0 mb-2"
+            className="source-preview border-popup shadow-md mx-0 w-full"
             style={{
                 background: backgroundColor,
                 backdropFilter: 'blur(6px)',

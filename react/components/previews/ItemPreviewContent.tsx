@@ -151,6 +151,39 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
     return (
         <>
             {renderContent()}
+            {/* buttons */}
+            {/* <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
+                <div className="flex-1 gap-3 display-flex">
+                    <Button
+                        variant="ghost"
+                        onClick={handleOpen}
+                        // disabled={!annotation.parent_key} // Disable if parent info is missing
+                    >
+                        <ZoteroIcon
+                            icon={ZOTERO_ICONS.OPEN}
+                            size={12}
+                        />
+                        Open
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        onClick={handleRemove}
+                    >
+                        <ZoteroIcon
+                            icon={ZOTERO_ICONS.TRASH}
+                            size={12}
+                        />
+                        Remove
+                    </Button>
+                </div>
+                <div className="display-flex">
+                    <IconButton
+                        icon={CancelIcon}
+                        variant="ghost"
+                        onClick={() => setActivePreview(null)}
+                    />
+                </div>
+            </div> */}
         </>
     );
 };
