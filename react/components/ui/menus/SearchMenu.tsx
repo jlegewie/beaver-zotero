@@ -415,7 +415,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 
     const textInput = (
         <div 
-            className={`display-flex flex-row items-center gap-05 p-1 ${
+            className={`display-flex flex-row items-center gap-05 p-1 px-2 ${
                 verticalPosition === 'above' 
                     ? 'mt-1 border-top-quinary' 
                     : 'mb-1 border-bottom-quinary'
