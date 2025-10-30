@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
@@ -28,7 +28,7 @@ const MessageAttachmentDisplay = ({
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
+    const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
@@ -76,7 +76,7 @@ const MessageAttachmentDisplay = ({
                     key={item.key}
                     item={item}
                     onRemove={(item) => {
-                        setCurrentMessageItems((prevItems) => prevItems.filter((i) => i.key !== item.key));
+                        removeItemFromMessage(item);
                     }}
                 />
             ))}
