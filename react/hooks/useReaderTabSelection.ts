@@ -193,7 +193,7 @@ export function useReaderTabSelection() {
                         currentReaderIdRef.current = null;
                         currentReaderRef.current = null;
                         setReaderTextSelection(null);
-                        setReaderAttachment(null);
+                        await updateReaderAttachment();
                     }
                 }
                 // Annotation events
