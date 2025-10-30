@@ -158,14 +158,19 @@ async function validateItemsInBackground(
     const getValidation = get(getItemValidationAtom);
     
     try {
-        // Items to validate: Regular items and their attachments
+        // Items to validate: items themselves, attachments of regular items, parent attachments of annotations
         const childItemsPromises = items
             .filter((item) => item.isRegularItem())
             .flatMap((item) => {
                 return item.getAttachments().map((id: number) => Zotero.Items.getAsync(id));
             });
         const childItems = await Promise.all(childItemsPromises);
-        const itemsToValidate = [...items, ...childItems];
+        const parentItems = items
+            .filter((item) => item.isAnnotation())
+            .map((item) => item.parentItem ?? null)
+            .filter((item): item is Zotero.Item => item !== null);
+        
+        const itemsToValidate = [...items, ...childItems, ...parentItems];
     
         // Validate all items with BACKEND validation
         // This does local validation first, then backend validation
@@ -177,7 +182,15 @@ async function validateItemsInBackground(
         
         // Remove invalid items from currentMessageItemsAtom
         const invalidItems = items
-            .map(item => ({ item, validation: getValidation(item) }))
+            .map(item => ({
+                item,
+                validation: item.isAnnotation() && item.parentItem
+                    ? {
+                        ...getValidation(item.parentItem),
+                        isValid: getValidation(item).isValid && getValidation(item.parentItem).isValid   
+                    }
+                    : getValidation(item)
+            }))
             .filter(({ validation }) => validation && !validation.isValid);
 
         if (invalidItems.length > 0) {
@@ -188,10 +201,14 @@ async function validateItemsInBackground(
             set(currentMessageItemsAtom, validItems);
 
             // Show error message with custom content
-            const label = isReaderAttachment ? 'Invalid File' : 'Removed';
-            const title = invalidItems.length === 1 
-                ? `${label} "${invalidItems[0].item.getDisplayTitle()}"`
-                : `${invalidItems.length} Items Removed`;
+            let title = `${invalidItems.length} Items Removed`;
+            if (invalidItems.length === 1) {
+                const label = isReaderAttachment ? 'Invalid File' : 'Removed';
+                const name = invalidItems[0].item.isAnnotation()
+                    ? 'Annotation'
+                    : `"${invalidItems[0].item.getDisplayTitle()}"`
+                title = `${label} ${name}`
+            }
             
             const invalidItemsData = invalidItems.map(({ item, validation }) => ({
                 item,
