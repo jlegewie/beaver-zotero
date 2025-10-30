@@ -162,6 +162,11 @@ attachment-box .metadata-table #beaver-status {
     animation: fadeIn 0.3s ease-in-out forwards;
 }
 
+[id^="beaver-pane-"] .source-preview.no-fade {
+    animation: none;
+    opacity: 1;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
