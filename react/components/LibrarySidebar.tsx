@@ -22,20 +22,6 @@ const LibrarySidebar = () => {
     const isVisible = useAtomValue(isSidebarVisibleAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
 
-    // Update sources from Zotero selection when opening the library sidebar
-    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
-    const updateMessageItemsFromZoteroSelection = useSetAtom(updateMessageItemsFromZoteroSelectionAtom);
-    const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
-    useEffect(() => {
-        if (!isVisible || !isLibraryTab) return;
-        removePopupMessagesByType(['items_summary']);
-        setCurrentMessageItems([]);
-        const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-        if (addSelectedItemsOnOpen) {
-            updateMessageItemsFromZoteroSelection(true);
-        }
-    }, [isVisible, isLibraryTab]);
-
     // Return the sidebar if it is visible and the currently selected tab is a library tab
     return isVisible && isLibraryTab ? <LibrarySidebarContent /> : null;
 }
