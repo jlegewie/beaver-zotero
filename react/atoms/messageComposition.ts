@@ -9,6 +9,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
+import { get } from "lodash";
 
 
 /**
@@ -243,7 +244,7 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 */
 export const updateReaderAttachmentAtom = atom(
     null,
-    async (_, set, reader?: any) => {
+    async (get, set, reader?: any) => {
         // also gets the current reader item (parent item)
         // Zotero.getActiveZoteroPane().getSelectedItems()
         // Get current reader
@@ -257,6 +258,7 @@ export const updateReaderAttachmentAtom = atom(
         if (item) {
             logger(`Updating reader attachment to ${item.key}`);
             set(currentReaderAttachmentAtom, item);
+            validateItemsInBackground(get, set, [item]);
         }
     }
 );
