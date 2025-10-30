@@ -244,6 +244,7 @@ export const loadThreadAtom = atom(
         }
         // Clear sources for now
         set(currentMessageItemsAtom, []);
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
     }
 );
