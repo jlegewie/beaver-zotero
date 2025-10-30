@@ -132,7 +132,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 />
 
                 {/* Content for info, warning, error */}
-                {['info', 'warning', 'error'].includes(message.type) && (
+                {['info', 'warning', 'error', 'items_summary'].includes(message.type) && (
                     message.customContent ? (
                         <div className="w-full">
                             {message.customContent}

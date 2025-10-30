@@ -260,7 +260,7 @@ export const addRegularItemPopupAtom = atom(
 
         // Always show popup for regular items
         set(addPopupMessageAtom, {
-            type: 'info',
+            type: 'items_summary',
             icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
             title: truncateText(getDisplayNameFromItem(item), 68),
             customContent: createElement(RegularItemMessageContent, { 
@@ -306,7 +306,7 @@ export const addRegularItemsSummaryPopupAtom = atom(
 
         // Show summary popup
         set(addPopupMessageAtom, {
-            type: 'info',
+            type: 'items_summary',
             title: `${items.length} Items Added`,
             customContent: createElement(RegularItemsSummaryContent, { 
                 items: itemsSummary 
