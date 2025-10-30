@@ -11,6 +11,7 @@ import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
 import { allAnnotationsAtom } from '../atoms/toolAnnotations';
+import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**
  * Manages text selection listening for the currently active Zotero reader tab.
@@ -27,6 +28,7 @@ export function useReaderTabSelection() {
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+    const getValidation = useAtomValue(getItemValidationAtom);
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
@@ -102,7 +104,7 @@ export function useReaderTabSelection() {
         }
 
         // Wait for the reader to be ready before setting initial selection and listener
-        waitForInternalReader(reader, () => {
+        waitForInternalReader(reader, async () => {
             // Check if the reader context is still the same after waiting
             if (currentReaderIdRef.current !== reader.itemID) {
                 logger(`useReaderTabSelection:setupReader: Reader changed after waitForInternalReader for ${reader.itemID}. Skipping setup.`);
@@ -112,16 +114,36 @@ export function useReaderTabSelection() {
             // Get current selection and update state
             const initialSelection = getSelectedTextAsTextSelection(reader);
             logger(`useReaderTabSelection:setupReader: Initial selection for reader ${reader.itemID}: ${initialSelection?.text ? '"' + initialSelection.text + '"' : 'null'}`);
+            // Ensure the reader item is valid
+            const item = await Zotero.Items.getAsync(reader.itemID);
+            if (item) {
+                const validation = getValidation(item);
+                if (validation && !validation.isValid) {
+                    logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is invalid. Skipping setup.`);
+                    return;
+                }
+            }
+            // Set the initial selection
             setReaderTextSelection(initialSelection);
 
             // Add new selection listener with initiallyHasSelection parameter based on initial selection
             logger(`useReaderTabSelection:setupReader: Adding selection listener for reader ${reader.itemID}`);
             selectionCleanupRef.current = addSelectionChangeListener(
                 reader, 
-                (newSelection: TextSelection | null) => {
+                async (newSelection: TextSelection | null) => {
                     // Ensure the event is for the currently active reader this hook manages
                     if (currentReaderIdRef.current === reader.itemID) {
                         logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection ? newSelection.text : 'null'}"`);
+                        // Ensure the reader item is valid
+                        const item = await Zotero.Items.getAsync(reader.itemID);
+                        if (item) {
+                            const validation = getValidation(item);
+                            if (validation && !validation.isValid) {
+                                logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is invalid. Skipping setup.`);
+                                return;
+                            }
+                        }
+                        // Set the new selection
                         setReaderTextSelection(newSelection);
                     } else {
                          logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
