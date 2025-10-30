@@ -4,6 +4,7 @@ import { activePreviewAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
 import TextSelectionPreviewContent from './TextSelectionPreviewContent';
 import AnnotationPreviewContent from './AnnotationPreviewContent';
 import ItemPreviewContent from './ItemPreviewContent';
+import ItemsSummaryPreviewContent from './ItemsSummaryPreviewContent';
 
 // Preview height constants
 const MIN_HEIGHT = 100;
@@ -113,6 +114,8 @@ const PreviewContainer: React.FC = () => {
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'annotation':
                 return <AnnotationPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
+            case 'itemsSummary':
+                return <ItemsSummaryPreviewContent items={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }
