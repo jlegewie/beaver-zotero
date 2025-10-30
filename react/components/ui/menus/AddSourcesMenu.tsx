@@ -4,7 +4,7 @@ import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon 
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../utils/sourceUtils';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { currentLibraryIdsAtom, inputAttachmentCountAtom } from '../../../atoms/messageComposition';
+import { currentLibraryIdsAtom, inputAttachmentCountAtom, removeItemFromMessageAtom } from '../../../atoms/messageComposition';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';
@@ -102,7 +102,7 @@ const AddSourcesMenu: React.FC<{
     const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
+    const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
 
     // Add ref for tracking the current search request
     const currentSearchRef = useRef<string>('');
@@ -329,10 +329,7 @@ const AddSourcesMenu: React.FC<{
                 updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
                 addItemToCurrentMessageItems(item);
             } else {
-                // Remove source from sources atom
-                setCurrentMessageItems((prevItems: Zotero.Item[]) => prevItems.filter(
-                    (i) => i.id !== item.id
-                ));
+                removeItemFromMessage(item);
             }
             // Close after selection in sources mode
             handleOnClose();
@@ -370,7 +367,7 @@ const AddSourcesMenu: React.FC<{
                 </div>
             ),
         };
-    }, [currentMessageItems, planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage, isAppKeyModel, addItemToCurrentMessageItems, setCurrentMessageItems]);
+    }, [currentMessageItems, planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage, isAppKeyModel, addItemToCurrentMessageItems]);
 
     // Create menu item for a library (libraries sub-menu)
     const createMenuItemFromLibrary = useCallback((
