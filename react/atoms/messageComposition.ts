@@ -150,7 +150,8 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 async function validateItemsInBackground(
     get: any,
     set: any,
-    items: Zotero.Item[]
+    items: Zotero.Item[],
+    isReaderAttachment: boolean = false
 ) {
     // Import validation atoms (avoid circular dependency issues)
     const { validateItemsAtom } = await import('./itemValidation');
@@ -187,8 +188,9 @@ async function validateItemsInBackground(
             set(currentMessageItemsAtom, validItems);
 
             // Show error message with custom content
+            const label = isReaderAttachment ? 'Invalid File' : 'Removed';
             const title = invalidItems.length === 1 
-                ? `Removed "${invalidItems[0].item.getDisplayTitle()}"`
+                ? `${label} "${invalidItems[0].item.getDisplayTitle()}"`
                 : `${invalidItems.length} Items Removed`;
             
             const invalidItemsData = invalidItems.map(({ item, validation }) => ({
@@ -205,7 +207,7 @@ async function validateItemsInBackground(
                 customContent: createElement(InvalidItemsMessageContent, { 
                     invalidItems: invalidItemsData 
                 }),
-                expire: true,
+                expire: isReaderAttachment ? false : true,
                 duration: 3000
             });
         }
@@ -268,7 +270,7 @@ export const updateReaderAttachmentAtom = atom(
         const item = await Zotero.Items.getAsync(reader.itemID);
         if (item) {
             set(currentReaderAttachmentAtom, item);
-            validateItemsInBackground(get, set, [item]);
+            validateItemsInBackground(get, set, [item], true);
         }
     }
 );
