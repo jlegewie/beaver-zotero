@@ -252,10 +252,12 @@ async function validateItemsInBackground(
 */
 export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
-    async (get, set, pinned: boolean = false) => {
+    async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment());
-        await set(addItemsToCurrentMessageItemsAtom, itemsFiltered);
+        if (!limit || itemsFiltered.length <= limit) {
+            await set(addItemsToCurrentMessageItemsAtom, itemsFiltered.slice(0, limit));
+        }
     }
 );
 
