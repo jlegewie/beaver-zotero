@@ -189,7 +189,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             >
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
-                    {isReaderAttachment ? 'Current File' : displayName || '...'}
+                    {isReaderAttachment
+                        ? validation?.isValid ? 'Current File' : 'Invalid File'
+                        : displayName || '...'}
                 </span>
                 
                 {/* Show arrow icon for annotations not in current reader */}
