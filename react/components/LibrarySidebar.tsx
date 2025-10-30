@@ -1,11 +1,8 @@
-import React, { useEffect } from 'react';
-import { useAtomValue, useSetAtom } from "jotai";
+import React from 'react';
+import { useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
-import { getPref } from '../../src/utils/prefs';
-import { removePopupMessagesByTypeAtom } from '../atoms/ui';
-import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 
 // LibrarySidebarContent handles library-specific features
 const LibrarySidebarContent = () => {
