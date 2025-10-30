@@ -256,7 +256,8 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, pinned: boolean = false) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        await set(addItemsToCurrentMessageItemsAtom, items);
+        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment());
+        await set(addItemsToCurrentMessageItemsAtom, itemsFiltered);
     }
 );
 
