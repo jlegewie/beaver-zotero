@@ -23,7 +23,7 @@ const getPluginPreferences = () => {
         'userId', 'userEmail', 'currentPlanId', 'installedVersion', 
         'showIndexingCompleteMessage', 'keyboardShortcut',
         'statefulChat', 'addSelectedItemsOnOpen', 'addSelectedItemsOnNewThread',
-        'maxAttachments', 'customInstructions', 'googleGenerativeAiApiKey',
+        'customInstructions', 'googleGenerativeAiApiKey',
         'openAiApiKey', 'anthropicApiKey', 'lastUsedModel', 'recentItems',
         'citationFormat', 'citationStyle', 'citationLocale', 'customPrompts'
     ] as const;

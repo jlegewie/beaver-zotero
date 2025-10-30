@@ -17,7 +17,6 @@ pref("annotationToolEnabled", true);
 pref("autoApplyAnnotations", true);
 
 // AI settings
-pref("maxAttachments", 8);
 pref("customInstructions", "");
 pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");
