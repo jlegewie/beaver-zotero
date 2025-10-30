@@ -42,6 +42,7 @@ import { userIdAtom } from './auth';
 import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { removePopupMessagesByTypeAtom } from './ui';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -209,6 +210,7 @@ export const generateResponseAtom = atom(
         
         // Reset user message and source after adding to message
         set(currentMessageContentAtom, '');
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageItemsAtom, []);
         
         // Execute chat completion
