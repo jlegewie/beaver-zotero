@@ -4,6 +4,7 @@ import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 import { getPref } from '../../src/utils/prefs';
+import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 
 // LibrarySidebarContent handles library-specific features
@@ -24,8 +25,10 @@ const LibrarySidebar = () => {
     // Update sources from Zotero selection when opening the library sidebar
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const updateMessageItemsFromZoteroSelection = useSetAtom(updateMessageItemsFromZoteroSelectionAtom);
+    const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
     useEffect(() => {
         if (!isVisible) return;
+        removePopupMessagesByType(['items_summary']);
         setCurrentMessageItems([]);
         const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
         if (addSelectedItemsOnOpen) {
