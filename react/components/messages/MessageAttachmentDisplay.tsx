@@ -8,6 +8,7 @@ import { LibraryButton } from '../library/LibraryButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
+import { activePreviewAtom } from '../../atoms/ui';
 
 const MAX_ATTACHMENTS = 4;
 
@@ -29,6 +30,7 @@ const MessageAttachmentDisplay = ({
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
+    const setActivePreview = useSetAtom(activePreviewAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
@@ -77,6 +79,12 @@ const MessageAttachmentDisplay = ({
                     item={item}
                     onRemove={(item) => {
                         removeItemFromMessage(item);
+                        setActivePreview((prev) => {
+                            if (prev && prev.type === 'item' && prev.content.key === item.key) {
+                                return null;
+                            }
+                            return prev;
+                        });
                     }}
                 />
             ))}
