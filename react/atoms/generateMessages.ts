@@ -169,11 +169,11 @@ export const generateResponseAtom = atom(
         set(currentAssistantMessageIdAtom, assistantMsg.id);
 
         // Convert sources to MessageAttachments and process image annotations
-        const messageAttachments: MessageAttachment[] =
+        let messageAttachments: MessageAttachment[] =
             payload.items
                 .map(item => toMessageAttachment(item))
                 .filter(attachment => attachment !== null);
-        const processedAttachments: MessageAttachment[] = await processImageAnnotations(messageAttachments);
+        messageAttachments = await processImageAnnotations(messageAttachments);
 
         // Get current reader state and add to message attachments if valid and not already in the thread
         const readerAttachment = get(currentReaderAttachmentAtom);
