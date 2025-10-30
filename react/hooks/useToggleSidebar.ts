@@ -6,6 +6,8 @@ import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 
+const MAX_ATTACHMENTS = 3;
+
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
@@ -25,7 +27,7 @@ export function useToggleSidebar() {
                 removePopupMessagesByType(['items_summary']);
                 const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
                 if (addSelectedItemsOnOpen && isLibraryTab) {
-                    updateMessageItemsFromZoteroSelection(true);
+                    updateMessageItemsFromZoteroSelection(MAX_ATTACHMENTS);
                 }
             }
             
