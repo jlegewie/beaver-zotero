@@ -14,7 +14,6 @@ declare namespace _ZoteroTypes {
       "showIndexingCompleteMessage": boolean;
       "authMethod": string;
       "keyboardShortcut": string;
-      "updateSourcesFromZoteroSelection": boolean;
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;

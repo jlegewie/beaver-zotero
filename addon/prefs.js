@@ -10,7 +10,6 @@ pref("authMethod", "otp");
 
 // App settings
 pref("keyboardShortcut", "l");
-pref("updateSourcesFromZoteroSelection", false);
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
