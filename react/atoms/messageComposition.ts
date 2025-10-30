@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
-import { getItemValidationAtom } from './itemValidation';
+import { getItemValidationAtom, validateItemsAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
@@ -153,9 +153,9 @@ async function validateItemsInBackground(
     items: Zotero.Item[],
     isReaderAttachment: boolean = false
 ) {
-    // Import validation atoms (avoid circular dependency issues)
-    const { validateItemsAtom } = await import('./itemValidation');
     const getValidation = get(getItemValidationAtom);
+    
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     try {
         // Items to validate: items themselves, attachments of regular items, parent attachments of annotations
