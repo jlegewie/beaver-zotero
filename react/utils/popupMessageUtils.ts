@@ -269,7 +269,7 @@ export const addRegularItemPopupAtom = atom(
                 summary
             }),
             expire: true,
-            duration: summary.hasIssues ? 4000 : 3000
+            duration: summary.hasIssues ? 3400 : 2400
         });
     }
 );
@@ -313,7 +313,7 @@ export const addRegularItemsSummaryPopupAtom = atom(
                 items: itemsSummary 
             }),
             expire: true,
-            duration: hasIssues ? 4000 : 3000
+            duration: hasIssues ? 3000 : 2000
         });
     }
 );
