@@ -15,12 +15,12 @@ import { buildMessageItemSummary } from '../hooks/useMessageItemSummary';
 
 /**
  * Adds a new popup message to the list.
- * @param message Partial message object. ID will be generated.
+ * @param message Partial message object. ID will be generated if not provided.
  */
 export const addPopupMessageAtom = atom(
     null,
-    (get, set, newMessage: Omit<PopupMessage, 'id'>) => {
-        const id = uuidv4();
+    (get, set, newMessage: Omit<PopupMessage, 'id'> & { id?: string }) => {
+        const id = newMessage.id ?? uuidv4();
         const messageWithDefaults: PopupMessage = {
             id,
             expire: true, // Default expire to true
