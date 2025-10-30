@@ -7,6 +7,7 @@ import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { LibraryButton } from '../library/LibraryButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
+import { usePreviewHover } from '../../hooks/usePreviewHover';
 
 const MAX_ATTACHMENTS = 4;
 
@@ -26,11 +27,24 @@ const MessageAttachmentDisplay = ({
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
-    const [currentMessageItems, setCurrentMessageItems] = useAtom<Zotero.Item[]>(currentMessageItemsAtom);
+    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
         .filter(lib => lib) as Zotero.Library[];
+
+    const filteredMessageItems = currentMessageItems.filter(
+        (item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key
+    );
+    const displayedMessageItems = filteredMessageItems.slice(0, MAX_ATTACHMENTS);
+    const overflowMessageItems = filteredMessageItems.slice(MAX_ATTACHMENTS);
+    const overflowCount = overflowMessageItems.length;
+
+    const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
+        overflowCount > 0 ? { type: 'itemsSummary', content: overflowMessageItems } : null,
+        { isEnabled: overflowCount > 0 }
+    );
 
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
@@ -57,17 +71,27 @@ const MessageAttachmentDisplay = ({
             )}
 
             {/* Current message items */}
-            {currentMessageItems
-                .filter((item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key)
-                .map((item, index) => (
-                    <MessageItemButton
-                        key={index} item={item}
-                        onRemove={(item) => {
-                            setCurrentMessageItems(currentMessageItems.filter((i) => i.key !== item.key));
-                        }}
-                    />
-                ))
-            }
+            {displayedMessageItems.map((item) => (
+                <MessageItemButton
+                    key={item.key}
+                    item={item}
+                    onRemove={(item) => {
+                        setCurrentMessageItems((prevItems) => prevItems.filter((i) => i.key !== item.key));
+                    }}
+                />
+            ))}
+
+            {overflowCount > 0 && (
+                <button
+                    type="button"
+                    className="variant-outline source-button"
+                    style={{ height: '22px' }}
+                    title={`${overflowCount} more attachment${overflowCount === 1 ? '' : 's'}`}
+                    {...overflowHoverHandlers}
+                >
+                    +{overflowCount}
+                </button>
+            )}
 
             {/* Current text selection */}
             {readerTextSelection && (

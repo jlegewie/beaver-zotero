@@ -61,7 +61,7 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
                                     {itemSummary.invalidAttachments > 0 && (
                                         <div className="display-flex items-center flex-row">
                                             <CSSIcon name="x-8" className="icon-16 scale-11" style={{ fill: 'var(--tag-red)' }}/>
-                                            <span>{itemSummary.invalidAttachments} skipped</span>
+                                            <span>{itemSummary.invalidAttachments} unavailable</span>
                                         </div>
                                     )}
                                 </div>

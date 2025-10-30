@@ -31,7 +31,7 @@ const ItemsSummaryPreviewContent: React.FC<ItemsSummaryPreviewContentProps> = ({
 
     return (
         <>
-            <div className="p-3 display-flex flex-row items-center gap-2 border-bottom-quinary">
+            {/* <div className="p-3 display-flex flex-row items-center gap-2 border-bottom-quinary">
                 <div className="font-weight-medium font-color-secondary">{headerText}</div>
                 <div className="flex-1" />
                 <IconButton
@@ -40,7 +40,7 @@ const ItemsSummaryPreviewContent: React.FC<ItemsSummaryPreviewContentProps> = ({
                     onClick={() => setActivePreview(null)}
                     ariaLabel="Close preview"
                 />
-            </div>
+            </div> */}
 
             <div
                 className="source-content p-3"
