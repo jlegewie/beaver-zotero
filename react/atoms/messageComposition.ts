@@ -155,8 +155,6 @@ async function validateItemsInBackground(
 ) {
     const getValidation = get(getItemValidationAtom);
     
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
     try {
         // Items to validate: items themselves, attachments of regular items, parent attachments of annotations
         const childItemsPromises = items
