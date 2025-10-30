@@ -45,7 +45,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
             </div>
 
             {/* buttons */}
-            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
+            {/* <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 <div className="flex-1 gap-3 display-flex">
                     <Button
                         variant="ghost"
@@ -75,7 +75,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
                         onClick={() => setActivePreview(null)}
                     />
                 </div>
-            </div>
+            </div> */}
         </>
     );
 };
