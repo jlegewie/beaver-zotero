@@ -149,7 +149,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
             </div>
 
             {/* buttons */}
-            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
+            {/* <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 <div className="flex-1 gap-3 display-flex">
                     <Button
                         variant="ghost"
@@ -180,7 +180,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
                         onClick={() => setActivePreview(null)}
                     />
                 </div>
-            </div>
+            </div> */}
         </>
     );
 };
