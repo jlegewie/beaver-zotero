@@ -107,7 +107,10 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
                             ? createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })
                             : <Icon icon={AlertIcon} className="font-color-error scale-11 mt-020" />
                         }
-                        title={getDisplayNameFromItem(item.parentItem ?? item)}
+                        title={isInvalid
+                            ? `Invalid File "${item.getDisplayTitle()}"`
+                            : getDisplayNameFromItem(item.parentItem ?? item)
+                        }
                         // title={item.getDisplayTitle()}
                         handleDismiss={() => setActivePreview(null)}
                         fontColor={isInvalid ? 'font-color-error' : 'font-color-secondary'}
