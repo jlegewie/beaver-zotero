@@ -80,7 +80,13 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // Is library synced?
     const libraryIds = store.get(syncLibraryIdsAtom);
-    if (!libraryIds.includes(item.libraryID)) return {valid: false, error: "This library is not synced with Beaver."};
+    if (!libraryIds.includes(item.libraryID)) {
+        const library = Zotero.Libraries.get(item.libraryID);
+        const library_name = library ? library.name : undefined;
+        return {
+            valid: false,
+            error: library_name ? `The library "${library_name}" is not synced with Beaver.` : "This library is not synced with Beaver."};
+    }
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
@@ -126,7 +132,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         // (b) Check if annotation is empty
         if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
         if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
-        if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
+        // if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
 
         // (c) Check if the parent exists and is an attachment
         const parent = item.parentItem;
