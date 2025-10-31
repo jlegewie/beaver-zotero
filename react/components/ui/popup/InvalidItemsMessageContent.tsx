@@ -1,4 +1,7 @@
 import React from 'react';
+import { InformationCircleIcon } from '../../icons/icons';
+import IconButton from '../IconButton';
+import { getInfoItemByTitle } from '../../../constants/info';
 
 interface InvalidItemInfo {
     item: Zotero.Item;
@@ -27,10 +30,25 @@ export const InvalidItemsMessageContent: React.FC<InvalidItemsMessageContentProp
             {uniqueReasons.map((reason) => {
                 const count = reasonCounts[reason];
                 const displayText = count > 1 ? `${reason} (${count} items)` : reason;
-                
+                const infoItem = getInfoItemByTitle(reason);
+
                 return (
-                    <div key={reason} className="display-flex flex-col gap-1">
+                    <div key={reason} className="display-flex flex-row items-center gap-1">
                         <div className="font-color-tertiary text-md ml-05">{displayText}</div>
+                        {infoItem && infoItem.url && (
+                            <IconButton
+                                icon={InformationCircleIcon}
+                                variant="ghost-secondary"
+                                className="mb-075"
+                                ariaLabel={infoItem.tooltip}
+                                title={infoItem.tooltip}
+                                onClick={() => {
+                                    if (infoItem.url) {
+                                        Zotero.launchURL(infoItem.url);
+                                    }
+                                }}
+                            />
+                        )}
                     </div>
                 );
             })}
