@@ -15,6 +15,7 @@ pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("annotationToolEnabled", true);
 pref("autoApplyAnnotations", true);
+pref("maxAddAttachmentToMessage", 3);
 
 // AI settings
 pref("customInstructions", "");

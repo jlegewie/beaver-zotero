@@ -141,7 +141,8 @@ export const newThreadAtom = atom(
         // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
         if (isLibraryTab && addSelectedItemsOnNewThread) {
-            set(updateMessageItemsFromZoteroSelectionAtom);
+            const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+            set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
         }
         if (!isLibraryTab) {
             await set(updateReaderAttachmentAtom);

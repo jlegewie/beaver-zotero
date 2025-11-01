@@ -19,6 +19,7 @@ declare namespace _ZoteroTypes {
       "addSelectedItemsOnNewThread": boolean;
       "annotationToolEnabled": boolean;
       "autoApplyAnnotations": boolean;
+      "maxAddAttachmentToMessage": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;
