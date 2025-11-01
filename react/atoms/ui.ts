@@ -1,9 +1,6 @@
 import { atom } from 'jotai';
-import { InputSource } from '../types/sources';
 import { TextSelection } from '../types/attachments/apiTypes';
-import { PopupMessage } from '../types/popupMessage';
-import { isFileUploaderRunningAtom, isFileUploaderFailedAtom } from './sync';
-
+import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -43,12 +40,23 @@ export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 // Active preview
 export type ActivePreview = 
-    | { type: 'source'; content: InputSource }
+    | { type: 'item'; content: Zotero.Item }
     | { type: 'textSelection'; content: TextSelection }
-    | { type: 'annotation'; content: InputSource }
+    | { type: 'annotation'; content: Zotero.Item }
+    | { type: 'itemsSummary'; content: Zotero.Item[] }
     | null;
 
 export const activePreviewAtom = atom<ActivePreview>(null);
 
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
+
+// Remove popup messages by type
+export const removePopupMessagesByTypeAtom = atom(
+    null,
+    (get, set, types: PopupMessageType[]) => {
+        set(popupMessagesAtom, (prevMessages) =>
+            prevMessages.filter((msg) => !types.includes(msg.type))
+        );   
+    }
+);

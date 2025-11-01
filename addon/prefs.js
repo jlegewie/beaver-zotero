@@ -10,15 +10,14 @@ pref("authMethod", "otp");
 
 // App settings
 pref("keyboardShortcut", "l");
-pref("updateSourcesFromZoteroSelection", false);
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("annotationToolEnabled", true);
 pref("autoApplyAnnotations", true);
+pref("maxAddAttachmentToMessage", 3);
 
 // AI settings
-pref("maxAttachments", 8);
 pref("customInstructions", "");
 pref("googleGenerativeAiApiKey", "");
 pref("openAiApiKey", "");

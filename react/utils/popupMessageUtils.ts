@@ -1,19 +1,26 @@
 import { atom } from 'jotai';
+import { createElement } from 'react';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroItemReference } from '../types/zotero';
-import { RepeatIcon } from '../components/icons/icons';
+import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
+import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
+import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
+import { truncateText } from '../utils/stringUtils';
+import { getDisplayNameFromItem } from '../utils/sourceUtils';
+import type { ItemValidationState } from '../atoms/itemValidation';
+import { buildMessageItemSummary } from '../hooks/useMessageItemSummary';
 
 /**
  * Adds a new popup message to the list.
- * @param message Partial message object. ID will be generated.
+ * @param message Partial message object. ID will be generated if not provided.
  */
 export const addPopupMessageAtom = atom(
     null,
-    (get, set, newMessage: Omit<PopupMessage, 'id'>) => {
-        const id = uuidv4();
+    (get, set, newMessage: Omit<PopupMessage, 'id'> & { id?: string }) => {
+        const id = newMessage.id ?? uuidv4();
         const messageWithDefaults: PopupMessage = {
             id,
             expire: true, // Default expire to true
@@ -230,5 +237,83 @@ export const addAPIKeyMessageAtom = atom(
                 expire: false
             });
         }
+    }
+);
+
+/**
+ * Adds a popup message for a regular item showing its attachment status.
+ * Always shows popup; duration is longer if there are issues (no PDF or invalid attachments).
+ * 
+ * @param item The regular Zotero item
+ * @param getValidation Function to get validation results for items
+ */
+export const addRegularItemPopupAtom = atom(
+    null,
+    (get, set, { 
+        item, 
+        getValidation 
+    }: { 
+        item: Zotero.Item; 
+        getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
+    }) => {
+        const summary = buildMessageItemSummary(item, getValidation);
+
+        // Always show popup for regular items
+        set(addPopupMessageAtom, {
+            id: item.key,
+            type: 'items_summary',
+            icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
+            title: truncateText(getDisplayNameFromItem(item), 68),
+            customContent: createElement(RegularItemMessageContent, { 
+                item,
+                summary
+            }),
+            expire: true,
+            duration: summary.hasIssues ? 3400 : 2400
+        });
+    }
+);
+
+/**
+ * Adds a summary popup message for multiple regular items showing their attachment status.
+ * 
+ * @param items Array of regular Zotero items
+ * @param getValidation Function to get validation results for items
+ */
+export const addRegularItemsSummaryPopupAtom = atom(
+    null,
+    (get, set, { 
+        items, 
+        getValidation 
+    }: { 
+        items: Zotero.Item[]; 
+        getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
+    }) => {
+        // Build summary data for each item
+        const itemsSummary = items.map(item => {
+            const summary = buildMessageItemSummary(item, getValidation);
+            
+            return {
+                item,
+                totalAttachments: summary.validAttachmentCount,
+                invalidAttachments: summary.invalidAttachmentCount
+            };
+        });
+
+        // Determine if there are any issues
+        const hasIssues = itemsSummary.some(summary => 
+            summary.totalAttachments === 0 || summary.invalidAttachments > 0
+        );
+
+        // Show summary popup
+        set(addPopupMessageAtom, {
+            type: 'items_summary',
+            title: `${items.length} Items Added`,
+            customContent: createElement(RegularItemsSummaryContent, { 
+                items: itemsSummary 
+            }),
+            expire: true,
+            duration: hasIssues ? 3000 : 2000
+        });
     }
 );

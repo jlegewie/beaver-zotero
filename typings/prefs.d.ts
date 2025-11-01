@@ -14,13 +14,12 @@ declare namespace _ZoteroTypes {
       "showIndexingCompleteMessage": boolean;
       "authMethod": string;
       "keyboardShortcut": string;
-      "updateSourcesFromZoteroSelection": boolean;
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
       "annotationToolEnabled": boolean;
       "autoApplyAnnotations": boolean;
-      "maxAttachments": number;
+      "maxAddAttachmentToMessage": number;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;

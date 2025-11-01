@@ -1,36 +1,17 @@
 import { useEffect, useRef } from "react";
-import { useSetAtom } from "jotai";
-import { updateSourcesFromZoteroItemsAtom, removedItemKeysCache } from "../atoms/input";
-import { updateSourcesFromZoteroSelectionAtom } from "../atoms/input";
 
 /**
 * Listens to changes in the Zotero item selection and update
 * currentSourcesAtom when the selection differs from the previous one.
 */
 export function useZoteroSelection() {
-    const updateSourcesFromZoteroItems = useSetAtom(updateSourcesFromZoteroItemsAtom);
-    const updateSourcesFromZoteroSelection = useSetAtom(updateSourcesFromZoteroSelectionAtom);
     const lastSelectionKeys = useRef<string[]>([]);
-
-    // Update sources based on Zotero selection
-    updateSourcesFromZoteroSelection();
 
     useEffect(() => {
         // Handler called whenever the Zotero selection changes
         const handleSelectionChange = async () => {
             // Retrieve newly selected items from Zotero
             const newSelectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
-
-            // Remove newly selected items from the removed item keys cache
-            // Logic: When the user re-selects an item that was previously removed,
-            // we need to remove it from the removed item keys cache.
-            const newlySelectedKeys = newSelectedItems
-                .map((item) => item.key)
-                .filter((key) => !lastSelectionKeys.current.includes(key));
-            newlySelectedKeys.forEach((key) => removedItemKeysCache.delete(key));
-
-            // Update the selected items atom
-            await updateSourcesFromZoteroItems(newSelectedItems);
 
             // Update the last selection keys
             lastSelectionKeys.current = newSelectedItems.map((item) => item.key);
@@ -45,5 +26,5 @@ export function useZoteroSelection() {
             // @ts-ignore itemsView is not fully typed
             Zotero.getActiveZoteroPane().itemsView.onSelect.removeListener(handleSelectionChange);
         };
-    }, [updateSourcesFromZoteroItems]);
+    }, []);
 }

@@ -1,16 +1,13 @@
-import React from 'react';
-import { useMemo, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import { SourceButton } from "../sources/SourceButton";
+import React, { useMemo } from 'react';
+import { useRef } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { userAttachmentsAtom } from '../../atoms/threads';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
-import { InputSource } from '../../types/sources';
-import { organizeSourcesByRegularItems } from '../../utils/sourceUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/input';
-import { AnnotationButton } from '../input/AnnotationButton';
-import { SourceValidationType } from '../../../src/services/sourceValidationManager';
+import { useAtomValue } from 'jotai';
+import { userAttachmentsAtom } from '../../atoms/threads';
+import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
+import { MessageAttachmentWithId, MessageAttachmentWithRequiredItem } from '../../types/attachments/uiTypes';
+import { MessageItemButton } from '../input/MessageItemButton';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -23,9 +20,15 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
 
-    const messageSources: InputSource[] = useMemo(() => {
-        return organizeSourcesByRegularItems(userAttachments.filter(s => s.messageId === message.id));
-    }, [userAttachments, currentReaderAttachmentKey]);
+    // Enrich message attachments with item data
+    const messageAttachments: MessageAttachmentWithId[] = useMemo(() => {
+        return userAttachments
+            .filter((a: MessageAttachmentWithId) => a.messageId === message.id)
+            .map((a: MessageAttachmentWithId) => {
+                const item = Zotero.Items.getByLibraryAndKey(a.library_id, a.zotero_key);
+                return {...a, item: item || undefined};
+            });
+    }, [userAttachments, message.id]);
 
     const {
         isMenuOpen: isSelectionMenuOpen, 
@@ -39,24 +42,17 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
         <div id={`message-${message.id}`} className="px-3 py-1">
             <div className="user-message-display">
                 {/* Message sources */}
-                {messageSources.length > 0 && (
+                {messageAttachments.length > 0 && (
                     <div className="display-flex flex-wrap gap-3 mb-2">
-                        {messageSources.map((source, index) => (
-                            source.type === "annotation" ? (
-                                <AnnotationButton
+                        {messageAttachments
+                            .filter((a): a is MessageAttachmentWithRequiredItem => Boolean(a.item))
+                            .map((attachment, index) => (
+                                <MessageItemButton
                                     key={index}
-                                    source={source}
+                                    item={attachment.item}
                                     canEdit={false}
                                 />
-                            ) : (
-                                <SourceButton
-                                    key={index}
-                                    source={source}
-                                    canEdit={false}
-                                    validationType={SourceValidationType.LOCAL_ONLY}
-                                />
-                            )
-                        ))}
+                            ))}
                     </div>
                 )}
                 

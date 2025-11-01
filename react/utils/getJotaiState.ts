@@ -1,7 +1,7 @@
 import { citationMetadataAtom, citationDataAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
-import { currentMessageContentAtom, currentSourcesAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom, readerTextSelectionAtom, removedItemKeysCache } from "../atoms/input"
+import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
@@ -32,12 +32,10 @@ export const atomRegistry = {
 
     // Input
     currentMessageContent: currentMessageContentAtom,
-    currentSources: currentSourcesAtom,
     currentReaderAttachment: currentReaderAttachmentAtom,
     currentReaderAttachmentKey: currentReaderAttachmentKeyAtom,
     inputAttachmentCount: inputAttachmentCountAtom,
     readerTextSelection: readerTextSelectionAtom,
-    // removedItemKeysCache: removedItemKeysCache,
 
     // Models
     supportedModels: supportedModelsAtom,

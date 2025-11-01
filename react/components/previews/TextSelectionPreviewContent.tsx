@@ -2,7 +2,7 @@ import React from 'react';
 import { CancelIcon, TextAlignLeftIcon, Icon } from '../icons/icons';
 import { useSetAtom, useAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
-import { readerTextSelectionAtom } from '../../atoms/input';
+import { readerTextSelectionAtom } from '../../atoms/messageComposition';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -45,7 +45,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
             </div>
 
             {/* buttons */}
-            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
+            {/* <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 <div className="flex-1 gap-3 display-flex">
                     <Button
                         variant="ghost"
@@ -75,7 +75,7 @@ const TextSelectionPreviewContent: React.FC<TextSelectionPreviewContentProps> = 
                         onClick={() => setActivePreview(null)}
                     />
                 </div>
-            </div>
+            </div> */}
         </>
     );
 };

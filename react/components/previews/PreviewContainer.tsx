@@ -1,9 +1,16 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { useAtom } from 'jotai';
-import { activePreviewAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
-import SourcePreviewContent from './SourcePreviewContent';
+import React, { useRef, useEffect, useState, useLayoutEffect, useMemo } from 'react';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { activePreviewAtom, popupMessagesAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
 import TextSelectionPreviewContent from './TextSelectionPreviewContent';
 import AnnotationPreviewContent from './AnnotationPreviewContent';
+import ItemPreviewContent from './ItemPreviewContent';
+import ItemsSummaryPreviewContent from './ItemsSummaryPreviewContent';
+import { removePopupMessageAtom } from '../../utils/popupMessageUtils';
+
+interface PreviewContainerProps {
+    className?: string;
+    hasAboveOverlay?: boolean;
+}
 
 // Preview height constants
 const MIN_HEIGHT = 100;
@@ -15,11 +22,15 @@ const SHOW_DELAY = 100;
 const HIDE_DELAY = 350;
 
 // Preview container component
-const PreviewContainer: React.FC = () => {
+const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAboveOverlay = false }) => {
     const previewRef = useRef<HTMLDivElement>(null);
     const [activePreview, setActivePreview] = useAtom(activePreviewAtom);
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
+    const popupMessages = useAtomValue(popupMessagesAtom);
+    const removePopupMessage = useSetAtom(removePopupMessageAtom);
+    const [skipFade, setSkipFade] = useState(false);
+    const skipFadePreviewKeyRef = useRef<string | null>(null);
 
     // Calculate available space
     useEffect(() => {
@@ -100,29 +111,64 @@ const PreviewContainer: React.FC = () => {
         };
     }, [activePreview, setActivePreview]); // Rerun if activePreview changes
 
+    const previewItemKey = activePreview?.type === 'item' ? activePreview.content?.key : null;
+
+    const hasMatchingPopup = useMemo(() => {
+        if (!previewItemKey) {
+            return false;
+        }
+        return popupMessages.some((message) => message.id === previewItemKey);
+    }, [popupMessages, previewItemKey]);
+
+    useLayoutEffect(() => {
+        if (!previewItemKey) {
+            skipFadePreviewKeyRef.current = null;
+            setSkipFade(false);
+            return;
+        }
+
+        if (skipFadePreviewKeyRef.current !== previewItemKey) {
+            const shouldSkip = hasMatchingPopup;
+            skipFadePreviewKeyRef.current = shouldSkip ? previewItemKey : null;
+            setSkipFade(shouldSkip);
+        }
+    }, [previewItemKey, hasMatchingPopup]);
+
+    useEffect(() => {
+        if (previewItemKey && hasMatchingPopup) {
+            removePopupMessage(previewItemKey);
+        }
+    }, [previewItemKey, hasMatchingPopup, removePopupMessage]);
+
     if (!activePreview || !maxContentHeight) {
         return null; // Render nothing if no active preview or height not calculated yet
     }
 
+    const containerClassName = ['w-full', hasAboveOverlay ? 'mt-2' : '', className]
+        .filter(Boolean)
+        .join(' ');
+
     // Determine which content component to render
     const renderPreviewContent = () => {
         switch (activePreview.type) {
-            case 'source':
-                return <SourcePreviewContent source={activePreview.content} maxContentHeight={maxContentHeight} />;
+            case 'item':
+                return <ItemPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'textSelection':
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'annotation':
-                return <AnnotationPreviewContent attachment={activePreview.content} maxContentHeight={maxContentHeight} />;
+                return <AnnotationPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
+            case 'itemsSummary':
+                return <ItemsSummaryPreviewContent items={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }
     };
 
     return (
-        <div className="absolute -top-4 inset-x-0 -translate-y-full px-3">
+        <div className={containerClassName}>
             <div
                 ref={previewRef}
-                className="source-preview border-popup shadow-md mx-0"
+                className={`source-preview border-popup shadow-md mx-0 ${skipFade ? 'no-fade' : ''}`}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
             >

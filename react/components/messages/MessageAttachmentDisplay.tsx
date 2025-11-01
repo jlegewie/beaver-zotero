@@ -1,13 +1,16 @@
 import React from 'react'
-import { SourceButton } from '../sources/SourceButton';
-import { useAtomValue } from 'jotai';
-import { currentSourcesAtom, readerTextSelectionAtom, currentReaderAttachmentAtom, currentLibraryIdsAtom } from '../../atoms/input';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
-import { AnnotationButton } from '../input/AnnotationButton';
-import { SourceValidationType } from '../../../src/services/sourceValidationManager';
 import { LibraryButton } from '../library/LibraryButton';
+import { MessageItemButton } from '../input/MessageItemButton';
+import { currentMessageItemsAtom } from '../../atoms/messageComposition';
+import { usePreviewHover } from '../../hooks/usePreviewHover';
+import { activePreviewAtom } from '../../atoms/ui';
+
+const MAX_ATTACHMENTS = 4;
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
@@ -22,20 +25,34 @@ const MessageAttachmentDisplay = ({
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLTextAreaElement>;
 }) => {
-    const currentSources = useAtomValue(currentSourcesAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
+    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
+    const setActivePreview = useSetAtom(activePreviewAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
         .filter(lib => lib) as Zotero.Library[];
 
+    const filteredMessageItems = currentMessageItems.filter(
+        (item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key
+    );
+    const displayedMessageItems = filteredMessageItems.slice(0, MAX_ATTACHMENTS);
+    const overflowMessageItems = filteredMessageItems.slice(MAX_ATTACHMENTS);
+    const overflowCount = overflowMessageItems.length;
+
+    const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
+        overflowCount > 0 ? { type: 'itemsSummary', content: overflowMessageItems } : null,
+        { isEnabled: overflowCount > 0 }
+    );
+
     return (
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
-                // showText={currentSources.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentSources.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
+                // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -49,47 +66,40 @@ const MessageAttachmentDisplay = ({
             {selectedLibraries.map(library => (
                 <LibraryButton key={library.libraryID} library={library} />
             ))}
-            {/* {threadSourceCount > 0 && (
-                <button
-                    className="sources-info"
-                    disabled={true}
-                    title={`This thread has ${threadSourceCount} sources.`}
-                >
-                    <ZoteroIcon 
-                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                        size={14} 
-                        color="--accent-green"
-                        className="mr-1"
-                    />
-                    {threadSourceCount}
-                </button>
-            )} */}
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
-                <SourceButton
-                    source={currentReaderAttachment}
-                    validationType={SourceValidationType.FULL_FILE}
-                />
+                <MessageItemButton item={currentReaderAttachment} canEdit={false} isReaderAttachment={true} />
             )}
 
-            {/* Current attachments */}
-            {currentSources
-                .filter((attachment) => !currentReaderAttachment || attachment.itemKey !== currentReaderAttachment.itemKey)
-                .map((source, index) => (
-                    source.type === "annotation" ? (
-                        <AnnotationButton
-                            key={index}
-                            source={source}
-                        />
-                    ) : (
-                        <SourceButton
-                            key={index}
-                            source={source}
-                        />
-                    )
-                ))
-            }
+            {/* Current message items */}
+            {displayedMessageItems.map((item) => (
+                <MessageItemButton
+                    key={item.key}
+                    item={item}
+                    onRemove={(item) => {
+                        removeItemFromMessage(item);
+                        setActivePreview((prev) => {
+                            if (prev && prev.type === 'item' && prev.content.key === item.key) {
+                                return null;
+                            }
+                            return prev;
+                        });
+                    }}
+                />
+            ))}
+
+            {overflowCount > 0 && (
+                <button
+                    type="button"
+                    className="variant-outline source-button"
+                    style={{ height: '22px' }}
+                    title={`${overflowCount} more attachment${overflowCount === 1 ? '' : 's'}`}
+                    {...overflowHoverHandlers}
+                >
+                    +{overflowCount}
+                </button>
+            )}
 
             {/* Current text selection */}
             {readerTextSelection && (

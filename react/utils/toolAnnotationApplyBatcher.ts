@@ -1,5 +1,5 @@
 import { store } from '../store';
-import { currentReaderAttachmentKeyAtom } from '../atoms/input';
+import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
 import { toolAnnotationsService } from '../../src/services/toolAnnotationsService';
 import { logger } from '../../src/utils/logger';
 import { ToolAnnotation } from '../types/chat/toolAnnotations';

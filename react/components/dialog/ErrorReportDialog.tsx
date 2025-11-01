@@ -21,9 +21,9 @@ const getPluginPreferences = () => {
     // Get all plugin preferences defined in prefs.d.ts
     const prefKeys = [
         'userId', 'userEmail', 'currentPlanId', 'installedVersion', 
-        'showIndexingCompleteMessage', 'keyboardShortcut', 'updateSourcesFromZoteroSelection',
+        'showIndexingCompleteMessage', 'keyboardShortcut',
         'statefulChat', 'addSelectedItemsOnOpen', 'addSelectedItemsOnNewThread',
-        'maxAttachments', 'customInstructions', 'googleGenerativeAiApiKey',
+        'customInstructions', 'googleGenerativeAiApiKey',
         'openAiApiKey', 'anthropicApiKey', 'lastUsedModel', 'recentItems',
         'citationFormat', 'citationStyle', 'citationLocale', 'customPrompts'
     ] as const;

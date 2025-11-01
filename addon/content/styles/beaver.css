@@ -162,6 +162,11 @@ attachment-box .metadata-table #beaver-status {
     animation: fadeIn 0.3s ease-in-out forwards;
 }
 
+[id^="beaver-pane-"] .source-preview.no-fade {
+    animation: none;
+    opacity: 1;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -356,6 +361,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .mx-2 { margin-left: 0.5rem; margin-right: 0.5rem; }
 [id^="beaver-pane-"] .mx-3 { margin-left: 0.75rem; margin-right: 0.75rem; }
 [id^="beaver-pane-"] .mx-auto { margin-left: auto; margin-right: auto; }
+[id^="beaver-pane-"] .mb-075 { margin-bottom: 0.075rem; }
 [id^="beaver-pane-"] .mb-1 { margin-bottom: 0.15rem; }
 [id^="beaver-pane-"] .mb-15 { margin-bottom: 0.35rem; }
 [id^="beaver-pane-"] .mb-2 { margin-bottom: 0.5rem; }
@@ -371,6 +377,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .mr-5 { margin-right: 1.25rem; }
 [id^="beaver-pane-"] .ml-05 { margin-left: 0.125rem; }
 [id^="beaver-pane-"] .ml-1 { margin-left: 0.25rem; }
+[id^="beaver-pane-"] .ml-15 { margin-left: 0.375rem; }
 [id^="beaver-pane-"] .ml-2 { margin-left: 0.5rem; }
 [id^="beaver-pane-"] .ml-3 { margin-left: 0.75rem; }
 [id^="beaver-pane-"] .ml-4 { margin-left: 1rem; }

@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
-import { InputSource } from '../types/sources';
 import { truncateText } from './stringUtils';
 import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
@@ -51,123 +49,16 @@ export function getReferenceFromItem(item: Zotero.Item): string {
     return formatted_citation.replace(/\n/g, '<br />');
 }
 
-export function createSourceIdentifier(item: Zotero.Item): string {
-    return `${item.libraryID}-${item.key}`;
-}
-
-export function getIdentifierFromItem(item: Zotero.Item): string {
-    return `${item.libraryID}-${item.key}`;
-}
-
-export function getIdentifierFromSource(source: InputSource): string {
-    return `${source.libraryID}-${source.itemKey}`;
-}
-
-export function getSourceTypeFromItem(item: Zotero.Item): InputSource["type"] {
-    if (item.isRegularItem()) return "regularItem";
-    if (item.isAttachment()) return "attachment";
-    if (item.isNote()) return "note";
-    if (item.isAnnotation()) return "annotation";
-    throw new Error("Invalid item type");
-}
-
-
-/**
-* Factory function to create a Source from a Zotero item
-*/
-export async function createSourceFromItem(
-    item: Zotero.Item,
-    pinned: boolean = false,
-    excludeKeys: string[] = [],
-    type?: InputSource["type"]
-): Promise<InputSource> {
-    type = type || getSourceTypeFromItem(item);
-    const bestAtt = item.isRegularItem() ? await item.getBestAttachment() : null;
-
-    return {
-        id: uuidv4(),
-        type: type,
-        libraryID: item.libraryID,
-        itemKey: item.key,
-        pinned: pinned,
-        parentKey: item.parentKey || null,
-        childItemKeys: bestAtt && !excludeKeys.includes(bestAtt.key) ? [bestAtt.key] : [],
-        timestamp: Date.now(),
-    } as InputSource;
-}
-
-
-export function organizeSourcesByRegularItems(attachments: MessageAttachmentWithId[]): InputSource[] {
-    return attachments.reduce((acc, attachment) => {
-        const zoteroItem = getZoteroItem(attachment);
-
-        // 1. Skip invalid items
-        if(!zoteroItem) return acc;
-        
-        // 2. Add standalone attachments or annotations (no parent)
-        if(!zoteroItem.parentItem || zoteroItem.isAnnotation()) {
-            acc.push(createSourceFromAttachmentOrNoteOrAnnotation(zoteroItem));
-            return acc;
-        }
-
-        // 3. Get or add parent source
-        const parent = acc.find((s: InputSource) => s.itemKey === zoteroItem.parentKey);
-        if(!parent) {
-            acc.push({
-                id: uuidv4(),
-                type: "regularItem",
-                messageId: attachment.messageId,
-                libraryID: zoteroItem.libraryID,
-                itemKey: zoteroItem.parentKey,
-                pinned: false,
-                parentKey: null,
-                childItemKeys: [attachment.zotero_key]
-            } as InputSource);
-            return acc;
-        } else {
-            parent.childItemKeys.push(attachment.zotero_key);
-        }
-
-        return acc;
-    }, [] as InputSource[]);
-}
-
-export function createSourceFromAttachmentOrNoteOrAnnotation(
-    item: Zotero.Item,
-    pinned: boolean = false
-): InputSource {
-    if (item.isRegularItem()) {
-        throw new Error("Cannot call createSourceFromAttachment on a regular item");
-    }
-    let type: InputSource["type"] = "attachment";
-    if (item.isAnnotation()) type = "annotation";
-    if (item.isNote()) type = "note";
-    if (item.isRegularItem()) type = "regularItem";
-
-    return {
-        id: uuidv4(),
-        libraryID: item.libraryID,
-        itemKey: item.key,
-        pinned: pinned,
-        timestamp: Date.now(),
-        type: type,
-        parentKey: item.parentKey || null,
-        childItemKeys: [],
-    };
-}
 
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: InputSource | MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
 
-        if ('libraryID' in source && 'itemKey' in source) {
-            libId = source.libraryID;
-            itemKeyValue = source.itemKey;
-        } else if ('library_id' in source && 'zotero_key' in source) {
+        if ('library_id' in source && 'zotero_key' in source) {
             libId = source.library_id;
             itemKeyValue = source.zotero_key;
         } else {
@@ -183,42 +74,19 @@ export function getZoteroItem(source: InputSource | MessageAttachmentWithId | So
 }
 
 /**
-* Source method: Get the parent item from a Source
-*/
-export function getParentItem(source: InputSource): Zotero.Item | null {
-    try {
-        const parentItem = source.parentKey
-            ? Zotero.Items.getByLibraryAndKey(source.libraryID, source.parentKey)
-            : null;
-        return parentItem || null;
-    } catch (error) {
-        console.error("Error retrieving Zotero item:", error);
-        return null;
-    }
-}
-
-/**
-* Source method: Get child items for a Source
-*/
-export function getChildItems(source: InputSource): Zotero.Item[] {
-    try {
-        return source.childItemKeys
-            .map(key => Zotero.Items.getByLibraryAndKey(source.libraryID, key))
-            .filter(Boolean) as Zotero.Item[];
-    } catch (error) {
-        console.error("Error retrieving child items:", error);
-        return [];
-    }
-}
-
-/**
 * Source method: Check if a source is valid
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: boolean, error?: string}> {
 
     // Is library synced?
     const libraryIds = store.get(syncLibraryIdsAtom);
-    if (!libraryIds.includes(item.libraryID)) return {valid: false, error: "This item's library is not synced with Beaver."};
+    if (!libraryIds.includes(item.libraryID)) {
+        const library = Zotero.Libraries.get(item.libraryID);
+        const library_name = library ? library.name : undefined;
+        return {
+            valid: false,
+            error: library_name ? `The library "${library_name}" is not synced with Beaver.` : "This library is not synced with Beaver."};
+    }
 
     // ------- Regular items -------
     if (item.isRegularItem()) {
@@ -230,7 +98,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         }
 
         // (b) Has attachments or notes
-        if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
+        // if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
         return {valid: true};
     }
 
@@ -264,7 +132,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         // (b) Check if annotation is empty
         if (item.annotationType === 'underline' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
         if (item.annotationType === 'highlight' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
-        if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
+        // if (item.annotationType === 'note' && !item.annotationText && !item.annotationComment) return {valid: false, error: "Annotation is empty"};
 
         // (c) Check if the parent exists and is an attachment
         const parent = item.parentItem;
@@ -286,12 +154,6 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     }
 
     return {valid: false, error: "Invalid item type"};
-}
-
-export async function isSourceValid(source: InputSource): Promise<{valid: boolean, error?: string}> {
-    const item = getZoteroItem(source);
-    if (!item) return {valid: false, error: "Item not found"};
-    return await isValidZoteroItem(item);
 }
 
 export function revealSource(source: SourceAttachment | CitationData) {

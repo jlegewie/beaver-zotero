@@ -1,8 +1,7 @@
 import { atom } from "jotai";
-import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
-import { currentMessageContentAtom, currentSourcesAtom, resetCurrentSourcesAtom, updateReaderAttachmentAtom, updateSourcesFromZoteroSelectionAtom } from "./input";
-import { isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom } from "./ui";
+import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { isLibraryTabAtom, isPreferencePageVisibleAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
@@ -132,16 +131,18 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
+        set(currentMessageItemsAtom, []);
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
         set(toolCallAnnotationsAtom, new Map());
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
-        set(resetCurrentSourcesAtom);
         set(isPreferencePageVisibleAtom, false);
-        // Update sources from Zotero selection or reader
+        // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
         if (isLibraryTab && addSelectedItemsOnNewThread) {
-            set(updateSourcesFromZoteroSelectionAtom);
+            const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+            set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
         }
         if (!isLibraryTab) {
             await set(updateReaderAttachmentAtom);
@@ -166,7 +167,6 @@ export const loadThreadAtom = atom(
             
             if (!statefulChat) {
                 const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
-                logger(`messagesDB from db ${threadId} ${messagesDB.length}`);
                 const messages = messagesDB.map(toMessageUI);
                 
                 // Extract user attachments from messages
@@ -243,7 +243,8 @@ export const loadThreadAtom = atom(
             set(isLoadingThreadAtom, false);
         }
         // Clear sources for now
-        set(currentSourcesAtom, []);
+        set(currentMessageItemsAtom, []);
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
     }
 );

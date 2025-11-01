@@ -7,7 +7,7 @@ import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../at
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../atoms/threads';
 import { generateResponseAtom } from '../../atoms/generateMessages';
-import { currentReaderAttachmentAtom, currentSourcesAtom } from "../../atoms/input";
+import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
@@ -17,7 +17,7 @@ const HomePage: React.FC = () => {
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
-    const currentSources = useAtomValue(currentSourcesAtom);
+    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const generateResponse = useSetAtom(generateResponseAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
 
@@ -29,12 +29,12 @@ const HomePage: React.FC = () => {
         prompt: CustomPrompt
     ) => {
         if (isStreaming || prompt.text.length === 0) return;
-        if (prompt.requiresAttachment && currentSources.length === 0) return;
+        if (prompt.requiresAttachment && currentMessageItems.length === 0) return;
 
         // Generate response
         generateResponse({
             content: prompt.text,
-            sources: currentSources
+            items: currentMessageItems
         });
 
         // console.log('Chat completion:', prompt.text);
@@ -67,9 +67,9 @@ const HomePage: React.FC = () => {
                         key={index}
                         variant="ghost-secondary"
                         onClick={() => handleCustomPrompt(prompt)}
-                        disabled={prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
+                        disabled={prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
                     >
-                        <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentSources.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                        <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                             {`${shortcutKey}${prompt.index}`}
                         </span>
                         <span

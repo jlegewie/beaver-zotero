@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
-import { currentSourcesAtom } from '../../atoms/input';
+import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ANNOTATION_ICON_BY_TYPE } from '../input/AnnotationButton';
+import { ANNOTATION_ICON_BY_TYPE } from '../input/MessageItemButton';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { CancelIcon } from '../icons/icons';
-import { InputSource } from '../../types/sources';
 import { toAnnotation } from '../../types/attachments/converters';
-import { getZoteroItem } from '../../utils/sourceUtils';
 
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlighted Text',
@@ -22,13 +20,13 @@ const ANNOTATION_TEXT_BY_TYPE = {
 
 
 interface AnnotationPreviewContentProps {
-    attachment: InputSource;
+    item: Zotero.Item;
     maxContentHeight: number;
 }
 
-const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ attachment, maxContentHeight }) => {
+const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ item, maxContentHeight }) => {
     const setActivePreview = useSetAtom(activePreviewAtom);
-    const setCurrentSourcesAtom = useSetAtom(currentSourcesAtom);
+    const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const [imagePath, setImagePath] = useState<string | null>(null);
     const [imageError, setImageError] = useState<boolean>(false);
     const [annotation, setAnnotation] = useState<Annotation | null>(null);
@@ -36,7 +34,6 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
     const [annotationText, setAnnotationText] = useState<string | null>(null);
 
     useEffect(() => {
-        const item = getZoteroItem(attachment);
         if (item) {
             const annotation = toAnnotation(item);
             if (annotation) {
@@ -53,7 +50,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
             setAnnotationIcon(null);
             setAnnotationText(null);
         }
-    }, [attachment, setAnnotation, setAnnotationIcon, setAnnotationText]);
+    }, [item, setAnnotation, setAnnotationIcon, setAnnotationText]);
 
     // Fetch image path for image annotations
     useEffect(() => {
@@ -89,7 +86,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
     if (!annotation || !annotationIcon || !annotationText) return null;
 
     const handleRemove = () => {
-        setCurrentSourcesAtom((prev) => prev.filter((a) => a.itemKey !== annotation.zotero_key))
+        setCurrentMessageItems((prev) => prev.filter((i) => i.key !== annotation.zotero_key))
         setActivePreview(null);
     };
 
@@ -152,7 +149,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
             </div>
 
             {/* buttons */}
-            <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
+            {/* <div className="p-2 pt-1 display-flex flex-row items-center border-top-quinary">
                 <div className="flex-1 gap-3 display-flex">
                     <Button
                         variant="ghost"
@@ -183,7 +180,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ att
                         onClick={() => setActivePreview(null)}
                     />
                 </div>
-            </div>
+            </div> */}
         </>
     );
 };
