@@ -4,11 +4,13 @@ import { getPref, setPref } from '../../src/utils/prefs';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { performConsistencyCheck } from '../../src/utils/syncConsistency';
+import { syncCollectionsOnly } from '../../src/utils/sync';
 import { version } from '../../package.json';
 import { logger } from '../../src/utils/logger';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
+import { syncLibraryIdsAtom } from '../atoms/profile';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -17,6 +19,8 @@ import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessage
 export const useUpgradeHandler = () => {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasRunConsistencyCheckRef = useRef(false);
+    const hasRunCollectionSyncRef = useRef(false);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const processedVersionsRef = useRef<Set<string>>(new Set());
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
@@ -50,6 +54,33 @@ export const useUpgradeHandler = () => {
         };
 
         runUpgradeTasks();
+
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        const runCollectionSync = async () => {
+            if (!isAuthenticated || !syncLibraryIds || syncLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
+
+            const needsCollectionSync = getPref('runCollectionSync');
+            if (!needsCollectionSync) return;
+            
+            // Mark as run to prevent re-execution in the same session
+            hasRunCollectionSyncRef.current = true;
+            logger(`useUpgradeHandler: Running collection sync after upgrade to ${version}.`);
+
+            try {
+                await syncCollectionsOnly(syncLibraryIds);
+                logger("useUpgradeHandler: Collection sync completed for all synced libraries.");
+            } catch (error) {
+                logger(`useUpgradeHandler: Could not run collection sync on upgrade: ${error}`, 1);
+                Zotero.logError(error as Error);
+            } finally {
+                // Unset the flag regardless of success or failure to prevent re-running
+                setPref('runCollectionSync', false);
+            }
+        };
+
+        runCollectionSync();
 
     }, [isAuthenticated]);
 

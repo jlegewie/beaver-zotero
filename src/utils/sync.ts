@@ -1202,6 +1202,141 @@ export async function syncZoteroDatabase(
 }
 
 /**
+ * Syncs all collections for specified libraries to the backend.
+ * This is a one-time operation typically run after an upgrade.
+ * 
+ * @param libraryIds IDs of libraries to sync collections for
+ * @returns Promise resolving when all collections have been synced
+ */
+export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
+    const syncSessionId = uuidv4();
+    
+    logger(`Beaver Collection Sync '${syncSessionId}': Syncing collections for ${libraryIds.length} libraries: ${libraryIds.join(', ')}`, 2);
+
+    const userId = store.get(userIdAtom);
+    if (!userId) {
+        throw new Error('No user found');
+    }
+
+    // Get libraries
+    const libraries = Zotero.Libraries.getAll();
+    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.libraryID));
+
+    // Determine sync method
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+    // Get user identifier for backend
+    const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
+
+    // Sync each library's collections
+    for (const library of librariesToSync) {
+        const libraryID = library.libraryID;
+        const libraryName = library.name;
+
+        try {
+            logger(`Beaver Collection Sync '${syncSessionId}':   Processing library ${libraryID} (${libraryName})`, 3);
+
+            // Get all collections
+            const collections = await getAllCollections(libraryID);
+            
+            if (collections.length === 0) {
+                logger(`Beaver Collection Sync '${syncSessionId}':   No collections found in library ${libraryID}`, 3);
+                continue;
+            }
+
+            logger(`Beaver Collection Sync '${syncSessionId}':   Found ${collections.length} collections to sync`, 3);
+
+            // Get clientDateModified for all collections
+            const collectionDateMap = new Map<number, string>();
+            for (const collection of collections) {
+                try {
+                    const dateModified = await getCollectionClientDateModifiedAsISOString(collection.id);
+                    collectionDateMap.set(collection.id, dateModified);
+                } catch (e) {
+                    logger(`Beaver Collection Sync '${syncSessionId}':   Warning: Could not get clientDateModified for collection ${collection.id}`, 2);
+                    collectionDateMap.set(collection.id, new Date().toISOString());
+                }
+            }
+
+            // Sort collections by version and date
+            collections.sort((a, b) => {
+                // Primary sort: version
+                if (a.version !== b.version) {
+                    return a.version - b.version;
+                }
+                
+                // Secondary sort: clientDateModified
+                const dateAStr = collectionDateMap.get(a.id);
+                const dateBStr = collectionDateMap.get(b.id);
+                const dateA = dateAStr ? new Date(dateAStr).getTime() : 0;
+                const dateB = dateBStr ? new Date(dateBStr).getTime() : 0;
+                return dateA - dateB;
+            });
+
+            // Extract collection data
+            const collectionsData: ZoteroCollection[] = await Promise.all(
+                collections.map(c => extractCollectionData(c, collectionDateMap.get(c.id)))
+            );
+
+            logger(`Beaver Collection Sync '${syncSessionId}':   Sending ${collectionsData.length} collections to backend`, 3);
+
+            // Send to backend
+            const batchResult = await syncService.processItemsBatch(
+                syncSessionId,
+                zoteroUserId,
+                localUserKey,
+                'consistency', // syncType for one-time maintenance operations
+                syncMethod,
+                libraryID,
+                [], // no items
+                [], // no attachments
+                collectionsData,
+                [] // no deletions
+            );
+
+            // Insert sync log into local database
+            await Zotero.Beaver.db.insertSyncLog({
+                session_id: syncSessionId,
+                sync_type: 'consistency',
+                method: syncMethod,
+                zotero_local_id: localUserKey,
+                zotero_user_id: zoteroUserId || undefined,
+                library_id: libraryID,
+                total_upserts: batchResult.total_upserts,
+                total_deletions: batchResult.total_deletions,
+                library_version: batchResult.library_version,
+                library_date_modified: batchResult.library_date_modified,
+                user_id: userId,
+            });
+
+            logger(`Beaver Collection Sync '${syncSessionId}':   Successfully synced collections for library ${libraryID}`, 3);
+
+        } catch (error: any) {
+            const errorMessage = error?.message ? String(error.message) : 'Collection sync failed';
+            logger(`Beaver Collection Sync '${syncSessionId}':   Error syncing collections for library ${libraryID} (${libraryName}): ${errorMessage}`, 1);
+            Zotero.logError(error);
+            throw error; // Re-throw to stop the process
+        }
+    }
+
+    // After all collections are synced, sync collection mappings
+    logger(`Beaver Collection Sync '${syncSessionId}': All collections synced, now syncing collection mappings`, 2);
+    
+    try {
+        const mappingResult = await syncService.syncCollectionMappings();
+        logger(`Beaver Collection Sync '${syncSessionId}': Collection mappings synced. Created ${mappingResult.item_mappings_created} item mappings and ${mappingResult.attachment_mappings_created} attachment mappings`, 2);
+    } catch (error: any) {
+        const errorMessage = error?.message ? String(error.message) : 'Collection mapping sync failed';
+        logger(`Beaver Collection Sync '${syncSessionId}': Error syncing collection mappings: ${errorMessage}`, 1);
+        Zotero.logError(error);
+        throw error;
+    }
+
+    logger(`Beaver Collection Sync '${syncSessionId}': Collection sync completed successfully`, 2);
+}
+
+/**
  * Deletes all data for a specific library from the backend when a user removes it from sync.
  * This includes all items, attachments, and sync logs associated with the library.
  *
