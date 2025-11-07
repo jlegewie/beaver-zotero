@@ -143,6 +143,17 @@ export interface DeletionStatusResponse {
     updated_at?: string;
 }
 
+export interface SyncCollectionMappingsRequest {
+    library_id?: number; // Optional - null/undefined means all libraries
+}
+
+export interface SyncCollectionMappingsResponse {
+    item_mappings_created: number;
+    attachment_mappings_created: number;
+    items_processed: number;
+    attachments_processed: number;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -269,6 +280,18 @@ export class SyncService extends ApiService {
             params.append('to_version', String(toLibraryVersion));
         }
         return this.get<SyncDataResponse>(`/api/v1/sync/data?${params.toString()}`);
+    }
+
+    /**
+     * Syncs collection mappings from JSONB fields to the collection_mappings table
+     * @param libraryId Optional library ID to sync (undefined means all libraries)
+     * @returns Promise with sync collection mappings response
+     */
+    async syncCollectionMappings(libraryId?: number): Promise<SyncCollectionMappingsResponse> {
+        const payload: SyncCollectionMappingsRequest = {
+            library_id: libraryId,
+        };
+        return this.post<SyncCollectionMappingsResponse>('/api/v1/sync/collections/sync-mappings', payload);
     }
 
 }
