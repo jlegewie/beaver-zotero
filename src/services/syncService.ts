@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
@@ -16,6 +16,7 @@ export interface ItemBatchRequest {
     library_id: number;
     items: ItemData[];
     attachments: AttachmentDataWithMimeType[];
+    collections: ZoteroCollection[];
     deletions: DeleteData[];
 }
 
@@ -155,12 +156,13 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Processes a batch of items for syncing
+     * Processes a batch of items, attachments, and collections for syncing
      * @param syncId The sync operation ID
      * @param syncType The type of sync operation
      * @param libraryId The Zotero library ID
      * @param items Array of items to process
      * @param attachments Array of attachments to process
+     * @param collections Array of collections to process
      * @param keysToDelete Array of keys to delete
      * @returns Promise with the batch processing result
      */
@@ -173,6 +175,7 @@ export class SyncService extends ApiService {
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentDataWithMimeType[],
+        collections: ZoteroCollection[],
         deletions: DeleteData[],
     ): Promise<SyncItemsResponse> {
         const payload: ItemBatchRequest = {
@@ -184,6 +187,7 @@ export class SyncService extends ApiService {
             library_id: libraryId,
             items: items,
             attachments: attachments,
+            collections: collections,
             deletions: deletions,
         };
         return this.post<SyncItemsResponse>('/api/v1/sync/items', payload);

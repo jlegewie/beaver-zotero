@@ -259,12 +259,54 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
                         }
                     }
+
+                    // Handle collection events
+                    if (type === 'collection') {
+                        let shouldSetTimer = false;
+                        
+                        // Handle add/modify events (only when syncWithZotero is false)
+                        if (!syncWithZotero && (event === 'add' || event === 'modify')) {
+                            const collections = await Zotero.Collections.getAsync(ids as number[]);
+                            collections
+                                .filter(collection => syncLibraryIds.includes(collection.libraryID))
+                                .forEach(collection => {
+                                    eventsRef.current.changedLibraries.add(collection.libraryID);
+                                });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Handle delete events (always processed regardless of sync mode)
+                        if (event === 'delete') {
+                            ids.forEach(id => {
+                                if (extraData && extraData[id]) {
+                                    const { libraryID } = extraData[id];
+                                    if (libraryID && syncLibraryIds.includes(libraryID)) {
+                                        // Mark library as having changes to trigger sync
+                                        eventsRef.current.changedLibraries.add(libraryID);
+                                    }
+                                }
+                            });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Only set timer if we have events that need processing
+                        if (shouldSetTimer) {
+                            eventsRef.current.timestamp = Date.now();
+                            
+                            // Clear existing timer and set a new one
+                            if (eventsRef.current.timer !== null) {
+                                clearTimeout(eventsRef.current.timer);
+                            }
+                            
+                            eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
+                        }
+                    }
                 }
             // @ts-ignore Zotero.Notifier.Notify is defined
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync'], 'beaver-sync');
+            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection'], 'beaver-sync');
         };
         
         // Initialize sync operations

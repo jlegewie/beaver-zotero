@@ -403,6 +403,41 @@ async function extractCollections(item: Zotero.Item): Promise<ZoteroCollection[]
 }
 
 /**
+ * Extracts data from a Zotero collection for syncing
+ * @param collection Zotero collection
+ * @param clientDateModified Optional pre-fetched clientDateModified
+ * @returns Promise resolving to ZoteroCollection object for syncing
+ */
+export async function extractCollectionData(
+    collection: Zotero.Collection,
+    clientDateModified?: string
+): Promise<ZoteroCollection> {
+    const collectionJSON = collection.toJSON();
+    
+    let finalDateModified: string;
+    if (clientDateModified) {
+        finalDateModified = clientDateModified;
+    } else {
+        try {
+            finalDateModified = await getCollectionClientDateModifiedAsISOString(collection.id);
+        } catch (e) {
+            logger(`Beaver Sync: Invalid clientDateModified for collection ${collection.key}. Falling back to current timestamp.`, 2);
+            finalDateModified = new Date().toISOString();
+        }
+    }
+
+    return {
+        library_id: collection.libraryID,
+        zotero_key: collection.key,
+        name: collection.name,
+        version: collection.version,
+        date_modified: finalDateModified,
+        parent_collection: collectionJSON.parentCollection || null,
+        relations: Object.keys(collectionJSON.relations).length > 0 ? collectionJSON.relations : null,
+    } as ZoteroCollection;
+}
+
+/**
  * Extracts collection keys from a Zotero item
  * @param item Zotero item
  * @returns Array of collection keys
@@ -565,12 +600,18 @@ export interface SyncItem {
     item: Zotero.Item;
 }
 
+export interface SyncCollection {
+    action: 'upsert' | 'delete';
+    collection: Zotero.Collection;
+}
+
 /**
- * Syncs an array of Zotero items to the backend in batches
+ * Syncs an array of Zotero items and collections to the backend in batches
  * 
  * @param syncSessionId Sync session ID
  * @param libraryID Zotero library ID
  * @param items Array of SyncItem objects to sync (upsert or delete)
+ * @param collections Array of SyncCollection objects to sync
  * @param syncType Type of sync operation. (optional)
  * @param onStatusChange Optional callback for status updates (in_progress, completed, failed)
  * @param onProgress Optional callback for progress updates (processed, total)
@@ -581,6 +622,7 @@ export async function syncItemsToBackend(
     syncSessionId: string,
     libraryID: number,
     items: SyncItem[],
+    collections: SyncCollection[],
     syncType: SyncType,
     syncMethod: SyncMethod,
     onStatusChange?: (libraryID: number, status: SyncStatus, errorMessage?: string) => void,
@@ -593,7 +635,7 @@ export async function syncItemsToBackend(
         return;
     }
 
-    const totalItemsForLibrary = items.length;
+    const totalItemsForLibrary = items.length + collections.length;
     let processedCount = 0;
     let syncFailed = false;
     let lastError: any = null;
@@ -601,13 +643,13 @@ export async function syncItemsToBackend(
     onStatusChange?.(libraryID, 'in_progress');
     
     if (totalItemsForLibrary === 0) {
-        logger(`Beaver Sync '${syncSessionId}':   No items to process`, 3);
+        logger(`Beaver Sync '${syncSessionId}':   No items or collections to process`, 3);
         onStatusChange?.(libraryID, 'completed');
         if (onProgress) onProgress(libraryID, 0, 0);
         return;
     }
     
-    logger(`Beaver Sync '${syncSessionId}':   Processing ${totalItemsForLibrary} items in batches of ${batchSize}`, 3);
+    logger(`Beaver Sync '${syncSessionId}':   Processing ${items.length} items and ${collections.length} collections in batches of ${batchSize}`, 3);
 
     // Get clientDateModified for all items
     const clientDateModifiedMap = await getClientDateModifiedBatch(items.map(item => item.item));
@@ -617,7 +659,19 @@ export async function syncItemsToBackend(
         logger(`Beaver Sync '${syncSessionId}': Warning: ${missingEntries.length} items missing clientDateModified, using fallback`, 2);
     }
     
-    // 1. Sort items
+    // Get clientDateModified for all collections
+    const collectionDateMap = new Map<number, string>();
+    for (const syncCollection of collections) {
+        try {
+            const dateModified = await getCollectionClientDateModifiedAsISOString(syncCollection.collection.id);
+            collectionDateMap.set(syncCollection.collection.id, dateModified);
+        } catch (e) {
+            logger(`Beaver Sync '${syncSessionId}': Warning: Could not get clientDateModified for collection ${syncCollection.collection.id}`, 2);
+            collectionDateMap.set(syncCollection.collection.id, new Date().toISOString());
+        }
+    }
+    
+    // 1. Sort items by version and date
     items.sort((a, b) => {
         // Primary sort: version
         if (a.item.version !== b.item.version) {
@@ -632,7 +686,22 @@ export async function syncItemsToBackend(
         return dateA - dateB;
     });
 
-    // 2. Create batches respecting clientDateModifiedMap boundaries
+    // 2. Sort collections by version and date
+    collections.sort((a, b) => {
+        // Primary sort: version
+        if (a.collection.version !== b.collection.version) {
+            return a.collection.version - b.collection.version;
+        }
+        
+        // Secondary sort: clientDateModified
+        const dateAStr = collectionDateMap.get(a.collection.id);
+        const dateBStr = collectionDateMap.get(b.collection.id);
+        const dateA = dateAStr ? new Date(dateAStr).getTime() : 0;
+        const dateB = dateBStr ? new Date(dateBStr).getTime() : 0;
+        return dateA - dateB;
+    });
+
+    // 3. Create batches respecting clientDateModifiedMap boundaries
     const batches = createBatches(
         items,
         batchSize,
@@ -656,22 +725,24 @@ export async function syncItemsToBackend(
 
     // Track skipped items
     const skippedItems: ZoteroItemReference[] = [];
+    
+    // Track which collections have been processed
+    let collectionIndex = 0;
 
-    // 3. Process each batch
+    // 4. Process each batch
     for (let i = 0; i < batches.length; i++) {
         const batchItems = batches[i];
+
+        // Determine the max version and date for this batch
+        const batchMaxVersion = Math.max(...batchItems.map(item => item.item.version));
+        const batchMaxDate = clientDateModifiedMap.get(batchItems[batchItems.length - 1].item.id) || new Date(0).toISOString();
 
         // Log batch info for debugging
         const batchDateRange = {
             first: clientDateModifiedMap.get(batchItems[0].item.id),
-            last: clientDateModifiedMap.get(batchItems[batchItems.length - 1].item.id),
-            versions: [batchItems[0].item.version, batchItems[batchItems.length - 1].item.version]
+            last: batchMaxDate,
+            versions: [batchItems[0].item.version, batchMaxVersion]
         };
-
-        logger(`Beaver Sync '${syncSessionId}':   Batch ${i + 1}/${batches.length}: ` +
-               `${batchItems.length} items, ` +
-               `dates: ${batchDateRange.first} to ${batchDateRange.last}, ` +
-               `versions: ${batchDateRange.versions[0]} to ${batchDateRange.versions[1]}`);
         
         try {
             // ------- Transform items in this batch -------
@@ -687,6 +758,39 @@ export async function syncItemsToBackend(
                 batchItems.filter(item => item.action === 'delete')
                     .map(item => extractDeleteData(item.item))
             );
+            
+            // ------- Extract collection data for this batch -------
+            // Include collections with version <= batchMaxVersion AND date <= batchMaxDate
+            const batchCollections: SyncCollection[] = [];
+            while (collectionIndex < collections.length) {
+                const collection = collections[collectionIndex];
+                const collectionVersion = collection.collection.version;
+                const collectionDate = collectionDateMap.get(collection.collection.id) || new Date(0).toISOString();
+                
+                // Check if this collection should be in this batch
+                // Use syncMethod to determine which comparison to use
+                const shouldInclude = syncMethod === 'version' 
+                    ? collectionVersion <= batchMaxVersion
+                    : collectionDate <= batchMaxDate;
+                
+                if (shouldInclude) {
+                    batchCollections.push(collection);
+                    collectionIndex++;
+                } else {
+                    // This collection belongs in a later batch
+                    break;
+                }
+            }
+            
+            // Extract collection data
+            const batchCollectionsData: ZoteroCollection[] = await Promise.all(
+                batchCollections.map(c => extractCollectionData(c.collection, collectionDateMap.get(c.collection.id)))
+            );
+
+            logger(`Beaver Sync '${syncSessionId}':   Batch ${i + 1}/${batches.length}: ` +
+                   `${batchItems.length} items, ${batchCollectionsData.length} collections, ` +
+                   `dates: ${batchDateRange.first} to ${batchDateRange.last}, ` +
+                   `versions: ${batchDateRange.versions[0]} to ${batchDateRange.versions[1]}`);
             
             // Extract item and attachment data
             const [batchItemsData, tempBatchAttachmentsData] = await Promise.all([
@@ -743,7 +847,7 @@ export async function syncItemsToBackend(
             }
 
             // Count total items
-            const totalItems = batchItemsData.length + batchAttachmentsData.length + itemsToDelete.length;
+            const totalItems = batchItemsData.length + batchAttachmentsData.length + itemsToDelete.length + batchCollectionsData.length;
             if (totalItems === 0) {
                 logger(`Beaver Sync '${syncSessionId}':     No items to send to backend`, 4);
                 continue;
@@ -758,9 +862,9 @@ export async function syncItemsToBackend(
             
             while (attempts < maxAttempts) {
                 try {
-                    logger(`Beaver Sync '${syncSessionId}':     Sending batch to backend (${totalItems} items, attempt ${attempts + 1}/${maxAttempts})`, 4);
+                    logger(`Beaver Sync '${syncSessionId}':     Sending batch to backend (${batchItemsData.length} items, ${batchAttachmentsData.length} attachments, ${batchCollectionsData.length} collections, ${itemsToDelete.length} deletions, attempt ${attempts + 1}/${maxAttempts})`, 4);
 
-                    // Upsert items and attachments
+                    // Upsert items, attachments, and collections
                     batchResult = await syncService.processItemsBatch(
                         syncSessionId,
                         zoteroUserId,
@@ -770,6 +874,7 @@ export async function syncItemsToBackend(
                         libraryID,
                         batchItemsData,
                         batchAttachmentsData,
+                        batchCollectionsData,
                         itemsToDelete
                     );
 
@@ -1004,7 +1109,7 @@ export async function syncZoteroDatabase(
             }
 
             if (syncLog) {
-                const { itemsToUpsert, itemsToDelete } = await getItemsToSync(
+                const { itemsToUpsert, itemsToDelete, collectionsToSync } = await getItemsToSync(
                     libraryID,
                     false,
                     syncMethod,
@@ -1013,7 +1118,7 @@ export async function syncZoteroDatabase(
                     filterFunction
                 );
 
-                if (itemsToUpsert.length === 0 && itemsToDelete.length === 0) {
+                if (itemsToUpsert.length === 0 && itemsToDelete.length === 0 && collectionsToSync.length === 0) {
                     logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is up to date based on local sync log. (${syncMethod}: ${syncLog.library_date_modified}, ${syncLog.library_version})`, 3);
                     updateSyncStatus(libraryID, { status: 'completed' });
                     continue;
@@ -1047,7 +1152,7 @@ export async function syncZoteroDatabase(
             // ----- 3. Items to sync and delete -----
             logger(`Beaver Sync '${syncSessionId}': (2) Get items to sync and delete`, 3);
             
-            const { itemsToUpsert, itemsToDelete } = await getItemsToSync(
+            const { itemsToUpsert, itemsToDelete, collectionsToSync } = await getItemsToSync(
                 libraryID,
                 isInitialSync,
                 syncMethod,
@@ -1057,7 +1162,7 @@ export async function syncZoteroDatabase(
             );
             
             // Update library-specific progress and status
-            const itemCount = itemsToUpsert.length + itemsToDelete.length;
+            const itemCount = itemsToUpsert.length + itemsToDelete.length + collectionsToSync.length;
             const libraryInitialStatus = {
                 libraryID,
                 libraryName,
@@ -1067,7 +1172,7 @@ export async function syncZoteroDatabase(
                 syncType: derivedSyncType
             } as LibrarySyncStatus;
 
-            logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete`, 3);
+            logger(`Beaver Sync '${syncSessionId}':   ${itemsToUpsert.length} items to upsert, ${itemsToDelete.length} items to delete, ${collectionsToSync.length} collections to sync`, 3);
 
             if (itemCount === 0) {
                 logger(`Beaver Sync '${syncSessionId}':   Sync complete`, 3);
@@ -1079,7 +1184,7 @@ export async function syncZoteroDatabase(
             // ----- 4. Sync items with backend -----
             logger(`Beaver Sync '${syncSessionId}': (3) Sync items with backend`, 3);
             const itemsToSync = [...itemsToUpsert, ...itemsToDelete];
-            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, derivedSyncType, syncMethod, onStatusChange, onProgress, batchSize);
+            await syncItemsToBackend(syncSessionId, libraryID, itemsToSync, collectionsToSync, derivedSyncType, syncMethod, onStatusChange, onProgress, batchSize);
 
             onStatusChange(libraryID, 'completed');
             
@@ -1174,10 +1279,10 @@ async function getModifiedItems(libraryID: number, sinceDate: string, untilDate?
  * @param libraryID Zotero library ID
  * @param sinceDate Date to check modifications since
  * @param untilDate Date to check modifications until (optional)
- * @returns Promise resolving to array of modified Zotero items
+ * @returns Promise resolving to array of modified Zotero collections
  */
 async function getModifiedCollections(libraryID: number, sinceDate: string, untilDate?: string): Promise<Zotero.Collection[]> {
-    // Updated item ids
+    // Updated collection ids
     let sql = "SELECT collectionID FROM collections WHERE libraryID=? AND clientDateModified > ?";
     const params: any[] = [libraryID, sinceDate];
     if (untilDate) {
@@ -1196,14 +1301,15 @@ async function getItemsToSync(
     lastSyncDate: string | null,
     lastSyncVersion: number | null,
     filterFunction: ItemFilterFunction
-): Promise<{ itemsToUpsert: SyncItem[], itemsToDelete: SyncItem[] }> {
+): Promise<{ itemsToUpsert: SyncItem[], itemsToDelete: SyncItem[], collectionsToSync: SyncCollection[] }> {
 
     // Get items
     let items: Zotero.Item[] = [];
-    // let collections: Zotero.Collection[] = [];
+    let collections: Zotero.Collection[] = [];
     if (isInitialSync) {
         const itemIds = await getRegularAndAttachmentIDs(libraryID, false);
         items = await Zotero.Items.getAsync(itemIds);
+        collections = await getAllCollections(libraryID);
         try {
             await Zotero.Items.loadAll(libraryID);
         } catch (e) {
@@ -1213,12 +1319,12 @@ async function getItemsToSync(
     } else if (lastSyncVersion !== null && syncMethod === 'version') {
         items = await getItemsSinceVersion(libraryID, lastSyncVersion);
         logger(`Beaver Sync: Found ${items.length} modified items: ${items.map(item => item.id).join(', ')}`, 3);
-        // collections = await getCollectionsSinceVersion(libraryID, lastSyncVersion);
+        collections = await getCollectionsSinceVersion(libraryID, lastSyncVersion);
     } else if (lastSyncDate !== null && syncMethod === 'date_modified') {
         lastSyncDate = Zotero.Date.isISODate(lastSyncDate) ? Zotero.Date.isoToSQL(lastSyncDate) : lastSyncDate;
         items = await getModifiedItems(libraryID, lastSyncDate);
         logger(`Beaver Sync: Found ${items.length} modified items: ${items.map(item => item.id).join(', ')}`, 3);
-        // collections = await getModifiedCollections(libraryID, lastSyncDate);
+        collections = await getModifiedCollections(libraryID, lastSyncDate);
     } else {
         throw new Error(`Beaver Sync: Invalid sync state: ${syncMethod} ${lastSyncDate} ${lastSyncVersion}`);
     }
@@ -1270,9 +1376,20 @@ async function getItemsToSync(
     
     logger(`Beaver Sync: Found ${itemsToDelete.length} items to delete: ${itemsToDelete.map(item => item.item.id).join(', ')}`, 3);
 
+    // Get collections to sync: All collections that have been modified
+    const collectionsToSync = collections
+        .filter(collection => !collection.deleted) // Exclude deleted collections
+        .map(collection => ({
+            action: 'upsert',
+            collection
+        } as SyncCollection));
+    
+    logger(`Beaver Sync: Found ${collectionsToSync.length} collections to sync: ${collectionsToSync.map(c => c.collection.id).join(', ')}`, 3);
+
     return {
         itemsToUpsert,
-        itemsToDelete
+        itemsToDelete,
+        collectionsToSync
     };
 }
 
