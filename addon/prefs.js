@@ -42,6 +42,7 @@ pref("deletionJobs", "[]");
 // Items skipped during sync
 pref("skippedItems", "[]")
 
-// Flag to run consistency check on upgrade
+// Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
+pref("runCollectionSync", false);
 pref("pendingVersionNotifications", "[]");
