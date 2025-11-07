@@ -208,9 +208,9 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Deletes items based on their Zotero keys and library
+     * Deletes items and/or collections based on their Zotero keys and library
      * @param libraryId The Zotero library ID
-     * @param zoteroKeys Array of Zotero keys to delete
+     * @param zoteroKeys Array of Zotero keys for items and/or collections to delete
      * @returns Promise with the deletion result
      */
     async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteZoteroDataResponse> {

@@ -142,11 +142,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
-                logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
+                logger(`useZoteroSync: Deleting ${keys.length} items/collections from library ${libraryID}`, 3);
                 await deleteItems(user.id, libraryID, keys);
             }
         } catch (error: any) {
-            logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);
+            logger(`useZoteroSync: Error handling deleted items/collections: ${error.message}`, 1);
             Zotero.logError(error);
         }
     };
@@ -279,11 +279,16 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         if (event === 'delete') {
                             ids.forEach(id => {
                                 if (extraData && extraData[id]) {
-                                    const { libraryID } = extraData[id];
-                                    if (libraryID && syncLibraryIds.includes(libraryID)) {
-                                        // Mark library as having changes to trigger sync
-                                        eventsRef.current.changedLibraries.add(libraryID);
+                                    const { libraryID, key } = extraData[id];
+                                    if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                        // Queue collection for backend deletion (same as items)
+                                        eventsRef.current.delete.set(id, { libraryID, key });
+                                        logger(`useZoteroSync: Queued collection ${key} from library ${libraryID} for deletion`, 3);
+                                    } else {
+                                        logger(`useZoteroSync: Missing libraryID or key in extraData for deleted collection ID ${id}`, 2);
                                     }
+                                } else {
+                                    logger(`useZoteroSync: Missing extraData for deleted collection ID ${id}`, 2);
                                 }
                             });
                             shouldSetTimer = true;

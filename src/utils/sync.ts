@@ -954,15 +954,15 @@ export async function syncItemsToBackend(
 }
 
 /**
- * Deletes items from Zotero library
+ * Deletes items and/or collections from Zotero library
  * @param userId User ID
  * @param libraryID Zotero library ID
- * @param zoteroKeys Zotero keys of items to delete
+ * @param zoteroKeys Zotero keys of items and/or collections to delete
  */
 export const deleteItems = async (userId: string, libraryID: number, zoteroKeys: string[]) => {
-    logger(`Beaver Sync: Deleting ${zoteroKeys.length} items from library ${libraryID}`, 3);
+    logger(`Beaver Sync: Deleting ${zoteroKeys.length} items/collections from library ${libraryID}`, 3);
 
-    // Delete items from backend
+    // Delete items/collections from backend
     const response = await syncService.deleteItems(libraryID, zoteroKeys);
 }
 
