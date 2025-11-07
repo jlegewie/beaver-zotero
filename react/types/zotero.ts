@@ -72,7 +72,7 @@ export interface ZoteroCreator {
 
 export interface ZoteroCollection extends ZoteroItemReference {
     name: string;
-    version: number;
+    zotero_version: number;
     date_modified: string;
     parent_collection: string | null;
     relations: Record<string, any> | null;
