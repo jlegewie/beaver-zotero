@@ -760,15 +760,16 @@ export async function syncItemsToBackend(
             );
             
             // ------- Extract collection data for this batch -------
-            // Include collections with version <= batchMaxVersion AND date <= batchMaxDate
+            // Include collections based on sync method boundary:
+            //   - version mode: version <= batchMaxVersion
+            //   - date_modified mode: date <= batchMaxDate
             const batchCollections: SyncCollection[] = [];
             while (collectionIndex < collections.length) {
                 const collection = collections[collectionIndex];
                 const collectionVersion = collection.collection.version;
                 const collectionDate = collectionDateMap.get(collection.collection.id) || new Date(0).toISOString();
                 
-                // Check if this collection should be in this batch
-                // Use syncMethod to determine which comparison to use
+                // Check if this collection should be in this batch based on sync method
                 const shouldInclude = syncMethod === 'version' 
                     ? collectionVersion <= batchMaxVersion
                     : collectionDate <= batchMaxDate;
