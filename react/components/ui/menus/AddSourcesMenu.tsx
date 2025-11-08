@@ -611,6 +611,32 @@ const AddSourcesMenu: React.FC<{
             ? "Search libraries"
             : "Search collections";
 
+    // Handle keyboard events - go back to sources mode on backspace/delete when search is empty
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if (!isMenuOpen) return;
+        
+        // Check if backspace or delete key was pressed
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+            // If in libraries or collections mode and search query is empty, go back to sources
+            if ((menuMode === 'libraries' || menuMode === 'collections') && searchQuery === '') {
+                e.preventDefault();
+                setSearchQuery('');
+                setMenuMode('sources');
+            }
+        }
+    }, [isMenuOpen, menuMode, searchQuery]);
+
+    // Add keyboard event listener
+    useEffect(() => {
+        if (!isMenuOpen) return;
+        
+        const mainWindow = Zotero.getMainWindow();
+        mainWindow.addEventListener('keydown', handleKeyDown);
+        return () => {
+            mainWindow.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isMenuOpen, handleKeyDown]);
+
     return (
         <>
             <button
