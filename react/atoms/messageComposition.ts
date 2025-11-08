@@ -20,6 +20,12 @@ import { get } from "lodash";
 export const currentLibraryIdsAtom = atom<number[]>([]);
 
 /**
+* Current collection IDs
+* When set, search will be limited to these collections.
+*/
+export const currentCollectionIdsAtom = atom<number[]>([]);
+
+/**
 * Current user message and sources
 */
 export const currentMessageContentAtom = atom<string>('');
@@ -80,6 +86,29 @@ export const removeLibraryIdAtom = atom(
     (get, set, libraryId: number) => {
         const currentIds = get(currentLibraryIdsAtom);
         set(currentLibraryIdsAtom, currentIds.filter(id => id !== libraryId));
+
+        const currentCollectionIds = get(currentCollectionIdsAtom);
+        if (currentCollectionIds.length > 0) {
+            set(currentCollectionIdsAtom, currentCollectionIds.filter((collectionId) => {
+                try {
+                    const collection = Zotero.Collections.get(collectionId);
+                    return !collection || collection.libraryID !== libraryId;
+                } catch {
+                    return true;
+                }
+            }));
+        }
+    }
+);
+
+/**
+* Remove a collection from the current selection
+*/
+export const removeCollectionIdAtom = atom(
+    null,
+    (get, set, collectionId: number) => {
+        const currentIds = get(currentCollectionIdsAtom);
+        set(currentCollectionIdsAtom, currentIds.filter(id => id !== collectionId));
     }
 );
 
