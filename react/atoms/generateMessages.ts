@@ -44,7 +44,6 @@ import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher'
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection } from '../../src/utils/zoteroSerializers';
-import { map } from 'lodash';
 
 
 export function getCurrentReaderState(): ReaderState | null {
