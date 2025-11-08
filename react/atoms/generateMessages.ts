@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, WarningMessage } from '../types/chat/uiTypes';
 import { MessageModel, toMessageData, ToolCall, toMessageModel } from '../types/chat/apiTypes';
-import { ZoteroItemReference, ZoteroLibrary } from '../types/zotero';
+import { ZoteroItemReference } from '../types/zotero';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
@@ -43,7 +43,7 @@ import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations'
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
-import { serializeCollection } from '../../src/utils/zoteroSerializers';
+import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -452,14 +452,7 @@ async function _processChatCompletionViaBackend(
     const filterLibraries = libraryIds
         ? libraryIds.map(id => Zotero.Libraries.get(id))
             .filter((l): l is Zotero.Library => !!l)
-            .map(l => ({
-                library_id: l.libraryID,
-                group_id: l.isGroup ? l.id : null,
-                name: l.name,
-                is_group: l.isGroup,
-                type: l.libraryType,
-                type_id: l.libraryTypeID,
-            } as ZoteroLibrary))
+            .map(serializeZoteroLibrary)
         : null;
     const filterCollections = collectionIds
         ? await Promise.all(collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))

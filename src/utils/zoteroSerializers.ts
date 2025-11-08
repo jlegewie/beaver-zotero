@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
@@ -367,4 +367,20 @@ export async function serializeAttachment(
     };
 
     return attachmentData;
+}
+
+/**
+ * Serializes a Zotero library object
+ * @param library Zotero library
+ * @returns Serialized ZoteroLibrary object
+ */
+export function serializeZoteroLibrary(library: Zotero.Library): ZoteroLibrary {
+    return {
+        library_id: library.libraryID,
+        group_id: library.isGroup ? library.id : null,
+        name: library.name,
+        is_group: library.isGroup,
+        type: library.libraryType,
+        type_id: library.libraryTypeID,
+    } as ZoteroLibrary;
 }
