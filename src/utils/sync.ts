@@ -1204,6 +1204,7 @@ export async function syncZoteroDatabase(
 /**
  * Syncs all collections for specified libraries to the backend.
  * This is a one-time operation typically run after an upgrade.
+ * Only syncs collections up to the last sync state to avoid advancing the sync cursor.
  * 
  * @param libraryIds IDs of libraries to sync collections for
  * @returns Promise resolving when all collections have been synced
@@ -1237,15 +1238,36 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
         try {
             logger(`Beaver Collection Sync '${syncSessionId}':   Processing library ${libraryID} (${libraryName})`, 3);
 
-            // Get all collections
-            const collections = await getAllCollections(libraryID);
+            // Get the last sync state from backend to ensure we don't advance the sync cursor
+            const syncState = await syncService.getSyncState(libraryID, syncMethod);
             
-            if (collections.length === 0) {
-                logger(`Beaver Collection Sync '${syncSessionId}':   No collections found in library ${libraryID}`, 3);
+            if (!syncState) {
+                logger(`Beaver Collection Sync '${syncSessionId}':   No sync state found for library ${libraryID}. Skipping collection sync.`, 2);
                 continue;
             }
 
-            logger(`Beaver Collection Sync '${syncSessionId}':   Found ${collections.length} collections to sync`, 3);
+            const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
+            const lastSyncVersion = syncState ? syncState.last_sync_version : null;
+
+            logger(`Beaver Collection Sync '${syncSessionId}':   Last sync: version=${lastSyncVersion}, date=${lastSyncDate}`, 3);
+
+            // Get all collections up to the last sync state
+            let collections: Zotero.Collection[];
+            if (syncMethod === 'version' && lastSyncVersion !== null) {
+                collections = await getCollectionsSinceVersion(libraryID, -1, lastSyncVersion);
+            } else if (syncMethod === 'date_modified' && lastSyncDate !== null) {
+                collections = await getModifiedCollections(libraryID, '1970-01-01 00:00:00', lastSyncDate);
+            } else {
+                logger(`Beaver Collection Sync '${syncSessionId}':   Invalid sync state for library ${libraryID}`, 1);
+                continue;
+            }
+            
+            if (collections.length === 0) {
+                logger(`Beaver Collection Sync '${syncSessionId}':   No collections found in library ${libraryID} up to sync state`, 3);
+                continue;
+            }
+
+            logger(`Beaver Collection Sync '${syncSessionId}':   Found ${collections.length} collections to sync (up to ${syncMethod === 'version' ? `version ${lastSyncVersion}` : `date ${lastSyncDate}`})`, 3);
 
             // Get clientDateModified for all collections
             const collectionDateMap = new Map<number, string>();
@@ -1282,6 +1304,8 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
             logger(`Beaver Collection Sync '${syncSessionId}':   Sending ${collectionsData.length} collections to backend`, 3);
 
             // Send to backend
+            // Note: The backend will receive collections with the lastSyncVersion/lastSyncDate as the max
+            // This ensures we don't advance the sync cursor beyond where items were synced
             const batchResult = await syncService.processItemsBatch(
                 syncSessionId,
                 zoteroUserId,
@@ -1294,6 +1318,17 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
                 collectionsData,
                 [] // no deletions
             );
+
+            // Verify the sync state wasn't advanced beyond the last sync
+            if (syncMethod === 'version' && batchResult.library_version > lastSyncVersion!) {
+                logger(`Beaver Collection Sync '${syncSessionId}':   Warning: Backend advanced version from ${lastSyncVersion} to ${batchResult.library_version}`, 2);
+            } else if (syncMethod === 'date_modified') {
+                const resultDate = new Date(batchResult.library_date_modified);
+                const expectedDate = new Date(lastSyncDate!);
+                if (resultDate > expectedDate) {
+                    logger(`Beaver Collection Sync '${syncSessionId}':   Warning: Backend advanced date from ${lastSyncDate} to ${batchResult.library_date_modified}`, 2);
+                }
+            }
 
             // Insert sync log into local database
             await Zotero.Beaver.db.insertSyncLog({
