@@ -2,10 +2,11 @@ import { syncService, SyncDataResponse } from '../services/syncService';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
-import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
+import { getClientDateModifiedAsISOString, getClientDateModifiedBatch, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
-import { deleteItems, getAllItemsToSync, syncingItemFilter, SyncItem, syncItemsToBackend, extractItemData, extractAttachmentData } from './sync';
+import { deleteItems, getAllItemsToSync, syncingItemFilter, SyncItem, syncItemsToBackend, extractItemData, extractAttachmentData, extractCollectionData } from './sync';
+import { ZoteroCollection } from '../../react/types/zotero';
 
 /**
  * Discrepancy information for consistency checks
@@ -38,11 +39,14 @@ interface ConsistencyCheckResult {
     library_id: number;
     total_items_checked: number;
     total_attachments_checked: number;
+    total_collections_checked: number;
     item_discrepancies: ItemDiscrepancy[];
     attachment_discrepancies: AttachmentDiscrepancy[];
     items_updated: number;
     attachments_updated: number;
     items_and_attachments_added: number;
+    collections_synced: number;
+    collections_deleted: number;
 }
 
 /**
@@ -73,11 +77,14 @@ export async function performConsistencyCheck(
         library_id: libraryID,
         total_items_checked: 0,
         total_attachments_checked: 0,
+        total_collections_checked: 0,
         item_discrepancies: [],
         attachment_discrepancies: [],
         items_updated: 0,
         attachments_updated: 0,
         items_and_attachments_added: 0,
+        collections_synced: 0,
+        collections_deleted: 0,
     };
 
     // Get all local items before processing backend data
@@ -90,6 +97,28 @@ export async function performConsistencyCheck(
     }
 
     logger(`Beaver Consistency Check '${consistencyId}': Found ${localItemKeys.size} local items`, 3);
+
+    // Get all local collections before processing backend data
+    logger(`Beaver Consistency Check '${consistencyId}': Getting all local collections to track additions/deletions`, 3);
+    const allLocalCollectionIds = await Zotero.Collections.getAllIDs(libraryID);
+    const allLocalCollections = await Zotero.Collections.getAsync(allLocalCollectionIds);
+    const localCollectionKeys = new Set<string>();
+    
+    for (const collection of allLocalCollections) {
+        if (!collection.deleted) {
+            localCollectionKeys.add(collection.key);
+        }
+    }
+
+    logger(`Beaver Consistency Check '${consistencyId}': Found ${localCollectionKeys.size} local collections`, 3);
+
+    // Store local collections for later syncing
+    const localCollectionsMap = new Map<string, Zotero.Collection>();
+    allLocalCollections.forEach(collection => {
+        if (!collection.deleted) {
+            localCollectionsMap.set(collection.key, collection);
+        }
+    });
 
     // Process all pages from backend
     let page = 0;
@@ -114,7 +143,7 @@ export async function performConsistencyCheck(
             result.total_items_checked += backendItems.length;
             result.total_attachments_checked += backendAttachments.length;
 
-            // Remove processed keys from local set
+            // Remove processed keys from local sets
             backendItems.forEach(item => localItemKeys.delete(item.zotero_key));
             backendAttachments.forEach(attachment => localItemKeys.delete(attachment.zotero_key));
 
@@ -275,6 +304,7 @@ export async function performConsistencyCheck(
                                 consistencyId,
                                 libraryID,
                                 itemsToSync,
+                                [],
                                 'consistency',
                                 syncMethod
                             );
@@ -315,7 +345,7 @@ export async function performConsistencyCheck(
                 const syncWithZotero = store.get(syncWithZoteroAtom);
                 const syncMethod = syncWithZotero ? 'version' : 'date_modified';
 
-                await syncItemsToBackend(consistencyId, libraryID, newItemsToSync, 'consistency', syncMethod);
+                await syncItemsToBackend(consistencyId, libraryID, newItemsToSync, [], 'consistency', syncMethod);
                 
                 result.items_and_attachments_added = newItemsToSync.length;
             } catch (error: any) {
@@ -325,13 +355,101 @@ export async function performConsistencyCheck(
         }
     }
 
+    // Process collections separately (not paginated, typically < 1000 per library)
+    logger(`Beaver Consistency Check '${consistencyId}': Processing collections for library ${libraryID}`, 3);
+    try {
+        // Get all backend collections
+        const backendCollectionsResponse = await syncService.getCollections(libraryID);
+        const backendCollections = backendCollectionsResponse.collections;
+        
+        result.total_collections_checked = backendCollections.length;
+        logger(`Beaver Consistency Check '${consistencyId}': Found ${backendCollections.length} backend collections`, 3);
+
+        // Remove processed collection keys from local set
+        backendCollections.forEach(collection => localCollectionKeys.delete(collection.zotero_key));
+
+        // Find collections to delete (exist in backend but not locally)
+        const collectionsToDelete: string[] = [];
+        for (const backendCollection of backendCollections) {
+            try {
+                const collection = Zotero.Collections.getByLibraryAndKey(libraryID, backendCollection.zotero_key);
+                if (!collection || collection.deleted) {
+                    collectionsToDelete.push(backendCollection.zotero_key);
+                }
+            } catch (error: any) {
+                logger(`Beaver Consistency Check '${consistencyId}': Error checking collection ${backendCollection.zotero_key}: ${error.message}`, 2);
+                Zotero.logError(error);
+                // If collection doesn't exist locally, mark for deletion
+                collectionsToDelete.push(backendCollection.zotero_key);
+            }
+        }
+
+        // Delete collections from backend that don't exist locally
+        if (sendUpdates && collectionsToDelete.length > 0) {
+            logger(`Beaver Consistency Check '${consistencyId}': ${collectionsToDelete.length} collections not found locally, deleting from backend.`, 3);
+            try {
+                await deleteItems(userId, libraryID, collectionsToDelete);
+                result.collections_deleted = collectionsToDelete.length;
+            } catch (error: any) {
+                logger(`Beaver Consistency Check '${consistencyId}': Failed to delete collections from backend: ${error.message}`, 1);
+                Zotero.logError(error);
+            }
+        }
+
+        // Sync all remaining local collections (collections are small, so we sync all of them)
+        if (sendUpdates && localCollectionKeys.size > 0) {
+            logger(`Beaver Consistency Check '${consistencyId}': Syncing ${localCollectionKeys.size} local collections`, 3);
+            
+            const collectionsToSync: Zotero.Collection[] = [];
+            for (const key of localCollectionKeys) {
+                const collection = localCollectionsMap.get(key);
+                if (collection) {
+                    collectionsToSync.push(collection);
+                }
+            }
+
+            if (collectionsToSync.length > 0) {
+                // Convert to SyncCollection format
+                const syncCollections = collectionsToSync.map(collection => ({
+                    action: 'upsert' as const,
+                    collection: collection
+                }));
+
+                const syncWithZotero = store.get(syncWithZoteroAtom);
+                const syncMethod = syncWithZotero ? 'version' : 'date_modified';
+
+                // Sync collections via syncItemsToBackend
+                await syncItemsToBackend(consistencyId, libraryID, [], syncCollections, 'consistency', syncMethod);
+                
+                result.collections_synced = syncCollections.length;
+                logger(`Beaver Consistency Check '${consistencyId}': Successfully synced ${syncCollections.length} collections`, 3);
+            }
+        }
+    } catch (error: any) {
+        logger(`Beaver Consistency Check '${consistencyId}': Error processing collections: ${error.message}`, 1);
+        Zotero.logError(error);
+    }
+
+    // After all items and collections are synced, sync collection mappings
+    if (sendUpdates) {
+        logger(`Beaver Consistency Check '${consistencyId}': Syncing collection mappings for library ${libraryID}`, 3);
+        try {
+            const mappingResult = await syncService.syncCollectionMappings(libraryID);
+            logger(`Beaver Consistency Check '${consistencyId}': Collection mappings synced: ${mappingResult.item_mappings_created} item mappings, ${mappingResult.attachment_mappings_created} attachment mappings created`, 3);
+        } catch (error: any) {
+            logger(`Beaver Consistency Check '${consistencyId}': Error syncing collection mappings: ${error.message}`, 1);
+            Zotero.logError(error);
+        }
+    }
+
     // Final logging of results
     logger(`Beaver Consistency Check '${consistencyId}': Completed`, 2);
-    logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments`, 3);
+    logger(`Beaver Consistency Check '${consistencyId}': Checked ${result.total_items_checked} items, ${result.total_attachments_checked} attachments, ${result.total_collections_checked} collections`, 3);
     logger(`Beaver Consistency Check '${consistencyId}': Found ${result.item_discrepancies.length} item discrepancies, ${result.attachment_discrepancies.length} attachment discrepancies`, 3);
     if (sendUpdates) {
         logger(`Beaver Consistency Check '${consistencyId}': Updated ${result.items_updated} items, ${result.attachments_updated} attachments`, 3);
         logger(`Beaver Consistency Check '${consistencyId}': Added ${result.items_and_attachments_added} items and attachments`, 3);
+        logger(`Beaver Consistency Check '${consistencyId}': Synced ${result.collections_synced} collections, deleted ${result.collections_deleted} collections from backend`, 3);
     }
 
     return result;
@@ -366,4 +484,3 @@ function shouldUpdateBackend(
     // Backend version is newer
     return false;
 }
-
