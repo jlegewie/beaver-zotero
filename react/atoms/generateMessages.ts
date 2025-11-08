@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, createAssistantMessage, createUserMessage, WarningMessage } from '../types/chat/uiTypes';
 import { MessageModel, toMessageData, ToolCall, toMessageModel } from '../types/chat/apiTypes';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference, ZoteroLibrary } from '../types/zotero';
 import { isAnnotationAttachment, MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import {
     threadMessagesAtom,
@@ -23,7 +23,7 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom} from './messageComposition';
+import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentCollectionIdsAtom} from './messageComposition';
 import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
@@ -43,6 +43,8 @@ import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations'
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
+import { extractCollectionData } from '../../src/utils/sync';
+import { map } from 'lodash';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -221,6 +223,7 @@ export const generateResponseAtom = atom(
             userMsg.content,
             messageAttachments,
             get(currentLibraryIdsAtom),
+            get(currentCollectionIdsAtom),
             readerState,
             model,
             set,
@@ -328,6 +331,7 @@ export const regenerateFromMessageAtom = atom(
             "",                    // content remains unchanged
             [],                    // sources remain unchanged
             get(currentLibraryIdsAtom),
+            get(currentCollectionIdsAtom),
             null,                  // readerState remains unchanged
             model,
             set,
@@ -399,6 +403,7 @@ async function _processChatCompletionViaBackend(
     content: string,
     attachments: MessageAttachment[],
     libraryIds: number[] | null,
+    collectionIds: number[] | null,
     readerState: ReaderState | null,
     model: FullModelConfig,
     set: any,
@@ -445,11 +450,28 @@ async function _processChatCompletionViaBackend(
     }
 
     // Set payload
+    const filterLibraries = libraryIds
+        ? libraryIds.map(id => Zotero.Libraries.get(id))
+            .filter((l): l is Zotero.Library => !!l)
+            .map(l => ({
+                library_id: l.libraryID,
+                group_id: l.isGroup ? l.id : null,
+                name: l.name,
+                is_group: l.isGroup,
+                type: l.libraryType,
+                type_id: l.libraryTypeID,
+            } as ZoteroLibrary))
+        : null;
+    const filterCollections = collectionIds
+        ? await Promise.all(collectionIds.map(id => extractCollectionData(Zotero.Collections.get(id))))
+        : null;
+    
     const payload: ChatCompletionRequestBody = {
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
         thread_id: threadId ?? undefined,
-        library_ids: libraryIds,
+        filter_libraries: filterLibraries,
+        filter_collections: filterCollections,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: model.is_custom ? undefined : userApiKey,
