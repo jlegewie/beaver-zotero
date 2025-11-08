@@ -1261,6 +1261,9 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
                 logger(`Beaver Collection Sync '${syncSessionId}':   Invalid sync state for library ${libraryID}`, 1);
                 continue;
             }
+
+            // Filter out deleted collections
+            collections = collections.filter(collection => !collection.deleted);
             
             if (collections.length === 0) {
                 logger(`Beaver Collection Sync '${syncSessionId}':   No collections found in library ${libraryID} up to sync state`, 3);
@@ -1552,6 +1555,14 @@ async function getItemsToSync(
         .filter(collection => !collection.deleted) // Exclude deleted collections
         .map(collection => ({
             action: 'upsert',
+            collection
+        } as SyncCollection));
+    
+    const collectionsToDelete = collections
+        .filter((_) => !isInitialSync) // Only delete items if not initial sync
+        .filter(collection => collection.deleted) // Exclude deleted collections
+        .map(collection => ({
+            action: 'delete',
             collection
         } as SyncCollection));
     
