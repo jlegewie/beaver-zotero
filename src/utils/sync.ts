@@ -1,12 +1,11 @@
 import { syncService, DeleteLibraryTask } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
-import { calculateObjectHash } from './hash';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
-import { ZoteroCreator, ItemDataHashedFields, ItemData, BibliographicIdentifier, ZoteroCollection, AttachmentDataHashedFields, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference } from '../../react/types/zotero';
-import { getMimeType, isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, getParentLoadPromises } from './zoteroUtils';
+import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, ZoteroCollection } from '../../react/types/zotero';
+import { isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, getParentLoadPromises } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -15,8 +14,9 @@ import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer, getFileHashes } from './webAPI';
 import { getServerOnlyAttachmentCount } from './libraries';
 import { skippedItemsManager } from '../services/skippedItemsManager';
+import { serializeCollection, serializeItem, serializeAttachment, NEEDS_HASH } from './zoteroSerializers';
 
-const NEEDS_HASH = '[needs_hash]';
+
 const MAX_SERVER_FILES = 100;
 
 
@@ -146,421 +146,6 @@ export async function extractCollectionDeleteData(collection: Zotero.Collection)
         date_modified: await getCollectionClientDateModifiedAsISOString(collection.id)
     };
 }
-
-/**
- * Extracts relevant data from a Zotero item for syncing, including a metadata hash.
- * @param item Zotero item
- * @returns Promise resolving to ItemData object for syncing
- */
-export async function extractItemData(item: Zotero.Item, clientDateModified: string | undefined): Promise<ItemData> {
-
-    // ------- 1. Get full item data -------
-    // @ts-ignore - Returns of item.toJSON are not typed correctly
-    const {abstractNote, key, libraryID, itemType, deleted, dateAdded, dateModified, accessDate, creators, collections, tags, version, ...fullItemData } = item.toJSON();
-
-    // ------- 2. Extract fields for hashing -------
-    const hashedFields: ItemDataHashedFields = {
-        zotero_key: item.key,
-        library_id: item.libraryID,
-        item_type: item.itemType,
-        title: item.getField('title'),
-        creators: extractCreators(item),
-        date: item.getField('date'),
-        year: extractYear(item),
-        publication_title: item.getField('publicationTitle'),
-        abstract: item.getField('abstractNote'),
-        url: item.getField('url'),
-        identifiers: extractIdentifiers(item),
-        language: item.getField('language'),
-        formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
-        deleted: item.isInTrash(),
-        tags: item.getTags().length > 0 ? item.getTags() : null,
-        collections: extractCollectionKeys(item),
-        citation_key: await getCiteKey(item),
-    };
-
-    // ------- 3. Calculate hash from the extracted hashed fields -------
-    const metadataHash = await calculateObjectHash(hashedFields);
-
-    // ------- 4. Construct final ItemData object -------
-    let finalDateModified: string;
-    if (clientDateModified) {
-        finalDateModified = clientDateModified;
-    } else {
-        try {
-            // Fallback to dateModified if clientDateModified was invalid
-            finalDateModified = Zotero.Date.sqlToISO8601(item.dateModified);
-        } catch (e) {
-            logger(
-                `Beaver Sync: Invalid clientDateModified and dateModified for item ${item.key}. Falling back to dateAdded.`,
-                2,
-            );
-            // As a last resort, use dateAdded
-            finalDateModified = Zotero.Date.sqlToISO8601(item.dateAdded);
-        }
-    }
-
-    const itemData: ItemData = {
-        ...hashedFields,
-        // Add full item data
-        item_json: fullItemData,
-        // Add non-hashed fields
-        date_added: Zotero.Date.sqlToISO8601(item.dateAdded), // Convert UTC SQL datetime format to ISO string
-        date_modified: finalDateModified,
-        // Add the calculated hash
-        zotero_version: item.version,
-        zotero_synced: item.synced,
-        item_metadata_hash: metadataHash,
-    };
-
-    return itemData;
-}
-
-
-export interface FileData {
-    // filename: string;
-    file_hash: string;
-    size: number;
-    mime_type: string;
-    // content?: string;
-    storage_path?: string;
-}
-
-/**
- * Extracts file metadata from a Zotero attachment item.
- * @param item Zotero attachment item
- * @returns Promise resolving to FileData object or null.
- */
-async function extractFileData(item: Zotero.Item): Promise<FileData | null> {
-    if (!item.isAttachment() || !(await item.fileExists())) return null;
-
-    try {
-        // const fileName = item.attachmentFilename;
-        const file_hash = await item.attachmentHash; // File content hash
-        const size = await Zotero.Attachments.getTotalFileSize(item);
-        const mimeType = item.attachmentContentType || 'application/octet-stream';
-
-        return {
-            // filename: fileName,
-            file_hash: file_hash,
-            size: size,
-            mime_type: mimeType
-        };
-    } catch (error: any) {
-        logger(`Beaver Sync: Error extracting file data for ${item.key}: ${error.message}`, 1);
-        Zotero.logError(error);
-        return null; // Return null if extraction fails
-    }
-}
-
-/**
- * Extracts relevant data from a Zotero attachment item for syncing, including a metadata hash.
- * Keeps the 'file' property nested in the final output.
- * @param item Zotero item
- * @param options Optional parameters
- * @param options.lightweight If true, skips file-system operations (file existence check and content hashing)
- * @returns Promise resolving to AttachmentData object for syncing
- */
-export async function extractAttachmentData(
-    item: Zotero.Item,
-    clientDateModified: string | undefined,
-    options?: { skipFileHash?: boolean }
-): Promise<AttachmentDataWithMimeType | null> {
-    const skipFileHash = options?.skipFileHash || false;
-
-    // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) {
-        if(item.isAttachment()) skippedItemsManager.upsert(item, 'not available locally or on server');
-        return null;
-    }
-    
-    // 2. Get the file hash
-    let file_hash: string = '';
-    let needs_hash: boolean = false;
-
-    // Determine local availability
-    const existsLocal = await item.fileExists();
-    const existsServer = isAttachmentOnServer(item);
-
-    // Get the file hash
-    if (!skipFileHash) {
-        // Hash from local file
-        if(existsLocal) {
-            file_hash = await item.attachmentHash;
-        
-        // Hash from server
-        } else if (existsServer) {
-            needs_hash = true;
-        }
-    }
-
-    if (!file_hash && !needs_hash && !skipFileHash) {
-        // TODO: silent failure for example when user doesn't sync and local file was removed
-        logger(`Beaver Sync: Attachment ${item.key} unavailable (local: ${existsLocal}, server: ${existsServer}). Skipping.`, 1);
-        skippedItemsManager.upsert(item, 'not available locally or on server');
-        return null;
-    }
-
-    // 2. Metadata: Prepare the object containing only fields for hashing
-    const hashedFields: AttachmentDataHashedFields = {
-        library_id: item.libraryID,
-        zotero_key: item.key,
-        parent_key: item.parentKey || null,
-        attachment_url: item.getField('url'),
-        link_mode: item.attachmentLinkMode,
-        tags: item.getTags().length > 0 ? item.getTags() : null,
-        collections: extractCollectionKeys(item),
-        deleted: item.isInTrash(),
-        title: item.getField('title'),
-        filename: item.attachmentFilename,
-    };
-
-    // 3. Metadata Hash: Calculate hash from the prepared hashed fields object
-    const metadataHash = await calculateObjectHash(hashedFields);
-
-    let finalDateModified: string;
-    if (clientDateModified) {
-        finalDateModified = clientDateModified;
-    } else {
-        try {
-            // Fallback to dateModified if clientDateModified was invalid
-            finalDateModified = Zotero.Date.sqlToISO8601(item.dateModified);
-        } catch (e) {
-            logger(
-                `Beaver Sync: Invalid clientDateModified and dateModified for item ${item.key}. Falling back to dateAdded.`,
-                2,
-            );
-            // As a last resort, use dateAdded
-            finalDateModified = Zotero.Date.sqlToISO8601(item.dateAdded);
-        }
-    }
-
-    // 4. AttachmentData: Construct final AttachmentData object (with optional placeholder flag)
-    const attachmentData: AttachmentDataWithMimeType = {
-        ...hashedFields,
-        // Add non-hashed fields
-        file_hash: needs_hash ? NEEDS_HASH : file_hash,
-        mime_type: await getMimeType(item),
-        date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
-        date_modified: finalDateModified,
-        // Add the calculated hash
-        attachment_metadata_hash: metadataHash,
-        zotero_version: item.version,
-        zotero_synced: item.synced,
-    };
-
-    return attachmentData;
-}
-
-/**
- * Extracts primary creators from a Zotero item
- * @param item Zotero item
- * @returns Array of primary creators
- */
-export function extractPrimaryCreators(item: Zotero.Item): ZoteroCreator[] {
-    const itemCreators = item.getCreators();
-    const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
-    return itemCreators
-        .filter(creator => creator.creatorTypeID == primaryCreatorTypeID)
-        .map(creator => ({
-            first_name: creator.firstName || null,
-            last_name: creator.lastName || null,
-            field_mode: creator.fieldMode,
-            creator_type_id: creator.creatorTypeID,
-            creator_type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
-            is_primary: creator.creatorTypeID === primaryCreatorTypeID
-        } as ZoteroCreator));
-}
-
-/**
- * Extracts creators from a Zotero item
- * @param item Zotero item
- * @returns Array of creators
- */
-function extractCreators(item: Zotero.Item): ZoteroCreator[] | null {
-    const itemCreators = item.getCreators();
-    const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
-
-    const creators = itemCreators.map((creator, index) => ({
-        first_name: creator.firstName || null,
-        last_name: creator.lastName || null,
-        field_mode: creator.fieldMode,
-        creator_type_id: creator.creatorTypeID,
-        creator_type: Zotero.CreatorTypes.getName(creator.creatorTypeID),
-        is_primary: creator.creatorTypeID === primaryCreatorTypeID
-    } as ZoteroCreator));
-
-    return creators.length > 0 ? creators : null;
-}
-
-/**
- * Extracts collections from a Zotero item
- * @param item Zotero item
- * @returns Array of collections
- */
-async function extractCollections(item: Zotero.Item): Promise<ZoteroCollection[] | null> {
-    const collectionPromises = item.getCollections()
-        .map(async (collection_id) => {
-            const collection = Zotero.Collections.get(collection_id).toJSON();
-            return {
-                library_id: item.libraryID,
-                zotero_key: collection.key,
-                name: collection.name,
-                zotero_version: collection.version,
-                date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
-                parent_collection: collection.parentCollection || null,
-                relations: Object.keys(collection.relations).length > 0 ? collection.relations : null,
-            } as ZoteroCollection;
-        })
-    const collections = await Promise.all(collectionPromises);
-
-    return collections.length > 0 ? collections : null;
-}
-
-/**
- * Extracts data from a Zotero collection for syncing
- * @param collection Zotero collection
- * @param clientDateModified Optional pre-fetched clientDateModified
- * @returns Promise resolving to ZoteroCollection object for syncing
- */
-export async function extractCollectionData(
-    collection: Zotero.Collection,
-    clientDateModified?: string
-): Promise<ZoteroCollection> {
-    const collectionJSON = collection.toJSON();
-    
-    let finalDateModified: string;
-    if (clientDateModified) {
-        finalDateModified = clientDateModified;
-    } else {
-        try {
-            finalDateModified = await getCollectionClientDateModifiedAsISOString(collection.id);
-        } catch (e) {
-            logger(`Beaver Sync: Invalid clientDateModified for collection ${collection.key}. Falling back to current timestamp.`, 2);
-            finalDateModified = new Date().toISOString();
-        }
-    }
-
-    return {
-        library_id: collection.libraryID,
-        zotero_key: collection.key,
-        name: collection.name,
-        zotero_version: collection.version,
-        date_modified: finalDateModified,
-        parent_collection: collectionJSON.parentCollection || null,
-        relations: Object.keys(collectionJSON.relations).length > 0 ? collectionJSON.relations : null,
-    } as ZoteroCollection;
-}
-
-/**
- * Extracts collection keys from a Zotero item
- * @param item Zotero item
- * @returns Array of collection keys
- */
-function extractCollectionKeys(item: Zotero.Item): string[] | null {
-    const collectionKeys = item.getCollections().map(id => Zotero.Collections.get(id).key);
-    return collectionKeys.length > 0 ? collectionKeys : null;
-}
-
-
-/**
- * Attempts to extract a year from a Zotero item's date field
- * @param item Zotero item
- * @returns Extracted year or undefined
- */
-export function extractYear(item: Zotero.Item): number | undefined {
-    const date = item.getField('date');
-    if (!date) return undefined;
-    
-    // Try to extract a 4-digit year from the date string
-    const yearMatch = date.match(/\b(\d{4})\b/);
-    return yearMatch ? parseInt(yearMatch[1]) : undefined;
-}
-
-/**
- * Extracts identifiers from a Zotero item
- * @param item Zotero item
- * @returns Object with identifiers
- */
-function extractIdentifiers(item: Zotero.Item): BibliographicIdentifier | null {
-    const identifiers: BibliographicIdentifier = {};
-    
-    const doi = item.getField('DOI');
-    if (doi) identifiers.doi = doi;
-    
-    const isbn = item.getField('ISBN');
-    if (isbn) identifiers.isbn = isbn;
-
-    const issn = item.getField('ISSN');
-    if (issn) identifiers.issn = issn;
-
-    const pmid = item.getField('PMID');
-    if (pmid) identifiers.pmid = pmid; 
-
-    const pmcid = item.getField('PMCID');
-    if (pmcid) identifiers.pmcid = pmcid; 
-
-    const arXivID = item.getField('arXiv ID') || item.getField('arXivID');
-    if (arXivID) identifiers.arXivID = arXivID; 
-    
-    const archiveID = item.getField('archiveID');
-    if (archiveID) identifiers.archiveID = archiveID;
-    
-    return Object.keys(identifiers).length > 0 ? identifiers : null;
-}
-
-/**
- * Get the BibTeX cite-key for a Zotero.Item, if available.
- * Tries Better BibTeX, then Zotero beta field citationKey, then Extra.
- *
- * @param {Zotero.Item} item
- * @return {string|null}
- */
-async function getCiteKey(item: Zotero.Item): Promise<string | null> {
-    // 1. Ensure we actually have an item
-    if (!item) return null;
-
-    // 2. If Better BibTeX is present, use its KeyManager API
-    if (typeof Zotero !== 'undefined'
-        && Zotero.BetterBibTeX
-        && Zotero.BetterBibTeX.KeyManager
-        && typeof Zotero.BetterBibTeX.KeyManager.get === 'function'
-    ) {
-        try {
-            const keydata = Zotero.BetterBibTeX.KeyManager.get(item.id);
-            
-            // Handle retry case (when KeyManager isn't ready)
-            if (keydata && keydata.retry) {
-                // KeyManager not ready, fall through to other methods
-            } else if (keydata && keydata.citationKey) {
-                return keydata.citationKey;
-            }
-        }
-        catch (e) {
-            // Something went wrong in BBT; fall back
-            logger('getCiteKey: BetterBibTeX KeyManager failed');
-        }
-    }
-
-    // 3. Use citationKey field (Zotero beta)
-    try {
-        const citationKey = item.getField('citationKey');
-        if (citationKey) return citationKey;
-    } catch (e) {
-        // citationKey field might not exist in older Zotero versions
-    }
-
-    // 4. Fallback: look for a pinned key in Extra field
-    try {
-        const extra = item.getField('extra') || '';
-        const m = extra.match(/^\s*Citation Key:\s*([^\s]+)/m);
-        return m ? m[1] : null;
-    } catch (e) {
-        logger('getCiteKey: Failed to get extra field');
-        return null;
-    }
-}
-
 
 function createBatches<T>(
     items: T[], 
@@ -813,7 +398,7 @@ export async function syncItemsToBackend(
             const batchCollectionsData: ZoteroCollection[] = await Promise.all(
                 batchCollections
                     .filter(c => c.action === 'upsert')
-                    .map(c => extractCollectionData(c.collection, collectionDateMap.get(c.collection.id)))
+                    .map(c => serializeCollection(c.collection, collectionDateMap.get(c.collection.id)))
             );
 
             // Extract delete data for collections
@@ -834,12 +419,12 @@ export async function syncItemsToBackend(
                 // Items
                 Promise.all(
                     regularItems.map((item) =>
-                        extractItemData(item, clientDateModifiedMap.get(item.id))
+                        serializeItem(item, clientDateModifiedMap.get(item.id))
                     )
                 ).then(data => data.filter((item) => item !== null) as ItemData[]),
                 // Attachments
                 Promise.all(attachmentItems.map((item) =>
-                    extractAttachmentData(item, clientDateModifiedMap.get(item.id)))
+                    serializeAttachment(item, clientDateModifiedMap.get(item.id)))
                 ).then(data => 
                     data.filter((att) => att !== null) as AttachmentDataWithMimeType[]
                 )
@@ -1341,7 +926,7 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
 
             // Extract collection data
             const collectionsData: ZoteroCollection[] = await Promise.all(
-                collections.map(c => extractCollectionData(c, collectionDateMap.get(c.id)))
+                collections.map(c => serializeCollection(c, collectionDateMap.get(c.id)))
             );
 
             logger(`Beaver Collection Sync '${syncSessionId}':   Sending ${collectionsData.length} collections to backend`, 3);

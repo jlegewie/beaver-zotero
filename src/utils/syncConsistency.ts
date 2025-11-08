@@ -2,11 +2,12 @@ import { syncService, SyncDataResponse } from '../services/syncService';
 import { logger } from './logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
-import { getClientDateModifiedAsISOString, getClientDateModifiedBatch, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';
+import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
-import { deleteItems, getAllItemsToSync, syncingItemFilter, SyncItem, syncItemsToBackend, extractItemData, extractAttachmentData, extractCollectionData } from './sync';
-import { ZoteroCollection } from '../../react/types/zotero';
+import { serializeItem, serializeAttachment } from './zoteroSerializers';
+import { deleteItems } from './sync';
+import { getAllItemsToSync, syncingItemFilter, SyncItem, syncItemsToBackend } from './sync';
 
 /**
  * Discrepancy information for consistency checks
@@ -162,7 +163,7 @@ export async function performConsistencyCheck(
                     }
 
                     const localDateModified = clientDateModifiedMap.get(zoteroItem.id) || await getClientDateModifiedAsISOString(zoteroItem);
-                    const localItemData = await extractItemData(zoteroItem, localDateModified);
+                    const localItemData = await serializeItem(zoteroItem, localDateModified);
                     if (backendItem.metadata_hash !== localItemData.item_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendItem.zotero_version,
@@ -206,7 +207,7 @@ export async function performConsistencyCheck(
                     }
 
                     const localDateModified = clientDateModifiedMapAttachments.get(zoteroAttachment.id) || await getClientDateModifiedAsISOString(zoteroAttachment);
-                    const localAttachmentData = await extractAttachmentData(zoteroAttachment, localDateModified, { skipFileHash: true });
+                    const localAttachmentData = await serializeAttachment(zoteroAttachment, localDateModified, { skipFileHash: true });
                     if (localAttachmentData && backendAttachment.metadata_hash !== localAttachmentData.attachment_metadata_hash) {
                         const shouldUpdate = shouldUpdateBackend(
                             backendAttachment.zotero_version,

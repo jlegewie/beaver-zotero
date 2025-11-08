@@ -43,7 +43,7 @@ import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations'
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
-import { extractCollectionData } from '../../src/utils/sync';
+import { serializeCollection } from '../../src/utils/zoteroSerializers';
 import { map } from 'lodash';
 
 
@@ -463,7 +463,7 @@ async function _processChatCompletionViaBackend(
             } as ZoteroLibrary))
         : null;
     const filterCollections = collectionIds
-        ? await Promise.all(collectionIds.map(id => extractCollectionData(Zotero.Collections.get(id))))
+        ? await Promise.all(collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
         : null;
     
     const payload: ChatCompletionRequestBody = {
