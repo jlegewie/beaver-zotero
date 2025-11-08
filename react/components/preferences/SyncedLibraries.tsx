@@ -6,8 +6,8 @@ import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../
 import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, CancelCircleIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
-import { ZoteroLibrary } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
+import { serializeZoteroLibrary } from '../../../src/utils/zoteroSerializers';
 import IconButton from '../ui/IconButton';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom, deletionJobsAtom } from '../../atoms/sync';
@@ -184,14 +184,7 @@ const SyncedLibraries: React.FC = () => {
                 const updated = remainingIds
                     .map((id) => Zotero.Libraries.get(id))
                     .filter((l): l is Zotero.Library => !!l)
-                    .map((l) => ({
-                        library_id: l.libraryID,
-                        group_id: l.isGroup ? l.id : null,
-                        name: l.name,
-                        is_group: l.isGroup,
-                        type: l.libraryType,
-                        type_id: l.libraryTypeID,
-                    } as ZoteroLibrary));
+                    .map(serializeZoteroLibrary);
 
                 await accountService.updateSyncLibraries(updated);
                 setProfileWithPlan({ ...profileWithPlan, libraries: updated });

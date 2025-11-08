@@ -15,11 +15,11 @@ import { isUploadProcessedAtom } from "../../atoms/files";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
-import { ZoteroLibrary } from "../../types/zotero";
 import { userAtom } from "../../atoms/auth";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
+import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 
 
 const OnboardingPage: React.FC = () => {
@@ -117,14 +117,7 @@ const OnboardingPage: React.FC = () => {
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
                     if (!library) return null;
-                    return {
-                        library_id: library.libraryID,
-                        group_id: library.isGroup ? library.id : null,
-                        name: library.name,
-                        is_group: library.isGroup,
-                        type: library.libraryType,
-                        type_id: library.libraryTypeID,
-                    } as ZoteroLibrary;
+                    return serializeZoteroLibrary(library);
                 })
                 .filter(library => library !== null);
             logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);

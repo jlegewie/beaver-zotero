@@ -9,6 +9,7 @@ import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../
 import { logger } from '../../../../src/utils/logger';
 import { accountService } from '../../../../src/services/accountService';
 import { ZoteroLibrary } from '../../../types/zotero';
+import { serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 
 interface AddLibraryButtonProps {
     disabled?: boolean;
@@ -81,14 +82,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
                 .map(id => {
                     const library = Zotero.Libraries.get(id);
                     if (!library) return null;
-                    return {
-                        library_id: library.libraryID,
-                        group_id: library.isGroup ? library.id : null,
-                        name: library.name,
-                        is_group: library.isGroup,
-                        type: library.libraryType,
-                        type_id: library.libraryTypeID,
-                    } as ZoteroLibrary;
+                    return serializeZoteroLibrary(library);
                 })
                 .filter((library): library is ZoteroLibrary => library !== null);
 
