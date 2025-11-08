@@ -154,6 +154,11 @@ export interface SyncCollectionMappingsResponse {
     attachments_processed: number;
 }
 
+export interface GetCollectionsResponse {
+    library_id: number;
+    collections: ZoteroCollection[];
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -280,6 +285,18 @@ export class SyncService extends ApiService {
             params.append('to_version', String(toLibraryVersion));
         }
         return this.get<SyncDataResponse>(`/api/v1/sync/data?${params.toString()}`);
+    }
+
+    /**
+     * Gets all collections for a library
+     * @param libraryId The Zotero library ID
+     * @returns Promise with all collections for the library
+     */
+    async getCollections(libraryId: number): Promise<GetCollectionsResponse> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+        });
+        return this.get<GetCollectionsResponse>(`/api/v1/sync/collections?${params.toString()}`);
     }
 
     /**
