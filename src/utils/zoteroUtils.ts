@@ -421,3 +421,44 @@ export async function getParentLoadPromises(item: Zotero.Item) {
 
     return promises;
 }
+
+
+/**
+ * Get the active Zotero library ID
+ * @returns The active Zotero library ID, or null if no library is selected
+ */
+export function getActiveZoteroLibraryId(): number | null {
+    const zoteroPane = Zotero.getActiveZoteroPane?.() as any;
+    if (!zoteroPane) return null;
+
+    if (typeof zoteroPane.getSelectedLibraryID === 'function') {
+        const libraryID = zoteroPane.getSelectedLibraryID();
+        if (typeof libraryID === 'number') {
+            return libraryID;
+        }
+    }
+
+    if (typeof zoteroPane.getSelectedCollection === 'function') {
+        const collection = zoteroPane.getSelectedCollection();
+        if (collection && typeof collection.libraryID === 'number') {
+            return collection.libraryID;
+        }
+    }
+
+    const selectedItems = zoteroPane.getSelectedItems?.();
+    if (Array.isArray(selectedItems) && selectedItems.length > 0) {
+        const itemLibraryId = selectedItems[0]?.libraryID;
+        if (typeof itemLibraryId === 'number') {
+            return itemLibraryId;
+        }
+    }
+
+    const collectionsView = zoteroPane.collectionsView as any;
+    const selectedTreeRow = collectionsView?._selectedTreeRow || collectionsView?._view?.selectedTreeRow;
+    const treeLibraryId = selectedTreeRow?.ref?.libraryID ?? selectedTreeRow?.libraryID;
+    if (typeof treeLibraryId === 'number') {
+        return treeLibraryId;
+    }
+
+    return null;
+};
