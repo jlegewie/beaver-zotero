@@ -1,10 +1,11 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { LibraryButton } from '../library/LibraryButton';
+import { CollectionButton } from '../library/CollectionButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
@@ -28,6 +29,7 @@ const MessageAttachmentDisplay = ({
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
+    const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);
@@ -35,6 +37,16 @@ const MessageAttachmentDisplay = ({
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
         .filter(lib => lib) as Zotero.Library[];
+
+    const selectedCollections = currentCollectionIds
+        .map(id => {
+            try {
+                return Zotero.Collections.get(id);
+            } catch {
+                return null;
+            }
+        })
+        .filter((collection): collection is Zotero.Collection => Boolean(collection));
 
     const filteredMessageItems = currentMessageItems.filter(
         (item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key
@@ -52,7 +64,7 @@ const MessageAttachmentDisplay = ({
         <div className="display-flex flex-wrap gap-3 mb-2">
             <AddSourcesMenu
                 // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -62,9 +74,15 @@ const MessageAttachmentDisplay = ({
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
             />
+
             {/* Selected Libraries */}
             {selectedLibraries.map(library => (
                 <LibraryButton key={library.libraryID} library={library} />
+            ))}
+
+            {/* Selected Collections */}
+            {selectedCollections.map(collection => (
+                <CollectionButton key={collection.id} collection={collection} />
             ))}
 
             {/* Current reader attachment */}
