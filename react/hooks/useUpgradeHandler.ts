@@ -82,7 +82,7 @@ export const useUpgradeHandler = () => {
 
         runCollectionSync();
 
-    }, [isAuthenticated]);
+    }, [isAuthenticated, syncLibraryIds]);
 
     useEffect(() => {
         if (!isAuthenticated) {
