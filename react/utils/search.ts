@@ -10,7 +10,8 @@ import { logger } from '../../src/utils/logger';
  */
 export async function searchTitleCreatorYear(
     searchTerm: string,
-    libraryIds?: number[]
+    libraryIds?: number[],
+    collectionIds?: number[]
 ): Promise<Zotero.Item[]> {
     // If no search term is provided, return an empty array.
     if (!searchTerm || searchTerm.trim() === "") {
@@ -43,7 +44,14 @@ export async function searchTitleCreatorYear(
 
         // Retrieve the full Zotero.Item objects
         const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
-        return items;
+
+        // Filter items by collection IDs
+        const filteredItems = collectionIds && collectionIds.length > 0
+            ? items.filter(item => item.getCollections().some(collection => collectionIds.includes(collection)))
+            : items;
+
+        logger(`searchTitleCreatorYear: Found ${filteredItems.length} items: ${filteredItems.map(item => item.id).join(', ')}`)
+        return filteredItems;
 
     } catch (error: any) {
         // Log any errors that occur during the search process.
