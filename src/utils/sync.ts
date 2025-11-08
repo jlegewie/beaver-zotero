@@ -722,6 +722,12 @@ export async function syncItemsToBackend(
             }
         },
     );
+    
+    // Ensure at least one batch exists if we have collections to process
+    // (collections are added to batches in the loop below)
+    if (batches.length === 0 && collections.length > 0) {
+        batches.push([]);
+    }
 
     // Track skipped items
     const skippedItems: ZoteroItemReference[] = [];
@@ -734,14 +740,19 @@ export async function syncItemsToBackend(
         const batchItems = batches[i];
 
         // Determine the max version and date for this batch
-        const batchMaxVersion = Math.max(...batchItems.map(item => item.item.version));
-        const batchMaxDate = clientDateModifiedMap.get(batchItems[batchItems.length - 1].item.id) || new Date(0).toISOString();
+        // If batch is empty (no items, only collections), use infinity to include all collections
+        const batchMaxVersion = batchItems.length > 0 
+            ? Math.max(...batchItems.map(item => item.item.version))
+            : Infinity;
+        const batchMaxDate = batchItems.length > 0
+            ? (clientDateModifiedMap.get(batchItems[batchItems.length - 1].item.id) || new Date(0).toISOString())
+            : new Date(8640000000000000).toISOString(); // Max date
 
         // Log batch info for debugging
         const batchDateRange = {
-            first: clientDateModifiedMap.get(batchItems[0].item.id),
+            first: batchItems.length > 0 ? clientDateModifiedMap.get(batchItems[0].item.id) : undefined,
             last: batchMaxDate,
-            versions: [batchItems[0].item.version, batchMaxVersion]
+            versions: batchItems.length > 0 ? [batchItems[0].item.version, batchMaxVersion] : [0, Infinity]
         };
         
         try {
