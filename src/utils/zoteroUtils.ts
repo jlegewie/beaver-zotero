@@ -262,7 +262,7 @@ export async function getMimeType(attachment: Zotero.Item, filePath?: string): P
 export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Array | ArrayBuffer): string {
     if (!attachment.isAttachment()) return '';
 
-    let mimeType = attachment.attachmentContentType;
+    const mimeType = attachment.attachmentContentType;
 
 
     // Validate/correct MIME type by checking actual file if needed
