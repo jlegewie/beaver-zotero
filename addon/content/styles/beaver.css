@@ -1640,6 +1640,7 @@ attachment-box .metadata-table #beaver-status {
 /* Link styles */
 [id^="beaver-pane-"] .text-link {
     color: var(--accent-blue);
+    opacity: 0.8;
     text-decoration: none;
     cursor: pointer;
     border: 0px solid transparent;
