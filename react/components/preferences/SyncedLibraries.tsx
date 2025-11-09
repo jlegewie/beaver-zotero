@@ -313,7 +313,7 @@ const SyncedLibraries: React.FC = () => {
                                                 variant="ghost-secondary"
                                                 ariaLabel="Sync Library"
                                                 disabled={isSyncingNow || !!deleting || !isValid}
-                                                title="Sync Library with Beaver"
+                                                title={isValid ? "Sync Library with Beaver" : "Unable to sync library with Beaver"}
                                                 icon={!syncingComplete ? SyncIcon : TickIcon}
                                                 iconClassName={isSyncingNow && !syncingComplete ? 'animate-spin' : ''}
                                                 className="scale-11"
