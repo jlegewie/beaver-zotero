@@ -76,11 +76,9 @@ export const useUpgradeHandler = () => {
                     await syncCollectionsOnly(syncLibraryIds);
                     logger("useUpgradeHandler: Full collection sync completed for all synced libraries.");
                 } else {
-                    // await syncCollectionsOnly(syncLibraryIds);
-                    const promises = syncLibraryIds.map((libraryID: number) => 
-                        performConsistencyCheck(libraryID)
-                    );
-                    await Promise.all(promises);
+                    for (const libraryID of syncLibraryIds) {
+                        await performConsistencyCheck(libraryID);
+                    }
                     logger("useUpgradeHandler: Full collection sync and consistency check completed for all synced libraries.");
                 }
             } catch (error) {
