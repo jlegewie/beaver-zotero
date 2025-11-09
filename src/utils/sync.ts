@@ -375,6 +375,11 @@ export async function syncItemsToBackend(
             //   - version mode: version <= batchMaxVersion
             //   - date_modified mode: date <= batchMaxDate
             const batchCollections: SyncCollection[] = [];
+            logger(`Beaver Sync '${syncSessionId}':     Processing collections: collectionIndex=${collectionIndex}, total=${collections.length}, syncMethod=${syncMethod}, batchMaxVersion=${batchMaxVersion}, batchMaxDate=${batchMaxDate}`, 4);
+            
+            // Convert batchMaxDate to timestamp once for comparison
+            const batchMaxDateTimestamp = new Date(batchMaxDate).getTime();
+            
             while (collectionIndex < collections.length) {
                 const collection = collections[collectionIndex];
                 const collectionVersion = collection.collection.version;
@@ -383,7 +388,7 @@ export async function syncItemsToBackend(
                 // Check if this collection should be in this batch based on sync method
                 const shouldInclude = syncMethod === 'version' 
                     ? collectionVersion <= batchMaxVersion
-                    : collectionDate <= batchMaxDate;
+                    : new Date(collectionDate).getTime() <= batchMaxDateTimestamp;
                 
                 if (shouldInclude) {
                     batchCollections.push(collection);
