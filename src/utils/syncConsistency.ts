@@ -61,7 +61,7 @@ export async function performConsistencyCheck(
     libraryID: number,
     pageSize: number = 500,
     sendUpdates: boolean = true
-): Promise<ConsistencyCheckResult> {
+): Promise<ConsistencyCheckResult | null> {
     const consistencyId = uuidv4();
     const library = Zotero.Libraries.get(libraryID);
     const libraryName = library ? library.name : 'Unknown';
@@ -72,6 +72,14 @@ export async function performConsistencyCheck(
     if (!userId) {
         logger(`Beaver Consistency Check '${consistencyId}': No user ID found, cannot perform consistency check.`, 1);
         throw new Error('User not authenticated for consistency check');
+    }
+
+    // Check if library is valid for sync
+    // if (isLibraryValidForSync(library, syncWithZotero))
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    if (library && library.isGroup && !syncWithZotero) {
+        logger(`Beaver Consistency Check '${consistencyId}': Library ${libraryID} (${libraryName}) is a group and is not synced with Zotero. Skipping consistency check.`, 2);
+        return null;
     }
 
     const result: ConsistencyCheckResult = {
