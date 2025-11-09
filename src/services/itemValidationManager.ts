@@ -170,6 +170,7 @@ class ItemValidationManager {
                 item.libraryID,
                 item.key,
                 fileHash,
+                item.dateAdded,
                 false // don't request upload URL
             );
 

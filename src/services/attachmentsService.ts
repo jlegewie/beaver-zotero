@@ -456,11 +456,15 @@ export class AttachmentsService extends ApiService {
         libraryId: number,
         zoteroKey: string,
         fileHash: string,
+        dateAdded: string | null = null,
         requestUrl: boolean = false
     ): Promise<ValidationResponse> {
         const params = new URLSearchParams();
         if (requestUrl) {
             params.append('request_url', 'true');
+        }
+        if (dateAdded) {
+            params.append('date_added', Zotero.Date.sqlToISO8601(dateAdded));
         }
         
         const url = `/api/v1/attachments/validate/${libraryId}/${zoteroKey}/${fileHash}${params.toString() ? `?${params.toString()}` : ''}`;
