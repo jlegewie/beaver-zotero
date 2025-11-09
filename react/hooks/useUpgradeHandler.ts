@@ -72,16 +72,16 @@ export const useUpgradeHandler = () => {
             logger(`useUpgradeHandler: Running collection sync after upgrade to ${version}.`);
 
             try {
-                await syncCollectionsOnly(syncLibraryIds);
-                if (!syncWithZotero) {
+                if (syncWithZotero) {
                     await syncCollectionsOnly(syncLibraryIds);
+                    logger("useUpgradeHandler: Full collection sync completed for all synced libraries.");
+                } else {
+                    // await syncCollectionsOnly(syncLibraryIds);
                     const promises = syncLibraryIds.map((libraryID: number) => 
                         performConsistencyCheck(libraryID)
                     );
                     await Promise.all(promises);
                     logger("useUpgradeHandler: Full collection sync and consistency check completed for all synced libraries.");
-                } else {
-                    logger("useUpgradeHandler: Full collection sync completed for all synced libraries.");
                 }
             } catch (error) {
                 logger(`useUpgradeHandler: Could not run collection sync on upgrade: ${error}`, 1);
@@ -94,7 +94,7 @@ export const useUpgradeHandler = () => {
 
         runCollectionSync();
 
-    }, [isAuthenticated, syncLibraryIds]);
+    }, [isAuthenticated, syncLibraryIds, syncWithZotero]);
 
     // Run version notification popup after upgrade
     useEffect(() => {
