@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { truncateText } from "../utils/stringUtils";
 import { userAttachmentKeysAtom } from "./threads";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
@@ -9,7 +10,6 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
-import { get } from "lodash";
 
 
 /**
@@ -230,10 +230,11 @@ async function validateItemsInBackground(
             // Show error message with custom content
             let title = `${invalidItems.length} Items Removed`;
             if (invalidItems.length === 1) {
+                const label = invalidItems[0].item.isAttachment() ? 'Invalid File' : 'Invalid Item';
                 const name = invalidItems[0].item.isAnnotation()
                     ? 'Annotation'
                     : invalidItems[0].item.isNote() ? 'Note' : `"${invalidItems[0].item.getDisplayTitle()}"`
-                title = `Invalid File ${name}`
+                title = `${label} ${truncateText(name, 60)}`
             }
             
             const invalidItemsData = invalidItems.map(({ item, validation }) => ({
