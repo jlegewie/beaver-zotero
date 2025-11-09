@@ -287,7 +287,7 @@ const SyncedLibraries: React.FC = () => {
                                             ) : (
                                                 <div className="text-sm font-color-tertiary">
                                                     {isValid && lastSynced[lib.libraryID] ? `Last synced ${lastSynced[lib.libraryID]}` : ''}
-                                                    {!isValid && 'Changes will not be synced with Beaver'}
+                                                    {!isValid && <span className="font-color-error">Changes will not be synced with Beaver</span>}
                                                 </div>
                                             )
                                         )}
