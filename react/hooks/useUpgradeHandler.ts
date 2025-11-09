@@ -10,7 +10,7 @@ import { logger } from '../../src/utils/logger';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
-import { syncLibraryIdsAtom } from '../atoms/profile';
+import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -21,9 +21,11 @@ export const useUpgradeHandler = () => {
     const hasRunConsistencyCheckRef = useRef(false);
     const hasRunCollectionSyncRef = useRef(false);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const processedVersionsRef = useRef<Set<string>>(new Set());
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
+    // Run consistency check after upgrade
     useEffect(() => {
         const runUpgradeTasks = async () => {
             if (!isAuthenticated || hasRunConsistencyCheckRef.current) return;
@@ -57,6 +59,7 @@ export const useUpgradeHandler = () => {
 
     }, [isAuthenticated]);
 
+    // Run collection sync after version upgrade and full consistency for non-Zotero synced libraries
     useEffect(() => {
         const runCollectionSync = async () => {
             if (!isAuthenticated || !syncLibraryIds || syncLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
@@ -70,7 +73,16 @@ export const useUpgradeHandler = () => {
 
             try {
                 await syncCollectionsOnly(syncLibraryIds);
-                logger("useUpgradeHandler: Collection sync completed for all synced libraries.");
+                if (!syncWithZotero) {
+                    await syncCollectionsOnly(syncLibraryIds);
+                    const promises = syncLibraryIds.map((libraryID: number) => 
+                        performConsistencyCheck(libraryID)
+                    );
+                    await Promise.all(promises);
+                    logger("useUpgradeHandler: Full collection sync and consistency check completed for all synced libraries.");
+                } else {
+                    logger("useUpgradeHandler: Full collection sync completed for all synced libraries.");
+                }
             } catch (error) {
                 logger(`useUpgradeHandler: Could not run collection sync on upgrade: ${error}`, 1);
                 Zotero.logError(error as Error);
@@ -84,6 +96,7 @@ export const useUpgradeHandler = () => {
 
     }, [isAuthenticated, syncLibraryIds]);
 
+    // Run version notification popup after upgrade
     useEffect(() => {
         if (!isAuthenticated) {
             return;
