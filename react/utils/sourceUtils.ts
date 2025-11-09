@@ -1,10 +1,10 @@
 import { truncateText } from './stringUtils';
-import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem } from '../../src/utils/sync';
+import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
-import { syncLibraryIdsAtom } from '../atoms/profile';
+import { syncLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 
 // Constants
@@ -78,14 +78,29 @@ export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: boolean, error?: string}> {
 
+    // Item library
+    const library = Zotero.Libraries.get(item.libraryID);
+    if (!library) {
+        return {valid: false, error: "Library not found"};
+    }
+
     // Is library synced?
     const libraryIds = store.get(syncLibraryIdsAtom);
     if (!libraryIds.includes(item.libraryID)) {
-        const library = Zotero.Libraries.get(item.libraryID);
         const library_name = library ? library.name : undefined;
         return {
             valid: false,
             error: library_name ? `The library "${library_name}" is not synced with Beaver.` : "This library is not synced with Beaver."};
+    }
+
+    // Is the library valid for sync?
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    if (library.isGroup && !syncWithZotero) {
+        return {valid: false, error: `The group library "${library.name}" cannot be synced with Beaver because the setting "Coordinate with Zotero Sync" is disabled.`};
+    }
+
+    if (!isLibraryValidForSync(library, syncWithZotero)) {
+        return {valid: false, error: `The group library "${library.name}" cannot be synced with Beaver. Please check Beaver Preferences to resolve this issue.`};
     }
 
     // ------- Regular items -------
