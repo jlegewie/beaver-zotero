@@ -4,6 +4,7 @@ import { CSSIcon, CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon } from '../../i
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import Button from '../Button';
 import { MessageItemSummary, useMessageItemSummary } from '../../../hooks/useMessageItemSummary';
+import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface RegularItemMessageContentProps {
     item: Zotero.Item;
@@ -111,7 +112,9 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                                         </div>
                                     </div>
                                     {reason && (
-                                        <div className="font-color-tertiary text-md ml-1 text-sm">{reason}</div>
+                                        <div className="font-color-tertiary text-md ml-1 text-sm">
+                                            {parseTextWithLinksAndNewlines(reason)}
+                                        </div>
                                     )}
                                 </div>
                             );

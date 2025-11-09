@@ -2,6 +2,7 @@ import React from 'react';
 import { InformationCircleIcon } from '../../icons/icons';
 import IconButton from '../IconButton';
 import { getInfoItemByTitle } from '../../../constants/info';
+import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface InvalidItemInfo {
     item: Zotero.Item;
@@ -34,7 +35,9 @@ export const InvalidItemsMessageContent: React.FC<InvalidItemsMessageContentProp
 
                 return (
                     <div key={reason} className="display-flex flex-row items-center gap-1">
-                        <div className="font-color-tertiary text-md ml-05">{displayText}</div>
+                        <div className="font-color-tertiary text-md ml-05">
+                            {parseTextWithLinksAndNewlines(displayText)}
+                        </div>
                         {infoItem && infoItem.url && (
                             <IconButton
                                 icon={InformationCircleIcon}
