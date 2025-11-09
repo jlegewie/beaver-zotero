@@ -638,8 +638,23 @@ export async function syncZoteroDatabase(
     } = options;
 
     // Get libraries
+    const syncWithZotero = store.get(syncWithZoteroAtom);
     const libraries = Zotero.Libraries.getAll();
-    const librariesToSync = libraries.filter((library) => libraryIds.includes(library.libraryID));
+    const librariesToSyncCandidates = libraries.filter((library) => libraryIds.includes(library.libraryID));
+
+    // Filter libraries to sync candidates to only include libraries that are valid for sync
+    const librariesToSync = librariesToSyncCandidates.filter((library) =>
+        // TODO: Use !isLibraryValidForSync to validate libraries and show warning if any libraries are not valid for sync (addPopupMessageAtom)
+        // libraryIds.includes(library.libraryID) && isLibraryValidForSync(library, syncWithZotero)
+        libraryIds.includes(library.libraryID) && (!library.isGroup || (library.isGroup && syncWithZotero))
+    );
+    if (librariesToSync.length !== librariesToSyncCandidates.length) {
+        logger(`Beaver Sync '${syncSessionId}':   ${librariesToSyncCandidates.length - librariesToSync.length} libraries were excluded from sync because they are not valid for sync`, 2);
+    }
+    if (librariesToSync.length === 0) {
+        logger(`Beaver Sync '${syncSessionId}':   No libraries were found to sync`, 2);
+        return;
+    }
 
     logger(`Beaver Sync '${syncSessionId}': Syncing ${librariesToSync.length} libraries with IDs: ${libraryIds.join(', ')}`, 2);
 
@@ -681,7 +696,6 @@ export async function syncZoteroDatabase(
     };
 
     // Determine sync method
-    const syncWithZotero = store.get(syncWithZoteroAtom);
     const syncMethod = syncWithZotero ? 'version' : 'date_modified';
 
     // Validate sync method for all libraries
