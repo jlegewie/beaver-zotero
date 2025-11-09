@@ -112,8 +112,11 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
             return {valid: false, error: "File not available for sync"};
         }
 
-        // (b) Has attachments or notes
-        // if ((item.getAttachments().length + item.getNotes().length) == 0) return {valid: false, error: "Item has no attachments or notes"};
+        // (b) If syncWithZotero is true, check whether item has been synced with Zotero
+        if (syncWithZotero && item.version === 0 && !item.synced) {
+            return {valid: false, error: "Item not yet synced with Zotero and therefore not available in Beaver."};
+        }
+
         return {valid: true};
     }
 
