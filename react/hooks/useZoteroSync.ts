@@ -260,6 +260,40 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         }
                     }
 
+                    // Handle item-tag events (tag add/remove/rename)
+                    if (type === 'item-tag') {
+                        let shouldSetTimer = false;
+                        
+                        // Handle all tag events (only when syncWithZotero is false)
+                        if (!syncWithZotero && (event === 'add' || event === 'remove' || event === 'modify')) {
+                            ids.forEach(id => {
+                                if (extraData && extraData[id]) {
+                                    const { libraryID } = extraData[id];
+                                    if (libraryID && syncLibraryIds.includes(libraryID)) {
+                                        eventsRef.current.changedLibraries.add(libraryID);
+                                        
+                                        // For tag operations, extract itemID from the composite ID (itemID-tagID)
+                                        const itemID = parseInt(id.toString().split('-')[0]);
+                                        // Remove from delete queue if it was there
+                                        eventsRef.current.delete.delete(itemID);
+                                    }
+                                }
+                            });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Set timer if we have events
+                        if (shouldSetTimer) {
+                            eventsRef.current.timestamp = Date.now();
+                            
+                            if (eventsRef.current.timer !== null) {
+                                clearTimeout(eventsRef.current.timer);
+                            }
+                            
+                            eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
+                        }
+                    }
+
                     // Handle collection events
                     if (type === 'collection') {
                         let shouldSetTimer = false;
@@ -311,7 +345,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection'], 'beaver-sync');
+            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection', 'item-tag'], 'beaver-sync');
         };
         
         // Initialize sync operations
