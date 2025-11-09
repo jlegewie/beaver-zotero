@@ -119,15 +119,24 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Attachments -------
     else if (item.isAttachment()) {
+
+        // (a) Check if attachment is supported
         if (!isSupportedItem(item)) {
             return {valid: false, error: "Beaver only supports PDF attachments"};
         }
 
+        // (b) Check if attachment is in trash
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
-        // Use the same comprehensive filter as sync
+        
+        // (c) Use comprehensive syncing filter
         if (!(await syncingItemFilterAsync(item))) {
             return {valid: false, error: "Attachment not synced with Beaver"};
+        }
+        
+        // (d) If syncWithZotero is true, check whether item has been synced with Zotero
+        if (syncWithZotero && item.version === 0 && !item.synced) {
+            return {valid: false, error: "Attachment not yet synced with Zotero and therefore not available in Beaver."};
         }
 
         // Confirm upload status
