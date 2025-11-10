@@ -820,6 +820,23 @@ export async function syncZoteroDatabase(
 
             if (itemCount === 0) {
                 logger(`Beaver Sync '${syncSessionId}':   Sync complete`, 3);
+                
+                // Write sync log to record we've confirmed backend state
+                const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
+                await Zotero.Beaver.db.insertSyncLog({
+                    session_id: syncSessionId,
+                    sync_type: derivedSyncType,
+                    method: syncMethod,
+                    zotero_local_id: localUserKey,
+                    zotero_user_id: zoteroUserId || undefined,
+                    library_id: libraryID,
+                    total_upserts: 0,
+                    total_deletions: 0,
+                    library_version: lastSyncVersion || library.libraryVersion,
+                    library_date_modified: lastSyncDate || new Date().toISOString(),
+                    user_id: userId,
+                });
+                
                 updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
             }
