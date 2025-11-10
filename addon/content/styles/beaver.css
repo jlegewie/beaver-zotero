@@ -1689,3 +1689,9 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .text-link-red:hover {
     text-decoration: underline;
 }
+
+[id^="beaver-pane-"] .icon-css.icon-tag {
+    background: url("chrome://zotero/skin/16/universal/tag.svg") no-repeat center/contain;
+    -moz-context-properties: fill, fill-opacity;
+    fill: currentColor;
+}
