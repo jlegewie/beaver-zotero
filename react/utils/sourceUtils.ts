@@ -99,7 +99,7 @@ async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boo
         : lastSyncDate;
     
     // Item was added before the last sync
-    return itemDateAdded < lastSyncDateSQL;
+    return itemDateAdded <= lastSyncDateSQL;
 }
 
 /**
