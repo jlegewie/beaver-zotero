@@ -61,7 +61,7 @@ const MessageAttachmentDisplay = ({
     );
 
     return (
-        <div className="display-flex flex-wrap gap-3 mb-2">
+        <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
             <AddSourcesMenu
                 // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
                 showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0}
