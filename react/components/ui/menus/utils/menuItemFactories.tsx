@@ -201,7 +201,7 @@ export function createTagMenuItem(
         customContent: (
             <div className={'display-flex flex-row gap-05 items-start min-w-0'}>
                 {tagIndicator}
-                <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
+                <div className={`display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary ${tag.type === 0 ? 'font-semibold' : ''}`}>
                     <span className="truncate">
                         {tag.name}
                     </span>
