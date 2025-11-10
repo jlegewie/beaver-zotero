@@ -82,6 +82,7 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
             <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                 {displayName}
             </span>
+            <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
         </button>
     );
 };
