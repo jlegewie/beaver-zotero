@@ -1,11 +1,12 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom, currentTagSelectionsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
+import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
@@ -30,6 +31,7 @@ const MessageAttachmentDisplay = ({
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
     const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
+    const currentTagSelections = useAtomValue(currentTagSelectionsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);
@@ -64,7 +66,7 @@ const MessageAttachmentDisplay = ({
         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
             <AddSourcesMenu
                 // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0 && currentTagSelections.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -83,6 +85,11 @@ const MessageAttachmentDisplay = ({
             {/* Selected Collections */}
             {selectedCollections.map(collection => (
                 <CollectionButton key={collection.id} collection={collection} />
+            ))}
+
+            {/* Selected Tags */}
+            {currentTagSelections.map(tag => (
+                <TagButton key={tag.id} tag={tag} />
             ))}
 
             {/* Current reader attachment */}
