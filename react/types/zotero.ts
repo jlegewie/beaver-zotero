@@ -78,6 +78,14 @@ export interface ZoteroCollection extends ZoteroItemReference {
     relations: Record<string, any> | null;
 }
 
+export interface ZoteroTag {
+    id: number;
+    name: string;
+    libraryId: number;
+    type: number;
+    color: string; // Hex color string (e.g., '#990000') if the tag has a color assigned
+}
+
 export interface BibliographicIdentifier {
     doi?: string;
     isbn?: string;

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import SearchMenu, { MenuPosition } from './SearchMenu';
-import { currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom } from '../../../atoms/messageComposition';
+import { currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom, currentTagSelectionsAtom } from '../../../atoms/messageComposition';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
@@ -13,14 +13,16 @@ import { syncLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
 import { addItemToCurrentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { currentMessageItemsAtom } from '../../../atoms/messageComposition';
-import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext } from './utils/menuItemFactories';
+import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
+import { useTagsMenu } from './hooks/useTagsMenu';
+import { ZoteroTag } from '../../../types/zotero';
 
 const RECENT_ITEMS_LIMIT = 5;
 
-type MenuMode = 'sources' | 'libraries' | 'collections';
+type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags';
 
 interface RecentItem {
     zotero_key: string;
@@ -97,6 +99,8 @@ const AddSourcesMenu: React.FC<{
     const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
     const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
     const setCurrentCollectionIds = useSetAtom(currentCollectionIdsAtom);
+    const currentTagSelections = useAtomValue(currentTagSelectionsAtom);
+    const setCurrentTagSelections = useSetAtom(currentTagSelectionsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
@@ -140,10 +144,16 @@ const AddSourcesMenu: React.FC<{
             // Search Zotero items
             const currentLibraryIds = store.get(currentLibraryIdsAtom);
             const currentCollections = store.get(currentCollectionIdsAtom);
-            const searchLibraryIds = currentLibraryIds.length > 0 ? currentLibraryIds : syncLibraryIds;
+            const currentTags = store.get(currentTagSelectionsAtom);
+            const searchLibraryIds = currentLibraryIds.length > 0
+                ? currentLibraryIds
+                : currentTags.length > 0
+                    ? Array.from(new Set(currentTags.map((tag: ZoteroTag) => tag.libraryId)))
+                    : syncLibraryIds;
             const searchCollectionIds = currentCollections.length > 0 ? currentCollections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds);
+            const searchTags = currentTags.length > 0 ? currentTags : undefined;
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.name} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
+            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
 
             // Ensure item data is loaded
             await loadFullItemData(resultsItems);
@@ -184,7 +194,7 @@ const AddSourcesMenu: React.FC<{
                 setIsLoading(false);
             }
         }
-    }, [scoreSearchResult]);
+    }, [scoreSearchResult, syncLibraryIds]);
 
     const handleNavigateToLibraries = useCallback(() => {
         setSearchQuery('');
@@ -195,6 +205,12 @@ const AddSourcesMenu: React.FC<{
         setActiveZoteroLibraryId(libraryId);
         setSearchQuery('');
         setMenuMode('collections');
+    }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
+
+    const handleNavigateToTags = useCallback((libraryId: number) => {
+        setActiveZoteroLibraryId(libraryId);
+        setSearchQuery('');
+        setMenuMode('tags');
     }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
 
     // Handler functions for menu item callbacks
@@ -217,8 +233,9 @@ const AddSourcesMenu: React.FC<{
             return [libraryId];
         });
         setCurrentCollectionIds([]);
+        setCurrentTagSelections([]);
         handleOnClose();
-    }, [setCurrentLibraryIds, setCurrentCollectionIds, handleOnClose]);
+    }, [setCurrentLibraryIds, setCurrentCollectionIds, setCurrentTagSelections, handleOnClose]);
 
     const handleSelectCollection = useCallback((collectionId: number) => {
         setCurrentCollectionIds((prev) => {
@@ -228,8 +245,22 @@ const AddSourcesMenu: React.FC<{
             return [...prev, collectionId];
         });
         setCurrentLibraryIds([]);
+        setCurrentTagSelections([]);
         handleOnClose();
-    }, [setCurrentCollectionIds, setCurrentLibraryIds, handleOnClose]);
+    }, [setCurrentCollectionIds, setCurrentLibraryIds, setCurrentTagSelections, handleOnClose]);
+
+    const handleSelectTag = useCallback((tag: ZoteroTag) => {
+        setCurrentTagSelections((prev) => {
+            const exists = prev.some((selected) => selected.id === tag.id);
+            if (exists) {
+                return prev.filter((selected) => selected.id !== tag.id);
+            }
+            return [...prev, tag];
+        });
+        setCurrentLibraryIds([]);
+        setCurrentCollectionIds([]);
+        handleOnClose();
+    }, [setCurrentTagSelections, setCurrentLibraryIds, setCurrentCollectionIds, handleOnClose]);
 
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         currentMessageItems,
@@ -247,6 +278,11 @@ const AddSourcesMenu: React.FC<{
         onSelect: handleSelectCollection
     }), [currentCollectionIds, handleSelectCollection]);
 
+    const tagMenuItemContext = useMemo<TagMenuItemContext>(() => ({
+        currentTags: currentTagSelections,
+        onSelect: handleSelectTag
+    }), [currentTagSelections, handleSelectTag]);
+
     const sourcesMenu = useSourcesMenu({
         isActive: isMenuOpen && menuMode === 'sources',
         searchResults,
@@ -255,6 +291,7 @@ const AddSourcesMenu: React.FC<{
         activeZoteroLibraryId,
         onNavigateToLibraries: handleNavigateToLibraries,
         onNavigateToCollections: handleNavigateToCollections,
+        onNavigateToTags: handleNavigateToTags,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT
     });
@@ -273,11 +310,20 @@ const AddSourcesMenu: React.FC<{
         collectionMenuItemContext
     });
 
+    const tagsMenu = useTagsMenu({
+        isActive: isMenuOpen && menuMode === 'tags',
+        searchQuery,
+        syncLibraryIds,
+        tagMenuItemContext
+    });
+
     const menuItems = menuMode === 'sources'
         ? sourcesMenu.menuItems
         : menuMode === 'libraries'
             ? librariesMenu.menuItems
-            : collectionsMenu.menuItems;
+            : menuMode === 'collections'
+                ? collectionsMenu.menuItems
+                : tagsMenu.menuItems;
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -305,13 +351,17 @@ const AddSourcesMenu: React.FC<{
         ? "No results found"
         : menuMode === 'libraries'
             ? "No libraries found"
-            : "No collections found";
+            : menuMode === 'collections'
+                ? "No collections found"
+                : "No tags found";
 
     const placeholderText = menuMode === 'sources'
         ? "Search by author, year and title"
         : menuMode === 'libraries'
             ? "Search libraries"
-            : "Search collections";
+            : menuMode === 'collections'
+                ? "Search collections"
+                : "Search tags";
 
     // Handle keyboard events - go back to sources mode on backspace/delete when search is empty
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -320,7 +370,7 @@ const AddSourcesMenu: React.FC<{
         // Check if backspace or delete key was pressed
         if (e.key === 'Backspace' || e.key === 'Delete') {
             // If in libraries or collections mode and search query is empty, go back to sources
-            if ((menuMode === 'libraries' || menuMode === 'collections') && searchQuery === '') {
+            if ((menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') && searchQuery === '') {
                 e.preventDefault();
                 setSearchQuery('');
                 setMenuMode('sources');

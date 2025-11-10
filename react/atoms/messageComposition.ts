@@ -10,6 +10,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
+import { ZoteroTag } from "../types/zotero";
 
 
 /**
@@ -24,6 +25,12 @@ export const currentLibraryIdsAtom = atom<number[]>([]);
 * When set, search will be limited to these collections.
 */
 export const currentCollectionIdsAtom = atom<number[]>([]);
+
+/**
+ * Current tag selections
+ * When set, search will be limited to these tags.
+ */
+export const currentTagSelectionsAtom = atom<ZoteroTag[]>([]);
 
 /**
 * Current user message and sources

@@ -13,6 +13,7 @@ interface UseSourcesMenuOptions {
     activeZoteroLibraryId: number | null;
     onNavigateToLibraries: () => void;
     onNavigateToCollections: (libraryId: number) => void;
+    onNavigateToTags: (libraryId: number) => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
     recentItemsLimit: number;
 }
@@ -29,6 +30,7 @@ export const useSourcesMenu = ({
     activeZoteroLibraryId,
     onNavigateToLibraries,
     onNavigateToCollections,
+    onNavigateToTags,
     getRecentItems,
     recentItemsLimit
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
@@ -55,11 +57,19 @@ export const useSourcesMenu = ({
             const currentLibraryId = activeZoteroLibraryId ?? getActiveZoteroLibraryId();
             let collectionIds: number[] = [];
 
+            let hasTagsInLibrary = false;
+
             if (currentLibraryId) {
                 try {
                     collectionIds = await Zotero.Collections.getAllIDs(currentLibraryId);
                 } catch {
                     collectionIds = [];
+                }
+                try {
+                    const hasTags = await Zotero.Tags.getAll(currentLibraryId);
+                    hasTagsInLibrary = Boolean(hasTags);
+                } catch {
+                    hasTagsInLibrary = false;
                 }
             }
 
@@ -74,6 +84,11 @@ export const useSourcesMenu = ({
                         return false;
                     }
                 })
+            );
+            const canSelectTags = Boolean(
+                currentLibraryId &&
+                syncLibraryIds.includes(currentLibraryId) &&
+                hasTagsInLibrary
             );
 
             const filterByHeader: SearchMenuItem = { label: 'Filter Search by', isGroupHeader: true, onClick: () => {} };
@@ -114,6 +129,33 @@ export const useSourcesMenu = ({
                             <div className="display-flex flex-row gap-2">
                                 <CSSIcon name="collection" className="icon-16 font-color-secondary scale-90" />
                                 <div>Select Collections</div>
+                            </div>
+                        </div>
+                        <div className="flex-1" />
+                        <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
+                    </div>
+                )
+            });
+
+            filterItems.unshift({
+                label: '"Select Tags"',
+                onClick: async () => {
+                    const latestLibraryId = getActiveZoteroLibraryId();
+                    if (!latestLibraryId || !syncLibraryIds.includes(latestLibraryId)) {
+                        return;
+                    }
+                    onNavigateToTags(latestLibraryId);
+                },
+                disabled: !canSelectTags,
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-col gap-05 min-w-0">
+                            <div className="display-flex flex-row gap-2">
+                                <CSSIcon
+                                    name="tag"
+                                    className="icon-16 font-color-secondary scale-90 icon-tag"
+                                />
+                                <div>Select Tags</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -168,6 +210,7 @@ export const useSourcesMenu = ({
         activeZoteroLibraryId,
         onNavigateToLibraries,
         onNavigateToCollections,
+        onNavigateToTags,
         getRecentItems,
         recentItemsLimit
     ]);

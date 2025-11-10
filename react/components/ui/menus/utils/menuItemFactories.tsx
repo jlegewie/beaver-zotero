@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon, TickIcon, CSSItemTypeIcon, CSSIcon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sourceUtils';
+import { ZoteroTag } from '../../../../types/zotero';
 
 /**
  * Context for creating source menu items
@@ -26,6 +27,14 @@ export interface LibraryMenuItemContext {
 export interface CollectionMenuItemContext {
     currentCollectionIds: number[];
     onSelect: (collectionId: number) => void;
+}
+
+/**
+ * Context for creating tag menu items
+ */
+export interface TagMenuItemContext {
+    currentTags: ZoteroTag[];
+    onSelect: (tag: ZoteroTag) => void;
 }
 
 /**
@@ -156,3 +165,49 @@ export function createCollectionMenuItem(
     };
 }
 
+/**
+ * Create a menu item from a Zotero tag (for tags mode)
+ */
+export function createTagMenuItem(
+    tag: ZoteroTag,
+    context: TagMenuItemContext
+): SearchMenuItem {
+    const { currentTags, onSelect } = context;
+    const isSelected = currentTags.some((selected) => selected.id === tag.id);
+
+    // Render colored dot if tag has a color, otherwise use tag icon
+    const tagIndicator = tag.color ? (
+        <span
+            className="tag-color-dot mt-15"
+            style={{
+                display: 'inline-block',
+                width: '0.72em',
+                height: '0.72em',
+                marginRight: '0.27em',
+                borderRadius: '50%',
+                backgroundColor: tag.color,
+                verticalAlign: '-0.36em',
+                flexShrink: 0,
+            }}
+        />
+    ) : (
+        // <CSSIcon name="tag" className="icon-16 scale-90" />
+        null
+    );
+
+    return {
+        label: tag.name,
+        onClick: () => onSelect(tag),
+        customContent: (
+            <div className={'display-flex flex-row gap-05 items-start min-w-0'}>
+                {tagIndicator}
+                <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
+                    <span className="truncate">
+                        {tag.name}
+                    </span>
+                    {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                </div>
+            </div>
+        ),
+    };
+}
