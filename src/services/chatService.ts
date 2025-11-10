@@ -17,7 +17,7 @@ export const search_tool_request: ToolRequest = {
     parameters: {}
 }
 
-export interface ChatFiltersPayload {
+export interface MessageSearchFilters {
     libraries: ZoteroLibrary[] | null;
     collections: ZoteroCollection[] | null;
     tags: ZoteroTag[] | null;
@@ -29,7 +29,7 @@ export interface ChatCompletionRequestBody {
     messages: MessageData[];
     thread_id?: string;
     assistant_message_id?: string;
-    filters?: ChatFiltersPayload;
+    filters?: MessageSearchFilters;
     user_api_key?: string;
     model_id?: string;
     access_id?: string;
