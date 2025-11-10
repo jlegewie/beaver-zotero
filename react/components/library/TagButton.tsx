@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { currentTagSelectionsAtom, removeTagIdAtom } from '../../atoms/messageComposition';
+import { currentMessageFiltersAtom, removeTagIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroTag } from '../../types/zotero';
 
@@ -22,8 +22,8 @@ export const TagButton: React.FC<TagButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeTagId = useSetAtom(removeTagIdAtom);
-    const currentTagSelections = useAtomValue(currentTagSelectionsAtom);
-    const isValid = currentTagSelections.some((selected) => selected.id === tag.id);
+    const { tagSelections } = useAtomValue(currentMessageFiltersAtom);
+    const isValid = tagSelections.some((selected) => selected.id === tag.id);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();

@@ -23,7 +23,7 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, currentCollectionIdsAtom} from './messageComposition';
+import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState } from './messageComposition';
 import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
@@ -221,8 +221,7 @@ export const generateResponseAtom = atom(
             assistantMsg.id,
             userMsg.content,
             messageAttachments,
-            get(currentLibraryIdsAtom),
-            get(currentCollectionIdsAtom),
+            get(currentMessageFiltersAtom),
             readerState,
             model,
             set,
@@ -329,8 +328,7 @@ export const regenerateFromMessageAtom = atom(
             assistantMsg.id,       // new assistant message ID
             "",                    // content remains unchanged
             [],                    // sources remain unchanged
-            get(currentLibraryIdsAtom),
-            get(currentCollectionIdsAtom),
+            get(currentMessageFiltersAtom),
             null,                  // readerState remains unchanged
             model,
             set,
@@ -401,8 +399,7 @@ async function _processChatCompletionViaBackend(
     assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
-    libraryIds: number[] | null,
-    collectionIds: number[] | null,
+    filters: MessageFiltersState,
     readerState: ReaderState | null,
     model: FullModelConfig,
     set: any,
@@ -449,21 +446,29 @@ async function _processChatCompletionViaBackend(
     }
 
     // Set payload
-    const filterLibraries = libraryIds
-        ? libraryIds.map(id => Zotero.Libraries.get(id))
+    const filterLibraries = filters.libraryIds.length > 0
+        ? filters.libraryIds
+            .map(id => Zotero.Libraries.get(id))
             .filter((l): l is Zotero.Library => !!l)
             .map(serializeZoteroLibrary)
         : null;
-    const filterCollections = collectionIds
-        ? await Promise.all(collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
+    const filterCollections = filters.collectionIds.length > 0
+        ? await Promise.all(filters.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
         : null;
+    const filterTags = filters.tagSelections.length > 0
+        ? filters.tagSelections.map(tag => ({ ...tag }))
+        : null;
+    const filtersPayload = {
+        libraries: filterLibraries,
+        collections: filterCollections,
+        tags: filterTags
+    };
     
     const payload: ChatCompletionRequestBody = {
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
         thread_id: threadId ?? undefined,
-        filter_libraries: filterLibraries,
-        filter_collections: filterCollections,
+        filters: filtersPayload,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: model.is_custom ? undefined : userApiKey,

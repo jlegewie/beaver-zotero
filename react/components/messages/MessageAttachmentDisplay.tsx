@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom, currentTagSelectionsAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
@@ -8,7 +8,6 @@ import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
-import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
 
@@ -29,9 +28,8 @@ const MessageAttachmentDisplay = ({
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
-    const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
-    const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
-    const currentTagSelections = useAtomValue(currentTagSelectionsAtom);
+    const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
+    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);

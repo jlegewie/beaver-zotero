@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import SearchMenu, { MenuPosition } from './SearchMenu';
-import { currentLibraryIdsAtom, removeItemFromMessageAtom, currentCollectionIdsAtom, currentTagSelectionsAtom } from '../../../atoms/messageComposition';
+import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
@@ -11,8 +11,6 @@ import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search
 import { logger } from '../../../../src/utils/logger';
 import { syncLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
-import { addItemToCurrentMessageItemsAtom } from '../../../atoms/messageComposition';
-import { currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
@@ -95,12 +93,9 @@ const AddSourcesMenu: React.FC<{
     const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-    const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
-    const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
-    const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
-    const setCurrentCollectionIds = useSetAtom(currentCollectionIdsAtom);
-    const currentTagSelections = useAtomValue(currentTagSelectionsAtom);
-    const setCurrentTagSelections = useSetAtom(currentTagSelectionsAtom);
+    const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
+    const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
+    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
@@ -142,16 +137,14 @@ const AddSourcesMenu: React.FC<{
             query = query.trim();
             
             // Search Zotero items
-            const currentLibraryIds = store.get(currentLibraryIdsAtom);
-            const currentCollections = store.get(currentCollectionIdsAtom);
-            const currentTags = store.get(currentTagSelectionsAtom);
-            const searchLibraryIds = currentLibraryIds.length > 0
-                ? currentLibraryIds
-                : currentTags.length > 0
-                    ? Array.from(new Set(currentTags.map((tag: ZoteroTag) => tag.libraryId)))
+            const { libraryIds, collectionIds, tagSelections } = store.get(currentMessageFiltersAtom);
+            const searchLibraryIds = libraryIds.length > 0
+                ? libraryIds
+                : tagSelections.length > 0
+                    ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
                     : syncLibraryIds;
-            const searchCollectionIds = currentCollections.length > 0 ? currentCollections : undefined;
-            const searchTags = currentTags.length > 0 ? currentTags : undefined;
+            const searchCollectionIds = collectionIds.length > 0 ? collectionIds : undefined;
+            const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
             logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.name} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
             const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
 
@@ -226,41 +219,47 @@ const AddSourcesMenu: React.FC<{
     }, [removeItemFromMessage, handleOnClose]);
 
     const handleSelectLibrary = useCallback((libraryId: number) => {
-        setCurrentLibraryIds((prev) => {
-            if (prev.includes(libraryId)) {
-                return prev.filter((id) => id !== libraryId);
-            }
-            return [libraryId];
+        setCurrentMessageFilters((prev) => {
+            const isSelected = prev.libraryIds.includes(libraryId);
+            return {
+                ...prev,
+                libraryIds: isSelected ? prev.libraryIds.filter((id) => id !== libraryId) : [libraryId],
+                collectionIds: [],
+                tagSelections: []
+            };
         });
-        setCurrentCollectionIds([]);
-        setCurrentTagSelections([]);
         handleOnClose();
-    }, [setCurrentLibraryIds, setCurrentCollectionIds, setCurrentTagSelections, handleOnClose]);
+    }, [setCurrentMessageFilters, handleOnClose]);
 
     const handleSelectCollection = useCallback((collectionId: number) => {
-        setCurrentCollectionIds((prev) => {
-            if (prev.includes(collectionId)) {
-                return prev.filter((id) => id !== collectionId);
-            }
-            return [...prev, collectionId];
+        setCurrentMessageFilters((prev) => {
+            const exists = prev.collectionIds.includes(collectionId);
+            return {
+                ...prev,
+                libraryIds: [],
+                collectionIds: exists
+                    ? prev.collectionIds.filter((id) => id !== collectionId)
+                    : [...prev.collectionIds, collectionId],
+                tagSelections: []
+            };
         });
-        setCurrentLibraryIds([]);
-        setCurrentTagSelections([]);
         handleOnClose();
-    }, [setCurrentCollectionIds, setCurrentLibraryIds, setCurrentTagSelections, handleOnClose]);
+    }, [setCurrentMessageFilters, handleOnClose]);
 
     const handleSelectTag = useCallback((tag: ZoteroTag) => {
-        setCurrentTagSelections((prev) => {
-            const exists = prev.some((selected) => selected.id === tag.id);
-            if (exists) {
-                return prev.filter((selected) => selected.id !== tag.id);
-            }
-            return [...prev, tag];
+        setCurrentMessageFilters((prev) => {
+            const exists = prev.tagSelections.some((selected) => selected.id === tag.id);
+            return {
+                ...prev,
+                libraryIds: [],
+                collectionIds: [],
+                tagSelections: exists
+                    ? prev.tagSelections.filter((selected) => selected.id !== tag.id)
+                    : [...prev.tagSelections, tag]
+            };
         });
-        setCurrentLibraryIds([]);
-        setCurrentCollectionIds([]);
         handleOnClose();
-    }, [setCurrentTagSelections, setCurrentLibraryIds, setCurrentCollectionIds, handleOnClose]);
+    }, [setCurrentMessageFilters, handleOnClose]);
 
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         currentMessageItems,

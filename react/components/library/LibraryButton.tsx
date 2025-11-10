@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { removeLibraryIdAtom, currentLibraryIdsAtom } from '../../atoms/messageComposition';
+import { removeLibraryIdAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectLibrary } from '../../../src/utils/selectItem';
 
@@ -22,8 +22,8 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeLibraryId = useSetAtom(removeLibraryIdAtom);
-    const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
-    const isValid = currentLibraryIds.includes(library.libraryID);
+    const { libraryIds } = useAtomValue(currentMessageFiltersAtom);
+    const isValid = libraryIds.includes(library.libraryID);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();

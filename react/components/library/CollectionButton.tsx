@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { currentCollectionIdsAtom, removeCollectionIdAtom } from '../../atoms/messageComposition';
+import { currentMessageFiltersAtom, removeCollectionIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 
@@ -22,8 +22,8 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeCollectionId = useSetAtom(removeCollectionIdAtom);
-    const currentCollectionIds = useAtomValue(currentCollectionIdsAtom);
-    const isValid = currentCollectionIds.includes(collection.id);
+    const { collectionIds } = useAtomValue(currentMessageFiltersAtom);
+    const isValid = collectionIds.includes(collection.id);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();

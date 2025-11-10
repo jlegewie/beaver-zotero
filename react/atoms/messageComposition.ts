@@ -14,23 +14,22 @@ import { ZoteroTag } from "../types/zotero";
 
 
 /**
-* Current library IDs
-* Search will be limited to these libraries. Currently only supporting single library.
-* Array is used to support multiple libraries in the future. Empty array means all libraries.
+* Current message filters
+* Controls search scoping by library, collection, and tag selections.
 */
-export const currentLibraryIdsAtom = atom<number[]>([]);
+export interface MessageFiltersState {
+    libraryIds: number[];
+    collectionIds: number[];
+    tagSelections: ZoteroTag[];
+}
 
-/**
-* Current collection IDs
-* When set, search will be limited to these collections.
-*/
-export const currentCollectionIdsAtom = atom<number[]>([]);
+const createDefaultMessageFilters = (): MessageFiltersState => ({
+    libraryIds: [],
+    collectionIds: [],
+    tagSelections: []
+});
 
-/**
- * Current tag selections
- * When set, search will be limited to these tags.
- */
-export const currentTagSelectionsAtom = atom<ZoteroTag[]>([]);
+export const currentMessageFiltersAtom = atom<MessageFiltersState>(createDefaultMessageFilters());
 
 /**
 * Current user message and sources
@@ -91,20 +90,22 @@ export const inputAttachmentCountAtom = atom<number>((get) => {
 export const removeLibraryIdAtom = atom(
     null,
     (get, set, libraryId: number) => {
-        const currentIds = get(currentLibraryIdsAtom);
-        set(currentLibraryIdsAtom, currentIds.filter(id => id !== libraryId));
+        const filters = get(currentMessageFiltersAtom);
+        const updatedLibraryIds = filters.libraryIds.filter(id => id !== libraryId);
+        const updatedCollectionIds = filters.collectionIds.filter((collectionId) => {
+            try {
+                const collection = Zotero.Collections.get(collectionId);
+                return !collection || collection.libraryID !== libraryId;
+            } catch {
+                return true;
+            }
+        });
 
-        const currentCollectionIds = get(currentCollectionIdsAtom);
-        if (currentCollectionIds.length > 0) {
-            set(currentCollectionIdsAtom, currentCollectionIds.filter((collectionId) => {
-                try {
-                    const collection = Zotero.Collections.get(collectionId);
-                    return !collection || collection.libraryID !== libraryId;
-                } catch {
-                    return true;
-                }
-            }));
-        }
+        set(currentMessageFiltersAtom, {
+            ...filters,
+            libraryIds: updatedLibraryIds,
+            collectionIds: updatedCollectionIds
+        });
     }
 );
 
@@ -114,8 +115,11 @@ export const removeLibraryIdAtom = atom(
 export const removeCollectionIdAtom = atom(
     null,
     (get, set, collectionId: number) => {
-        const currentIds = get(currentCollectionIdsAtom);
-        set(currentCollectionIdsAtom, currentIds.filter(id => id !== collectionId));
+        const filters = get(currentMessageFiltersAtom);
+        set(currentMessageFiltersAtom, {
+            ...filters,
+            collectionIds: filters.collectionIds.filter(id => id !== collectionId)
+        });
     }
 );
 
@@ -125,8 +129,11 @@ export const removeCollectionIdAtom = atom(
 export const removeTagIdAtom = atom(
     null,
     (get, set, tagId: number) => {
-        const currentTags = get(currentTagSelectionsAtom);
-        set(currentTagSelectionsAtom, currentTags.filter(tag => tag.id !== tagId));
+        const filters = get(currentMessageFiltersAtom);
+        set(currentMessageFiltersAtom, {
+            ...filters,
+            tagSelections: filters.tagSelections.filter(tag => tag.id !== tagId)
+        });
     }
 );
 
