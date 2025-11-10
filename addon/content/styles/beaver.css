@@ -487,6 +487,7 @@ attachment-box .metadata-table #beaver-status {
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
 
+[id^="beaver-pane-"] .scale-60 { transform: scale(0.6); }
 [id^="beaver-pane-"] .scale-70 { transform: scale(0.7); }
 [id^="beaver-pane-"] .scale-75 { transform: scale(0.75); }
 [id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
