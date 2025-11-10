@@ -16,7 +16,6 @@ export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 export const MAX_ATTACHMENTS = 10;
 export const MAX_PAGES = 100;
 
-// TODO: Add more mime types as needed
 export const VALID_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'] as const;
 type ValidMimeType = typeof VALID_MIME_TYPES[number];
 
