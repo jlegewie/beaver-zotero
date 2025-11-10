@@ -16,6 +16,12 @@ import { ZoteroTag } from "../types/zotero";
 /**
 * Current message filters
 * Controls search scoping by library, collection, and tag selections.
+* 
+* Note: Filters are mutually exclusive - selecting a library clears collections/tags,
+* selecting a collection clears libraries/tags, etc. This ensures clear, predictable
+* search scoping behavior.
+* 
+* Empty arrays mean no filtering is applied for that dimension.
 */
 export interface MessageFiltersState {
     libraryIds: number[];
@@ -23,13 +29,58 @@ export interface MessageFiltersState {
     tagSelections: ZoteroTag[];
 }
 
-const createDefaultMessageFilters = (): MessageFiltersState => ({
+/**
+* Create default (empty) message filters
+* Exported for use in tests and reset operations
+*/
+export const createDefaultMessageFilters = (): MessageFiltersState => ({
     libraryIds: [],
     collectionIds: [],
     tagSelections: []
 });
 
 export const currentMessageFiltersAtom = atom<MessageFiltersState>(createDefaultMessageFilters());
+
+/**
+* Reset message filters to default (empty) state
+*/
+export const resetMessageFiltersAtom = atom(
+    null,
+    (_, set) => {
+        set(currentMessageFiltersAtom, createDefaultMessageFilters());
+    }
+);
+
+/**
+* Validate and clean up message filters
+* Removes any library or collection references that no longer exist in Zotero
+*/
+export const validateFiltersAtom = atom((get) => {
+    const filters = get(currentMessageFiltersAtom);
+    
+    // Validate library IDs
+    const validLibraryIds = filters.libraryIds.filter(id => 
+        Zotero.Libraries.exists(id)
+    );
+    
+    // Validate collection IDs
+    const validCollectionIds = filters.collectionIds.filter(id => {
+        try {
+            return !!Zotero.Collections.get(id);
+        } catch {
+            return false;
+        }
+    });
+    
+    // Tags don't need validation as they're stored as complete objects
+    // If a tag is deleted, it won't match anything in searches but won't cause errors
+    
+    return {
+        ...filters,
+        libraryIds: validLibraryIds,
+        collectionIds: validCollectionIds
+    };
+});
 
 /**
 * Current user message and sources
@@ -86,12 +137,15 @@ export const inputAttachmentCountAtom = atom<number>((get) => {
 
 /**
 * Remove a library from the current selection
+* Also removes any collections that belong to the removed library (cascading cleanup)
 */
 export const removeLibraryIdAtom = atom(
     null,
     (get, set, libraryId: number) => {
         const filters = get(currentMessageFiltersAtom);
         const updatedLibraryIds = filters.libraryIds.filter(id => id !== libraryId);
+        
+        // Cascade: Remove collections that belong to the removed library
         const updatedCollectionIds = filters.collectionIds.filter((collectionId) => {
             try {
                 const collection = Zotero.Collections.get(collectionId);
