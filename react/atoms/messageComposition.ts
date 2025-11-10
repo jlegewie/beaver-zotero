@@ -120,6 +120,17 @@ export const removeCollectionIdAtom = atom(
 );
 
 /**
+* Remove a tag from the current selection
+*/
+export const removeTagIdAtom = atom(
+    null,
+    (get, set, tagId: number) => {
+        const currentTags = get(currentTagSelectionsAtom);
+        set(currentTagSelectionsAtom, currentTags.filter(tag => tag.id !== tagId));
+    }
+);
+
+/**
 * Remove item from currentMessageItemsAtom
 */
 export const removeItemFromMessageAtom = atom(
