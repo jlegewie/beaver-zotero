@@ -67,7 +67,7 @@ export const useTagsMenu = ({
                         
                         return {
                             id: tagID,
-                            name: tagJson.tag,
+                            tag: tagJson.tag,
                             libraryId: libraryId,
                             type: tagJson.type ?? 0,
                             color: color
@@ -97,7 +97,7 @@ export const useTagsMenu = ({
                         }
                         
                         // Fourth priority: sort by name
-                        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+                        return a.tag.localeCompare(b.tag, undefined, { sensitivity: 'base' });
                     })
                     .reverse();
 
@@ -126,7 +126,7 @@ export const useTagsMenu = ({
 
         const lowerCaseQuery = searchQuery.toLowerCase();
         const filteredTags = tags.filter((tag) =>
-            tag.name.toLowerCase().includes(lowerCaseQuery)
+            tag.tag.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredTags.map((tag) =>
             createTagMenuItem(tag, tagMenuItemContext)

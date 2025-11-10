@@ -196,14 +196,14 @@ export function createTagMenuItem(
     );
 
     return {
-        label: tag.name,
+        label: tag.tag,
         onClick: () => onSelect(tag),
         customContent: (
             <div className={'display-flex flex-row gap-05 items-start min-w-0'}>
                 {tagIndicator}
                 <div className={`display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary ${tag.type === 0 ? 'font-semibold' : ''}`}>
                     <span className="truncate">
-                        {tag.name}
+                        {tag.tag}
                     </span>
                     {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                 </div>

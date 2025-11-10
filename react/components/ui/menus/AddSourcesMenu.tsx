@@ -145,7 +145,7 @@ const AddSourcesMenu: React.FC<{
                     : syncLibraryIds;
             const searchCollectionIds = collectionIds.length > 0 ? collectionIds : undefined;
             const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.name} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
             const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
 
             // Ensure item data is loaded

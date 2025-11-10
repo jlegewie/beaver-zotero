@@ -62,7 +62,7 @@ export async function searchTitleCreatorYear(
                     if (item.libraryID !== tag.libraryId) {
                         return false;
                     }
-                    return itemTags.some((itemTag: { tag?: string }) => itemTag.tag === tag.name);
+                    return itemTags.some((itemTag: { tag?: string }) => itemTag.tag === tag.tag);
                 });
             })
             : filteredByCollection;

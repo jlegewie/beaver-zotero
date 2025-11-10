@@ -66,7 +66,7 @@ export const TagButton: React.FC<TagButtonProps> = ({
         return "Search is restricted to the selected tags";
     };
 
-    const displayName = truncateText(tag.name, MAX_TAGBUTTON_TEXT_LENGTH);
+    const displayName = truncateText(tag.tag, MAX_TAGBUTTON_TEXT_LENGTH);
 
     return (
         <button
