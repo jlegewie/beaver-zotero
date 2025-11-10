@@ -63,8 +63,22 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Beta users can now process up to 125k pages for free. Additional files will be processed when you submit a chat query.",
             }
         ],
-        // learnMoreUrl: "https://www.beaverapp.ai/changelog/v0.5",
-        // learnMoreLabel: "Learn more",
+    },
+    {
+        version: "0.7.0",
+        title: "Beaver Version 0.7.0",
+        text: "Support for tags and collections and other improvements.",
+        featureList: [
+            {
+                title: "Support for tags and collections",
+                description: "Using the @ menu, you can now filter by tags and collections to restrict Beaver searches.",
+            },
+            {
+                title: "Improved handeling of user attachments",
+            }
+        ],
+        learnMoreUrl: "mailto:contact@beaverapp.ai?subject=Beaver Feedback",
+        learnMoreLabel: "Give Feedback",
     },
 ];
 
