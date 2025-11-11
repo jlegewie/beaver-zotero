@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { currentMessageFiltersAtom, removeCollectionIdAtom } from '../../atoms/messageComposition';
+import { removeCollectionIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 
@@ -22,8 +22,6 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeCollectionId = useSetAtom(removeCollectionIdAtom);
-    const { collectionIds } = useAtomValue(currentMessageFiltersAtom);
-    const isValid = collectionIds.includes(collection.id);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();
@@ -55,9 +53,6 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
 
     const getButtonClasses = () => {
         const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
-        if (!isValid) {
-            return `${baseClasses} border-red`;
-        }
         return baseClasses;
     };
 
@@ -79,7 +74,7 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
             {...rest}
         >
             {getIconElement()}
-            <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
+            <span className="truncate">
                 {displayName}
             </span>
             <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
