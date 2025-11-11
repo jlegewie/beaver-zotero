@@ -292,6 +292,19 @@ async function validateItemsInBackground(
             })
         );
         
+        // Validate annotations themselves first
+        const annotationValidationPromises = annotations.map((item) => {
+            logger(`validateItemsInBackground: Validating annotation ${item.libraryID}-${item.key}`, 3);
+            return set(validateItemsAtom, {
+                items: [item],
+                validationType: ItemValidationType.LOCAL_ONLY,  // Annotations only need local validation
+                forceRefresh: false
+            }).catch((error: any) => {
+                logger(`Validation failed for annotation ${item.key}: ${error.message}`, 2);
+                return null;
+            });
+        });
+
         // Validate parent items of annotations
         const parentItems = annotations
             .map((item) => item.parentItem ?? null)
@@ -312,21 +325,38 @@ async function validateItemsInBackground(
         await Promise.all([
             ...regularItemValidationPromises,
             ...attachmentValidationPromises,
+            ...annotationValidationPromises,
             ...parentItemValidationPromises
         ]);
         
         // Remove invalid items from currentMessageItemsAtom
         const invalidItems = items
-            .map(item => ({
-                item,
-                validation: item.isAnnotation() && item.parentItem
+            .map(item => {
+                const itemValidation = getValidation(item);
+                const parentValidation = item.parentItem ? getValidation(item.parentItem) : undefined;
+                
+                logger(`validateItemsInBackground: Checking item ${item.libraryID}-${item.key}, isAnnotation: ${item.isAnnotation()}, itemValidation: ${itemValidation ? JSON.stringify(itemValidation) : 'undefined'}, parentValidation: ${parentValidation ? JSON.stringify(parentValidation) : 'undefined'}`, 3);
+                
+                const validation = item.isAnnotation() && item.parentItem
                     ? {
-                        ...getValidation(item.parentItem),
-                        isValid: getValidation(item).isValid && getValidation(item.parentItem).isValid   
+                        ...parentValidation,
+                        isValid: itemValidation?.isValid && parentValidation?.isValid   
                     }
-                    : getValidation(item)
-            }))
-            .filter(({ validation }) => validation && !validation.isValid);
+                    : itemValidation;
+                
+                logger(`validateItemsInBackground: Combined validation for ${item.libraryID}-${item.key}: ${validation ? JSON.stringify(validation) : 'undefined'}`, 3);
+                
+                return { item, validation };
+            })
+            .filter(({ item, validation }) => {
+                const isInvalid = validation && !validation.isValid;
+                if (isInvalid) {
+                    logger(`validateItemsInBackground: Filtering out invalid item ${item.libraryID}-${item.key}, reason: ${validation.reason}`, 3);
+                }
+                return isInvalid;
+            });
+
+        logger(`validateItemsInBackground: Found ${invalidItems.length} invalid items to remove`, 3);
 
         if (invalidItems.length > 0) {
             // Remove invalid items from currentMessageItemsAtom
