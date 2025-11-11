@@ -4,6 +4,7 @@ import { CSSIcon } from '../icons/icons';
 import { removeLibraryIdAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectLibrary } from '../../../src/utils/selectItem';
+import { syncLibraryIdsAtom} from '../../atoms/profile';
 
 const MAX_LIBRARYBUTTON_TEXT_LENGTH = 20;
 
@@ -22,8 +23,8 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeLibraryId = useSetAtom(removeLibraryIdAtom);
-    const { libraryIds } = useAtomValue(currentMessageFiltersAtom);
-    const isValid = libraryIds.includes(library.libraryID);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const isValid = syncLibraryIds.includes(library.libraryID);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();
