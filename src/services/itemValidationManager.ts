@@ -1,4 +1,5 @@
 import { attachmentsService } from './attachmentsService';
+import { itemsService } from './itemsService';
 import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
@@ -21,6 +22,24 @@ export interface ItemValidationResult {
     isValid: boolean;
     reason?: string;
     backendChecked: boolean;
+}
+
+/**
+ * Result of validating a single attachment within a regular item
+ */
+export interface AttachmentValidationResult {
+    isValid: boolean;
+    reason?: string;
+    backendChecked: boolean;
+}
+
+/**
+ * Result of validating a regular item with all its attachments
+ */
+export interface RegularItemValidationResult {
+    isValid: boolean;
+    reason?: string;
+    attachmentResults: Map<string, AttachmentValidationResult>;
 }
 
 /**
@@ -399,6 +418,142 @@ class ItemValidationManager {
         this.validationCache.clear();
         this.pendingValidations.clear();
         logger('ItemValidationManager: Cleared all cached validation results', 3);
+    }
+
+    /**
+     * Validate a regular item along with all its attachments
+     * This performs local validation on all items, then batch validates with backend
+     * 
+     * @param item A regular Zotero item (not an attachment)
+     * @returns Result containing overall validity and per-attachment results
+     */
+    async validateRegularItem(item: Zotero.Item): Promise<RegularItemValidationResult> {
+        if (!item.isRegularItem()) {
+            throw new Error('validateRegularItem can only be called on regular items');
+        }
+
+        // Step 1: Local validation for the regular item itself
+        logger(`ItemValidationManager: Starting local validation for regular item ${item.libraryID}-${item.key}`, 4);
+        const itemLocalValidation = await this.performLocalValidation(item);
+        
+        if (!itemLocalValidation.isValid) {
+            logger(`ItemValidationManager: Regular item failed local validation: ${itemLocalValidation.reason}`, 3);
+            return {
+                isValid: false,
+                reason: itemLocalValidation.reason,
+                attachmentResults: new Map()
+            };
+        }
+
+        // Step 2: Get all attachments
+        const attachmentIDs = item.getAttachments();
+        if (attachmentIDs.length === 0) {
+            logger(`ItemValidationManager: Regular item has no attachments`, 4);
+            return {
+                isValid: false,
+                reason: 'No attachments found',
+                attachmentResults: new Map()
+            };
+        }
+
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+
+        // Step 3: Validate all attachments locally in parallel
+        logger(`ItemValidationManager: Starting local validation for ${attachments.length} attachments`, 4);
+        const localValidationPromises = attachments.map(async (attachment) => {
+            const validation = await this.performLocalValidation(attachment);
+            return {
+                attachment,
+                validation
+            };
+        });
+
+        const localValidationResults = await Promise.all(localValidationPromises);
+
+        // Step 4: Track invalid attachments and collect valid ones for backend validation
+        const attachmentResults = new Map<string, AttachmentValidationResult>();
+        const validAttachments: Array<{
+            item: Zotero.Item;
+            fileHash: string;
+        }> = [];
+
+        for (const { attachment, validation } of localValidationResults) {
+            const key = `${attachment.libraryID}-${attachment.key}`;
+            
+            if (!validation.isValid) {
+                logger(`ItemValidationManager: Attachment ${key} failed local validation: ${validation.reason}`, 4);
+                attachmentResults.set(key, {
+                    isValid: false,
+                    reason: validation.reason,
+                    backendChecked: false
+                });
+            } else {
+                // Get file hash for backend validation
+                try {
+                    const fileHash = await attachment.attachmentHash || '';
+                    if (!fileHash) {
+                        logger(`ItemValidationManager: Attachment ${key} has no file hash`, 4);
+                        attachmentResults.set(key, {
+                            isValid: false,
+                            reason: 'No file hash available',
+                            backendChecked: false
+                        });
+                    } else {
+                        validAttachments.push({ item: attachment, fileHash });
+                    }
+                } catch (error: any) {
+                    logger(`ItemValidationManager: Unable to get file hash for ${key}: ${error.message}`, 2);
+                    attachmentResults.set(key, {
+                        isValid: false,
+                        reason: 'Unable to get file hash',
+                        backendChecked: false
+                    });
+                }
+            }
+        }
+
+        // Step 5: Call backend validation endpoint for items that passed local validation
+        if (validAttachments.length === 0) {
+            logger(`ItemValidationManager: No attachments passed local validation`, 3);
+            return {
+                isValid: false,
+                reason: 'No valid attachments found',
+                attachmentResults
+            };
+        }
+
+        logger(`ItemValidationManager: Starting backend validation for ${validAttachments.length} attachments`, 4);
+        try {
+            const backendResponse = await itemsService.validateRegularItemBatch(
+                item,
+                validAttachments
+            );
+
+            // Step 6: Update results with backend validation
+            for (const attachmentResult of backendResponse.attachments) {
+                const key = `${attachmentResult.library_id}-${attachmentResult.zotero_key}`;
+                attachmentResults.set(key, {
+                    isValid: attachmentResult.processed,
+                    reason: attachmentResult.processed ? undefined : attachmentResult.details,
+                    backendChecked: true
+                });
+            }
+
+            // Step 7: Determine overall validity
+            const allAttachmentsValid = Array.from(attachmentResults.values())
+                .every(result => result.isValid);
+
+            logger(`ItemValidationManager: Regular item validation complete. Valid: ${allAttachmentsValid}`, 4);
+            return {
+                isValid: allAttachmentsValid,
+                reason: allAttachmentsValid ? undefined : 'Some attachments are not valid',
+                attachmentResults
+            };
+            
+        } catch (error: any) {
+            logger(`ItemValidationManager: Backend validation failed for regular item ${item.libraryID}-${item.key}: ${error.message}`, 2);
+            throw new Error(`Backend validation failed: ${error.message}`);
+        }
     }
 
     /**
