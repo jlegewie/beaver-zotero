@@ -35,6 +35,7 @@ export interface FileStatus {
     md_failed_user: number;
     md_plan_limit: number;
     md_unsupported_file: number;
+    page_balance_exhausted: boolean;
 
     // Advanced processing status (docling)
     docling_queued: number;
@@ -82,4 +83,5 @@ export interface FileStatusSummary {
     totalProcessingCount: number,
     uploadProgress: number,
     progress: number,
+    pageBalanceExhausted: boolean,
 }
