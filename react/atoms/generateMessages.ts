@@ -26,7 +26,7 @@ import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotati
 import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState } from './messageComposition';
 import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -422,6 +422,25 @@ async function _processChatCompletionViaBackend(
         return;
     }
 
+    // Set filters
+    const filterLibraries = filters.libraryIds.length > 0
+        ? filters.libraryIds
+            .map(id => Zotero.Libraries.get(id))
+            .filter((l): l is Zotero.Library => !!l)
+            .map(serializeZoteroLibrary)
+        : null;
+    const filterCollections = filters.collectionIds.length > 0
+        ? await Promise.all(filters.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
+        : null;
+    const filterTags = filters.tagSelections.length > 0
+        ? filters.tagSelections.map(tag => ({ ...tag }))
+        : null;
+    const filtersPayload = {
+        libraries: filterLibraries,
+        collections: filterCollections,
+        tags: filterTags
+    } as MessageSearchFilters;
+
     // User message
     const userMessage = {
         id: userMessageId,
@@ -429,6 +448,7 @@ async function _processChatCompletionViaBackend(
         content: content,
         attachments: attachments,
         reader_state: readerState,
+        filters: filtersPayload,
         tool_request: null,
         status: "completed"
     } as MessageData;
@@ -446,29 +466,10 @@ async function _processChatCompletionViaBackend(
     }
 
     // Set payload
-    const filterLibraries = filters.libraryIds.length > 0
-        ? filters.libraryIds
-            .map(id => Zotero.Libraries.get(id))
-            .filter((l): l is Zotero.Library => !!l)
-            .map(serializeZoteroLibrary)
-        : null;
-    const filterCollections = filters.collectionIds.length > 0
-        ? await Promise.all(filters.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
-        : null;
-    const filterTags = filters.tagSelections.length > 0
-        ? filters.tagSelections.map(tag => ({ ...tag }))
-        : null;
-    const filtersPayload = {
-        libraries: filterLibraries,
-        collections: filterCollections,
-        tags: filterTags
-    };
-    
     const payload: ChatCompletionRequestBody = {
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
         thread_id: threadId ?? undefined,
-        filters: filtersPayload,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: model.is_custom ? undefined : userApiKey,

@@ -29,7 +29,6 @@ export interface ChatCompletionRequestBody {
     messages: MessageData[];
     thread_id?: string;
     assistant_message_id?: string;
-    filters?: MessageSearchFilters;
     user_api_key?: string;
     model_id?: string;
     access_id?: string;
