@@ -233,6 +233,20 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 </div>
             )}
 
+            {/* Page balance warning */}
+            {connectionStatus === 'connected' && fileStats.pageBalanceExhausted && (
+                <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+                    <Icon icon={AlertIcon} className="scale-11 mt-020" />
+                    <div className="items-start display-flex flex-col gap-2">
+                        <span>File processing limit reached</span>
+                        <span className="text-sm">
+                            You've hit the 125,000-page processing limit for the beta.
+                            Some files weren't processed. Limits will change after the beta.
+                        </span>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };
