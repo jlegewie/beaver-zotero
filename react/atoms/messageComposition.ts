@@ -5,7 +5,7 @@ import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
 import { ItemValidationType } from "../../src/services/itemValidationManager";
-import { getItemValidationAtom, validateItemsAtom } from './itemValidation';
+import { getItemValidationAtom, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
@@ -254,6 +254,9 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 /**
  * Validate items in background and remove invalid ones
  * This runs asynchronously without blocking the UI
+ * 
+ * Uses batch validation for regular items (validates item + all attachments together)
+ * and individual validation for standalone attachments and annotations
  */
 async function validateItemsInBackground(
     get: any,
@@ -264,27 +267,53 @@ async function validateItemsInBackground(
     const getValidation = get(getItemValidationAtom);
     
     try {
-        // Items to validate: items themselves, attachments of regular items, parent attachments of annotations
-        const childItemsPromises = items
-            .filter((item) => item.isRegularItem())
-            .flatMap((item) => {
-                return item.getAttachments().map((id: number) => Zotero.Items.getAsync(id));
-            });
-        const childItems = await Promise.all(childItemsPromises);
-        const parentItems = items
-            .filter((item) => item.isAnnotation())
+        // Separate regular items from standalone attachments and annotations
+        const regularItems = items.filter((item) => item.isRegularItem());
+        const attachments = items.filter((item) => item.isAttachment());
+        const annotations = items.filter((item) => item.isAnnotation());
+        
+        // Validate regular items using batch validation (item + all attachments)
+        const regularItemValidationPromises = regularItems.map((item) => 
+            set(validateRegularItemAtom, item).catch((error: any) => {
+                logger(`Batch validation failed for regular item ${item.key}: ${error.message}`, 2);
+                return null;
+            })
+        );
+        
+        // Validate attachments individually
+        const attachmentValidationPromises = attachments.map((item) =>
+            set(validateItemsAtom, {
+                items: [item],
+                validationType: ItemValidationType.BACKEND,
+                forceRefresh: false
+            }).catch((error: any) => {
+                logger(`Validation failed for standalone attachment ${item.key}: ${error.message}`, 2);
+                return null;
+            })
+        );
+        
+        // Validate parent items of annotations
+        const parentItems = annotations
             .map((item) => item.parentItem ?? null)
             .filter((item): item is Zotero.Item => item !== null);
         
-        const itemsToValidate = [...items, ...childItems, ...parentItems];
-    
-        // Validate all items with BACKEND validation
-        // This does local validation first, then backend validation
-        await set(validateItemsAtom, {
-            items: itemsToValidate,
-            validationType: ItemValidationType.BACKEND,
-            forceRefresh: false
-        });
+        const parentItemValidationPromises = parentItems.map((item) =>
+            set(validateItemsAtom, {
+                items: [item],
+                validationType: ItemValidationType.BACKEND,
+                forceRefresh: false
+            }).catch((error: any) => {
+                logger(`Validation failed for parent item ${item.key}: ${error.message}`, 2);
+                return null;
+            })
+        );
+        
+        // Wait for all validations to complete
+        await Promise.all([
+            ...regularItemValidationPromises,
+            ...attachmentValidationPromises,
+            ...parentItemValidationPromises
+        ]);
         
         // Remove invalid items from currentMessageItemsAtom
         const invalidItems = items
@@ -336,23 +365,21 @@ async function validateItemsInBackground(
         }
 
         // Show popup for regular items with invalid attachments or no PDF attachments
-        const invalidItemsWithAttachments = itemsToValidate
-            .map(item => ({ item, validation: getValidation(item) }))
-            .filter(({ validation }) => validation && !validation.isValid);
-        const invalidItemIds = new Set(invalidItemsWithAttachments.map(({ item }) => item.id));
-        const regularItems = items.filter((i) => i.isRegularItem() && !invalidItemIds.has(i.id));
+        const validRegularItems = regularItems.filter((item) => {
+            const validation = getValidation(item);
+            return validation && validation.isValid;
+        });
         
         // Show individual popup for single item, summary popup for multiple items
-        // for (const item of regularItems) set(addRegularItemPopupAtom, { item, getValidation });
-        if (regularItems.length === 1) {
-            set(addRegularItemPopupAtom, { item: regularItems[0], getValidation });
-        } else if (regularItems.length > 1) {
-            set(addRegularItemsSummaryPopupAtom, { items: regularItems, getValidation });
+        if (validRegularItems.length === 1) {
+            set(addRegularItemPopupAtom, { item: validRegularItems[0], getValidation });
+        } else if (validRegularItems.length > 1) {
+            set(addRegularItemsSummaryPopupAtom, { items: validRegularItems, getValidation });
         }
 
-        } catch (error: any) {
-            logger(`Background validation failed: ${error.message}`, 1);
-        }
+    } catch (error: any) {
+        logger(`Background validation failed: ${error.message}`, 1);
+    }
 }
 
 /**
