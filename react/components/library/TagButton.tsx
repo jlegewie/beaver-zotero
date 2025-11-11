@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { currentMessageFiltersAtom, removeTagIdAtom } from '../../atoms/messageComposition';
+import { removeTagIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroTag } from '../../types/zotero';
 
@@ -22,8 +22,6 @@ export const TagButton: React.FC<TagButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeTagId = useSetAtom(removeTagIdAtom);
-    const { tagSelections } = useAtomValue(currentMessageFiltersAtom);
-    const isValid = tagSelections.some((selected) => selected.id === tag.id);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();
@@ -56,9 +54,6 @@ export const TagButton: React.FC<TagButtonProps> = ({
 
     const getButtonClasses = () => {
         const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
-        if (!isValid) {
-            return `${baseClasses} border-red`;
-        }
         return baseClasses;
     };
 
@@ -80,7 +75,7 @@ export const TagButton: React.FC<TagButtonProps> = ({
             {...rest}
         >
             {getIconElement()}
-            <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
+            <span className="truncate">
                 {displayName}
             </span>
             <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
