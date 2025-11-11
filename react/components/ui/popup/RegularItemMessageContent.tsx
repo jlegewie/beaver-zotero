@@ -69,22 +69,26 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                     />
                     <span className="font-color-secondary">{validAttachmentsCount} Attachment{validAttachmentsCount !== 1 ? 's' : ''} available</span>
                 </Button>
-                {validAttachmentsVisible && validAttachmentsList.map((attachment, index) => {
-                    const displayName = getDisplayName(attachment);
-                    
-                    return (
-                        <div key={attachment.key || index} className="display-flex flex-col gap-1 ml-4">
-                            <div className="display-flex flex-row items-start gap-1">
-                                <div className="flex-shrink-0 -mt-010 scale-80">
-                                    <CSSItemTypeIcon itemType={attachment.getItemTypeIconName()} />
+                {validAttachmentsVisible && (
+                    <div className="display-flex flex-col gap-2 max-height-200 overflow-y-auto">
+                        {validAttachmentsList.map((attachment, index) => {
+                            const displayName = getDisplayName(attachment);
+                            
+                            return (
+                                <div key={attachment.key || index} className="display-flex flex-col gap-1 ml-4">
+                                    <div className="display-flex flex-row items-start gap-1">
+                                        <div className="flex-shrink-0 -mt-010 scale-80">
+                                            <CSSItemTypeIcon itemType={attachment.getItemTypeIconName()} />
+                                        </div>
+                                        <div className="display-flex flex-col min-w-0 gap-1 text-sm">
+                                            <div className="font-color-secondary text-md truncate">{displayName}</div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="display-flex flex-col min-w-0 gap-1 text-sm">
-                                    <div className="font-color-secondary text-md truncate">{displayName}</div>
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
+                            );
+                        })}
+                    </div>
+                )}
 
                 {/* Invalid Attachments Section */}
                 {invalidAttachments.length > 0 && (
@@ -98,27 +102,31 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             <CSSIcon name="x-8" className="icon-16 font-color-error scale-11 mr-1" style={{ fill: 'red' }}/>
                             <span>{invalidAttachments.length} Attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
                         </Button>
-                        {invalidAttachmentsVisible && invalidAttachments.map(({ item, reason }, index) => {
-                            const displayName = getDisplayName(item);
-                            
-                            return (
-                                <div key={item.key || index} className="display-flex flex-col gap-1 ml-4">
-                                    <div className="display-flex flex-row items-start gap-1">
-                                        <div className="flex-shrink-0 -mt-010 scale-80">
-                                            <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
+                        {invalidAttachmentsVisible && (
+                            <div className="display-flex flex-col gap-2 max-height-200 overflow-y-auto">
+                                {invalidAttachments.map(({ item, reason }, index) => {
+                                    const displayName = getDisplayName(item);
+                                    
+                                    return (
+                                        <div key={item.key || index} className="display-flex flex-col gap-1 ml-4">
+                                            <div className="display-flex flex-row items-start gap-1">
+                                                <div className="flex-shrink-0 -mt-010 scale-80">
+                                                    <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
+                                                </div>
+                                                <div className="display-flex flex-col min-w-0 gap-1 text-sm">
+                                                    <div className="font-color-secondary text-md truncate">{displayName}</div>
+                                                </div>
+                                            </div>
+                                            {reason && (
+                                                <div className="font-color-tertiary text-md ml-1 text-sm">
+                                                    {parseTextWithLinksAndNewlines(reason)}
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="display-flex flex-col min-w-0 gap-1 text-sm">
-                                            <div className="font-color-secondary text-md truncate">{displayName}</div>
-                                        </div>
-                                    </div>
-                                    {reason && (
-                                        <div className="font-color-tertiary text-md ml-1 text-sm">
-                                            {parseTextWithLinksAndNewlines(reason)}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                                    );
+                                })}
+                            </div>
+                        )}
                     </>
                 )}
 
