@@ -130,6 +130,7 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
         totalProcessingCount,
         uploadProgress,
         progress,
+        pageBalanceExhausted: fileStatus?.page_balance_exhausted || false,
     } as FileStatusSummary;
 }
 
