@@ -74,7 +74,8 @@ class ItemValidationManager {
     private pendingValidations = new Map<string, Promise<ItemValidationResult>>();
     
     // Cache settings
-    private readonly CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+    // private readonly CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+    private readonly CACHE_DURATION_MS = 100;
     private readonly MAX_CACHE_SIZE = 1000;
 
     /**
@@ -606,6 +607,16 @@ class ItemValidationManager {
                         fileHash: candidate.fileHash
                     }))
                 );
+
+                // Check if the regular item exists in the backend
+                if (!backendResponse.item.exists) {
+                    logger(`ItemValidationManager: Regular item not found in backend: ${backendResponse.item.details || 'Item does not exist'}`, 3);
+                    return {
+                        isValid: false,
+                        reason: backendResponse.item.details || 'Item not found in Beaver',
+                        attachmentResults: new Map()
+                    };
+                }
 
                 const backendResultsMap = new Map<string, typeof backendResponse.attachments[number]>();
                 for (const backendAttachment of backendResponse.attachments) {

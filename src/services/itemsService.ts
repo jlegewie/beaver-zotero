@@ -1,5 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ZoteroItemReference } from '../../react/types/zotero';
 
 /**
  * Request body for batch validation of regular item with attachments
@@ -19,16 +20,27 @@ export interface ValidateRegularItemRequest {
 }
 
 /**
+ * Backend validation result for a single item
+ */
+export interface BackendItemValidationResult extends ZoteroItemReference {
+    exists: boolean;
+    details?: string;
+}
+
+/**
+ * Backend validation result for a single attachment
+ */
+export interface BackendAttachmentValidationResult extends ZoteroItemReference {
+    processed: boolean;
+    details?: string;
+}
+
+/**
  * Response from batch validation of regular item with attachments
  */
 export interface ValidateRegularItemResponse {
-    item_valid: boolean;
-    attachments: Array<{
-        library_id: number;
-        zotero_key: string;
-        processed: boolean;
-        details?: string;
-    }>;
+    item: BackendItemValidationResult;
+    attachments: BackendAttachmentValidationResult[];
 }
 
 /**
@@ -38,7 +50,7 @@ export class ItemsService extends ApiService {
 
     /**
      * Validates a regular item with all its attachments in a single batch request
-     * This checks if each attachment has been processed on the backend
+     * This checks if the item exists and if each attachment has been processed on the backend
      * 
      * @param item The regular Zotero item
      * @param attachments Array of attachments with their file hashes
@@ -66,7 +78,12 @@ export class ItemsService extends ApiService {
      * 
      * Response:
      * {
-     *   "item_valid": boolean,
+     *   "item": {
+     *     "library_id": number,
+     *     "zotero_key": string,
+     *     "exists": boolean,  // true if item exists in database
+     *     "details": string | undefined  // error message if item does not exist
+     *   },
      *   "attachments": [
      *     {
      *       "library_id": number,
@@ -80,7 +97,7 @@ export class ItemsService extends ApiService {
      * Backend should:
      * 1. Verify the regular item exists in the database
      * 2. For each attachment, check if it has been successfully processed (text extraction completed)
-     * 3. Return processed status for each attachment
+     * 3. Return validation status for the item and processed status for each attachment
      */
     async validateRegularItemBatch(
         item: Zotero.Item,
