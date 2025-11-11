@@ -50,7 +50,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
     return (
         <div className="display-flex flex-col gap-3 -ml-1">
             <div className="display-flex flex-row items-center gap-2 ml-15">
-                <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 100)}</div>
+                <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 200)}</div>
             </div>
             <div id="parent-item" className="display-flex flex-col gap-2">
                 {/* Valid Attachments Section */}
