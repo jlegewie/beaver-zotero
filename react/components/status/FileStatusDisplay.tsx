@@ -240,7 +240,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                     <div className="items-start display-flex flex-col gap-2">
                         <span>File processing limit reached</span>
                         <span className="text-sm">
-                            You've hit the 125,000-page processing limit for the beta.
+                            The free beta has a 125,000-page processing limit.
                             Some files weren't processed. Limits will change after the beta.
                         </span>
                     </div>
