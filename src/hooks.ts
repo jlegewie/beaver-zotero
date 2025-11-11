@@ -4,15 +4,11 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverUIFactory } from "./ui/ui";
 import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
-// import { newZoteroAttachmentPane, ZoteroAttachmentPane } from './ui/ZoteroAttachmentPane'
 import { BeaverDB } from "./services/database";
 import { uiManager } from "../react/ui/UIManager";
-import { cleanupAllAttachmentPanePatches } from './ui/ZoteroAttachmentPane'
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-
-// const attachmentPanes: Map<Window, ZoteroAttachmentPane> = new Map();
 
 /**
  * Compares two semantic version strings.
@@ -144,22 +140,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 	BeaverUIFactory.registerChatPanel(win);
 
-	// Initialize Beaver attachment info row for this window
-	// if (!attachmentPanes.has(win)) { // Check if already initialized for this window
-	// 	ztoolkit.log(`Initializing Beaver attachment pane for window: ${win.location.href}`);
-	// 	try {
-	// 		const pane = await newZoteroAttachmentPane(win);
-	// 		if (pane) {
-	// 			attachmentPanes.set(win, pane);
-	// 			ztoolkit.log("Beaver attachment pane initialized successfully.");
-	// 		} else {
-	// 			ztoolkit.log("Failed to initialize Beaver attachment pane (returned null).");
-	// 		}
-	// 	} catch (err) {
-	// 		ztoolkit.log("Error initializing Beaver attachment pane:", err);
-	// 	}
-	// }
-
 	ztoolkit.log("UI ready");
 	
 	// Load styles for this window
@@ -169,17 +149,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-	// Clean up Beaver attachment info row for this window
-	// const pane = attachmentPanes.get(win);
-	// if (pane) {
-	// 	ztoolkit.log(`Unloading Beaver attachment pane for window: ${win.location.href}`);
-	// 	try {
-	// 		pane.unload();
-	// 	} catch (err) {
-	// 		ztoolkit.log("Error unloading Beaver attachment pane:", err);
-	// 	}
-	// 	attachmentPanes.delete(win); // Remove from map
-	// }
 	// Clean up Chat Panel for this window
 	BeaverUIFactory.removeChatPanel(win);
 
@@ -268,21 +237,6 @@ async function onShutdown(): Promise<void> {
 			addon.citationService.dispose();
 			addon.citationService = undefined;
 		}
-
-		// Final cleanup for any remaining attachment panes
-		// ztoolkit.log("Cleaning up all Beaver attachment panes during shutdown.");
-		// for (const [win, pane] of attachmentPanes.entries()) {
-		// 	ztoolkit.log(`Force unloading Beaver attachment pane for window: ${win.location.href}`);
-		// 	try {
-		// 		pane.unload();
-		// 	} catch (err) {
-		// 		ztoolkit.log("Error during shutdown unload of attachment pane:", err);
-		// 	}
-		// }
-		// attachmentPanes.clear();
-
-		// Global cleanup of all attachment pane patches
-		cleanupAllAttachmentPanePatches();
 
 		// Call UIManager cleanup
 		if (uiManager) {

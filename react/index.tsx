@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Provider, createStore } from 'jotai';
+import { Provider } from 'jotai';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useAuth } from './hooks/useAuth';
@@ -8,7 +8,6 @@ import ReaderSidebar from './components/ReaderSidebar';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
-import { useAttachmentStatusInfoRow } from './hooks/useAttachmentStatusInfoRow';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
@@ -40,9 +39,6 @@ const GlobalContextInitializer = () => {
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();
-
-    // Handle attachment status info row
-    // useAttachmentStatusInfoRow();
 
     return null; // This component does not render any UI
 };

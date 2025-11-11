@@ -10,4 +10,3 @@ prefs-table-detail = Detail
 tabpanel-lib-tab-label = Lib Tab
 tabpanel-reader-tab-label = Reader Tab
 beaver-menu-upsert = Upsert to Beaver
-beaver-item-pane-status = Beaver Status

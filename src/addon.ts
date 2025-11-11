@@ -23,7 +23,6 @@ class Addon {
             rows: Array<{ [dataKey: string]: string }>;
         };
         dialog?: DialogHelper;
-        _itemStatuses: Map<number, string>;
     };
     public aiProvider?: AIProvider;
     public citationService?: CitationService;
@@ -39,8 +38,7 @@ class Addon {
             alive: true,
             config,
             env: __env__,
-            ztoolkit: createZToolkit(),
-            _itemStatuses: new Map()
+            ztoolkit: createZToolkit()
         };
         this.hooks = hooks;
         this.api = {};

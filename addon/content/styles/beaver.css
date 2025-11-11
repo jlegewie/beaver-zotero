@@ -52,32 +52,6 @@
     padding: 4px;
 }
 
-attachment-box .metadata-table #beaver-status {
-    margin-top: 3px;
-}
-
-#beaver-status-button {
-    height: 22px;
-    width: 22px;
-    padding: 1px;
-    margin-left: 4px;
-    list-style-image: url("chrome://zotero/skin/20/universal/sync.svg");
-    /* list-style-image: url("chrome://beaver/content/icons/info.svg"); */
-    fill: var(--fill-secondary);
-    stroke: var(--fill-secondary);
-    /* cursor: pointer; */
-    /* list-style-image: url("chrome: //beaver/content/icons/magic-wand.svg"); */
-
-    &:not([disabled='true']) {
-        color: var(--fill-secondary);
-    }
-}
-
-#beaver-status-button[disabled="true"] {
-    opacity: .5;
-    /* cursor: default; */
-}
-
 #zotero-beaver-tb-chat-toggle:hover {
     background-color: var(--fill-quinary);
 }

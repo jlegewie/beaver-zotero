@@ -207,20 +207,6 @@ export class BeaverUIFactory {
         }
     }
 
-    static registerExtraColumn() {
-        Zotero.ItemTreeManager.registerColumn({
-            pluginID: addon.data.config.addonID,
-            dataKey: 'beaver-status',
-            // label: getLocaleID("item-pane-status"),
-            label: "Status",
-            dataProvider: (item: Zotero.Item, dataKey: string) => {
-                return item.id.toString();
-                // return addon.data._itemStatuses.get(item.id) || '';
-            }
-            // iconPath: "chrome://zotero/skin/cross.png",
-        });
-    }
-
     static registerShortcuts() {
         // Always unregister all existing shortcuts first to prevent duplicates
         keyboardManager.unregisterAll();
@@ -269,10 +255,5 @@ export class BeaverUIFactory {
      */
     static unregisterShortcuts() {
         keyboardManager.unregisterAll();
-    }
-
-    static updateItemPaneStatus(itemId: number, status: string) {
-        addon.data._itemStatuses.set(itemId, status);
-        Zotero.ItemPaneManager.refreshInfoRow('beaver-item-pane-status');
     }
 }
