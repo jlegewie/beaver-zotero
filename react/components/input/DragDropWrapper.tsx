@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
@@ -21,6 +22,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+
+    const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
 
     // Show error message temporarily
     const showErrorMessage = (message: string) => {
@@ -59,6 +62,19 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
+
+        const itemCount = e.dataTransfer.types.includes('zotero/item')
+            ? e.dataTransfer.getData('zotero/item').split(',').length
+            : e.dataTransfer.types.includes('zotero/annotation')
+            ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : 0;
+
+        if (itemCount > maxAddAttachmentToMessage) {
+            e.dataTransfer.dropEffect = 'none';
+            if (isDragging) setIsDragging(false);
+            showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} items at a time.`);
+            return;
+        }
         
         // Set appropriate drop effect
         if (
@@ -118,6 +134,19 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
+
+        const itemCount = e.dataTransfer.types.includes('zotero/item')
+            ? e.dataTransfer.getData('zotero/item').split(',').length
+            : e.dataTransfer.types.includes('zotero/annotation')
+            ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : 0;
+        
+        if (itemCount > maxAddAttachmentToMessage) {
+            e.dataTransfer.dropEffect = 'none';
+            if (isDragging) setIsDragging(false);
+            showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} items at a time.`);
+            return;
+        }
         
         // Handle Zotero annotations
         if (e.dataTransfer.types.includes('zotero/annotation')) {
@@ -188,6 +217,18 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         setDragError(null);
         setDragType(null);
         setDragCount(0);
+
+        // Do not proceed if the number of items is too large
+        const itemCount = e.dataTransfer.types.includes('zotero/item')
+            ? e.dataTransfer.getData('zotero/item').split(',').length
+            : e.dataTransfer.types.includes('zotero/annotation')
+            ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : 0;
+
+        if (itemCount > maxAddAttachmentToMessage) {
+            showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} items at a time.`);
+            return;
+        }
 
         // Handle Zotero items
         if (e.dataTransfer.types.includes('zotero/item')) {

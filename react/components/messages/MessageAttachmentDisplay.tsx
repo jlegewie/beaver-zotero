@@ -1,12 +1,13 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentLibraryIdsAtom, removeItemFromMessageAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { LibraryButton } from '../library/LibraryButton';
+import { CollectionButton } from '../library/CollectionButton';
+import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
-import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
 
@@ -27,7 +28,8 @@ const MessageAttachmentDisplay = ({
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
-    const currentLibraryIds = useAtomValue(currentLibraryIdsAtom);
+    const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
+    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);
@@ -35,6 +37,16 @@ const MessageAttachmentDisplay = ({
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
         .filter(lib => lib) as Zotero.Library[];
+
+    const selectedCollections = currentCollectionIds
+        .map(id => {
+            try {
+                return Zotero.Collections.get(id);
+            } catch {
+                return null;
+            }
+        })
+        .filter((collection): collection is Zotero.Collection => Boolean(collection));
 
     const filteredMessageItems = currentMessageItems.filter(
         (item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key
@@ -49,10 +61,10 @@ const MessageAttachmentDisplay = ({
     );
 
     return (
-        <div className="display-flex flex-wrap gap-3 mb-2">
+        <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
             <AddSourcesMenu
                 // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0 && currentTagSelections.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -62,9 +74,20 @@ const MessageAttachmentDisplay = ({
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
             />
+
             {/* Selected Libraries */}
             {selectedLibraries.map(library => (
                 <LibraryButton key={library.libraryID} library={library} />
+            ))}
+
+            {/* Selected Collections */}
+            {selectedCollections.map(collection => (
+                <CollectionButton key={collection.id} collection={collection} />
+            ))}
+
+            {/* Selected Tags */}
+            {currentTagSelections.map(tag => (
+                <TagButton key={tag.id} tag={tag} />
             ))}
 
             {/* Current reader attachment */}

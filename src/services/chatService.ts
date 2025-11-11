@@ -4,6 +4,7 @@ import { MessageData, MessageModel, ToolCall } from '../../react/types/chat/apiT
 import { ProviderType } from '../../react/atoms/models';
 import { CustomChatModel } from '../../react/types/settings';
 import { CitationMetadata } from '../../react/types/citations';
+import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from '../../react/types/zotero';
 
 export interface ToolRequest {
     function: "rag_search";
@@ -16,13 +17,18 @@ export const search_tool_request: ToolRequest = {
     parameters: {}
 }
 
+export interface MessageSearchFilters {
+    libraries: ZoteroLibrary[] | null;
+    collections: ZoteroCollection[] | null;
+    tags: ZoteroTag[] | null;
+}
+
 // Interface for the request body (matching 'ChatCompletionRequest' in backend)
 export interface ChatCompletionRequestBody {
     mode?: 'stateful' | 'stateless';
     messages: MessageData[];
     thread_id?: string;
     assistant_message_id?: string;
-    library_ids?: number[] | null;
     user_api_key?: string;
     model_id?: string;
     access_id?: string;

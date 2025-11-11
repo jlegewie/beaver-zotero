@@ -1,4 +1,4 @@
-import { ToolRequest } from "src/services/chatService";
+import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 import { CitationMetadata } from "../citations";
 import { ToolAnnotation } from './toolAnnotations';
@@ -55,6 +55,7 @@ export interface MessageData {
     content: string;
     reader_state: ReaderState | null;
     attachments: MessageAttachment[] | null;
+    filters: MessageSearchFilters | null;
     tool_request: ToolRequest | null;
     tool_calls: ToolCall[] | null;
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
@@ -74,6 +75,7 @@ export interface MessageModel {
     // reader state and attachments
     reader_state?: ReaderState;
     attachments?: MessageAttachment[];
+    filters?: MessageSearchFilters;
 
     // User-initiated tool requests
     tool_request?: ToolRequest;

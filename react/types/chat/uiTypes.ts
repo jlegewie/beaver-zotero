@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ToolCall } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
+import { MessageSearchFilters } from '../../../src/services/chatService';
 
 
 // WarningMessage messages
@@ -35,6 +36,7 @@ export interface ChatMessage {
     content: string;
     reasoning_content?: string;
     tool_calls?: ToolCall[];
+    filters?: MessageSearchFilters;
     status: MessageStatus;
     errorType?: string;
     error?: ErrorMessage;

@@ -1,10 +1,12 @@
 import { useSetAtom } from 'jotai';
+import { store } from '../store';
 import { isSidebarVisibleAtom } from '../atoms/ui';
 import { useEventSubscription } from './useEventSubscription';
 import { uiManager } from '../ui/UIManager';
 import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
+import { syncLibraryIdsAtom } from '../atoms/profile';
 
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
@@ -23,8 +25,9 @@ export function useToggleSidebar() {
             if (!currentlyOpen) {
                 setCurrentMessageItems([]);
                 removePopupMessagesByType(['items_summary']);
+                const libraryIds = store.get(syncLibraryIdsAtom);   // Checking for empty array ensures that profile is loaded
                 const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-                if (addSelectedItemsOnOpen && isLibraryTab) {
+                if (addSelectedItemsOnOpen && isLibraryTab && libraryIds.length > 0) {
                     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
                     updateMessageItemsFromZoteroSelection(maxAddAttachmentToMessage);
                 }

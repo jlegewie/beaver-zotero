@@ -57,6 +57,13 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
         setPref('runConsistencyCheck', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for consistency check.`);
     }
+
+    // Upgrade to 0.6.2 or newer from a version before 0.6.2
+    if (compareVersions(lastVersion, '0.6.2') < 0 && compareVersions(currentVersion, '0.6.2') >= 0) {
+        // Set flag to run collection sync from UI context
+        setPref('runCollectionSync', true);
+        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for collection sync.`);
+    }
 }
 
 async function onStartup() {

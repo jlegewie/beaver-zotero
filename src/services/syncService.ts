@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, DeleteData, AttachmentDataWithMimeType } from '../../react/types/zotero';
+import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
@@ -16,6 +16,7 @@ export interface ItemBatchRequest {
     library_id: number;
     items: ItemData[];
     attachments: AttachmentDataWithMimeType[];
+    collections: ZoteroCollection[];
     deletions: DeleteData[];
 }
 
@@ -142,6 +143,22 @@ export interface DeletionStatusResponse {
     updated_at?: string;
 }
 
+export interface SyncCollectionMappingsRequest {
+    library_id?: number; // Optional - null/undefined means all libraries
+}
+
+export interface SyncCollectionMappingsResponse {
+    item_mappings_created: number;
+    attachment_mappings_created: number;
+    items_processed: number;
+    attachments_processed: number;
+}
+
+export interface GetCollectionsResponse {
+    library_id: number;
+    collections: ZoteroCollection[];
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -155,12 +172,13 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Processes a batch of items for syncing
+     * Processes a batch of items, attachments, and collections for syncing
      * @param syncId The sync operation ID
      * @param syncType The type of sync operation
      * @param libraryId The Zotero library ID
      * @param items Array of items to process
      * @param attachments Array of attachments to process
+     * @param collections Array of collections to process
      * @param keysToDelete Array of keys to delete
      * @returns Promise with the batch processing result
      */
@@ -173,6 +191,7 @@ export class SyncService extends ApiService {
         libraryId: number,
         items: ItemData[],
         attachments: AttachmentDataWithMimeType[],
+        collections: ZoteroCollection[],
         deletions: DeleteData[],
     ): Promise<SyncItemsResponse> {
         const payload: ItemBatchRequest = {
@@ -184,6 +203,7 @@ export class SyncService extends ApiService {
             library_id: libraryId,
             items: items,
             attachments: attachments,
+            collections: collections,
             deletions: deletions,
         };
         return this.post<SyncItemsResponse>('/api/v1/sync/items', payload);
@@ -204,9 +224,9 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Deletes items based on their Zotero keys and library
+     * Deletes items and/or collections based on their Zotero keys and library
      * @param libraryId The Zotero library ID
-     * @param zoteroKeys Array of Zotero keys to delete
+     * @param zoteroKeys Array of Zotero keys for items and/or collections to delete
      * @returns Promise with the deletion result
      */
     async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteZoteroDataResponse> {
@@ -265,6 +285,30 @@ export class SyncService extends ApiService {
             params.append('to_version', String(toLibraryVersion));
         }
         return this.get<SyncDataResponse>(`/api/v1/sync/data?${params.toString()}`);
+    }
+
+    /**
+     * Gets all collections for a library
+     * @param libraryId The Zotero library ID
+     * @returns Promise with all collections for the library
+     */
+    async getCollections(libraryId: number): Promise<GetCollectionsResponse> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+        });
+        return this.get<GetCollectionsResponse>(`/api/v1/sync/collections?${params.toString()}`);
+    }
+
+    /**
+     * Syncs collection mappings from JSONB fields to the collection_mappings table
+     * @param libraryId Optional library ID to sync (undefined means all libraries)
+     * @returns Promise with sync collection mappings response
+     */
+    async syncCollectionMappings(libraryId?: number): Promise<SyncCollectionMappingsResponse> {
+        const payload: SyncCollectionMappingsRequest = {
+            library_id: libraryId,
+        };
+        return this.post<SyncCollectionMappingsResponse>('/api/v1/sync/collections/sync-mappings', payload);
     }
 
 }

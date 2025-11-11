@@ -8,6 +8,9 @@ import { userAttachmentsAtom } from '../../atoms/threads';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { MessageAttachmentWithId, MessageAttachmentWithRequiredItem } from '../../types/attachments/uiTypes';
 import { MessageItemButton } from '../input/MessageItemButton';
+import { LibraryButton } from '../library/LibraryButton';
+import { CollectionButton } from '../library/CollectionButton';
+import { TagButton } from '../library/TagButton';
 
 interface UserMessageDisplayProps {
     message: ChatMessage;
@@ -41,9 +44,39 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
     return (
         <div id={`message-${message.id}`} className="px-3 py-1">
             <div className="user-message-display">
-                {/* Message sources */}
-                {messageAttachments.length > 0 && (
-                    <div className="display-flex flex-wrap gap-3 mb-2">
+
+                {/* Message attachments and filters */}
+                {(messageAttachments.length > 0 || message.filters) && (
+                    <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
+                        {/* Message filters */}
+                        {message.filters && message.filters.libraries && (
+                            message.filters.libraries
+                                .map((library) => Zotero.Libraries.get(library.library_id))
+                                .filter((library): library is Zotero.Library => Boolean(library))
+                                .map((library) => (
+                                    <LibraryButton key={library.libraryID} library={library} canEdit={false} />
+                                ))
+                        )}
+
+                        {/* Message collections */}
+                        {message.filters && message.filters.collections && (
+                            message.filters.collections
+                                .map((collection) => Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key))
+                                .filter((collection): collection is Zotero.Collection => Boolean(collection))
+                                .map((collection) => (
+                                    <CollectionButton key={collection.id} collection={collection} canEdit={false} />
+                                ))
+                        )}
+
+                        {/* Message tags */}
+                        {message.filters && message.filters.tags && (
+                            message.filters.tags
+                                .map((tag) => (
+                                    <TagButton key={tag.id} tag={tag} canEdit={false} />
+                                ))
+                        )}
+
+                        {/* Message attachments */}
                         {messageAttachments
                             .filter((a): a is MessageAttachmentWithRequiredItem => Boolean(a.item))
                             .map((attachment, index) => (

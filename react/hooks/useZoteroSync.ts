@@ -142,11 +142,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Process each library's deletions
             for (const [libraryID, keys] of keysByLibrary.entries()) {
-                logger(`useZoteroSync: Deleting ${keys.length} items from library ${libraryID}`, 3);
+                logger(`useZoteroSync: Deleting ${keys.length} items/collections from library ${libraryID}`, 3);
                 await deleteItems(user.id, libraryID, keys);
             }
         } catch (error: any) {
-            logger(`useZoteroSync: Error handling deleted items: ${error.message}`, 1);
+            logger(`useZoteroSync: Error handling deleted items/collections: ${error.message}`, 1);
             Zotero.logError(error);
         }
     };
@@ -259,12 +259,93 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
                         }
                     }
+
+                    // Handle item-tag events (tag add/remove/rename)
+                    if (type === 'item-tag') {
+                        let shouldSetTimer = false;
+                        
+                        // Handle all tag events (only when syncWithZotero is false)
+                        if (!syncWithZotero && (event === 'add' || event === 'remove' || event === 'modify')) {
+                            ids.forEach(id => {
+                                if (extraData && extraData[id]) {
+                                    const { libraryID } = extraData[id];
+                                    if (libraryID && syncLibraryIds.includes(libraryID)) {
+                                        eventsRef.current.changedLibraries.add(libraryID);
+                                        
+                                        // For tag operations, extract itemID from the composite ID (itemID-tagID)
+                                        const itemID = parseInt(id.toString().split('-')[0]);
+                                        // Remove from delete queue if it was there
+                                        eventsRef.current.delete.delete(itemID);
+                                    }
+                                }
+                            });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Set timer if we have events
+                        if (shouldSetTimer) {
+                            eventsRef.current.timestamp = Date.now();
+                            
+                            if (eventsRef.current.timer !== null) {
+                                clearTimeout(eventsRef.current.timer);
+                            }
+                            
+                            eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
+                        }
+                    }
+
+                    // Handle collection events
+                    if (type === 'collection') {
+                        let shouldSetTimer = false;
+                        
+                        // Handle add/modify events (only when syncWithZotero is false)
+                        if (!syncWithZotero && (event === 'add' || event === 'modify')) {
+                            const collections = await Zotero.Collections.getAsync(ids as number[]);
+                            collections
+                                .filter(collection => syncLibraryIds.includes(collection.libraryID))
+                                .forEach(collection => {
+                                    eventsRef.current.changedLibraries.add(collection.libraryID);
+                                });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Handle delete events (always processed regardless of sync mode)
+                        if (event === 'delete') {
+                            ids.forEach(id => {
+                                if (extraData && extraData[id]) {
+                                    const { libraryID, key } = extraData[id];
+                                    if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                        // Queue collection for backend deletion (same as items)
+                                        eventsRef.current.delete.set(id, { libraryID, key });
+                                        logger(`useZoteroSync: Queued collection ${key} from library ${libraryID} for deletion`, 3);
+                                    } else {
+                                        logger(`useZoteroSync: Missing libraryID or key in extraData for deleted collection ID ${id}`, 2);
+                                    }
+                                } else {
+                                    logger(`useZoteroSync: Missing extraData for deleted collection ID ${id}`, 2);
+                                }
+                            });
+                            shouldSetTimer = true;
+                        }
+                        
+                        // Only set timer if we have events that need processing
+                        if (shouldSetTimer) {
+                            eventsRef.current.timestamp = Date.now();
+                            
+                            // Clear existing timer and set a new one
+                            if (eventsRef.current.timer !== null) {
+                                clearTimeout(eventsRef.current.timer);
+                            }
+                            
+                            eventsRef.current.timer = setTimeout(processEvents, LIBRARY_SYNC_DELAY_MS);
+                        }
+                    }
                 }
             // @ts-ignore Zotero.Notifier.Notify is defined
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync'], 'beaver-sync');
+            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection', 'item-tag'], 'beaver-sync');
         };
         
         // Initialize sync operations

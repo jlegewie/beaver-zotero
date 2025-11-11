@@ -1,26 +1,26 @@
 import React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { PlusSignIcon, CSSItemTypeIcon, TickIcon, Icon, CSSIcon, ArrowRightIcon } from '../../icons/icons';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
-import { getDisplayNameFromItem, isValidZoteroItem } from '../../../utils/sourceUtils';
-import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
-import { currentLibraryIdsAtom, inputAttachmentCountAtom, removeItemFromMessageAtom } from '../../../atoms/messageComposition';
+import SearchMenu, { MenuPosition } from './SearchMenu';
+import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
-import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUtils';
+import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
-import { planFeaturesAtom, syncLibraryIdsAtom } from '../../../atoms/profile';
-import { threadAttachmentCountAtom } from '../../../atoms/threads';
-import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
-import { isAppKeyModelAtom } from '../../../atoms/models';
+import { syncLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
-import { addItemToCurrentMessageItemsAtom } from '../../../atoms/messageComposition';
-import { currentMessageItemsAtom } from '../../../atoms/messageComposition';
+import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
+import { useSourcesMenu } from './hooks/useSourcesMenu';
+import { useLibrariesMenu } from './hooks/useLibrariesMenu';
+import { useCollectionsMenu } from './hooks/useCollectionsMenu';
+import { useTagsMenu } from './hooks/useTagsMenu';
+import { ZoteroTag } from '../../../types/zotero';
 
 const RECENT_ITEMS_LIMIT = 5;
 
-type MenuMode = 'sources' | 'libraries';
+type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags';
 
 interface RecentItem {
     zotero_key: string;
@@ -89,17 +89,13 @@ const AddSourcesMenu: React.FC<{
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
-    const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
-    const [allLibraries, setAllLibraries] = useState<Zotero.Library[]>([]);
+    const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
-    const planFeatures = useAtomValue(planFeaturesAtom);
-    const threadAttachmentCount = useAtomValue(threadAttachmentCountAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-    const inputAttachmentCount = useAtomValue(inputAttachmentCountAtom);
-    const setPopupMessage = useSetAtom(addPopupMessageAtom);
-    const isAppKeyModel = useAtomValue(isAppKeyModelAtom);
-    const setCurrentLibraryIds = useSetAtom(currentLibraryIdsAtom);
+    const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
+    const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
+    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
@@ -107,16 +103,20 @@ const AddSourcesMenu: React.FC<{
     // Add ref for tracking the current search request
     const currentSearchRef = useRef<string>('');
 
-    const handleOnClose = () => {
+    useEffect(() => {
+        if (!isMenuOpen) return;
+        setActiveZoteroLibraryId(getActiveZoteroLibraryId());
+    }, [isMenuOpen, menuMode]);
+
+    const handleOnClose = useCallback(() => {
         setSearchQuery('');
-        setMenuItems([]);
         setSearchResults([]);
         setMenuMode('sources');
         // Delay the onClose call to ensure focus happens after menu is fully closed
         setTimeout(() => {
             onClose();
         }, 5);
-    }
+    }, [onClose, setMenuMode, setSearchQuery, setSearchResults]);
 
     // Improved search function with debouncing and cancellation
     const handleSearch = useCallback(async (query: string, limit: number = 10) => {
@@ -137,10 +137,16 @@ const AddSourcesMenu: React.FC<{
             query = query.trim();
             
             // Search Zotero items
-            const currentLibraryIds = store.get(currentLibraryIdsAtom);
-            const searchLibraryIds = currentLibraryIds.length > 0 ? currentLibraryIds : syncLibraryIds;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds);
+            const { libraryIds, collectionIds, tagSelections } = store.get(currentMessageFiltersAtom);
+            const searchLibraryIds = libraryIds.length > 0
+                ? libraryIds
+                : tagSelections.length > 0
+                    ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
+                    : syncLibraryIds;
+            const searchCollectionIds = collectionIds.length > 0 ? collectionIds : undefined;
+            const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
+            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
 
             // Ensure item data is loaded
             await loadFullItemData(resultsItems);
@@ -181,238 +187,142 @@ const AddSourcesMenu: React.FC<{
                 setIsLoading(false);
             }
         }
-    }, [scoreSearchResult]);
+    }, [scoreSearchResult, syncLibraryIds]);
 
-    // Sources mode: initial menu items
-    useEffect(() => {
-        if (!isMenuOpen || menuMode !== 'sources') return;
+    const handleNavigateToLibraries = useCallback(() => {
+        setSearchQuery('');
+        setMenuMode('libraries');
+    }, [setMenuMode, setSearchQuery]);
 
-        const getMenuItems = async () => {
+    const handleNavigateToCollections = useCallback((libraryId: number) => {
+        setActiveZoteroLibraryId(libraryId);
+        setSearchQuery('');
+        setMenuMode('collections');
+    }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
 
-            // Select Libraries menu (only show if multiple libraries available)
-            const librariesHeader = { label: "Select Library", isGroupHeader: true, onClick: () => {} };
-            const selectLibrariesMenuItem = {
-                label: `"Select Library"`,
-                onClick: async () => {
-                    setSearchQuery('');
-                    setMenuMode('libraries');
-                },
-                customContent: (
-                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
-                        <div className="display-flex flex-row gap-2">
-                            <CSSIcon name="library" className="icon-16 font-color-secondary" />
-                            <div>Select Library</div>
-                        </div>
-                        <div className="flex-1"/>
-                        <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
-                    </div>
-                )
+    const handleNavigateToTags = useCallback((libraryId: number) => {
+        setActiveZoteroLibraryId(libraryId);
+        setSearchQuery('');
+        setMenuMode('tags');
+    }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
+
+    // Handler functions for menu item callbacks
+    const handleAddSourceItem = useCallback((item: Zotero.Item) => {
+        updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
+        addItemToCurrentMessageItems(item);
+        handleOnClose();
+    }, [addItemToCurrentMessageItems, handleOnClose]);
+
+    const handleRemoveSourceItem = useCallback((item: Zotero.Item) => {
+        removeItemFromMessage(item);
+        handleOnClose();
+    }, [removeItemFromMessage, handleOnClose]);
+
+    const handleSelectLibrary = useCallback((libraryId: number) => {
+        setCurrentMessageFilters((prev) => {
+            const isSelected = prev.libraryIds.includes(libraryId);
+            return {
+                ...prev,
+                libraryIds: isSelected ? prev.libraryIds.filter((id) => id !== libraryId) : [libraryId],
+                collectionIds: [],
+                tagSelections: []
             };
-            const menuItemsLibraries = syncLibraryIds.length > 1 ? [selectLibrariesMenuItem, librariesHeader] : [];
+        });
+        handleOnClose();
+    }, [setCurrentMessageFilters, handleOnClose]);
 
-            // 1. Get all initial items
-            const currentMessageItemsFiltered = currentMessageItems.filter((i) => !i.isAnnotation());
-            const recentItems: Zotero.Item[] = await getRecentItems();
-            const recentlyModifiedItems = await getRecentAsync(1, { limit: RECENT_ITEMS_LIMIT * 3 }) as Zotero.Item[];
+    const handleSelectCollection = useCallback((collectionId: number) => {
+        setCurrentMessageFilters((prev) => {
+            const exists = prev.collectionIds.includes(collectionId);
+            return {
+                ...prev,
+                libraryIds: [],
+                collectionIds: exists
+                    ? prev.collectionIds.filter((id) => id !== collectionId)
+                    : [...prev.collectionIds, collectionId],
+                tagSelections: []
+            };
+        });
+        handleOnClose();
+    }, [setCurrentMessageFilters, handleOnClose]);
 
-            const allItems = [...currentMessageItemsFiltered, ...recentItems, ...recentlyModifiedItems]
-                .filter((item): item is Zotero.Item => Boolean(item));
+    const handleSelectTag = useCallback((tag: ZoteroTag) => {
+        setCurrentMessageFilters((prev) => {
+            const exists = prev.tagSelections.some((selected) => selected.id === tag.id);
+            return {
+                ...prev,
+                libraryIds: [],
+                collectionIds: [],
+                tagSelections: exists
+                    ? prev.tagSelections.filter((selected) => selected.id !== tag.id)
+                    : [...prev.tagSelections, tag]
+            };
+        });
+        handleOnClose();
+    }, [setCurrentMessageFilters, handleOnClose]);
 
-            await loadFullItemData(allItems);
+    const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
+        currentMessageItems,
+        onAdd: handleAddSourceItem,
+        onRemove: handleRemoveSourceItem
+    }), [currentMessageItems, handleAddSourceItem, handleRemoveSourceItem]);
 
-            // 5. Process items
-            const currentItemsHeader = { label: "Current Items", isGroupHeader: true, onClick: () => {} };
-            const menuItemsCurrentItems = await Promise.all(
-                currentMessageItemsFiltered.map(async (item) => await createMenuItemFromZoteroItem(item))
-            );
-            const menuItemsCurrentItemsWithHeader = menuItemsCurrentItems.length > 0 ? [...menuItemsCurrentItems, currentItemsHeader] : [];
+    const libraryMenuItemContext = useMemo<LibraryMenuItemContext>(() => ({
+        currentLibraryIds,
+        onSelect: handleSelectLibrary
+    }), [currentLibraryIds, handleSelectLibrary]);
 
-            // Recently used items
-            const recentItemsHeader = { label: "Recent Items", isGroupHeader: true, onClick: () => {} };
+    const collectionMenuItemContext = useMemo<CollectionMenuItemContext>(() => ({
+        currentCollectionIds,
+        onSelect: handleSelectCollection
+    }), [currentCollectionIds, handleSelectCollection]);
 
-            // Recently modified items - process them now that data is loaded
-            const recentlyModifiedItemsFiltered = recentlyModifiedItems
-                .map((item) => item.parentItem ? item.parentItem : item)
-                .filter((item) => item.isRegularItem() || item.isAttachment());
-            
-            // Remove duplicates from recent items and recently modified items
-            const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
-                .filter((item, index, self) =>
-                    index === self.findIndex((t) => t.id === item.id) &&
-                    !currentMessageItems.some((i) => i.id === item.id)
-                )
-                .slice(0, Math.max(RECENT_ITEMS_LIMIT - menuItemsCurrentItems.length, 0));
-            
-            // Create menu items from combined items (data already loaded)
-            const menuItemsRecentItems = await Promise.all(
-                combinedItems.map(async (item) => await createMenuItemFromZoteroItem(item))
-            );
+    const tagMenuItemContext = useMemo<TagMenuItemContext>(() => ({
+        currentTags: currentTagSelections,
+        onSelect: handleSelectTag
+    }), [currentTagSelections, handleSelectTag]);
 
-            const menuItemsRecentItemsWithHeader = menuItemsRecentItems.length > 0
-                ? [...menuItemsRecentItems, recentItemsHeader]
-                : [];
+    const sourcesMenu = useSourcesMenu({
+        isActive: isMenuOpen && menuMode === 'sources',
+        searchResults,
+        sourceMenuItemContext,
+        syncLibraryIds,
+        activeZoteroLibraryId,
+        onNavigateToLibraries: handleNavigateToLibraries,
+        onNavigateToCollections: handleNavigateToCollections,
+        onNavigateToTags: handleNavigateToTags,
+        getRecentItems,
+        recentItemsLimit: RECENT_ITEMS_LIMIT
+    });
 
-            // Combine all menu items
-            const allMenuItems = [
-                ...menuItemsLibraries,
-                ...menuItemsCurrentItemsWithHeader, 
-                ...menuItemsRecentItemsWithHeader
-            ];
+    const librariesMenu = useLibrariesMenu({
+        isActive: isMenuOpen && menuMode === 'libraries',
+        searchQuery,
+        syncLibraryIds,
+        libraryMenuItemContext
+    });
 
-            // Set menu items
-            setMenuItems(allMenuItems);
-        }
-        getMenuItems();
-    }, [isMenuOpen, menuMode, currentMessageItems, syncLibraryIds]);
+    const collectionsMenu = useCollectionsMenu({
+        isActive: isMenuOpen && menuMode === 'collections',
+        searchQuery,
+        syncLibraryIds,
+        collectionMenuItemContext
+    });
 
-    // Libraries mode: fetch libraries when entering this mode
-    useEffect(() => {
-        if (!isMenuOpen || menuMode !== 'libraries') return;
-        const fetchLibraries = async () => {
-            const libraries = await Zotero.Libraries.getAll();
-            const librariesFiltered = libraries.filter((library) => syncLibraryIds.includes(library.libraryID));
-            setAllLibraries(librariesFiltered);
-        };
-        fetchLibraries();
-    }, [isMenuOpen, menuMode, syncLibraryIds]);
+    const tagsMenu = useTagsMenu({
+        isActive: isMenuOpen && menuMode === 'tags',
+        searchQuery,
+        syncLibraryIds,
+        tagMenuItemContext
+    });
 
-    // Libraries mode: update menu items based on libraries or search query
-    useEffect(() => {
-        if (!isMenuOpen || menuMode !== 'libraries') return;
-
-        const lowerCaseQuery = searchQuery.toLowerCase();
-        const filteredLibraries = allLibraries.filter(lib => 
-            lib.name.toLowerCase().includes(lowerCaseQuery)
-        );
-        const items = filteredLibraries.map(lib => createMenuItemFromLibrary(lib));
-        const header = { label: "Select Library", isGroupHeader: true, onClick: () => {} };
-        setMenuItems([...items.reverse(), header]);
-    }, [isMenuOpen, menuMode, allLibraries, searchQuery]);
-
-    // createMenuItemFromZoteroItem is a memoized function that creates a menu item from a Zotero item
-    const createMenuItemFromZoteroItem = useCallback(async (
-        item: Zotero.Item
-    ): Promise<SearchMenuItem> => {
-        
-        const title = item.getDisplayTitle();
-                
-        // Determine item status
-        const {valid: isValid} = await isValidZoteroItem(item);
-        const isInCurrentMessageItems = currentMessageItems.some(
-            (i) => i.id === item.id
-        );
-
-        // Handle menu item click
-        const handleMenuItemClick = async (item: Zotero.Item, isValid: boolean) => {
-            if (!isValid) return;
-            // Check if source already exists
-            const exists = currentMessageItems.some(
-                (i) => i.id === item.id
-            );
-            
-            // Add source to current message items
-            if (!exists) {
-                updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
-                addItemToCurrentMessageItems(item);
-            } else {
-                removeItemFromMessage(item);
-            }
-            // Close after selection in sources mode
-            handleOnClose();
-        }
-
-        // Get the icon element for the item
-        const getIconElement = (item: Zotero.Item) => {
-            const iconName = item.getItemTypeIconName();
-            const iconElement = iconName ? (
-                <span className="scale-80">
-                    <CSSItemTypeIcon itemType={iconName} />
-                </span>
-            ) : null
-            return iconElement;
-        }
-        
-        // Create the menu item
-        return {
-            label: getDisplayNameFromItem(item) + " " + title,
-            onClick: async () => await handleMenuItemClick(item, isValid),
-            customContent: (
-                <div className={`display-flex flex-row gap-2 items-start min-w-0 ${!isValid ? 'opacity-70' : ''}`}>
-                    {getIconElement(item)}
-                    <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
-                        <div className="display-flex flex-row justify-between min-w-0">
-                            <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
-                                {getDisplayNameFromItem(item)}
-                            </span>
-                            {isInCurrentMessageItems && <Icon icon={TickIcon} className="scale-12 ml-2" />}
-                        </div>
-                        <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
-                            {title}
-                        </span>
-                    </div>
-                </div>
-            ),
-        };
-    }, [currentMessageItems, planFeatures, inputAttachmentCount, threadAttachmentCount, setPopupMessage, isAppKeyModel, addItemToCurrentMessageItems]);
-
-    // Create menu item for a library (libraries sub-menu)
-    const createMenuItemFromLibrary = useCallback((
-        library: Zotero.Library,
-    ): SearchMenuItem => {
-
-        const getIconElement = (library: Zotero.Library) => {
-            return (
-                <span className="scale-90">
-                    <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
-                </span>
-            );
-        }
-        
-        return {
-            label: library.name,
-            onClick: () => {
-                setCurrentLibraryIds([library.libraryID]);
-                handleOnClose();
-            },
-            customContent: (
-                <div className={'display-flex flex-row gap-2 items-start min-w-0'}>
-                    {getIconElement(library)}
-                    <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
-                        <div className="display-flex flex-row justify-between min-w-0">
-                            <span className={'truncate font-color-secondary'}>
-                                {library.name}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            ),
-        };
-    }, [setCurrentLibraryIds]);
-
-    // Search results -> menu items (sources mode only)
-    useEffect(() => {
-        if (menuMode !== 'sources') return;
-        const header = { label: "Search Results", isGroupHeader: true, onClick: () => {} };
-        const searchToMenuItems = async (results: ItemSearchResult[]) => {
-            // Map the search results to menu items
-            const menuItems: SearchMenuItem[] = [];
-            
-            for (const result of results) {
-                // Get the Zotero item from the library and key
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    result.library_id,
-                    result.zotero_key
-                );
-                if (!item) continue;
-                const menuItem = await createMenuItemFromZoteroItem(item);
-                if (menuItem) {
-                    menuItems.push(menuItem);
-                }
-            }
-            setMenuItems(menuItems.length > 0 ? [...menuItems, header] : []);
-        }
-        searchToMenuItems(searchResults);
-    }, [searchResults, currentMessageItems, createMenuItemFromZoteroItem, menuMode]);
+    const menuItems = menuMode === 'sources'
+        ? sourcesMenu.menuItems
+        : menuMode === 'libraries'
+            ? librariesMenu.menuItems
+            : menuMode === 'collections'
+                ? collectionsMenu.menuItems
+                : tagsMenu.menuItems;
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -435,6 +345,48 @@ const AddSourcesMenu: React.FC<{
             mainWindow.document.dispatchEvent(new MouseEvent('click'));
         }
     };
+
+    const noResultsText = menuMode === 'sources'
+        ? "No results found"
+        : menuMode === 'libraries'
+            ? "No libraries found"
+            : menuMode === 'collections'
+                ? "No collections found"
+                : "No tags found";
+
+    const placeholderText = menuMode === 'sources'
+        ? "Search by author, year and title"
+        : menuMode === 'libraries'
+            ? "Search libraries"
+            : menuMode === 'collections'
+                ? "Search collections"
+                : "Search tags";
+
+    // Handle keyboard events - go back to sources mode on backspace/delete when search is empty
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if (!isMenuOpen) return;
+        
+        // Check if backspace or delete key was pressed
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+            // If in libraries or collections mode and search query is empty, go back to sources
+            if ((menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') && searchQuery === '') {
+                e.preventDefault();
+                setSearchQuery('');
+                setMenuMode('sources');
+            }
+        }
+    }, [isMenuOpen, menuMode, searchQuery]);
+
+    // Add keyboard event listener
+    useEffect(() => {
+        if (!isMenuOpen) return;
+        
+        const mainWindow = Zotero.getMainWindow();
+        mainWindow.addEventListener('keydown', handleKeyDown);
+        return () => {
+            mainWindow.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isMenuOpen, handleKeyDown]);
 
     return (
         <>
@@ -459,8 +411,8 @@ const AddSourcesMenu: React.FC<{
                 verticalPosition="above"
                 width="250px"
                 onSearch={menuMode === 'sources' ? handleSearch : () => {}}
-                noResultsText={menuMode === 'sources' ? "No results found" : "No libraries found"}
-                placeholder={menuMode === 'sources' ? "Search by author, year and title" : "Search libraries"}
+                noResultsText={noResultsText}
+                placeholder={placeholderText}
                 closeOnSelect={false}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}

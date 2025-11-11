@@ -72,10 +72,18 @@ export interface ZoteroCreator {
 
 export interface ZoteroCollection extends ZoteroItemReference {
     name: string;
-    version: number;
+    zotero_version: number;
     date_modified: string;
     parent_collection: string | null;
     relations: Record<string, any> | null;
+}
+
+export interface ZoteroTag {
+    id: number;
+    tag: string;
+    libraryId: number;
+    type: number;
+    color: string; // Hex color string (e.g., '#990000') if the tag has a color assigned
 }
 
 export interface BibliographicIdentifier {

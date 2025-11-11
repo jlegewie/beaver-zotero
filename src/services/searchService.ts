@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { extractYear } from '../utils/sync'
+import { getYearFromItem } from '../utils/zoteroSerializers'
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
@@ -26,7 +26,7 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
         // @ts-ignore - Add proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
         title: item.getField('title'),
-        year: extractYear(item),
+        year: getYearFromItem(item),
         rank: 0,
         similarity: 0,
     } as ItemSearchResult;

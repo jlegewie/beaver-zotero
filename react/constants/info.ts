@@ -9,7 +9,7 @@ export interface InfoItem {
 export const infoItemList: InfoItem[] = [
     {
         title: "File not synced with Beaver",
-        url: "https://github.com/jlegewie/beaver-zotero/wiki/Error-File-not-synced-with-Beaver",
+        url: "https://github.com/jlegewie/beaver-zotero/wiki/Syncing-error-in-Beaver",
         tooltip: "Get help with this error",
     }
 ];

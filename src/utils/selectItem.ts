@@ -135,3 +135,26 @@ export async function selectLibrary(library: Zotero.Library) {
         return false;
     }
 }
+
+/**
+ * Selects a collection in the Zotero collections view
+ * @param {Zotero.Collection} collection - The collection to select
+ * @returns {Promise<boolean>} - True if successfully selected, false otherwise
+ */
+export async function selectCollection(collection: Zotero.Collection) {
+    if (!collection) return false;
+
+    const zoteroPane = Zotero.getActiveZoteroPane();
+    if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
+
+    try {
+        const success = await zoteroPane.collectionsView.selectCollection(collection.id);
+        if (success) {
+            await zoteroPane.itemsView.waitForLoad();
+        }
+        return success;
+    } catch (error) {
+        logger(`Error selecting collection ${collection.id}: ${error}`, 2);
+        return false;
+    }
+}

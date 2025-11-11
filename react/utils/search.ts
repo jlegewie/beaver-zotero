@@ -1,4 +1,5 @@
 import { logger } from '../../src/utils/logger';
+import { ZoteroTag } from '../types/zotero';
 
 
 /**
@@ -10,7 +11,9 @@ import { logger } from '../../src/utils/logger';
  */
 export async function searchTitleCreatorYear(
     searchTerm: string,
-    libraryIds?: number[]
+    libraryIds?: number[],
+    collectionIds?: number[],
+    tags?: ZoteroTag[]
 ): Promise<Zotero.Item[]> {
     // If no search term is provided, return an empty array.
     if (!searchTerm || searchTerm.trim() === "") {
@@ -43,7 +46,29 @@ export async function searchTitleCreatorYear(
 
         // Retrieve the full Zotero.Item objects
         const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
-        return items;
+
+        // Filter items by collection IDs
+        const filteredByCollection = collectionIds && collectionIds.length > 0
+            ? items.filter(item => item.getCollections().some(collection => collectionIds.includes(collection)))
+            : items;
+
+        const filteredItems = tags && tags.length > 0
+            ? filteredByCollection.filter(item => {
+                const itemTags = item.getTags();
+                if (!itemTags || itemTags.length === 0) {
+                    return false;
+                }
+                return tags.some((tag) => {
+                    if (item.libraryID !== tag.libraryId) {
+                        return false;
+                    }
+                    return itemTags.some((itemTag: { tag?: string }) => itemTag.tag === tag.tag);
+                });
+            })
+            : filteredByCollection;
+
+        logger(`searchTitleCreatorYear: Found ${filteredItems.length} items: ${filteredItems.map(item => item.id).join(', ')}`)
+        return filteredItems;
 
     } catch (error: any) {
         // Log any errors that occur during the search process.

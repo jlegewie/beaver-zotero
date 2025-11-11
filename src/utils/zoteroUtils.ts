@@ -1,6 +1,59 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { logger } from "./logger";
 
+
+/**
+ * Get the BibTeX cite-key for a Zotero.Item, if available.
+ * Tries Better BibTeX, then Zotero beta field citationKey, then Extra.
+ *
+ * @param {Zotero.Item} item
+ * @return {string|null}
+ */
+export async function getCitationKeyFromItem(item: Zotero.Item): Promise<string | null> {
+    // 1. Ensure we actually have an item
+    if (!item) return null;
+
+    // 2. If Better BibTeX is present, use its KeyManager API
+    if (typeof Zotero !== 'undefined'
+        && Zotero.BetterBibTeX
+        && Zotero.BetterBibTeX.KeyManager
+        && typeof Zotero.BetterBibTeX.KeyManager.get === 'function'
+    ) {
+        try {
+            const keydata = Zotero.BetterBibTeX.KeyManager.get(item.id);
+            
+            // Handle retry case (when KeyManager isn't ready)
+            if (keydata && keydata.retry) {
+                // KeyManager not ready, fall through to other methods
+            } else if (keydata && keydata.citationKey) {
+                return keydata.citationKey;
+            }
+        }
+        catch (e) {
+            // Something went wrong in BBT; fall back
+            logger('getCitationKeyFromItem: BetterBibTeX KeyManager failed');
+        }
+    }
+
+    // 3. Use citationKey field (Zotero beta)
+    try {
+        const citationKey = item.getField('citationKey');
+        if (citationKey) return citationKey;
+    } catch (e) {
+        // citationKey field might not exist in older Zotero versions
+    }
+
+    // 4. Fallback: look for a pinned key in Extra field
+    try {
+        const extra = item.getField('extra') || '';
+        const m = extra.match(/^\s*Citation Key:\s*([^\s]+)/m);
+        return m ? m[1] : null;
+    } catch (e) {
+        logger('getCitationKeyFromItem: Failed to get extra field');
+        return null;
+    }
+}
+
 /**
  * Get the clientDateModified for an item
  * @param item Zotero item or item ID
@@ -262,7 +315,7 @@ export async function getMimeType(attachment: Zotero.Item, filePath?: string): P
 export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Array | ArrayBuffer): string {
     if (!attachment.isAttachment()) return '';
 
-    let mimeType = attachment.attachmentContentType;
+    const mimeType = attachment.attachmentContentType;
 
 
     // Validate/correct MIME type by checking actual file if needed
@@ -421,3 +474,44 @@ export async function getParentLoadPromises(item: Zotero.Item) {
 
     return promises;
 }
+
+
+/**
+ * Get the active Zotero library ID
+ * @returns The active Zotero library ID, or null if no library is selected
+ */
+export function getActiveZoteroLibraryId(): number | null {
+    const zoteroPane = Zotero.getActiveZoteroPane?.() as any;
+    if (!zoteroPane) return null;
+
+    if (typeof zoteroPane.getSelectedLibraryID === 'function') {
+        const libraryID = zoteroPane.getSelectedLibraryID();
+        if (typeof libraryID === 'number') {
+            return libraryID;
+        }
+    }
+
+    if (typeof zoteroPane.getSelectedCollection === 'function') {
+        const collection = zoteroPane.getSelectedCollection();
+        if (collection && typeof collection.libraryID === 'number') {
+            return collection.libraryID;
+        }
+    }
+
+    const selectedItems = zoteroPane.getSelectedItems?.();
+    if (Array.isArray(selectedItems) && selectedItems.length > 0) {
+        const itemLibraryId = selectedItems[0]?.libraryID;
+        if (typeof itemLibraryId === 'number') {
+            return itemLibraryId;
+        }
+    }
+
+    const collectionsView = zoteroPane.collectionsView as any;
+    const selectedTreeRow = collectionsView?._selectedTreeRow || collectionsView?._view?.selectedTreeRow;
+    const treeLibraryId = selectedTreeRow?.ref?.libraryID ?? selectedTreeRow?.libraryID;
+    if (typeof treeLibraryId === 'number') {
+        return treeLibraryId;
+    }
+
+    return null;
+};

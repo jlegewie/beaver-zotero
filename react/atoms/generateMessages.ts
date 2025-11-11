@@ -23,10 +23,10 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentLibraryIdsAtom} from './messageComposition';
+import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState } from './messageComposition';
 import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, ChatCompletionRequestBody, DeltaType } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -43,6 +43,7 @@ import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations'
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
+import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -220,7 +221,7 @@ export const generateResponseAtom = atom(
             assistantMsg.id,
             userMsg.content,
             messageAttachments,
-            get(currentLibraryIdsAtom),
+            get(currentMessageFiltersAtom),
             readerState,
             model,
             set,
@@ -327,7 +328,7 @@ export const regenerateFromMessageAtom = atom(
             assistantMsg.id,       // new assistant message ID
             "",                    // content remains unchanged
             [],                    // sources remain unchanged
-            get(currentLibraryIdsAtom),
+            get(currentMessageFiltersAtom),
             null,                  // readerState remains unchanged
             model,
             set,
@@ -398,7 +399,7 @@ async function _processChatCompletionViaBackend(
     assistantMessageId: string,
     content: string,
     attachments: MessageAttachment[],
-    libraryIds: number[] | null,
+    filters: MessageFiltersState,
     readerState: ReaderState | null,
     model: FullModelConfig,
     set: any,
@@ -421,6 +422,25 @@ async function _processChatCompletionViaBackend(
         return;
     }
 
+    // Set filters
+    const filterLibraries = filters.libraryIds.length > 0
+        ? filters.libraryIds
+            .map(id => Zotero.Libraries.get(id))
+            .filter((l): l is Zotero.Library => !!l)
+            .map(serializeZoteroLibrary)
+        : null;
+    const filterCollections = filters.collectionIds.length > 0
+        ? await Promise.all(filters.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))
+        : null;
+    const filterTags = filters.tagSelections.length > 0
+        ? filters.tagSelections.map(tag => ({ ...tag }))
+        : null;
+    const filtersPayload = {
+        libraries: filterLibraries,
+        collections: filterCollections,
+        tags: filterTags
+    } as MessageSearchFilters;
+
     // User message
     const userMessage = {
         id: userMessageId,
@@ -428,6 +448,7 @@ async function _processChatCompletionViaBackend(
         content: content,
         attachments: attachments,
         reader_state: readerState,
+        filters: filtersPayload,
         tool_request: null,
         status: "completed"
     } as MessageData;
@@ -449,7 +470,6 @@ async function _processChatCompletionViaBackend(
         mode: statefulChat ? "stateful" : "stateless",
         messages: messages,
         thread_id: threadId ?? undefined,
-        library_ids: libraryIds,
         assistant_message_id: assistantMessageId,
         custom_instructions: getPref('customInstructions') || undefined,
         user_api_key: model.is_custom ? undefined : userApiKey,

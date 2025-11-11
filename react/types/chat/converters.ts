@@ -9,6 +9,7 @@ export function toMessageUI(message: MessageModel): ChatMessage {
         id: message.id,
         role: message.role,
         content: message.content || '',
+        filters: message.filters,
         reasoning_content: message.reasoning_content || '',
         status: message.status,
         tool_calls: message.tool_calls,
