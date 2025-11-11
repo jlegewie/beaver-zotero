@@ -129,6 +129,98 @@ export const validateItemsAtom = atom(
 );
 
 /**
+ * Validate a regular item with all its attachments using batch validation
+ * Updates the validation results map for the item and all its attachments
+ */
+export const validateRegularItemAtom = atom(
+    null,
+    async (get, set, item: Zotero.Item) => {
+        if (!item.isRegularItem()) {
+            throw new Error('validateRegularItemAtom can only be called on regular items');
+        }
+
+        const itemKey = getItemKey(item);
+        
+        // Set validating state for the item
+        const results = get(itemValidationResultsAtom);
+        const newResults = new Map(results);
+        newResults.set(itemKey, {
+            isValid: true,
+            backendChecked: false,
+            isValidating: true
+        });
+        
+        // Get all attachments and set validating state for them
+        const attachmentIDs = item.getAttachments();
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+        for (const attachment of attachments) {
+            const attachmentKey = getItemKey(attachment);
+            newResults.set(attachmentKey, {
+                isValid: true,
+                backendChecked: false,
+                isValidating: true
+            });
+        }
+        set(itemValidationResultsAtom, newResults);
+        
+        try {
+            const result = await itemValidationManager.validateRegularItem(item);
+            
+            // Update validation results for item and all attachments
+            const updatedResults = new Map(get(itemValidationResultsAtom));
+            
+            // Update item itself
+            updatedResults.set(itemKey, {
+                isValid: result.isValid,
+                reason: result.reason,
+                backendChecked: false,
+                isValidating: false
+            });
+            
+            // Update all attachments
+            for (const [attachmentKey, attachmentResult] of result.attachmentResults) {
+                updatedResults.set(attachmentKey, {
+                    ...attachmentResult,
+                    isValidating: false
+                });
+            }
+            
+            set(itemValidationResultsAtom, updatedResults);
+            
+            logger(`Validated regular item ${itemKey} with ${result.attachmentResults.size} attachments: ${result.isValid ? 'valid' : 'invalid'}`, 4);
+            
+            return result;
+        } catch (error: any) {
+            logger(`Failed to validate regular item ${itemKey}: ${error.message}`, 1);
+            
+            // Update with error result for item and attachments
+            const errorResults = new Map(get(itemValidationResultsAtom));
+            errorResults.set(itemKey, {
+                isValid: false,
+                reason: `Validation error: ${error.message}`,
+                backendChecked: false,
+                isValidating: false
+            });
+            
+            // Mark all attachments as error too
+            for (const attachment of attachments) {
+                const attachmentKey = getItemKey(attachment);
+                errorResults.set(attachmentKey, {
+                    isValid: false,
+                    reason: `Validation error: ${error.message}`,
+                    backendChecked: false,
+                    isValidating: false
+                });
+            }
+            
+            set(itemValidationResultsAtom, errorResults);
+            
+            throw error;
+        }
+    }
+);
+
+/**
  * Invalidate cache for a specific item
  * Removes the validation result from the map
  */
