@@ -224,6 +224,8 @@ const OnboardingPage: React.FC = () => {
             return "Initial syncing in progress.";
         } else if (overallSyncStatus === 'failed') {
             return `Initial syncing failed. Please retry or contact support.`;
+        } else if (fileStatusSummary.pageBalanceExhausted) {
+            return "Free file processing limit reached. Continue to use Beaver with processed files.";
         } else if (!isUploadProcessed) {
             return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
         } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
@@ -343,7 +345,7 @@ const OnboardingPage: React.FC = () => {
                         <Button
                             variant="solid"
                             rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={!isUploadProcessed || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') || isCompletingOnboarding}
+                            disabled={(!isUploadProcessed && !fileStatusSummary.pageBalanceExhausted) || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') || isCompletingOnboarding}
                             onClick={handleCompleteOnboarding}
                         >
                             Complete
