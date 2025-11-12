@@ -11,6 +11,7 @@ export class KeyboardManager {
     private _initializedWindows = new Set<Window>();
     private _initializedReaders = new Set<any>();
     private _addonID = "beaver@jlegewie.com"; // Keep the hardcoded ID for now
+    private _reinitInterval: NodeJS.Timeout | null = null;
 
     constructor() {
         this.id = Math.random().toString(36).substring(2, 15);
@@ -18,7 +19,7 @@ export class KeyboardManager {
         
         // Re-initialize on a regular basis to catch any new windows/readers
         // that might have been opened
-        setInterval(() => {
+        this._reinitInterval = setInterval(() => {
             this.initKeyboardListener();
         }, 5000);
     }
@@ -51,6 +52,12 @@ export class KeyboardManager {
         this._keyboardCallbacks.clear();
         this.unInitKeyboardListener();
         this._activeKeyEvents.clear();
+        
+        // Clear the re-initialization interval
+        if (this._reinitInterval) {
+            clearInterval(this._reinitInterval);
+            this._reinitInterval = null;
+        }
     }
 
     private initKeyboardListener() {
