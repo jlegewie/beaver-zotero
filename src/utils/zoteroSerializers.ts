@@ -382,5 +382,6 @@ export function serializeZoteroLibrary(library: Zotero.Library): ZoteroLibrary {
         is_group: library.isGroup,
         type: library.libraryType,
         type_id: library.libraryTypeID,
+        read_only: !library.editable || !library.filesEditable,
     } as ZoteroLibrary;
 }

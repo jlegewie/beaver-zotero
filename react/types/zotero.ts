@@ -8,6 +8,7 @@ export interface ZoteroLibrary {
     is_group: boolean;
     type: string;
     type_id: number;
+    read_only: boolean | null;
 }
 
 /**

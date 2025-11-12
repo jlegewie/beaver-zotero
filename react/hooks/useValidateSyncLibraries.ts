@@ -29,6 +29,7 @@ export function useValidateSyncLibraries() {
                 is_group: l.is_group,
                 type: l.type,
                 type_id: l.type_id,
+                read_only: l.read_only,
             }));
 
         try {
