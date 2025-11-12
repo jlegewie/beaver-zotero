@@ -48,6 +48,15 @@ async function getAttachmentItem(
     return (await Zotero.Items.getByLibraryAndKeyAsync(libraryId, attachmentKey)) || null;
 }
 
+function isLibraryEditable(libraryId: number): boolean {
+    const library = Zotero.Libraries.get(libraryId);
+    if (!library) {
+        return false;
+    }
+    // Library must be editable AND files must be editable to create annotations
+    return library.editable && library.filesEditable;
+}
+
 function isReaderForAttachment(reader: ZoteroReader | null, attachment: Zotero.Item): boolean {
     if (!reader) return false;
     if (!attachment.id) return false;
@@ -180,6 +189,10 @@ async function createHighlightAnnotation(
         Components.utils.cloneInto(data, iframeWindow)
     );
 
+    if (!annotationResult || !annotationResult.id) {
+        throw new Error('Failed to create annotation - annotation manager returned null');
+    }
+
     return annotationResult.id;
 }
 
@@ -270,6 +283,10 @@ async function createNoteAnnotation(
         Components.utils.cloneInto(data, iframeWindow)
     );
 
+    if (!annotationResult || !annotationResult.id) {
+        throw new Error('Failed to create annotation - annotation manager returned null');
+    }
+
     return annotationResult.id;
 }
 
@@ -311,6 +328,11 @@ export async function applyAnnotation(
     }
     
     try {
+        // Check if the library is editable before attempting to create annotations
+        if (!isLibraryEditable(annotation.library_id)) {
+            throw new Error('Cannot create annotations in a read-only library');
+        }
+
         // Check if the reader is still correct
         if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
             throw new Error('Reader changed to another attachment');
