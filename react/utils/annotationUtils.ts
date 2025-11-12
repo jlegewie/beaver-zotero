@@ -272,7 +272,9 @@ const ZoteroImageAnnotations = {
  */
 export const BeaverTemporaryAnnotations = {
     // Track temporary annotation references globally (both database and temporary-only)
+    // Limit to prevent unbounded growth (should be cleaned up regularly)
     _currentAnnotations: [] as ZoteroItemReference[],
+    _maxAnnotations: 1000, // Maximum annotations to track before forcing cleanup
 
     /**
      * Add annotation references to the tracking list
@@ -281,6 +283,13 @@ export const BeaverTemporaryAnnotations = {
     addToTracking(annotationReferences: ZoteroItemReference[]): void {
         logger(`BeaverTemporaryAnnotations: Adding to tracking ${annotationReferences.length} annotations`);
         this._currentAnnotations.push(...annotationReferences);
+        
+        // Prevent unbounded growth - if we exceed max, log warning and clear oldest entries
+        if (this._currentAnnotations.length > this._maxAnnotations) {
+            const excess = this._currentAnnotations.length - this._maxAnnotations;
+            logger(`BeaverTemporaryAnnotations: Warning - annotation tracking exceeded limit. Removing ${excess} oldest entries.`, 2);
+            this._currentAnnotations = this._currentAnnotations.slice(-this._maxAnnotations);
+        }
     },
 
     /**
