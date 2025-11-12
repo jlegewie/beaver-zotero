@@ -4,6 +4,7 @@ class UIManager {
     private elements: DOMElements;
     private collapseState: CollapseState;
     private sidebarWidth: number = 350;
+    private activeTimeouts: Set<NodeJS.Timeout> = new Set();
 
     constructor() {
         this.collapseState = {
@@ -35,9 +36,11 @@ class UIManager {
                 }
                 
                 // Force our desired width after a short delay
-                setTimeout(() => {
+                const timeout = setTimeout(() => {
                     this.enforceConsistentWidth();
+                    this.activeTimeouts.delete(timeout);
                 }, 50);
+                this.activeTimeouts.add(timeout);
             };
         }
     }
@@ -173,7 +176,11 @@ class UIManager {
         this.updateToolbarButton(state.isVisible);
         
         if (state.isVisible) {
-            setTimeout(() => this.enforceConsistentWidth(), 50);
+            const timeout = setTimeout(() => {
+                this.enforceConsistentWidth();
+                this.activeTimeouts.delete(timeout);
+            }, 50);
+            this.activeTimeouts.add(timeout);
             if (state.isLibraryTab) {
                 this.handleLibraryPane(true);
                 this.handleReaderPane(false);
@@ -196,6 +203,12 @@ class UIManager {
     }
 
     public cleanup(): void {
+        // Clear all active timeouts
+        for (const timeout of this.activeTimeouts) {
+            clearTimeout(timeout);
+        }
+        this.activeTimeouts.clear();
+
         // Restore all UI elements to their original state
         this.handleLibraryPane(false);
         this.handleReaderPane(false);
