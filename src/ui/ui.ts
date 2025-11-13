@@ -20,8 +20,11 @@ export class BeaverUIFactory {
     private static windowRoots = new WeakMap<Window, Set<any>>();
 
     static registerChatPanel(win: BeaverWindow) {
+        const windowHref = win.location?.href ?? 'unknown';
+        ztoolkit.log(`registerChatPanel: start for window ${windowHref}`);
         // Remove existing panel if present
         this.removeChatPanel(win);
+        ztoolkit.log("registerChatPanel: previous panel removed");
 
         /**
          * Create mounting points for React components
@@ -45,39 +48,49 @@ export class BeaverUIFactory {
         // Create and append mounting points
         const itemPane = win.document.getElementById("zotero-item-pane");
         const contextPane = win.document.getElementById("zotero-context-pane");
+        ztoolkit.log(`registerChatPanel: itemPane=${Boolean(itemPane)} contextPane=${Boolean(contextPane)} (${windowHref})`);
 
         if (itemPane) {
+            ztoolkit.log("registerChatPanel: creating library mount point");
             const { mountPoint: libraryMount } = createMountingElement("beaver-pane-library", "library");
             itemPane.appendChild(libraryMount);
+            ztoolkit.log("registerChatPanel: appended library mount point");
         }
 
         if (contextPane) {
+            ztoolkit.log("registerChatPanel: creating reader mount point");
             const { mountPoint: readerMount } = createMountingElement("beaver-pane-reader", "reader");
             contextPane.appendChild(readerMount);
+            ztoolkit.log("registerChatPanel: appended reader mount point");
         }
 
         // Add toggle button to toolbar
         this.addToolbarButton(win);
+        ztoolkit.log("registerChatPanel: toolbar button setup finished");
 
         // Load React bundle
         const script = win.document.createElement("script");
         script.type = "text/javascript";
         script.src = "chrome://beaver/content/reactBundle.js";
         win.document.documentElement.appendChild(script);
+        ztoolkit.log("registerChatPanel: injected reactBundle.js script tag");
 
         script.onload = () => {
+            ztoolkit.log("registerChatPanel: reactBundle.js loaded");
             if (win.BeaverReact && 
                 typeof win.BeaverReact.renderAiSidebar === 'function' &&
                 typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
                 typeof win.BeaverReact.unmountFromElement === 'function') {
                 
                 // All functions verified, proceed with mounting
+                ztoolkit.log("registerChatPanel: BeaverReact API verified");
             } else {
                 ztoolkit.log("Error: BeaverReact bundle did not load correctly");
             }
 
             // Initialize React UI
             initializeReactUI(win);
+            ztoolkit.log("registerChatPanel: initializeReactUI executed");
             
             // Initialize roots tracking for this window
             if (!this.windowRoots.has(win)) {
@@ -92,13 +105,17 @@ export class BeaverUIFactory {
                 globalInitializerRoot.id = "beaver-global-initializer-root";
                 globalInitializerRoot.style.display = "none";
                 win.document.documentElement.appendChild(globalInitializerRoot);
+                ztoolkit.log("registerChatPanel: created global initializer root element");
                 
                 if (typeof win.BeaverReact?.renderGlobalInitializer === 'function') {
                     const root = win.BeaverReact.renderGlobalInitializer(globalInitializerRoot);
                     if (root) roots.add(root);
+                    ztoolkit.log("registerChatPanel: renderGlobalInitializer mounted");
                 } else {
                     ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
                 }
+            } else {
+                ztoolkit.log("registerChatPanel: global initializer root already existed");
             }
             
             // Render React components for actual sidebars
@@ -108,10 +125,12 @@ export class BeaverUIFactory {
             if (libraryRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
                 const root = win.BeaverReact.renderAiSidebar(libraryRootEl, "library");
                 if (root) roots.add(root);
+                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for library");
             }
             if (readerRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
                 const root = win.BeaverReact.renderAiSidebar(readerRootEl, "reader");
                 if (root) roots.add(root);
+                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
             }
         };
     }
@@ -143,7 +162,7 @@ export class BeaverUIFactory {
     }
 
     static removeChatPanel(win: BeaverWindow) {
-        ztoolkit.log("[Beaver] BeaverUIFactory.removeChatPanel called.");
+        ztoolkit.log("BeaverUIFactory.removeChatPanel called.");
 
         // Unmount React components using the correct API
         if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
@@ -154,12 +173,12 @@ export class BeaverUIFactory {
                     try {
                         const unmounted = win.BeaverReact!.unmountFromElement(element);
                         if (unmounted) {
-                            ztoolkit.log(`[Beaver] Unmounted React component from #${id}`);
+                            ztoolkit.log(`Unmounted React component from #${id}`);
                         } else {
-                            ztoolkit.log(`[Beaver] No React root found for #${id}`);
+                            ztoolkit.log(`No React root found for #${id}`);
                         }
                     } catch (e: any) {
-                        ztoolkit.log(`[Beaver] Error unmounting React component from #${id}: ${e.message}`);
+                        ztoolkit.log(`Error unmounting React component from #${id}: ${e.message}`);
                     }
                 }
             });
@@ -170,14 +189,14 @@ export class BeaverUIFactory {
                 roots.forEach(root => {
                     try {
                         root.unmount();
-                        ztoolkit.log("[Beaver] Unmounted React root using fallback method");
+                        ztoolkit.log("Unmounted React root using fallback method");
                     } catch (e: any) {
-                        ztoolkit.log(`[Beaver] Error unmounting React root: ${e.message}`);
+                        ztoolkit.log(`Error unmounting React root: ${e.message}`);
                     }
                 });
                 roots.clear();
             }
-            ztoolkit.log("[Beaver] unmountFromElement function not available on window object during cleanup.");
+            ztoolkit.log("unmountFromElement function not available on window object during cleanup.");
         }
 
         // Clean up roots tracking
@@ -195,7 +214,7 @@ export class BeaverUIFactory {
             const element = win.document.getElementById(id);
             if (element) {
                 element.remove();
-                ztoolkit.log(`[Beaver] Removed element #${id}`);
+                ztoolkit.log(`Removed element #${id}`);
             }
         });
 
@@ -203,7 +222,7 @@ export class BeaverUIFactory {
         const scriptTag = win.document.querySelector('script[src="chrome://beaver/content/reactBundle.js"]');
         if (scriptTag) {
             scriptTag.remove();
-            ztoolkit.log("[Beaver] Removed React bundle script tag.");
+            ztoolkit.log("Removed React bundle script tag.");
         }
     }
 
