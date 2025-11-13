@@ -8,6 +8,7 @@ import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils'
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
+import { isLibraryEditable } from '../../src/utils/zoteroUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -46,15 +47,6 @@ async function getAttachmentItem(
     attachmentKey: string
 ): Promise<Zotero.Item | null> {
     return (await Zotero.Items.getByLibraryAndKeyAsync(libraryId, attachmentKey)) || null;
-}
-
-function isLibraryEditable(libraryId: number): boolean {
-    const library = Zotero.Libraries.get(libraryId);
-    if (!library) {
-        return false;
-    }
-    // Library must be editable AND files must be editable to create annotations
-    return library.editable && library.filesEditable;
 }
 
 function isReaderForAttachment(reader: ZoteroReader | null, attachment: Zotero.Item): boolean {
