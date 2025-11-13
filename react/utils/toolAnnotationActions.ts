@@ -8,6 +8,7 @@ import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils'
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
+import { isLibraryEditable } from '../../src/utils/zoteroUtils';
 
 
 export type ApplyAnnotationResult = {
@@ -180,6 +181,10 @@ async function createHighlightAnnotation(
         Components.utils.cloneInto(data, iframeWindow)
     );
 
+    if (!annotationResult || !annotationResult.id) {
+        throw new Error('Failed to create annotation - annotation manager returned null');
+    }
+
     return annotationResult.id;
 }
 
@@ -270,6 +275,10 @@ async function createNoteAnnotation(
         Components.utils.cloneInto(data, iframeWindow)
     );
 
+    if (!annotationResult || !annotationResult.id) {
+        throw new Error('Failed to create annotation - annotation manager returned null');
+    }
+
     return annotationResult.id;
 }
 
@@ -311,6 +320,11 @@ export async function applyAnnotation(
     }
     
     try {
+        // Check if the library is editable before attempting to create annotations
+        if (!isLibraryEditable(annotation.library_id)) {
+            throw new Error('Cannot create annotations in a read-only library');
+        }
+
         // Check if the reader is still correct
         if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
             throw new Error('Reader changed to another attachment');

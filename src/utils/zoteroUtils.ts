@@ -210,6 +210,15 @@ export function getZoteroUserIdentifier(): { userID: string | undefined, localUs
     }
 }
 
+export function isLibraryEditable(libraryId: number): boolean {
+    const library = Zotero.Libraries.get(libraryId);
+    if (!library) {
+        return false;
+    }
+    // Library must be editable AND files must be editable to create annotations
+    return library.editable && library.filesEditable;
+}
+
 export function isLibrarySynced(libraryID: number): boolean {
     try {
         // Check if sync is enabled globally first
