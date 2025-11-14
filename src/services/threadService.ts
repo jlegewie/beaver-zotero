@@ -6,7 +6,7 @@ import { toMessageUI } from '../../react/types/chat/converters';
 import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
 import { ThreadModel } from '../../react/types/chat/apiTypes';
 import { CitationMetadata } from '../../react/types/citations';
-import { ToolAnnotation, toToolAnnotation } from '../../react/types/chat/toolAnnotations';
+import { ProposedAction, toProposedAction } from '../../react/types/chat/proposedActions';
 
 
 // Based on backend MessageModel
@@ -19,7 +19,7 @@ export interface PaginatedThreadsResponse {
 // Based on backend ThreadMessagesResponse
 export interface ThreadMessagesResponse {
     messages: MessageModel[];
-    tool_annotations?: ToolAnnotation[];
+    proposed_actions?: Record<string, any>[];
 }
 
 /**
@@ -63,12 +63,12 @@ export class ThreadService extends ApiService {
         userAttachments: MessageAttachmentWithId[],
         toolAttachments: MessageAttachmentWithId[],
         citationMetadata: CitationMetadata[],
-        toolCallAnnotations: ToolAnnotation[]
+        proposedActions: ProposedAction[]
     }> {
         // Get thread messages from backend using new endpoint
         const response = await this.get<ThreadMessagesResponse>(`/api/v1/threads/${threadId}/messages-with-annotations`);
         const messages = response.messages;
-        const toolCallAnnotations = response.tool_annotations?.map(toToolAnnotation) || [];
+        const proposedActions = response.proposed_actions?.map(toProposedAction) || [];
         
         // Convert backend MessageModel to frontend ChatMessage format
         const chatMessages = messages.map(toMessageUI);
@@ -96,7 +96,7 @@ export class ThreadService extends ApiService {
             userAttachments: userAttachments,
             toolAttachments: toolAttachments,
             citationMetadata: citationMetadata,
-            toolCallAnnotations: toolCallAnnotations
+            proposedActions: proposedActions
         };
     }
 

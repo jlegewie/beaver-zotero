@@ -6,7 +6,7 @@ import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/con
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
-import { toolCallAnnotationsAtom } from "./toolAnnotations";
+import { threadProposedActionsAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -134,7 +134,7 @@ export const newThreadAtom = atom(
         set(currentMessageItemsAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
-        set(toolCallAnnotationsAtom, new Map());
+        set(threadProposedActionsAtom, []);
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(isPreferencePageVisibleAtom, false);
@@ -164,7 +164,7 @@ export const loadThreadAtom = atom(
             set(isPreferencePageVisibleAtom, false);
             
             // Use remote API
-            const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
+            const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
                 // Load item data
@@ -195,15 +195,8 @@ export const loadThreadAtom = atom(
                 // set(toolAttachmentsAtom, toolAttachments);
                 set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
                 
-                // Group annotations by toolcall_id
-                const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
-                    if (!acc.has(annotation.toolcall_id)) {
-                        acc.set(annotation.toolcall_id, []);
-                    }
-                    acc.get(annotation.toolcall_id).push(annotation);
-                    return acc;
-                }, new Map());
-                set(toolCallAnnotationsAtom, groupedAnnotations);
+                // Set proposed actions
+                set(threadProposedActionsAtom, proposedActions);
             }
         } catch (error) {
             console.error('Error loading thread:', error);
