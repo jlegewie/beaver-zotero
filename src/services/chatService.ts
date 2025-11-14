@@ -69,15 +69,15 @@ export interface SSECallbacks {
     onToolcall: (messageId: string, toolcallId: string, toolCall: ToolCall) => Promise<void>;
 
     /**
-     * Handles "annotation" event when annotation data is streamed
+     * Handles "proposed_action" event when action data is streamed
      * @param messageId ID of the assistant message
      * @param toolcallId ID of the tool call
-     * @param annotation Raw annotation payload
+     * @param action Raw proposed action payload
      */
-    onAnnotation: (
+    onProposedAction: (
         messageId: string,
-        toolcallId: string,
-        annotations: Record<string, any>[]
+        toolcallId: string | null,
+        action: Record<string, any> | Record<string, any>[]
     ) => void;
 
     /**
@@ -235,7 +235,7 @@ export class ChatService extends ApiService {
             onDelta,
             onMessage,
             onToolcall,
-            onAnnotation,
+            onProposedAction,
             onCitationMetadata,
             onComplete,
             onDone,
@@ -278,7 +278,7 @@ export class ChatService extends ApiService {
                                     onDelta,
                                     onMessage,
                                     onToolcall,
-                                    onAnnotation,
+                                    onProposedAction,
                                     onCitationMetadata,
                                     onComplete,
                                     onDone,
@@ -339,7 +339,7 @@ export class ChatService extends ApiService {
             onDelta,
             onMessage,
             onToolcall,
-            onAnnotation,
+            onProposedAction,
             onCitationMetadata,
             onComplete,
             onDone,
@@ -358,10 +358,10 @@ export class ChatService extends ApiService {
                 toolcallId: string,
                 toolCall: ToolCall
             ) => Promise<void>;
-            onAnnotation: (
+            onProposedAction: (
                 messageId: string,
-                toolcallId: string,
-                annotations: Record<string, any>[]
+                toolcallId: string | null,
+                action: Record<string, any> | Record<string, any>[]
             ) => void;
             onCitationMetadata: (
                 messageId: string,
@@ -429,17 +429,15 @@ export class ChatService extends ApiService {
                     await onToolcall(parsedData.messageId, parsedData.toolcallId, toolcall);
                 }
                 break;
-            case 'annotation':
-                if (parsedData?.messageId && parsedData?.toolcallId && parsedData?.annotation) {
-                    const annotation =
-                        typeof parsedData.annotation === 'string'
-                            ? JSON.parse(parsedData.annotation)
-                            : parsedData.annotation;
-                    const annotations = Array.isArray(annotation) ? annotation : [annotation];
-                    onAnnotation(
+            case 'proposed_action':
+                if (parsedData?.messageId && (parsedData?.action || parsedData?.actions)) {
+                    const payload = parsedData.action ?? parsedData.actions;
+                    const normalizedPayload =
+                        typeof payload === 'string' ? JSON.parse(payload) : payload;
+                    onProposedAction(
                         parsedData.messageId,
-                        parsedData.toolcallId,
-                        annotations
+                        parsedData.toolcallId ?? null,
+                        normalizedPayload
                     );
                 }
                 break;
