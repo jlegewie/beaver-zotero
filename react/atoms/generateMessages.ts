@@ -23,7 +23,7 @@ import {
     streamReasoningToMessageAtom
 } from './threads';
 import { addProposedActionsAtom, threadProposedActionsAtom } from './proposedActions';
-import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState } from './messageComposition';
+import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { currentReaderAttachmentAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
@@ -39,10 +39,11 @@ import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
-import { toProposedAction, ProposedAction, isAnnotationAction } from '../types/chat/proposedActions';
+import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/chat/proposedActions';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -588,70 +589,80 @@ async function _processChatCompletionViaBackend(
                 );
                 async function processActions(rawActions: Record<string, any>[]) {
                     try {
+                        // Convert raw actions to ProposedAction
                         const actions = rawActions
                             .map((raw) => {
                                 try {
                                     return toProposedAction(raw);
                                 } catch (error) {
-                                    logger(
-                                        `event 'onProposedAction': Failed to convert action ${raw.id}: ${error}`,
-                                        1
-                                    );
+                                    logger(`event 'onProposedAction': Failed to convert action ${raw.id}: ${error}`, 1);
                                     return null;
                                 }
                             })
                             .filter((action): action is ProposedAction => action !== null);
 
+                        // If no actions, return
                         if (actions.length === 0) {
                             return;
                         }
 
+                        // Add proposed actions to the thread proposed actions
                         set(addProposedActionsAtom, actions);
 
-                        // const annotationActions = actions.filter(isAnnotationAction);
-                        // const otherActions = actions.filter((action) => !isAnnotationAction(action));
+                        // Separate annotation actions from other actions
+                        const annotationActions = actions.filter(isAnnotationAction) as AnnotationProposedAction[];
 
-                        // if (otherActions.length > 0) {
-                        //     set(upsertProposedActionsAtom, { toolcallId, actions: otherActions });
-                        // }
+                        // If no annotation actions, return
+                        if (annotationActions.length === 0) {
+                            return;
+                        }
 
-                        // if (annotationActions.length === 0) {
-                        //     return;
-                        // }
+                        // Load attachment item data for annotation actions
+                        const attachmentRefs = new Set<ZoteroItemReference>();
+                        annotationActions.forEach((action) => {
+                            attachmentRefs.add({
+                                library_id: action.proposed_data.library_id,
+                                zotero_key: action.proposed_data.attachment_key,
+                            });
+                        });
+                        const attachmentPromises = Array.from(attachmentRefs).map((ref) =>
+                            Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
+                        );
+                        const attachments = (await Promise.all(attachmentPromises)).filter(
+                            Boolean
+                        ) as Zotero.Item[];
+                        if (attachments.length > 0) {
+                            await loadFullItemDataWithAllTypes(attachments);
+                        }
 
-                        // const attachmentRefs = new Set<ZoteroItemReference>();
-                        // annotationActions.forEach((action) => {
-                        //     attachmentRefs.add({
-                        //         library_id: action.library_id,
-                        //         zotero_key: action.attachment_key,
-                        //     });
-                        // });
-                        // const attachmentPromises = Array.from(attachmentRefs).map((ref) =>
-                        //     Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
-                        // );
-                        // const attachments = (await Promise.all(attachmentPromises)).filter(
-                        //     Boolean
-                        // ) as Zotero.Item[];
-                        // if (attachments.length > 0) {
-                        //     await loadFullItemDataWithAllTypes(attachments);
-                        // }
+                        // Check if auto-apply is enabled
+                        if (!getPref('autoApplyAnnotations')) {
+                            return;
+                        }
 
-                        // if (!getPref('autoApplyAnnotations')) {
-                        //     set(upsertProposedActionsAtom, { toolcallId, actions: annotationActions });
-                        //     return;
-                        // }
+                        // Check if there's a current reader with matching attachment
+                        const currentReaderKey = get(currentReaderAttachmentKeyAtom);
+                        if (currentReaderKey === null) {
+                            return;
+                        }
 
-                        // const currentReaderKey = get(currentReaderAttachmentKeyAtom);
-                        // if (currentReaderKey === null) {
-                        //     set(upsertProposedActionsAtom, { toolcallId, actions: annotationActions });
-                        //     return;
-                        // }
+                        // Only auto-apply annotations for the current reader
+                        const actionsForCurrentReader = annotationActions.filter(
+                            (action) => action.proposed_data.attachment_key === currentReaderKey
+                        );
 
-                        // proposedActionApplyBatcher.enqueue({
-                        //     messageId,
-                        //     toolcallId: toolcallId ?? UNASSIGNED_TOOLCALL_ID,
-                        //     annotations: annotationActions,
-                        // });
+                        if (actionsForCurrentReader.length === 0) {
+                            return;
+                        }
+
+                        // Enqueue for batch application
+                        if (toolcallId) {
+                            toolAnnotationApplyBatcher.enqueue({
+                                messageId,
+                                toolcallId,
+                                actions: actionsForCurrentReader,
+                            });
+                        }
                     } catch (error) {
                         logger(
                             `event 'onProposedAction': failed to parse action for message ${messageId} toolcall ${toolcallId}: ${error}`,
