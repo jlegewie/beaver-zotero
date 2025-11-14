@@ -1,21 +1,11 @@
-import {
-    ToolAnnotationHighlightLocation,
-    ToolAnnotation,
-    ToolAnnotationType,
-} from '../types/chat/toolAnnotations';
-import { BoundingBox, CoordOrigin, toZoteroRectFromBBox } from '../types/citations';
+import { BoundingBox, CoordOrigin, PageLocation, toZoteroRectFromBBox } from '../types/citations';
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
+import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/chat/proposedActions';
 
-
-export type ApplyAnnotationResult = {
-    updated: boolean;
-    error?: string;
-    annotation: ToolAnnotation;
-}
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
     red: '#ff6666',
@@ -82,14 +72,18 @@ function convertBoundingBoxToBottomLeft(
 
 async function convertLocationToRects(
     reader: ZoteroReader,
-    location: ToolAnnotationHighlightLocation
+    location: PageLocation
 ): Promise<number[][]> {
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.pageIndex);
+    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.page_idx);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
 
     // Create viewport object for coordinate conversion
     const viewport = { height };
+
+    if (!location.boxes) {
+        throw new Error('Location boxes missing');
+    }
 
     // Only apply rotation transformation if page is actually rotated
     const rects = rotation !== 0
@@ -121,18 +115,18 @@ function generateSortIndex(pageIndex: number, rect: number[]): string {
 
 async function createHighlightAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<string> {
     if (
-        !annotation.highlight_locations ||
-        annotation.highlight_locations.length === 0
+        !annotation.proposed_data.highlight_locations ||
+        annotation.proposed_data.highlight_locations.length === 0
     ) {
         throw new Error('Highlight annotation missing geometry');
     }
 
-    const primaryLocation = annotation.highlight_locations[0];
-    const allSamePage = annotation.highlight_locations.every(
-        (loc) => loc.pageIndex === primaryLocation.pageIndex
+    const primaryLocation = annotation.proposed_data.highlight_locations[0];
+    const allSamePage = annotation.proposed_data.highlight_locations.every(
+        (loc: PageLocation) => loc.page_idx === primaryLocation.page_idx
     );
 
     if (!allSamePage) {
@@ -141,7 +135,7 @@ async function createHighlightAnnotation(
 
     const rects = allSamePage
         ? (await Promise.all(
-            annotation.highlight_locations.map(loc =>
+            annotation.proposed_data.highlight_locations.map((loc: PageLocation) =>
             convertLocationToRects(reader, loc)
             )
         )).flat()
@@ -151,19 +145,19 @@ async function createHighlightAnnotation(
     }
 
     const now = (new Date()).toISOString();
-    const sortIndex = generateSortIndex(primaryLocation.pageIndex, rects[0]);
+    const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0]);
     const data = {
         type: 'highlight',
-        color: resolveHighlightColor(annotation.color),
-        comment: annotation.comment || annotation.title || '',
+        color: resolveHighlightColor(annotation.proposed_data.color),
+        comment: annotation.proposed_data.comment || annotation.proposed_data.title || '',
         // comment: annotation.title || '',
-        pageLabel: primaryLocation.pageIndex + 1,
+        pageLabel: primaryLocation.page_idx + 1,
         sortIndex,
         position: {
-            pageIndex: primaryLocation.pageIndex,
+            pageIndex: primaryLocation.page_idx,
             rects,
         },
-        text: annotation.text || '',
+        text: annotation.proposed_data.text || '',
         tags: [],
         temporary: false,
         dateCreated: now,
@@ -190,13 +184,13 @@ async function createHighlightAnnotation(
 
 async function convertNotePositionToRect(
     reader: ZoteroReader,
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<{ pageIndex: number; rect: number[] }> {
-    if (!annotation.note_position) {
+    if (!annotation.proposed_data.note_position) {
         throw new Error('Note annotation missing position');
     }
 
-    const { pageIndex, side, y } = annotation.note_position;
+    const { pageIndex, side, y } = annotation.proposed_data.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, pageIndex);
@@ -241,7 +235,7 @@ async function convertNotePositionToRect(
 
 async function createNoteAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<string> {
     const { pageIndex, rect } = await convertNotePositionToRect(reader, annotation);
     const sortIndex = generateSortIndex(pageIndex, rect);
@@ -249,8 +243,8 @@ async function createNoteAnnotation(
     const now = (new Date()).toISOString();
     const data = {
         type: 'note',
-        comment: annotation.comment || annotation.title || '',
-        color: resolveHighlightColor(annotation.color),
+        comment: annotation.proposed_data.comment || annotation.proposed_data.title || '',
+        color: resolveHighlightColor(annotation.proposed_data.color),
         pageLabel: pageIndex + 1,
         sortIndex,
         position: {
@@ -259,7 +253,7 @@ async function createNoteAnnotation(
         },
         tags: [],
         temporary: false,
-        notePosition: annotation.note_position,
+        notePosition: annotation.proposed_data.note_position,
         dateCreated: now,
         dateModified: now,
         authorName: 'Beaver',
@@ -284,14 +278,14 @@ async function createNoteAnnotation(
 
 async function createAnnotation(
     reader: ZoteroReader,
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<string> {
-    switch (annotation.annotation_type as ToolAnnotationType) {
-        case 'note':
-            return createNoteAnnotation(reader, annotation);
-        case 'highlight':
-        default:
-            return createHighlightAnnotation(reader, annotation);
+    if (isNoteAnnotationAction(annotation)) {
+        return createNoteAnnotation(reader, annotation);
+    } else if (isHighlightAnnotationAction(annotation)) {
+        return createHighlightAnnotation(reader, annotation);
+    } else {
+        throw new Error('Invalid annotation type');
     }
 }
 
@@ -306,27 +300,23 @@ async function createAnnotation(
  * @returns An object indicating success ('applied') or failure ('error').
  */
 export async function applyAnnotation(
-    annotation: ToolAnnotation,
+    annotation: AnnotationProposedAction,
     reader?: ZoteroReader
-): Promise<ApplyAnnotationResult> {
+): Promise<AnnotationResultData> {
     // Get the current reader if not provided, and wait for PDF document to be loaded
     reader = reader ?? (await getCurrentReaderAndWaitForView(undefined, true) as ZoteroReader | undefined);
-    if (!reader) {
-        return {
-            updated: false,
-            error: 'No reader found',
-            annotation
-        };
+    if (!reader || !annotation.proposed_data?.attachment_key) {
+        throw new Error('Invalid reader or attachment key');
     }
     
     try {
         // Check if the library is editable before attempting to create annotations
-        if (!isLibraryEditable(annotation.library_id)) {
+        if (!isLibraryEditable(annotation.proposed_data.library_id)) {
             throw new Error('Cannot create annotations in a read-only library');
         }
 
         // Check if the reader is still correct
-        if (!isReaderForAttachmentKey(reader, annotation.attachment_key)) {
+        if (!isReaderForAttachmentKey(reader, annotation.proposed_data.attachment_key)) {
             throw new Error('Reader changed to another attachment');
         }
         
@@ -343,55 +333,41 @@ export async function applyAnnotation(
         // Create the annotation
         const annotationKey = await createAnnotation(reader, annotation);
         return {
-            updated: true,
-            annotation: {
-                ...annotation,
-                status: 'applied',
-                zotero_key: annotationKey,
-                error_message: null,
-                modified_at: new Date().toISOString(),
-            },
+            zotero_key: annotationKey,
+            library_id: annotation.proposed_data.library_id,
+            attachment_key: annotation.proposed_data.attachment_key,
         };
     } catch (error: any) {
         logger(`applyAnnotation error: ${error?.message || error?.toString()}`, 1);
         const errorMessage = error?.message || 'Failed to create annotation';
-        return {
-            updated: true,
-            error: errorMessage,
-            annotation: {
-                ...annotation,
-                status: 'error',
-                error_message: errorMessage,
-                modified_at: new Date().toISOString(),
-            },
-        };
+        throw new Error(errorMessage);
     }
 }
 
 export async function deleteAnnotationFromReader(
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<void> {
-    if (!annotation.zotero_key) {
+    if (!annotation.result_data?.zotero_key) {
         throw new Error('Annotation key missing for deletion');
     }
 
     const reader = getCurrentReader() as ZoteroReader | null;
     const attachmentItem = await getAttachmentItem(
-        annotation.library_id,
-        annotation.attachment_key
+        annotation.result_data.library_id,
+        annotation.result_data.attachment_key
     );
     if (reader && attachmentItem && isReaderForAttachment(reader, attachmentItem)) {
         const iframeWindow = (reader as any)?._internalReader?._iframeWindow;
         if (iframeWindow) {
             await (reader as any)._internalReader.unsetAnnotations(
-                Components.utils.cloneInto([annotation.zotero_key], iframeWindow)
+                Components.utils.cloneInto([annotation.result_data.zotero_key], iframeWindow)
             );
         }
     }
 
     const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-        annotation.library_id,
-        annotation.zotero_key
+        annotation.result_data.library_id,
+        annotation.result_data.zotero_key
     );
     if (annotationItem) {
         await annotationItem.eraseTx();
@@ -405,18 +381,18 @@ export async function deleteAnnotationFromReader(
  * @returns Object with key (if exists) and whether annotation should be marked as deleted
  */
 export async function validateAppliedAnnotation(
-    annotation: ToolAnnotation
+    annotation: AnnotationProposedAction
 ): Promise<{ key: string | null; markAsDeleted: boolean }> {
     // If annotation is marked as applied with a zotero_key, verify it still exists
-    if (annotation.status === 'applied' && annotation.zotero_key) {
+    if (annotation.status === 'applied' && annotation.result_data?.zotero_key) {
         try {
             const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                annotation.library_id,
-                annotation.zotero_key
+                annotation.result_data.library_id,
+                annotation.result_data.zotero_key
             );
             
             if (annotationItem && annotationItem.isAnnotation()) {
-                return { key: annotation.zotero_key, markAsDeleted: false };
+                return { key: annotation.result_data.zotero_key, markAsDeleted: false };
             } else {
                 // Annotation item doesn't exist - should be marked as deleted
                 return { key: null, markAsDeleted: true };
