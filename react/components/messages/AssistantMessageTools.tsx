@@ -13,7 +13,7 @@ import {
 } from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
-import { isAnnotationTool } from '../../types/chat/toolAnnotations';
+import { isAnnotationTool } from '../../types/chat/proposedActions';
 import AnnotationToolCallDisplay from './AnnotationToolCallDisplay';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 
@@ -206,6 +206,7 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
             }
         >
             {toolCallGroups.map((group, groupIndex) => {
+                // TODO: Split by proposed actions and searchtoolcall
                 // For groups with single tool call
                 if (group.length === 1) {
                     const toolCall = group[0];
