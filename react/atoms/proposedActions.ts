@@ -171,26 +171,28 @@ export const rejectProposedActionStateAtom = atom(
     }
 );
 
-export const updateProposedActionStateAtom = atom(
+export const undoProposedActionStateAtom = atom(
     null,
-    (_, set, actionId: string, state: ActionStatus) => {
+    (_, set, actionId: string) => {
         // Update UI state
         set(threadProposedActionsAtom, (prev: ProposedAction[]) => {
             return prev.map((action) => action.id === actionId
-                ? { ...action, status: state }
+                ? { ...action, status: 'undone', result_data: undefined, error_message: undefined }
                 : action
             );
         });
         // Update backend state
         proposedActionsService.updateAction(actionId, {
-            status: state,
-            error_message: null,
+            status: 'undone',
+            result_data: undefined,
+            error_message: undefined,
         }).catch((error) => {
-            logger(`updateProposedActionStateAtom: failed to persist state for action ${actionId}: ${error}`, 1);
+            logger(`undoProposedActionStateAtom: failed to persist state for action ${actionId}: ${error}`, 1);
         });
 
     }
 );
+
 
 // export const addProposedActionsAtom = atom(
 //     null,
