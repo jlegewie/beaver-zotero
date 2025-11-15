@@ -1,4 +1,5 @@
 import { PageLocation, BoundingBox, CoordOrigin } from '../../types/citations';
+import { ZoteroItemReference } from '../zotero';
 
 /**
  * Status of a proposed action in its lifecycle
@@ -100,6 +101,21 @@ export interface AnnotationResultData {
  * Type of result data after applying an action
  */
 export type ActionResultDataType = AnnotationResultData;
+
+
+/**
+ * Get a Zotero item reference from ProposedAction
+ */
+export const getZoteroItemReferenceFromProposedAction = (proposedAction: ProposedAction): ZoteroItemReference | null => {
+    if(proposedAction.status !== 'applied' || !proposedAction.result_data?.zotero_key || !proposedAction.result_data?.library_id) {
+        return null;
+    }
+    return {
+        library_id: proposedAction.result_data.library_id,
+        zotero_key: proposedAction.result_data.zotero_key
+    } as ZoteroItemReference;
+};
+
 
 /**
  * Core proposed action model matching the backend schema
