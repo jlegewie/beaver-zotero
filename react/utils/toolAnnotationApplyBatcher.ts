@@ -4,7 +4,7 @@ import { proposedActionsService, AckLink } from '../../src/services/proposedActi
 import { logger } from '../../src/utils/logger';
 import { AnnotationProposedAction, AnnotationResultData } from '../types/proposedActions/base';
 import { updateProposedActionsAtom, ProposedActionUpdate } from '../atoms/proposedActions';
-import { applyAnnotation } from './toolAnnotationActions';
+import { applyAnnotation } from './annotationActions';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;
 const MAX_QUEUE_SIZE = 50;

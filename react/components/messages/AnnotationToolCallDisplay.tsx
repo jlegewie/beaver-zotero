@@ -16,7 +16,7 @@ import IconButton from '../ui/IconButton';
 import {
     applyAnnotation,
     deleteAnnotationFromReader,
-} from '../../utils/toolAnnotationActions';
+} from '../../utils/annotationActions';
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
