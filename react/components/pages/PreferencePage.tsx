@@ -157,11 +157,9 @@ const PreferencePage: React.FC = () => {
         
         try {
             // Run consistency check for all sync libraries
-            const promises = syncLibraryIds.map(libraryID => 
-                performConsistencyCheck(libraryID)
-            );
-            
-            await Promise.all(promises);
+            for (const libraryID of syncLibraryIds) {
+                await performConsistencyCheck(libraryID);
+            }
             
             logger('Sync verification completed successfully');
             setVerifyStatus('completed');
