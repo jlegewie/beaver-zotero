@@ -190,10 +190,10 @@ async function convertNotePositionToRect(
         throw new Error('Note annotation missing position');
     }
 
-    const { pageIndex, side, y } = annotation.proposed_data.note_position;
+    const { page_index, side, y } = annotation.proposed_data.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
-    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, pageIndex);
+    const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, page_index);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
     
     // Calculate x position based on side
@@ -228,7 +228,7 @@ async function convertNotePositionToRect(
     }
 
     return {
-        pageIndex,
+        pageIndex: page_index,
         rect: toZoteroRectFromBBox(converted, viewBoxLL),
     };
 }
