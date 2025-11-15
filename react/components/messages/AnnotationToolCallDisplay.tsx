@@ -16,7 +16,6 @@ import IconButton from '../ui/IconButton';
 import {
     applyAnnotation,
     deleteAnnotationFromReader,
-    validateAppliedAnnotation,
 } from '../../utils/toolAnnotationActions';
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
@@ -25,7 +24,7 @@ import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
-import { updateProposedActionsAtom, getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom } from '../../atoms/proposedActions';
+import { updateProposedActionsAtom, getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
 import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/chat/proposedActions';
 import { AckLink } from '../../../src/services/proposedActionsService';
 
@@ -369,41 +368,6 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
         };
         getAttachmentTitle();
     }, [annotations]);
-
-    /**
-     * Validate applied annotations
-     *
-     * validateAppliedAnnotation checks if an annotation that's marked as 'applied'
-     * still exists in Zotero. This handles the case where the annotation was applied
-     * but manually deleted from Zotero by the user.
-     */
-    useEffect(() => {
-        const validateAppliedAnnotations = async () => {
-            const appliedAnnotations = annotations.filter((a: AnnotationProposedAction) => a.status === 'applied' && a.result_data?.zotero_key);
-            for (const annotation of appliedAnnotations) {
-
-                // Skip if annotation was modified in last 10 seconds
-                // if (annotation.modified_at) {
-                //     const timeSinceModified = Date.now() - new Date(annotation.modified_at).getTime();
-                //     if (timeSinceModified < 10000) { // 10 seconds
-                //         logger('validationResult: skipping because modified in last 10 seconds');
-                //         continue;
-                //     }
-                // }
-
-                // Validate annotation
-                // const validationResult = await validateAppliedAnnotation(annotation);
-                // if (validationResult.markAsDeleted) {
-                //     logger('validateAppliedAnnotations: marking as rejected');
-                //     // Annotation was marked as applied but no longer exists - mark as rejected
-                //     rejectProposedAction(annotation.id);
-                // }
-                continue;
-            }
-        };
-
-        validateAppliedAnnotations();
-    }, [annotations, rejectProposedAction]);
 
     /**
      * Navigate to an annotation on annotation click
