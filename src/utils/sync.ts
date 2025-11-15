@@ -5,7 +5,7 @@ import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, ZoteroCollection } from '../../react/types/zotero';
-import { isLibrarySynced, getClientDateModified, getClientDateModifiedBatch, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, getParentLoadPromises } from './zoteroUtils';
+import { isLibrarySynced, getClientDateModifiedBatch, getClientDateModifiedAsISOString, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, getParentLoadPromises } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -127,8 +127,7 @@ export async function extractDeleteData(item: Zotero.Item): Promise<DeleteData> 
         zotero_key: item.key,
         zotero_version: item.version,
         zotero_synced: item.synced,
-        date_modified: await getClientDateModified(item)
-        // date_modified: await getClientDateModifiedAsISOString(item)
+        date_modified: await getClientDateModifiedAsISOString(item)
     };
 }
 
