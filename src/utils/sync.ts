@@ -566,7 +566,8 @@ export async function syncItemsToBackend(
     }
     // Check for skipped items
     if (skippedItems.length > 0) {
-        logger(`Beaver Sync '${syncSessionId}':     ${skippedItems.length} items were skipped`, 1);
+        const skippedItemsList = skippedItems.map(item => `${item.library_id}-${item.zotero_key}`).join(', ');
+        logger(`Beaver Sync '${syncSessionId}':     ${skippedItems.length} items were skipped: ${skippedItemsList}`, 1);
         if (skippedItems.length/ totalItemsForLibrary > 0.05) {
             throw new Error("Too many items were skipped during sync");
         }
