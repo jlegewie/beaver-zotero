@@ -218,7 +218,7 @@ export const loadThreadAtom = atom(
                     set(citationMetadataAtom, citationMetadata);
                     set(userAttachmentsAtom, userAttachments);
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                    set(updateCitationDataAtom);
+                    await set(updateCitationDataAtom);
                 }
             } else {
                 // Use remote API
@@ -249,7 +249,7 @@ export const loadThreadAtom = atom(
                     set(threadMessagesAtom, messages);
                     set(userAttachmentsAtom, userAttachments);
                     set(citationMetadataAtom, citationMetadata);
-                    set(updateCitationDataAtom);
+                    await set(updateCitationDataAtom);
                     // set(toolAttachmentsAtom, toolAttachments);
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
                     
