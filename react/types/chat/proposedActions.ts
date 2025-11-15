@@ -126,9 +126,6 @@ export interface ProposedAction {
     // Timestamps
     created_at: string;
     updated_at: string;
-    applied_at?: string;
-    rejected_at?: string;
-    undone_at?: string;
 }
 
 export type AnnotationProposedAction = ProposedAction & {
@@ -371,9 +368,6 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
         result_data: resultData,
         created_at: raw.created_at ?? raw.createdAt ?? new Date().toISOString(),
         updated_at: raw.updated_at ?? raw.updatedAt ?? new Date().toISOString(),
-        applied_at: raw.applied_at ?? raw.appliedAt,
-        rejected_at: raw.rejected_at ?? raw.rejectedAt,
-        undone_at: raw.undone_at ?? raw.undoneAt,
     };
 }
 
