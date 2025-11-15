@@ -96,6 +96,21 @@ export async function performConsistencyCheck(
         collections_deleted: 0,
     };
 
+    // Ensure all items for this library are fully loaded before accessing them
+    try {
+        logger(`Beaver Consistency Check '${consistencyId}': Loading Zotero items for library ${libraryID}`, 4);
+        await Zotero.Items.loadAll(libraryID);
+    } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        // These are expected/benign errors - items are loaded or loading
+        if (errorMessage?.includes('already loaded') || errorMessage?.includes('already loading')) {
+            logger(`Beaver Consistency Check '${consistencyId}': Items already loaded/loading for library ${libraryID}`, 4);
+        } else {
+            logger(`Beaver Consistency Check '${consistencyId}': Failed to load all items for library ${libraryID}: ${errorMessage}`, 2);
+            Zotero.logError(error);
+        }
+    }
+
     // Get all local items before processing backend data
     logger(`Beaver Consistency Check '${consistencyId}': Getting all local items to track new additions`, 3);
     const allLocalItems = await getAllItemsToSync(libraryID);
