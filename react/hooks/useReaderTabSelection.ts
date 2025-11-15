@@ -10,7 +10,8 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
-import { allAnnotationsAtom } from '../atoms/toolAnnotations';
+import { threadProposedActionsAtom } from '../atoms/proposedActions';
+import { getZoteroItemReferenceFromProposedAction } from '../types/chat/proposedActions';
 import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**
@@ -225,7 +226,13 @@ export function useReaderTabSelection() {
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
-                        if (store.get(allAnnotationsAtom).some((a) => a.zotero_key === item.key)) return;
+                        // Check if this annotation was created by a proposed action
+                        const proposedActions = store.get(threadProposedActionsAtom);
+                        const isFromProposedAction = proposedActions.some((action) => 
+                            getZoteroItemReferenceFromProposedAction(action)?.zotero_key === item.key &&
+                            getZoteroItemReferenceFromProposedAction(action)?.library_id === item.libraryID
+                        );
+                        if (isFromProposedAction) return;
                         if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                         await addItemToCurrentMessageItems(item);
                     }
