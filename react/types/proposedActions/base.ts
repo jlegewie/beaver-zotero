@@ -398,34 +398,3 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
         updated_at: raw.updated_at ?? raw.updatedAt ?? new Date().toISOString(),
     };
 }
-
-/**
- * Normalize raw actions from various formats
- */
-function normalizeRawActions(value: any): Record<string, any>[] {
-    if (!value) return [];
-    if (Array.isArray(value)) {
-        return value.filter(
-            (candidate): candidate is Record<string, any> =>
-                typeof candidate === 'object' &&
-                candidate !== null &&
-                typeof candidate.id === 'string'
-        );
-    }
-    if (typeof value === 'string') {
-        try {
-            const parsed = JSON.parse(value);
-            return normalizeRawActions(parsed);
-        } catch (_error) {
-            return [];
-        }
-    }
-    if (typeof value === 'object') {
-        const candidate = value as Record<string, any>;
-        if (typeof candidate.id === 'string') {
-            return [candidate];
-        }
-    }
-    return [];
-}
-
