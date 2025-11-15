@@ -11,7 +11,7 @@ import { allAnnotationsAtom, updateToolcallAnnotationAtom } from "../atoms/toolA
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
-const SYNC_BATCH_SIZE_INITIAL = 75;
+const SYNC_BATCH_SIZE_INITIAL = 85;
 
 /**
  * Interface for collected sync events
