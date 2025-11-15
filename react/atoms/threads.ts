@@ -47,6 +47,33 @@ export const currentThreadIdAtom = atom<string | null>(null);
 export const currentAssistantMessageIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
 
+export const threadScrollPositionsAtom = atom<Record<string, number>>({});
+export const currentThreadScrollPositionAtom = atom(
+    (get) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return undefined;
+        }
+        const positions = get(threadScrollPositionsAtom);
+        return positions[threadId];
+    },
+    (get, set, scrollTop: number | null) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return;
+        }
+        set(threadScrollPositionsAtom, (prevPositions) => {
+            const nextPositions = { ...prevPositions };
+            if (scrollTop === null) {
+                delete nextPositions[threadId];
+            } else {
+                nextPositions[threadId] = scrollTop;
+            }
+            return nextPositions;
+        });
+    }
+);
+
 /*
  * User added sources are sources added by the user to the 
  * thread. Either from existing messages with role "user"
@@ -191,7 +218,7 @@ export const loadThreadAtom = atom(
                     set(citationMetadataAtom, citationMetadata);
                     set(userAttachmentsAtom, userAttachments);
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                    set(updateCitationDataAtom);
+                    await set(updateCitationDataAtom);
                 }
             } else {
                 // Use remote API
@@ -222,7 +249,7 @@ export const loadThreadAtom = atom(
                     set(threadMessagesAtom, messages);
                     set(userAttachmentsAtom, userAttachments);
                     set(citationMetadataAtom, citationMetadata);
-                    set(updateCitationDataAtom);
+                    await set(updateCitationDataAtom);
                     // set(toolAttachmentsAtom, toolAttachments);
                     set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
                     
