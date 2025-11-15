@@ -47,6 +47,33 @@ export const currentThreadIdAtom = atom<string | null>(null);
 export const currentAssistantMessageIdAtom = atom<string | null>(null);
 export const threadMessagesAtom = atom<ChatMessage[]>([]);
 
+export const threadScrollPositionsAtom = atom<Record<string, number>>({});
+export const currentThreadScrollPositionAtom = atom(
+    (get) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return undefined;
+        }
+        const positions = get(threadScrollPositionsAtom);
+        return positions[threadId];
+    },
+    (get, set, scrollTop: number | null) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return;
+        }
+        set(threadScrollPositionsAtom, (prevPositions) => {
+            const nextPositions = { ...prevPositions };
+            if (scrollTop === null) {
+                delete nextPositions[threadId];
+            } else {
+                nextPositions[threadId] = scrollTop;
+            }
+            return nextPositions;
+        });
+    }
+);
+
 /*
  * User added sources are sources added by the user to the 
  * thread. Either from existing messages with role "user"

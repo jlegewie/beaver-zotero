@@ -34,7 +34,6 @@ export const zoteroServerCredentialsErrorAtom = atom(false);
 
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
-export const messagesScrollAtom = atom(0);
 
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 export const previewCloseTimeoutAtom = atom<number | null>(null)

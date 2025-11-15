@@ -4,7 +4,8 @@ import UserMessageDisplay from "./UserMessageDisplay"
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { ChatMessage, MessageGroup } from "../../types/chat/uiTypes";
 import AssistantMessagesGroup from "./AssistantMessagesGroup";
-import { messagesScrollAtom, userScrolledAtom } from "../../atoms/ui";
+import { userScrolledAtom } from "../../atoms/ui";
+import { currentThreadScrollPositionAtom } from "../../atoms/threads";
 import { store } from "../../store";
 
 type MessagesAreaProps = {
@@ -19,7 +20,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         const lastScrollTopRef = useRef(0);
         const restoredFromAtomRef = useRef(false);
         const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-        const storedScrollTop = useAtomValue(messagesScrollAtom);
+        const storedScrollTop = useAtomValue(currentThreadScrollPositionAtom);
         const BOTTOM_THRESHOLD = 20; // pixels
 
         const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -43,20 +44,20 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                 return;
             }
 
-            const delta = Math.abs(container.scrollTop - storedScrollTop);
+            const targetScrollTop = storedScrollTop ?? container.scrollHeight;
+            const delta = Math.abs(container.scrollTop - targetScrollTop);
             if (delta > 1) {
                 restoredFromAtomRef.current = true;
-                container.scrollTop = storedScrollTop;
+                container.scrollTop = targetScrollTop;
             } else {
                 restoredFromAtomRef.current = false;
             }
 
             const { scrollHeight, clientHeight } = container;
-            const distanceFromBottom = scrollHeight - storedScrollTop - clientHeight;
+            const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
             const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
             store.set(userScrolledAtom, !isNearBottom);
-            store.set(messagesScrollAtom, storedScrollTop);
-            lastScrollTopRef.current = storedScrollTop;
+            lastScrollTopRef.current = container.scrollTop;
         }, [storedScrollTop]);
 
         // Scroll to bottom when messages change
@@ -103,7 +104,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
                 store.set(userScrolledAtom, false);
             }
 
-            store.set(messagesScrollAtom, scrollTop);
+            store.set(currentThreadScrollPositionAtom, scrollTop);
             
             // Still track last scroll position for reference
             lastScrollTopRef.current = scrollTop;
