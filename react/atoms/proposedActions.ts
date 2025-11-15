@@ -171,7 +171,7 @@ export const rejectProposedActionStateAtom = atom(
     }
 );
 
-export const undoProposedActionStateAtom = atom(
+export const undoProposedActionAtom = atom(
     null,
     (_, set, actionId: string) => {
         // Update UI state
