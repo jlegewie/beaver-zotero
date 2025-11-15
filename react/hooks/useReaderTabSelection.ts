@@ -11,7 +11,7 @@ import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
 import { threadProposedActionsAtom } from '../atoms/proposedActions';
-import { getZoteroItemReferenceFromProposedAction } from '../types/chat/proposedActions';
+import { getZoteroItemReferenceFromProposedAction } from '../types/proposedActions/base';
 import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**

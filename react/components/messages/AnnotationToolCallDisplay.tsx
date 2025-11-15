@@ -25,7 +25,7 @@ import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { updateProposedActionsAtom, getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
-import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/chat/proposedActions';
+import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/proposedActions/base';
 import { AckLink } from '../../../src/services/proposedActionsService';
 
 interface AnnotationListItemProps {

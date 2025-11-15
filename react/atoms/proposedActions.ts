@@ -3,7 +3,7 @@ import { proposedActionsService, AckLink } from '../../src/services/proposedActi
 import { logger } from '../../src/utils/logger';
 import {
     ProposedAction,
-} from '../types/chat/proposedActions';
+} from '../types/proposedActions/base';
 
 
 /*

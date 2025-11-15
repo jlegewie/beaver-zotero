@@ -13,7 +13,7 @@ import {
 } from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
-import { isAnnotationTool } from '../../types/chat/proposedActions';
+import { isAnnotationTool } from '../../types/proposedActions/base';
 import AnnotationToolCallDisplay from './AnnotationToolCallDisplay';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 

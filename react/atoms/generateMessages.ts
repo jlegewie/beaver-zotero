@@ -39,7 +39,7 @@ import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
-import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/chat/proposedActions';
+import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/proposedActions/base';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';

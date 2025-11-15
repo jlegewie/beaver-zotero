@@ -1,5 +1,5 @@
-import { hasAppliedZoteroItem, ProposedAction, isAnnotationAction } from "../types/chat/proposedActions";
-import { getZoteroItemFromProposedAction } from "../types/chat/proposedActions";
+import { hasAppliedZoteroItem, ProposedAction, isAnnotationAction } from "../types/proposedActions/base";
+import { getZoteroItemFromProposedAction } from "../types/proposedActions/base";
 
 /**
  * Validates that a proposed action has been applied and is still valid.

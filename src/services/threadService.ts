@@ -6,7 +6,7 @@ import { toMessageUI } from '../../react/types/chat/converters';
 import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
 import { ThreadModel } from '../../react/types/chat/apiTypes';
 import { CitationMetadata } from '../../react/types/citations';
-import { ProposedAction, toProposedAction } from '../../react/types/chat/proposedActions';
+import { ProposedAction, toProposedAction } from '../../react/types/proposedActions/base';
 
 
 // Based on backend MessageModel

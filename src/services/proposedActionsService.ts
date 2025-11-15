@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ActionStatus, ActionResultDataType } from '../../react/types/chat/proposedActions';
+import { ActionStatus, ActionResultDataType } from '../../react/types/proposedActions/base';
 import { logger } from '../utils/logger';
 
 export interface AckLink {

@@ -4,7 +4,7 @@ import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
-import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/chat/proposedActions';
+import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/proposedActions/base';
 
 
 const HIGHLIGHT_COLORS: Record<string, string> = {

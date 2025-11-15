@@ -8,7 +8,7 @@ import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
 import { threadProposedActionsAtom, undoProposedActionAtom } from "../atoms/proposedActions";
-import { getZoteroItemReferenceFromProposedAction } from "../types/chat/proposedActions";
+import { getZoteroItemReferenceFromProposedAction } from "../types/proposedActions/base";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries

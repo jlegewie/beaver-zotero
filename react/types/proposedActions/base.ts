@@ -1,4 +1,4 @@
-import { PageLocation, BoundingBox, CoordOrigin } from '../../types/citations';
+import { PageLocation, BoundingBox, CoordOrigin } from '../citations';
 import { ZoteroItemReference } from '../zotero';
 
 /**

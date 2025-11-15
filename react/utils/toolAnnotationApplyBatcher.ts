@@ -2,7 +2,7 @@ import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
 import { proposedActionsService, AckLink } from '../../src/services/proposedActionsService';
 import { logger } from '../../src/utils/logger';
-import { AnnotationProposedAction, AnnotationResultData } from '../types/chat/proposedActions';
+import { AnnotationProposedAction, AnnotationResultData } from '../types/proposedActions/base';
 import { updateProposedActionsAtom, ProposedActionUpdate } from '../atoms/proposedActions';
 import { applyAnnotation } from './toolAnnotationActions';
 
