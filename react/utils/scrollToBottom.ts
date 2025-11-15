@@ -19,7 +19,7 @@ export const scrollToBottom = (
     }
     
     const container = containerRef.current;
-    const targetScrollTop = container.scrollHeight;
+    const targetScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
     const startScrollTop = container.scrollTop;
     const distance = targetScrollTop - startScrollTop;
     

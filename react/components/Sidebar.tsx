@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { MessagesArea } from "./messages/MessagesArea"
-import { currentThreadIdAtom, threadMessagesAtom } from '../atoms/threads';
+import { currentThreadIdAtom, threadMessagesAtom, currentThreadScrollPositionAtom } from '../atoms/threads';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -37,19 +37,14 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
 
     useEffect(() => {
-        if (isLoadingThread) return;
-        if (messagesContainerRef.current) {
-            scrollToBottom(messagesContainerRef, false);
-        }
-    }, [threadId]);
-
-    useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
     }, []);
     
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
             store.set(userScrolledAtom, false);
+            // Clear stored scroll position to let natural scroll-to-bottom take over
+            store.set(currentThreadScrollPositionAtom, null);
             scrollToBottom(messagesContainerRef, false);
         }
     };
