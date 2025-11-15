@@ -5,24 +5,49 @@ import { ChatMessage, MessageGroup } from "../../types/chat/uiTypes";
 import AssistantMessagesGroup from "./AssistantMessagesGroup";
 import { userScrolledAtom } from "../../atoms/ui";
 import { store } from "../../store";
+import { useScrollPosition } from "../../hooks/useScrollPosition";
+import { useAtomValue } from "jotai";
+import { currentThreadIdAtom } from "../../atoms/threads";
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
+    location: 'library' | 'reader';
 };
 
 export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
     function MessagesArea(
-        { messages }: MessagesAreaProps,
+        { messages, location }: MessagesAreaProps,
         ref: React.ForwardedRef<HTMLDivElement>
     ) {
         const lastScrollTopRef = useRef(0);
+        const threadId = useAtomValue(currentThreadIdAtom);
+        const previousThreadIdRef = useRef(threadId);
+        const previousMessageCountRef = useRef(messages.length);
+        
+        // Initialize scroll position persistence
+        useScrollPosition(ref as React.RefObject<HTMLElement>, location);
 
-        // Scroll to bottom when messages change
-        useEffect(() => {
-            if (ref && 'current' in ref && ref.current && messages.length > 0) {
-                scrollToBottom(ref as React.RefObject<HTMLElement>);
-            }
-        }, [messages, ref]);
+        // Smart scroll to bottom: only when new messages arrive AND user hasn't scrolled up
+        // useEffect(() => {
+        //     if (!ref || !('current' in ref) || !ref.current || messages.length === 0) {
+        //         return;
+        //     }
+
+        //     const isNewThread = threadId !== previousThreadIdRef.current;
+        //     const hasNewMessages = messages.length > previousMessageCountRef.current;
+        //     const userHasScrolledUp = store.get(userScrolledAtom);
+
+        //     // Scroll to bottom if:
+        //     // 1. It's a new thread (always scroll to bottom on thread change)
+        //     // 2. New messages arrived AND user hasn't scrolled up
+        //     if (isNewThread || (hasNewMessages && !userHasScrolledUp)) {
+        //         scrollToBottom(ref as React.RefObject<HTMLElement>);
+        //     }
+
+        //     // Update refs
+        //     previousThreadIdRef.current = threadId;
+        //     previousMessageCountRef.current = messages.length;
+        // }, [messages, threadId, ref]);
 
         // Group messages by role
         const messageGroups = useMemo(() => {

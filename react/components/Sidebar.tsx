@@ -36,12 +36,12 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
 
-    useEffect(() => {
-        if (isLoadingThread) return;
-        if (messagesContainerRef.current) {
-            scrollToBottom(messagesContainerRef, false);
-        }
-    }, [threadId]);
+    // useEffect(() => {
+    //     if (isLoadingThread) return;
+    //     if (messagesContainerRef.current) {
+    //         scrollToBottom(messagesContainerRef, false);
+    //     }
+    // }, [threadId]);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -123,6 +123,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {threadMessages.length > 0 ? (
                 <MessagesArea 
                     messages={threadMessages} 
+                    location={location}
                     ref={messagesContainerRef}
                 />
             ) : (

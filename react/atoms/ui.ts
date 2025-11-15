@@ -35,6 +35,22 @@ export const zoteroServerCredentialsErrorAtom = atom(false);
 // UI behavior and elements
 export const userScrolledAtom = atom(false);
 
+// Scroll position tracking for library and reader sidebars
+export type ScrollPositionState = {
+    threadId: string | null;
+    scrollTop: number;
+};
+
+export const libraryScrollPositionAtom = atom<ScrollPositionState>({
+    threadId: null,
+    scrollTop: 0,
+});
+
+export const readerScrollPositionAtom = atom<ScrollPositionState>({
+    threadId: null,
+    scrollTop: 0,
+});
+
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 export const previewCloseTimeoutAtom = atom<number | null>(null)
 
