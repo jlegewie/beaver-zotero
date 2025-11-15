@@ -1,6 +1,5 @@
 import { atom } from 'jotai';
 import { proposedActionsService, AckLink } from '../../src/services/proposedActionsService';
-import { ActionStatus } from '../types/chat/proposedActions';
 import { logger } from '../../src/utils/logger';
 import {
     ProposedAction,
