@@ -28,9 +28,12 @@ export interface AckResponse {
 
 export interface UpdateProposedActionRequest {
     status?: ActionStatus;
-    error_message?: string | null;
+    error_message?: string;
     result_data?: Record<string, any>;
-    validation_errors?: Record<string, any>;
+    error_details?: Record<string, any>;
+    clear_error_message?: boolean;
+    clear_result_data?: boolean;
+    clear_error_details?: boolean;
 }
 
 export interface ProposedActionResponse {
@@ -52,9 +55,12 @@ export interface UpdateProposedActionResponse {
 export interface BatchUpdateItem {
     action_id: string;
     status?: ActionStatus;
-    error_message?: string | null;
+    error_message?: string;
     result_data?: Record<string, any>;
-    validation_errors?: Record<string, any>;
+    error_details?: Record<string, any>;
+    clear_error_message?: boolean;
+    clear_result_data?: boolean;
+    clear_error_details?: boolean;
 }
 
 export interface BatchUpdateRequest {

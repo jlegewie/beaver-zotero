@@ -161,8 +161,8 @@ export const rejectProposedActionStateAtom = atom(
         // Update backend state
         proposedActionsService.updateAction(actionId, {
             status: 'rejected',
-            result_data: undefined,
-            error_message: undefined,
+            clear_result_data: true,
+            clear_error_message: true,
         }).catch((error) => {
             logger(`rejectProposedActionAtom: failed to persist state for action ${actionId}: ${error}`, 1);
         });
@@ -183,8 +183,8 @@ export const undoProposedActionAtom = atom(
         // Update backend state
         proposedActionsService.updateAction(actionId, {
             status: 'undone',
-            result_data: undefined,
-            error_message: undefined,
+            clear_result_data: true,
+            clear_error_message: true,
         }).catch((error) => {
             logger(`undoProposedActionStateAtom: failed to persist state for action ${actionId}: ${error}`, 1);
         });
