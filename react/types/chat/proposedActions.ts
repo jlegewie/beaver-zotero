@@ -104,7 +104,7 @@ export type ActionResultDataType = AnnotationResultData;
 
 
 /**
- * Get a Zotero item reference from a ProposedAction if it has been applied
+ * Get a Zotero item or item reference from a ProposedAction if it has been applied
  */
 export const getZoteroItemReferenceFromProposedAction = (proposedAction: ProposedAction): ZoteroItemReference | null => {
     if(proposedAction.status !== 'applied' || !proposedAction.result_data?.zotero_key || !proposedAction.result_data?.library_id) {
@@ -116,6 +116,13 @@ export const getZoteroItemReferenceFromProposedAction = (proposedAction: Propose
     } as ZoteroItemReference;
 };
 
+export const getZoteroItemFromProposedAction = async (proposedAction: ProposedAction): Promise<Zotero.Item | null> => {
+    const zoteroItemReference = getZoteroItemReferenceFromProposedAction(proposedAction);
+    if(!zoteroItemReference) {
+        return null;
+    }
+    return (await Zotero.Items.getByLibraryAndKeyAsync(zoteroItemReference.library_id, zoteroItemReference.zotero_key)) || null;
+};
 
 /**
  * Core proposed action model matching the backend schema
