@@ -213,6 +213,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
+    const undoProposedAction = useSetAtom(undoProposedActionAtom);
 
     // Extract annotations from tool call result
     const getProposedActionsByToolcall = useAtomValue(getProposedActionsByToolcallAtom);
@@ -444,7 +445,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 } else {
                     // deleteAnnotationFromReader: Removes annotation from PDF reader
                     await deleteAnnotationFromReader(annotation);
-                    rejectProposedAction(annotation.id);
+                    undoProposedAction(annotation.id);
                 }
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to delete annotation';
