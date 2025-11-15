@@ -66,7 +66,7 @@ export class ThreadService extends ApiService {
         proposedActions: ProposedAction[]
     }> {
         // Get thread messages from backend using new endpoint
-        const response = await this.get<ThreadMessagesResponse>(`/api/v1/threads/${threadId}/messages-with-annotations`);
+        const response = await this.get<ThreadMessagesResponse>(`/api/v1/threads/${threadId}/messages-with-proposed-actions`);
         const messages = response.messages;
         const proposedActions = response.proposed_actions?.map(toProposedAction) || [];
         
