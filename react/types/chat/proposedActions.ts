@@ -106,6 +106,11 @@ export type ActionResultDataType = AnnotationResultData;
 /**
  * Get a Zotero item or item reference from a ProposedAction if it has been applied
  */
+export const hasAppliedZoteroItem = (proposedAction: ProposedAction): boolean => {
+    return proposedAction.status === 'applied' && proposedAction.result_data?.zotero_key && proposedAction.result_data?.library_id;
+};
+
+
 export const getZoteroItemReferenceFromProposedAction = (proposedAction: ProposedAction): ZoteroItemReference | null => {
     if(proposedAction.status !== 'applied' || !proposedAction.result_data?.zotero_key || !proposedAction.result_data?.library_id) {
         return null;
