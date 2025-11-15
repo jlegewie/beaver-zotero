@@ -7,7 +7,8 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { allAnnotationsAtom, updateToolcallAnnotationAtom } from "../atoms/toolAnnotations";
+import { threadProposedActionsAtom, undoProposedActionAtom } from "../atoms/proposedActions";
+import { getZoteroItemReferenceFromProposedAction } from "../types/chat/proposedActions";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
@@ -224,15 +225,20 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key && syncLibraryIds.includes(libraryID)) {
-                                        // Skip if tool annotation is deleted
-                                        const toolAnnotations = store.get(allAnnotationsAtom).filter((a) => a.library_id === libraryID && a.zotero_key === key);
-                                        if (toolAnnotations.length > 0) {
-                                            logger(`useZoteroSync: Skipping delete event for tool annotation ${toolAnnotations[0].id}`, 3);
-                                            store.set(updateToolcallAnnotationAtom, {
-                                                toolcallId: toolAnnotations[0].toolcall_id,
-                                                annotationId: toolAnnotations[0].id,
-                                                updates: { status: 'deleted', modified_at: new Date().toISOString() }
+                                        // Check if this item was created by a proposed action
+                                        const proposedActions = store.get(threadProposedActionsAtom);
+                                        const matchingActions = proposedActions
+                                            .filter((action) => {
+                                                const itemRef = getZoteroItemReferenceFromProposedAction(action);
+                                                return itemRef && itemRef.library_id === libraryID && itemRef.zotero_key === key;
                                             });
+                                        
+                                        if (matchingActions.length > 0) {
+                                            logger(`useZoteroSync: Skipping delete event for proposed action(s), marking as undone: ${matchingActions.map(a => a.id).join(', ')}`, 3);
+                                            matchingActions.forEach(action => {
+                                                store.set(undoProposedActionAtom, action.id);
+                                            });
+                                            // Return early to avoid queueing for backend deletion
                                             return;
                                         }
                                         // Queue for backend deletion
