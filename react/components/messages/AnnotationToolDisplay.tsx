@@ -167,7 +167,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     );
 };
 
-interface AnnotationToolCallDisplayProps {
+interface AnnotationToolDisplayProps {
     messageId: string;
     toolCalls: ToolCall[];
 }
@@ -181,7 +181,7 @@ interface AnnotationToolCallDisplayProps {
  * 2. pending -> Apply annotation to PDF (if reader is open)
  * 3. applied -> User can navigate to or delete the annotation
  */
-const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ messageId, toolCalls }) => {
+const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId, toolCalls }) => {
 
     // Current reader state
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
@@ -540,4 +540,4 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
     );
 };
 
-export default AnnotationToolCallDisplay;
+export default AnnotationToolDisplay;
