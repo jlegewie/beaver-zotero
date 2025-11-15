@@ -61,7 +61,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
-            if (annotation.status === 'rejected' || annotation.status === 'pending') {
+            if (annotation.status === 'rejected' || annotation.status === 'pending' || annotation.status === 'undone') {
                 onReAdd(annotation);
             } else {
                 onDelete(annotation);
@@ -76,7 +76,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     const hasApplicationError = annotation.status !== 'error';
 
     // Icon color
-    let iconColor = annotation.status === 'rejected' || annotation.status === 'pending'
+    let iconColor = annotation.status === 'rejected' || annotation.status === 'pending' || annotation.status === 'undone'
         ? 'font-color-tertiary'
         : 'font-color-secondary';
     iconColor = annotation.result_data?.color
@@ -98,7 +98,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     ];
 
     const getTextClasses = () => {
-        if (annotation.status === 'rejected') return 'font-color-tertiary line-through';
+        if (annotation.status === 'rejected' || annotation.status === 'undone') return 'font-color-tertiary line-through';
         if (annotation.status === 'pending') return 'font-color-tertiary';
         return 'font-color-secondary';
     }
@@ -106,7 +106,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     if (isHovered) {
         baseClasses.push('bg-quinary');
     }
-    if (annotation.status === 'rejected' || annotation.status === 'error') {
+    if (annotation.status === 'rejected' || annotation.status === 'undone' || annotation.status === 'error') {
         baseClasses.push('opacity-60');
     }
 
@@ -151,7 +151,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         />
                     </div>
                 )}
-                {(annotation.status === 'rejected' || annotation.status === 'pending') && (
+                {(annotation.status === 'rejected' || annotation.status === 'pending' || annotation.status === 'undone') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
@@ -420,7 +420,7 @@ const AnnotationToolCallDisplay: React.FC<AnnotationToolCallDisplayProps> = ({ m
                 await navigateToAnnotation(annotationItem);
 
             // Re-add annotation if it was deleted
-            } else if (annotation.status === 'rejected' || annotation.status === 'pending') {
+            } else if (annotation.status === 'rejected' || annotation.status === 'pending' || annotation.status === 'undone') {
                 await handleApplyAnnotations(annotation.id);
             }
         },
