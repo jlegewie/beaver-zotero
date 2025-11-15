@@ -2,16 +2,17 @@ import { atom } from "jotai";
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
-import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
+import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
-import { threadProposedActionsAtom } from "./proposedActions";
+import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
-import { logger } from "../../src/utils/logger";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
+import { validateAppliedAction } from "../utils/proposedActions";
+import { logger } from "../../src/utils/logger";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -197,6 +198,17 @@ export const loadThreadAtom = atom(
                 
                 // Set proposed actions
                 set(threadProposedActionsAtom, proposedActions);
+
+                // Validate proposed actions and undo if not valid
+                await Promise.all(proposedActions.map(async action => {
+                    const isValid = await validateAppliedAction(action);
+                    if (!isValid) {
+                        logger(`loadThreadAtom: undoing proposedAction ${action.id} because it is not valid`, 1);
+                        set(undoProposedActionAtom, action.id);
+                    }
+                    return isValid;
+                }));
+                
             }
         } catch (error) {
             console.error('Error loading thread:', error);
