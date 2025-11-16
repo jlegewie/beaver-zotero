@@ -211,7 +211,6 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                     const toolCall = group[0];
                     // Annotation tool calls are handled by AnnotationToolCallDisplay
                     if (isAnnotationTool(toolCall.function?.name)) {
-                        console.log('Annotation tool call', toolCall);
                         return <AnnotationToolCallDisplay key={toolCall.id} messageId={message.id} toolCalls={[toolCall]} />;
                     }
                     // Search tool calls are handled by ToolCallDisplay
