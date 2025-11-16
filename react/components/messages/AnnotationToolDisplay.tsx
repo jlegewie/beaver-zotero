@@ -336,7 +336,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
 
             // STEP 6: NAVIGATE TO FIRST SUCCESSFULLY APPLIED ANNOTATION
             if (actionsResultDataToAcknowledge.length > 0) {
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 250));
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
                     actionsResultDataToAcknowledge[0].result_data.library_id,
                     actionsResultDataToAcknowledge[0].result_data.zotero_key
