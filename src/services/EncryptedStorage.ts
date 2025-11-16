@@ -27,7 +27,8 @@ export class EncryptedStorage {
             return this.encryptionKey;
         }
 
-        const machineId = Zotero.version + Zotero.platform;
+        const localUserKey = Zotero.Users.getLocalUserKey();
+        const machineId = localUserKey + Zotero.platform;
         const machineIdBytes = this.textEncoder.encode(machineId);
         const keyMaterial = await crypto.subtle.importKey(
             'raw',
