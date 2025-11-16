@@ -245,10 +245,10 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
 
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
     const toggleResults = useCallback(() => {
-        if (isCompleted && totalAnnotations > 0 && !allErrors) {
+        if (isCompleted && totalAnnotations > 0) {
             toggleAnnotationPanelVisibility(groupId);
         }
-    }, [allErrors, groupId, isCompleted, totalAnnotations, toggleAnnotationPanelVisibility]);
+    }, [groupId, isCompleted, totalAnnotations, toggleAnnotationPanelVisibility]);
 
     /**
      * Handle applying annotations to the PDF
