@@ -1,10 +1,10 @@
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { toolAnnotationsService } from '../../src/services/toolAnnotationsService';
+import { proposedActionsService, AckLink } from '../../src/services/proposedActionsService';
 import { logger } from '../../src/utils/logger';
-import { ToolAnnotation } from '../types/chat/toolAnnotations';
-import { AnnotationUpdates, updateToolcallAnnotationsAtom, upsertToolcallAnnotationAtom } from '../atoms/toolAnnotations';
-import { applyAnnotation } from './toolAnnotationActions';
+import { AnnotationProposedAction, AnnotationResultData } from '../types/proposedActions/base';
+import { updateProposedActionsAtom, ProposedActionUpdate } from '../atoms/proposedActions';
+import { applyAnnotation } from './annotationActions';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;
 const MAX_QUEUE_SIZE = 50;
@@ -12,12 +12,12 @@ const MAX_QUEUE_SIZE = 50;
 type AnnotationBatchItem = {
     messageId: string;
     toolcallId: string;
-    annotations: ToolAnnotation[];
+    actions: AnnotationProposedAction[];
 };
 
 type AckEntry = {
     toolcallId: string;
-    annotation: ToolAnnotation;
+    action: AnnotationProposedAction;
 };
 
 export class ToolAnnotationApplyBatcher {
@@ -32,7 +32,7 @@ export class ToolAnnotationApplyBatcher {
     }
 
     public enqueue(item: AnnotationBatchItem): void {
-        if (item.annotations.length === 0) {
+        if (item.actions.length === 0) {
             return;
         }
 
@@ -106,124 +106,129 @@ export class ToolAnnotationApplyBatcher {
 
         const ackRequests = new Map<string, AckEntry[]>();
         const ackIndex = new Map<string, AckEntry>();
-        const errorAnnotationsToPersist: Array<{ annotation: ToolAnnotation }> = [];
-        const ackErrorUpdatesByToolcall = new Map<string, AnnotationUpdates[]>();
-        const ackErrorsToPersist: Array<{ annotationId: string; detail: string }> = [];
+        const errorActionsToUpdate: ProposedActionUpdate[] = [];
+        const ackErrorUpdates: ProposedActionUpdate[] = [];
+        const errorActionsToPersist: Array<{ actionId: string; errorMessage: string }> = [];
+        const ackErrorsToPersist: Array<{ actionId: string; detail: string }> = [];
 
         for (const item of batch) {
-            const appliedAnnotations = await Promise.all(
-                item.annotations.map((annotation) => this.applySingleAnnotation(annotation, currentReaderKey))
+            const appliedActions = await Promise.all(
+                item.actions.map((action) => this.applySingleAction(action, currentReaderKey))
             );
 
-            store.set(upsertToolcallAnnotationAtom, {
-                toolcallId: item.toolcallId,
-                annotations: appliedAnnotations,
-            });
+            // Update state for all actions in this batch item
+            store.set(updateProposedActionsAtom, 
+                appliedActions.map((action) => ({
+                    id: action.id,
+                    status: action.status,
+                    result_data: action.result_data,
+                    error_message: action.error_message,
+                }))
+            );
 
-            appliedAnnotations
-                .filter((annotation) => annotation.status === 'applied' && Boolean(annotation.zotero_key))
-                .forEach((annotation) => {
-                    const existing = ackIndex.get(annotation.id);
+            appliedActions
+                .filter((action) => action.status === 'applied' && action.result_data?.zotero_key)
+                .forEach((action) => {
+                    const existing = ackIndex.get(action.id);
                     if (existing) {
-                        logger(`AnnotationBatcher: duplicate annotation ${annotation.id} received for ack, ignoring duplicate`, 2);
+                        logger(`AnnotationBatcher: duplicate action ${action.id} received for ack, ignoring duplicate`, 2);
                         return;
                     }
 
-                    const entry: AckEntry = { toolcallId: item.toolcallId, annotation };
+                    const entry: AckEntry = { toolcallId: item.toolcallId, action };
                     if (!ackRequests.has(item.messageId)) {
                         ackRequests.set(item.messageId, []);
                     }
                     ackRequests.get(item.messageId)!.push(entry);
-                    ackIndex.set(annotation.id, entry);
+                    ackIndex.set(action.id, entry);
                 });
 
-            appliedAnnotations
-                .filter((annotation) => annotation.status === 'error')
-                .forEach((annotation) => {
-                    errorAnnotationsToPersist.push({ annotation });
+            appliedActions
+                .filter((action) => action.status === 'error')
+                .forEach((action) => {
+                    errorActionsToUpdate.push({
+                        id: action.id,
+                        status: 'error',
+                        error_message: action.error_message || 'Failed to apply action',
+                    });
+                    errorActionsToPersist.push({
+                        actionId: action.id,
+                        errorMessage: action.error_message || 'Failed to apply action',
+                    });
                 });
         }
 
         for (const [messageId, entries] of ackRequests.entries()) {
             try {
-                const response = await toolAnnotationsService.markAnnotationsApplied(
-                    messageId,
-                    entries.map(({ annotation }) => ({
-                        annotationId: annotation.id,
-                        zoteroKey: annotation.zotero_key as string,
-                    }))
-                );
+                const links: AckLink[] = entries.map(({ action }) => ({
+                    action_id: action.id,
+                    result_data: action.result_data as AnnotationResultData,
+                }));
+
+                const response = await proposedActionsService.acknowledgeActions(messageId, links);
 
                 if (response.errors.length > 0) {
                     response.errors.forEach((ackError) => {
-                        const entry = ackIndex.get(ackError.annotation_id);
+                        const entry = ackIndex.get(ackError.action_id);
                         if (!entry) {
                             logger(
-                                `AnnotationBatcher: ack error for unknown annotation ${ackError.annotation_id}: ${ackError.detail}`,
+                                `AnnotationBatcher: ack error for unknown action ${ackError.action_id}: ${ackError.detail}`,
                                 1
                             );
                             return;
                         }
 
-                        const updates = ackErrorUpdatesByToolcall.get(entry.toolcallId) || [];
-                        updates.push({
-                            annotationId: ackError.annotation_id,
-                            updates: {
-                                status: 'error',
-                                error_message: ackError.detail,
-                                modified_at: new Date().toISOString(),
-                            },
+                        ackErrorUpdates.push({
+                            id: ackError.action_id,
+                            status: 'error',
+                            error_message: ackError.detail,
                         });
-                        ackErrorUpdatesByToolcall.set(entry.toolcallId, updates);
                         ackErrorsToPersist.push({
-                            annotationId: ackError.annotation_id,
+                            actionId: ackError.action_id,
                             detail: ackError.detail,
                         });
                     });
                 }
             } catch (error: any) {
                 logger(
-                    `AnnotationBatcher: failed to acknowledge annotations for message ${messageId}: ${error?.message || error}`,
+                    `AnnotationBatcher: failed to acknowledge actions for message ${messageId}: ${error?.message || error}`,
                     1
                 );
             }
         }
 
-        for (const [toolcallId, updates] of ackErrorUpdatesByToolcall.entries()) {
-            store.set(updateToolcallAnnotationsAtom, {
-                toolcallId,
-                updates,
-            });
+        if (ackErrorUpdates.length > 0) {
+            store.set(updateProposedActionsAtom, ackErrorUpdates);
         }
 
         const backendUpdatePromises: Promise<void>[] = [];
 
-        errorAnnotationsToPersist.forEach(({ annotation }) => {
+        errorActionsToPersist.forEach(({ actionId, errorMessage }) => {
             backendUpdatePromises.push((async () => {
                 try {
-                    await toolAnnotationsService.updateAnnotation(annotation.id, {
+                    await proposedActionsService.updateAction(actionId, {
                         status: 'error',
-                        error_message: annotation.error_message || 'Failed to apply annotation',
+                        error_message: errorMessage,
                     });
                 } catch (error: any) {
                     logger(
-                        `AnnotationBatcher: failed to persist error status for annotation ${annotation.id}: ${error?.message || error}`,
+                        `AnnotationBatcher: failed to persist error status for action ${actionId}: ${error?.message || error}`,
                         1
                     );
                 }
             })());
         });
 
-        ackErrorsToPersist.forEach(({ annotationId, detail }) => {
+        ackErrorsToPersist.forEach(({ actionId, detail }) => {
             backendUpdatePromises.push((async () => {
                 try {
-                    await toolAnnotationsService.updateAnnotation(annotationId, {
+                    await proposedActionsService.updateAction(actionId, {
                         status: 'error',
                         error_message: detail,
                     });
                 } catch (error: any) {
                     logger(
-                        `AnnotationBatcher: failed to update backend for ack error ${annotationId}: ${error?.message || error}`,
+                        `AnnotationBatcher: failed to update backend for ack error ${actionId}: ${error?.message || error}`,
                         1
                     );
                 }
@@ -235,49 +240,34 @@ export class ToolAnnotationApplyBatcher {
         }
     }
 
-    private async applySingleAnnotation(
-        annotation: ToolAnnotation,
+    private async applySingleAction(
+        action: AnnotationProposedAction,
         currentReaderKey: string | null
-    ): Promise<ToolAnnotation> {
-        if (!currentReaderKey) {
-            return annotation;
+    ): Promise<AnnotationProposedAction> {
+        if (!currentReaderKey || !action.proposed_data?.attachment_key) {
+            return action;
         }
 
-        if (annotation.attachment_key !== currentReaderKey) {
-            return annotation;
+        if (action.proposed_data.attachment_key !== currentReaderKey) {
+            return action;
         }
 
         try {
-            const result = await applyAnnotation(annotation);
-            if (!result.updated) {
-                return annotation;
-            }
-
-            if (result.annotation.status === 'applied') {
-                logger(`AnnotationBatcher: applied annotation ${result.annotation.id}`, 1);
-            }
-
-            if (result.annotation.status === 'error') {
-                logger(
-                    `AnnotationBatcher: error applying annotation ${result.annotation.id}: ${result.annotation.error_message}`,
-                    1
-                );
-            }
+            const result = await applyAnnotation(action);
+            logger(`AnnotationBatcher: applied action ${action.id}`, 1);
 
             return {
-                ...result.annotation,
-                ...(result.annotation.status === 'error' && !result.annotation.error_message
-                    ? { error_message: result.error || 'Failed to create annotation' }
-                    : {}),
+                ...action,
+                status: 'applied',
+                result_data: result,
             };
         } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to apply annotation';
-            logger(`AnnotationBatcher: failed to apply annotation ${annotation.id}: ${errorMessage}`, 1);
+            const errorMessage = error?.message || 'Failed to apply action';
+            logger(`AnnotationBatcher: failed to apply action ${action.id}: ${errorMessage}`, 1);
             return {
-                ...annotation,
+                ...action,
                 status: 'error',
-                error_message: errorMessage,
-                modified_at: new Date().toISOString(),
+                error_message: errorMessage
             };
         }
     }

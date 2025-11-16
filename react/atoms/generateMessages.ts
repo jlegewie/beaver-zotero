@@ -22,9 +22,9 @@ import {
     toolAttachmentsAtom,
     streamReasoningToMessageAtom
 } from './threads';
-import { upsertToolcallAnnotationAtom, allAnnotationsAtom } from './toolAnnotations';
-import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState } from './messageComposition';
-import { currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from './messageComposition';
+import { addProposedActionsAtom, threadProposedActionsAtom } from './proposedActions';
+import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState, currentReaderAttachmentKeyAtom } from './messageComposition';
+import { currentReaderAttachmentAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
 import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
@@ -39,11 +39,11 @@ import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { CitationMetadata } from '../types/citations';
 import { userIdAtom } from './auth';
-import { toToolAnnotation, ToolAnnotation } from '../types/chat/toolAnnotations';
-import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
+import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/proposedActions/base';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -271,26 +271,36 @@ export const regenerateFromMessageAtom = atom(
 
         // Delete annotations if user confirms
         const messageIdsToDelete = threadMessages.slice(lastUserMessageIndex + 1).map(m => m.id);
-        const annotationsToDelete = get(allAnnotationsAtom)
+        const proposedActionsToDelete = get(threadProposedActionsAtom)
+            .filter(isAnnotationAction)
             .filter(a => messageIdsToDelete.includes(a.message_id))
-            .filter(a => a.status === 'applied' && a.zotero_key);
-        if (annotationsToDelete.length > 0) {
+            .filter(a => a.status === 'applied' && a.result_data);
+        if (proposedActionsToDelete.length > 0) {
+            const actionsAreAnnotations = proposedActionsToDelete.every(isAnnotationAction);
+            const title = actionsAreAnnotations
+                ? 'Delete annotations?'
+                : 'Undo changes?';
+            const message = actionsAreAnnotations
+                ? 'Do you want to delete the annotations created by the assistant messages that will be regenerated?'
+                : 'Do you want to undo the changes created by the assistant messages that will be regenerated?';
             const buttonIndex = Zotero.Prompt.confirm({
                 window: Zotero.getMainWindow(),
-                title: 'Delete annotations?',
-                text: 'Do you want to delete the annotations created by the assistant messages that will be regenerated?',
+                title: title,
+                text: message,
                 button0: Zotero.Prompt.BUTTON_TITLE_YES,
                 button1: Zotero.Prompt.BUTTON_TITLE_NO,
                 defaultButton: 1,
             });
             if (buttonIndex === 0) {
-                for (const annotation of annotationsToDelete) {
-                    const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                        annotation.library_id,
-                        annotation.zotero_key as string
-                    );
-                    if (annotationItem) {
-                        await annotationItem.eraseTx();
+                for (const proposedAction of proposedActionsToDelete) {
+                    if (isAnnotationAction(proposedAction) && proposedAction.result_data?.zotero_key) {
+                        const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                            proposedAction.result_data.library_id,
+                            proposedAction.result_data.zotero_key
+                        );
+                        if (annotationItem) {
+                            await annotationItem.eraseTx();
+                        }
                     }
                 }
             }
@@ -567,66 +577,100 @@ async function _processChatCompletionViaBackend(
                 // Update state
                 set(addOrUpdateToolcallAtom, { messageId, toolcallId, toolcall });
             },
-            onAnnotation: (
+            onProposedAction: (
                 messageId: string,
-                toolcallId: string,
-                rawAnnotations: Record<string, any>[]
+                toolcallId: string | null,
+                rawAction: Record<string, any> | Record<string, any>[]
             ) => {
-                logger(`event 'onAnnotation': messageId: ${messageId}, toolcallId: ${toolcallId}, annotationsCount: ${rawAnnotations.length}, annotationIds: ${rawAnnotations.map(a => a.id || 'unknown').join(', ')}`, 1);
-                async function applyAnnotationsAndUpsert(rawAnnotations: Record<string, any>[]) {
+                const asArray = Array.isArray(rawAction) ? rawAction : [rawAction];
+                logger(
+                    `event 'onProposedAction': messageId: ${messageId}, toolcallId: ${toolcallId}, actionsCount: ${asArray.length}`,
+                    1
+                );
+                async function processActions(rawActions: Record<string, any>[]) {
                     try {
-                        // Convert raw annotation to ToolAnnotation
-                        const annotations = rawAnnotations.map((a: Record<string, any>) => {
-                            try {
-                                return toToolAnnotation(a);
-                            } catch (error) {
-                                logger(`event 'onAnnotation': Failed to convert annotation ${a.id}: ${error}`, 1);
-                                return null;
-                            }
-                        }).filter((a): a is ToolAnnotation => a !== null);
+                        // Convert raw actions to ProposedAction
+                        const actions = rawActions
+                            .map((raw) => {
+                                try {
+                                    return toProposedAction(raw);
+                                } catch (error) {
+                                    logger(`event 'onProposedAction': Failed to convert action ${raw.id}: ${error}`, 1);
+                                    return null;
+                                }
+                            })
+                            .filter((action): action is ProposedAction => action !== null);
 
-                        if (annotations.length === 0) {
+                        // If no actions, return
+                        if (actions.length === 0) {
                             return;
                         }
 
-                        // Validate that all annotations belong to the same toolcall
-                        const uniqueToolcallIds = new Set(rawAnnotations.map(a => a.toolcall_id || a.toolcallId));
-                        if (uniqueToolcallIds.size > 1) {
-                            logger(`event 'onAnnotation': Warning - annotations from multiple toolcalls in single batch: ${Array.from(uniqueToolcallIds).join(', ')}`, 1);
+                        // Add proposed actions to the thread proposed actions
+                        set(addProposedActionsAtom, actions);
+
+                        // Separate annotation actions from other actions
+                        const annotationActions = actions.filter(isAnnotationAction) as AnnotationProposedAction[];
+
+                        // If no annotation actions, return
+                        if (annotationActions.length === 0) {
+                            return;
                         }
 
-                        // Load item data
-                        const attachmentRefs= new Set<ZoteroItemReference>();
-                        annotations.forEach(a => attachmentRefs.add({library_id: a.library_id, zotero_key: a.attachment_key}));
-                        const attachmentPromises = Array.from(attachmentRefs).map(ref => Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key));
-                        const attachments = (await Promise.all(attachmentPromises)).filter(Boolean) as Zotero.Item[];
+                        // Load attachment item data for annotation actions
+                        const attachmentRefs = new Set<ZoteroItemReference>();
+                        annotationActions.forEach((action) => {
+                            attachmentRefs.add({
+                                library_id: action.proposed_data.library_id,
+                                zotero_key: action.proposed_data.attachment_key,
+                            });
+                        });
+                        const attachmentPromises = Array.from(attachmentRefs).map((ref) =>
+                            Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
+                        );
+                        const attachments = (await Promise.all(attachmentPromises)).filter(
+                            Boolean
+                        ) as Zotero.Item[];
                         if (attachments.length > 0) {
                             await loadFullItemDataWithAllTypes(attachments);
                         }
 
-                        // Early return if autoApplyAnnotations is disabled
+                        // Check if auto-apply is enabled
                         if (!getPref('autoApplyAnnotations')) {
-                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
                             return;
                         }
 
-                        // Early return if no reader is open
+                        // Check if there's a current reader with matching attachment
                         const currentReaderKey = get(currentReaderAttachmentKeyAtom);
                         if (currentReaderKey === null) {
-                            set(upsertToolcallAnnotationAtom, { toolcallId, annotations });
                             return;
                         }
 
-                        toolAnnotationApplyBatcher.enqueue({
-                            messageId,
-                            toolcallId,
-                            annotations,
-                        });
+                        // Only auto-apply annotations for the current reader
+                        const actionsForCurrentReader = annotationActions.filter(
+                            (action) => action.proposed_data.attachment_key === currentReaderKey
+                        );
+
+                        if (actionsForCurrentReader.length === 0) {
+                            return;
+                        }
+
+                        // Enqueue for batch application
+                        if (toolcallId) {
+                            toolAnnotationApplyBatcher.enqueue({
+                                messageId,
+                                toolcallId,
+                                actions: actionsForCurrentReader,
+                            });
+                        }
                     } catch (error) {
-                        logger(`event 'onAnnotation': failed to parse annotation for message ${messageId} toolcall ${toolcallId}: ${error}`, 1);
+                        logger(
+                            `event 'onProposedAction': failed to parse action for message ${messageId} toolcall ${toolcallId}: ${error}`,
+                            1
+                        );
                     }
                 }
-                applyAnnotationsAndUpsert(rawAnnotations);
+                processActions(asArray);
             },
             onCitationMetadata: async (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);

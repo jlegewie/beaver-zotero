@@ -2,16 +2,17 @@ import { atom } from "jotai";
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isPreferencePageVisibleAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
-import { getResultAttachmentsFromToolcall, toMessageUI } from "../types/chat/converters";
+import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
-import { toolCallAnnotationsAtom } from "./toolAnnotations";
+import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
-import { logger } from "../../src/utils/logger";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
+import { validateAppliedAction } from "../utils/proposedActions";
+import { logger } from "../../src/utils/logger";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -161,7 +162,7 @@ export const newThreadAtom = atom(
         set(currentMessageItemsAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
-        set(toolCallAnnotationsAtom, new Map());
+        set(threadProposedActionsAtom, []);
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
         set(isPreferencePageVisibleAtom, false);
@@ -189,80 +190,52 @@ export const loadThreadAtom = atom(
             // Set the current thread ID
             set(currentThreadIdAtom, threadId);
             set(isPreferencePageVisibleAtom, false);
-
-            const statefulChat = getPref('statefulChat');
             
-            if (!statefulChat) {
-                const messagesDB = await Zotero.Beaver.db.getMessagesFromThread(user_id, threadId);
-                const messages = messagesDB.map(toMessageUI);
-                
-                // Extract user attachments from messages
-                const userAttachments: MessageAttachmentWithId[] = [];
-                for (const messageDB of messagesDB) {
-                    if (messageDB.role === 'user') {
-                        for (const attachment of messageDB.attachments || []) {
-                            userAttachments.push({ ...attachment, messageId: messageDB.id } as MessageAttachmentWithId);
-                        }
+            // Use remote API
+            const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
+            
+            if (messages.length > 0) {
+                // Load item data
+                const allItemReferences = new Set<string>();
+                [...userAttachments, ...citationMetadata, ...toolAttachments]
+                    .map(att => `${att.library_id}-${att.zotero_key}`)
+                    .forEach(ref => allItemReferences.add(ref));
+
+                const itemsPromises = Array.from(allItemReferences).map(ref => {
+                    const [libraryId, key] = ref.split('-');
+                    return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                })
+                const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
+
+                if (itemsToLoad.length > 0) {
+                    await loadFullItemDataWithAllTypes(itemsToLoad);
+
+                    if (!Zotero.Styles.initialized()) {
+                        await Zotero.Styles.init();
                     }
                 }
 
-                // Get citation metadata from messages
-                const citationMetadata = messagesDB.flatMap(message => {
-                    const messageCitations = (message.metadata?.citations || []);
-                    return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
-                });
-                
                 // Update the thread messages and attachments state
-                if (messages.length > 0) {
-                    set(threadMessagesAtom, messages);
-                    set(citationMetadataAtom, citationMetadata);
-                    set(userAttachmentsAtom, userAttachments);
-                    set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                    await set(updateCitationDataAtom);
-                }
-            } else {
-                // Use remote API
-                const { messages, userAttachments, toolAttachments, citationMetadata, toolCallAnnotations } = await threadService.getThreadMessages(threadId);
+                set(threadMessagesAtom, messages);
+                set(userAttachmentsAtom, userAttachments);
+                set(citationMetadataAtom, citationMetadata);
+                await set(updateCitationDataAtom);
+                // set(toolAttachmentsAtom, toolAttachments);
+                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
                 
-                if (messages.length > 0) {
-                    // Load item data
-                    const allItemReferences = new Set<string>();
-                    [...userAttachments, ...citationMetadata, ...toolAttachments]
-                        .map(att => `${att.library_id}-${att.zotero_key}`)
-                        .forEach(ref => allItemReferences.add(ref));
+                // Set proposed actions
+                set(threadProposedActionsAtom, proposedActions);
 
-                    const itemsPromises = Array.from(allItemReferences).map(ref => {
-                        const [libraryId, key] = ref.split('-');
-                        return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
-                    })
-                    const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
-
-                    if (itemsToLoad.length > 0) {
-                        await loadFullItemDataWithAllTypes(itemsToLoad);
-
-                        if (!Zotero.Styles.initialized()) {
-                            await Zotero.Styles.init();
-                        }
+                // Validate proposed actions and undo if not valid
+                await Promise.all(proposedActions.map(async action => {
+                    const isValid = await validateAppliedAction(action);
+                    if (!isValid) {
+                        logger(`loadThreadAtom: undoing proposedAction ${action.id} because it is not valid`, 1);
+                        set(undoProposedActionAtom, action.id);
                     }
-
-                    // Update the thread messages and attachments state
-                    set(threadMessagesAtom, messages);
-                    set(userAttachmentsAtom, userAttachments);
-                    set(citationMetadataAtom, citationMetadata);
-                    await set(updateCitationDataAtom);
-                    // set(toolAttachmentsAtom, toolAttachments);
-                    set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                    
-                    // Group annotations by toolcall_id
-                    const groupedAnnotations = toolCallAnnotations.reduce((acc, annotation) => {
-                        if (!acc.has(annotation.toolcall_id)) {
-                            acc.set(annotation.toolcall_id, []);
-                        }
-                        acc.get(annotation.toolcall_id).push(annotation);
-                        return acc;
-                    }, new Map());
-                    set(toolCallAnnotationsAtom, groupedAnnotations);
-                }
+                    return isValid;
+                }));
+                
             }
         } catch (error) {
             console.error('Error loading thread:', error);
