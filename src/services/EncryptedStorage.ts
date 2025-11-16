@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 
 export class EncryptedStorage {
     private encryptionKey: CryptoKey | null = null;
+    private storageDirectory: any | null = null;
 
     /**
      * Get or derive the encryption key using Web Crypto API
@@ -58,6 +59,90 @@ export class EncryptedStorage {
     }
 
     /**
+     * Ensure the storage directory exists and return a clone
+     */
+    private ensureStorageDirectory(): any {
+        if (!this.storageDirectory) {
+            const profileDir = Zotero.File.pathToFile(Zotero.Profile.dir);
+            const beaverDir = profileDir.clone();
+            beaverDir.append('beaver');
+
+            if (!beaverDir.exists()) {
+                beaverDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o700);
+            }
+
+            const storageDir = beaverDir.clone();
+            storageDir.append('secure-storage');
+
+            if (!storageDir.exists()) {
+                storageDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o700);
+            }
+
+            this.storageDirectory = storageDir;
+        }
+
+        return this.storageDirectory.clone();
+    }
+
+    /**
+     * Replace characters not supported by the filesystem
+     */
+    private sanitizeKey(key: string): string {
+        return key.replace(/[^a-zA-Z0-9._-]/g, '_');
+    }
+
+    private getFileForKey(key: string): any {
+        const dir = this.ensureStorageDirectory();
+        dir.append(`${this.sanitizeKey(key)}.json`);
+        return dir;
+    }
+
+    private getPrefKey(key: string): string {
+        return `beaver.auth.${key}`;
+    }
+
+    private async writeEncryptedValue(key: string, value: string): Promise<void> {
+        const file = this.getFileForKey(key);
+        await Zotero.File.putContentsAsync(file.path, value);
+    }
+
+    private async readEncryptedValue(key: string): Promise<string | null> {
+        try {
+            const file = this.getFileForKey(key);
+            if (!file.exists()) {
+                return null;
+            }
+
+            return await Zotero.File.getContentsAsync(file.path);
+        } catch (error) {
+            logger(`Error reading encrypted auth token: ${error}`);
+            return null;
+        }
+    }
+
+    private async migrateFromPreferences(key: string): Promise<string | null> {
+        const prefKey = this.getPrefKey(key);
+        const encrypted = Zotero.Prefs.get(prefKey);
+        if (!encrypted) {
+            return null;
+        }
+
+        try {
+            const decrypted = await this.decrypt(encrypted as string);
+            try {
+                await this.writeEncryptedValue(key, encrypted as string);
+                Zotero.Prefs.clear(prefKey);
+            } catch (persistError) {
+                logger(`Failed to persist migrated auth token: ${persistError}`);
+            }
+            return decrypted;
+        } catch (error) {
+            logger(`Migration from preferences failed: ${error}`);
+            return null;
+        }
+    }
+
+    /**
      * Encrypt text using AES-CBC
      */
     async encrypt(text: string): Promise<string> {
@@ -102,12 +187,13 @@ export class EncryptedStorage {
     }
 
     /**
-     * Store encrypted value in Zotero preferences
+     * Store encrypted value on disk
      */
     async setItem(key: string, value: string): Promise<void> {
         try {
             const encrypted = await this.encrypt(value);
-            Zotero.Prefs.set(`beaver.auth.${key}`, encrypted);
+            await this.writeEncryptedValue(key, encrypted);
+            this.clearPreferenceKey(key);
         } catch (error) {
             logger(`Encryption failed: ${error}`);
             throw error;
@@ -115,15 +201,16 @@ export class EncryptedStorage {
     }
 
     /**
-     * Retrieve and decrypt value from Zotero preferences
+     * Retrieve and decrypt value from disk (with legacy preference fallback)
      */
     async getItem(key: string): Promise<string | null> {
         try {
-            const encrypted = Zotero.Prefs.get(`beaver.auth.${key}`);
-            if (!encrypted) {
-                return null;
+            const encrypted = await this.readEncryptedValue(key);
+            if (encrypted) {
+                return await this.decrypt(encrypted);
             }
-            return await this.decrypt(encrypted as string);
+
+            return await this.migrateFromPreferences(key);
         } catch (error) {
             logger(`Decryption failed: ${error}`);
             return null;
@@ -131,13 +218,24 @@ export class EncryptedStorage {
     }
 
     /**
-     * Remove item from Zotero preferences
+     * Remove stored value (and clean up legacy preference entry)
      */
-    removeItem(key: string): void {
+    async removeItem(key: string): Promise<void> {
         try {
-            Zotero.Prefs.clear(`beaver.auth.${key}`);
+            const file = this.getFileForKey(key);
+            await Zotero.File.removeIfExists(file.path);
         } catch (error) {
-            logger(`Error removing item from Zotero prefs: ${error}`);
+            logger(`Error removing auth token file: ${error}`);
+        }
+
+        this.clearPreferenceKey(key);
+    }
+
+    private clearPreferenceKey(key: string): void {
+        try {
+            Zotero.Prefs.clear(this.getPrefKey(key));
+        } catch (error) {
+            logger(`Error clearing legacy preference key: ${error}`);
         }
     }
 }
