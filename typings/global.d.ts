@@ -319,6 +319,10 @@ declare namespace Zotero {
 }
 
 declare namespace Zotero {
+    namespace Profile {
+        const dir: string;
+    }
+    
     namespace BetterBibTeX {
         /**
          * Better BibTeX KeyManager API
