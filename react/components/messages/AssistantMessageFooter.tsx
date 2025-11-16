@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -14,6 +14,7 @@ import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData } from '../../types/citations';
 import { store } from '../../store';
+import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 
 interface AssistantMessageFooterProps {
     messages: ChatMessage[];
@@ -52,8 +53,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         return unique;
     }, [citations, messageIds]);
 
-    // New state for source visibility
-    const [sourcesVisible, setSourcesVisible] = useState<boolean>(false);
+    const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);
+    const sourcesVisible = sourcesVisibilityMap[lastMessage.id] ?? false;
+    const toggleSourcesVisibility = useSetAtom(toggleMessageSourcesVisibilityAtom);
+    const setSourcesVisibility = useSetAtom(setMessageSourcesVisibilityAtom);
         
     const shareMenuItems = [
         {
@@ -79,8 +82,14 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
     // Toggle sources visibility
     const toggleSources = () => {
-        setSourcesVisible((prev: boolean) => !prev);
+        toggleSourcesVisibility(lastMessage.id);
     };
+
+    useEffect(() => {
+        if (uniqueCitations.length === 0 && sourcesVisible) {
+            setSourcesVisibility({ messageId: lastMessage.id, visible: false });
+        }
+    }, [lastMessage.id, setSourcesVisibility, sourcesVisible, uniqueCitations.length]);
 
     const handleRepeat = async () => {
         await regenerateFromMessage(lastMessage.id);

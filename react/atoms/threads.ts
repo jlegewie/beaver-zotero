@@ -13,6 +13,7 @@ import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { validateAppliedAction } from "../utils/proposedActions";
 import { logger } from "../../src/utils/logger";
+import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -165,6 +166,7 @@ export const newThreadAtom = atom(
         set(threadProposedActionsAtom, []);
         set(citationDataAtom, []);
         set(currentMessageContentAtom, '');
+        set(resetMessageUIStateAtom);
         set(isPreferencePageVisibleAtom, false);
         // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
@@ -342,6 +344,7 @@ export const removeMessageAtom = atom(
     null,
     (get, set, { id }: { id: string }) => {
         set(threadMessagesAtom, get(threadMessagesAtom).filter(message => message.id !== id));
+        set(clearMessageUIStateAtom, id);
     }
 );
 

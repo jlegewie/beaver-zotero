@@ -47,6 +47,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 {/* Reasoning */}
                 {message.reasoning_content && (
                     <ThinkingContent
+                        messageId={message.id}
                         thinkingContent={message.reasoning_content}
                         isThinking={message.status === 'thinking'}
                         previousMessageHasToolCalls={previousMessageHasToolCalls}

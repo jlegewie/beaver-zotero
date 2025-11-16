@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { ToolCall } from '../../types/chat/apiTypes';
 import {
@@ -24,9 +24,19 @@ import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
-import { updateProposedActionsAtom, getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
+import { getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
 import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/proposedActions/base';
 import { AckLink } from '../../../src/services/proposedActionsService';
+import {
+    annotationAttachmentTitlesAtom,
+    annotationBusyAtom,
+    annotationPanelStateAtom,
+    defaultAnnotationPanelState,
+    setAnnotationAttachmentTitleAtom,
+    setAnnotationBusyStateAtom,
+    setAnnotationPanelStateAtom,
+    toggleAnnotationPanelVisibilityAtom
+} from '../../atoms/messageUIState';
 
 interface AnnotationListItemProps {
     annotation: AnnotationProposedAction;
@@ -169,6 +179,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 
 interface AnnotationToolDisplayProps {
     messageId: string;
+    groupId: string;
     toolCalls: ToolCall[];
 }
 
@@ -181,19 +192,19 @@ interface AnnotationToolDisplayProps {
  * 2. pending -> Apply annotation to PDF (if reader is open)
  * 3. applied -> User can navigate to or delete the annotation
  */
-const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId, toolCalls }) => {
+const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId, groupId, toolCalls }) => {
 
     // Current reader state
     const currentReaderAttachmentKey = useAtomValue(currentReaderAttachmentKeyAtom);
 
     // UI state for collapsible annotation list
-    const [resultsVisible, setResultsVisible] = useState(true);
-    
-    // Track which individual annotations are currently being processed
-    const [isApplyingAnnotations, setIsApplyingAnnotations] = useState(false);
-    const [busyState, setBusyState] = useState<Record<string, boolean>>({});
-    const [attachmentTitle, setAttachmentTitle] = useState<string | null>(null);
-    const attachmentTitleKeyRef = useRef<string | null>(null);
+    const panelStates = useAtomValue(annotationPanelStateAtom);
+    const panelState = panelStates[groupId] ?? defaultAnnotationPanelState;
+    const { resultsVisible, isApplying: isApplyingAnnotations } = panelState;
+    const busyStateMap = useAtomValue(annotationBusyAtom);
+    const busyState = busyStateMap[groupId] ?? {};
+    const attachmentTitleMap = useAtomValue(annotationAttachmentTitlesAtom);
+    const attachmentTitle = attachmentTitleMap[groupId] ?? null;
 
     // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -208,7 +219,6 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     const loadingDots = useLoadingDots(isInProgress);
     
     // Global state updater for annotation status changes
-    const updateProposedActions = useSetAtom(updateProposedActionsAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
@@ -228,12 +238,17 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     const appliedAnnotationCount = annotations.filter((annotation) => annotation.status === 'applied').length;
     const allErrors = annotations.every((annotation) => annotation.status === 'error');
 
+    const toggleAnnotationPanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
+    const setAnnotationPanelState = useSetAtom(setAnnotationPanelStateAtom);
+    const setAnnotationBusy = useSetAtom(setAnnotationBusyStateAtom);
+    const setAnnotationAttachmentTitle = useSetAtom(setAnnotationAttachmentTitleAtom);
+
     // Toggle visibility of annotation list (only when tool call is completed and has processable annotations)
     const toggleResults = useCallback(() => {
         if (isCompleted && totalAnnotations > 0) {
-            setResultsVisible((prev) => !prev);
+            toggleAnnotationPanelVisibility(groupId);
         }
-    }, [isCompleted, totalAnnotations]);
+    }, [groupId, isCompleted, totalAnnotations, toggleAnnotationPanelVisibility]);
 
     /**
      * Handle applying annotations to the PDF
@@ -247,7 +262,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     const handleApplyAnnotations = useCallback(async (annotationId?: string) => {
         // Guard clause: No annotations to apply
         if (annotations.length === 0) return;
-        setIsApplyingAnnotations(true);
+        setAnnotationPanelState({ key: groupId, updates: { isApplying: true } });
 
         try {
             // STEP 1: ENSURE PDF IS OPEN
@@ -261,7 +276,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                 // Handle case where attachment doesn't exist
                 if (!attachmentItem) {
                     setProposedActionsToError(annotations.map(a => a.id), 'Attachment not found');
-                    setIsApplyingAnnotations(false);
+                    setAnnotationPanelState({ key: groupId, updates: { isApplying: false } });
                     return;
                 }
 
@@ -282,7 +297,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
             // STEP 2: GET READER INSTANCE AND WAIT FOR VIEW TO LOAD
             const reader = await getCurrentReaderAndWaitForView() as ZoteroReader | undefined;
             if (!reader) {
-                setIsApplyingAnnotations(false);
+                setAnnotationPanelState({ key: groupId, updates: { isApplying: false } });
                 return;
             }
 
@@ -297,7 +312,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
 
             // Guard clause: No annotations to apply
             if (annotationsToApply.length === 0) {
-                setIsApplyingAnnotations(false);
+                setAnnotationPanelState({ key: groupId, updates: { isApplying: false } });
                 return;
             }
 
@@ -331,8 +346,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
             }
 
             // Show the results panel and mark operation as complete
-            setResultsVisible(true);
-            setIsApplyingAnnotations(false);
+            setAnnotationPanelState({ key: groupId, updates: { resultsVisible: true, isApplying: false } });
 
             // STEP 6: NAVIGATE TO FIRST SUCCESSFULLY APPLIED ANNOTATION
             if (actionsResultDataToAcknowledge.length > 0) {
@@ -348,27 +362,30 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
 
         } catch (error) {
             logger(`handleApplyAnnotations: unexpected error: ${error}`, 1);
-            setIsApplyingAnnotations(false);
+            setAnnotationPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [isAttachmentOpen, annotations, toolCalls, updateProposedActions, messageId]);
+    }, [annotations, groupId, isAttachmentOpen, messageId, setAnnotationPanelState, ackProposedActions, setProposedActionsToError]);
 
     /**
      * Get the title of the attachment
      */
     useEffect(() => {
         const getAttachmentTitle = async () => {
-            // Guard clause
             if (annotations.length === 0) return;
-            if(attachmentTitleKeyRef.current === annotations[0].proposed_data?.attachment_key) return;
-            attachmentTitleKeyRef.current = annotations[0].proposed_data?.attachment_key;
-
-            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(annotations[0].proposed_data?.library_id, annotations[0].proposed_data?.attachment_key);
+            const attachmentKey = annotations[0].proposed_data?.attachment_key;
+            if (!attachmentKey) return;
+            const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                annotations[0].proposed_data?.library_id,
+                attachmentKey
+            );
             if (!attachmentItem) return;
             const title = await shortItemTitle(attachmentItem);
-            setAttachmentTitle(title);
+            setAnnotationAttachmentTitle({ key: groupId, title });
         };
-        getAttachmentTitle();
-    }, [annotations]);
+        if (!attachmentTitle) {
+            getAttachmentTitle();
+        }
+    }, [annotations, attachmentTitle, groupId, setAnnotationAttachmentTitle]);
 
     /**
      * Navigate to an annotation on annotation click
@@ -399,7 +416,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
      */
     const handleDelete = useCallback(
         async (annotation: AnnotationProposedAction) => {
-            setBusyState((prev) => ({ ...prev, [annotation.id]: true }));
+            setAnnotationBusy({ key: groupId, annotationId: annotation.id, isBusy: true });
             try {
                 if (
                     annotation.status !== 'applied' ||
@@ -416,13 +433,10 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                 const errorMessage = error?.message || 'Failed to delete annotation';
                 setProposedActionsToError([annotation.id], errorMessage);
             } finally {
-                setBusyState((prev) => ({
-                    ...prev,
-                    [annotation.id]: false,
-                }));
+                setAnnotationBusy({ key: groupId, annotationId: annotation.id, isBusy: false });
             }
         },
-        [rejectProposedAction, setProposedActionsToError]
+        [groupId, rejectProposedAction, setAnnotationBusy, setProposedActionsToError, undoProposedAction]
     );
 
     // Re-add a deleted annotation by treating it like a click

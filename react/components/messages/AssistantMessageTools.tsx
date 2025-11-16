@@ -37,8 +37,18 @@ function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
  * @param toolCalls - Array of tool calls to group
  * @returns Array of tool call groups
  */
-function groupToolCalls(toolCalls: ToolCall[]): ToolCall[][] {
-    const groups: ToolCall[][] = [];
+type ToolCallGroup = {
+    id: string;
+    toolCalls: ToolCall[];
+};
+
+function buildGroupId(messageId: string, toolCalls: ToolCall[]): string {
+    const ids = toolCalls.map((tc) => tc.id).sort().join('|');
+    return `${messageId}:${ids}`;
+}
+
+function groupToolCalls(toolCalls: ToolCall[], messageId: string): ToolCallGroup[] {
+    const groups: ToolCallGroup[] = [];
     const annotationGroups = new Map<string, ToolCall[]>();
 
     for (const toolCall of toolCalls) {
@@ -52,17 +62,17 @@ function groupToolCalls(toolCalls: ToolCall[]): ToolCall[][] {
                 annotationGroups.get(attachmentId)!.push(toolCall);
             } else {
                 // No attachment_id found, keep as individual group
-                groups.push([toolCall]);
+                groups.push({ id: buildGroupId(messageId, [toolCall]), toolCalls: [toolCall] });
             }
         } else {
             // Non-annotation tools are kept as individual groups
-            groups.push([toolCall]);
+            groups.push({ id: buildGroupId(messageId, [toolCall]), toolCalls: [toolCall] });
         }
     }
 
     // Add all annotation groups to the main groups array
-    for (const group of annotationGroups.values()) {
-        groups.push(group);
+    for (const [attachmentId, group] of annotationGroups.entries()) {
+        groups.push({ id: `${messageId}:${attachmentId}`, toolCalls: group });
     }
 
     return groups;
@@ -84,7 +94,7 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
     }
 
     // Group tool calls by attachment_id for annotation tools, keep others individual
-    const toolCallGroups = groupToolCalls(message.tool_calls);
+    const toolCallGroups = groupToolCalls(message.tool_calls, message.id);
 
     return (
         <div
@@ -97,11 +107,11 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
             {toolCallGroups.map((group, groupIndex) => {
                 // TODO: Split by proposed actions and searchtoolcall
                 // For groups with single tool call
-                if (group.length === 1) {
-                    const toolCall = group[0];
+                if (group.toolCalls.length === 1) {
+                    const toolCall = group.toolCalls[0];
                     // Annotation tool calls are handled by AnnotationToolDisplay
                     if (isAnnotationTool(toolCall.function?.name)) {
-                        return <AnnotationToolDisplay key={toolCall.id} messageId={message.id} toolCalls={[toolCall]} />;
+                        return <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={[toolCall]} />;
                     }
                     // Search tool calls are handled by SearchToolDisplay
                     return <SearchToolDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
@@ -111,7 +121,7 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 // All should be annotation tools at this point, so use AnnotationToolDisplay for each
                 return (
                     <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
-                        <AnnotationToolDisplay key={group[0].id} messageId={message.id} toolCalls={group} />
+                        <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
                     </div>
                 );
             })}

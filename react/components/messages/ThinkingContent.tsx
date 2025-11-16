@@ -1,23 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
+import { thinkingVisibilityAtom, toggleThinkingVisibilityAtom } from '../../atoms/messageUIState';
 
 interface ThinkingContentProps {
+    messageId: string;
     thinkingContent: string;
     isThinking: boolean;
     previousMessageHasToolCalls: boolean;
     messageHasContent: boolean;
 }
 
-const ThinkingContent: React.FC<ThinkingContentProps> = ({ thinkingContent, isThinking, previousMessageHasToolCalls, messageHasContent }) => {
-    const [resultsVisible, setResultsVisible] = useState(false);
+const ThinkingContent: React.FC<ThinkingContentProps> = ({ messageId, thinkingContent, isThinking, previousMessageHasToolCalls, messageHasContent }) => {
+    const thinkingVisibilityMap = useAtomValue(thinkingVisibilityAtom);
+    const toggleVisibility = useSetAtom(toggleThinkingVisibilityAtom);
+    const resultsVisible = thinkingVisibilityMap[messageId] ?? false;
     const loadingDots = useLoadingDots(isThinking);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
 
     const toggleResults = () => {
-        setResultsVisible(!resultsVisible);
+        toggleVisibility(messageId);
     };
 
     const getIcon = () => {
