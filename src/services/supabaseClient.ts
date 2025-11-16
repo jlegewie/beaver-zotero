@@ -24,7 +24,7 @@ const zoteroStorage = {
     },
     removeItem: async (key: string) => {
         try {
-            encryptedStorage.removeItem(key);
+            await encryptedStorage.removeItem(key);
         } catch (error) {
             console.error('Error removing auth from encrypted storage:', error);
         }
