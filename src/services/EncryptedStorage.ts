@@ -3,6 +3,16 @@ import { logger } from '../utils/logger';
 export class EncryptedStorage {
     private encryptionKey: CryptoKey | null = null;
     private storageDirectory: any | null = null;
+    private textEncoder = new TextEncoder();
+    private textDecoder = new TextDecoder();
+
+    private toArrayBuffer(view: ArrayBufferView): ArrayBuffer {
+        const { buffer, byteLength, byteOffset } = view;
+        const source = new Uint8Array(buffer, byteOffset, byteLength);
+        const copy = new Uint8Array(byteLength);
+        copy.set(source);
+        return copy.buffer;
+    }
 
     /**
      * Get or derive the encryption key using Web Crypto API
@@ -13,19 +23,20 @@ export class EncryptedStorage {
         }
 
         const machineId = Zotero.version + Zotero.platform;
-        const encoder = new TextEncoder();
+        const machineIdBytes = this.textEncoder.encode(machineId);
         const keyMaterial = await crypto.subtle.importKey(
             'raw',
-            encoder.encode(machineId),
+            this.toArrayBuffer(machineIdBytes),
             'PBKDF2',
             false,
             ['deriveBits', 'deriveKey']
         );
 
+        const saltBytes = this.textEncoder.encode('beaver-salt');
         this.encryptionKey = await crypto.subtle.deriveKey(
             {
                 name: 'PBKDF2',
-                salt: encoder.encode('beaver-salt'),
+                salt: this.toArrayBuffer(saltBytes),
                 iterations: 10000,
                 hash: 'SHA-256'
             },
@@ -113,7 +124,21 @@ export class EncryptedStorage {
                 return null;
             }
 
-            return await Zotero.File.getContentsAsync(file.path);
+            const contents = await Zotero.File.getContentsAsync(file.path);
+
+            if (typeof contents === 'string') {
+                return contents;
+            }
+
+            if (contents instanceof Uint8Array) {
+                return this.textDecoder.decode(this.toArrayBuffer(contents));
+            }
+
+            if (contents instanceof ArrayBuffer) {
+                return this.textDecoder.decode(contents);
+            }
+
+            return null;
         } catch (error) {
             logger(`Error reading encrypted auth token: ${error}`);
             return null;
@@ -147,16 +172,17 @@ export class EncryptedStorage {
      */
     async encrypt(text: string): Promise<string> {
         const key = await this.getEncryptionKey();
-        const encoder = new TextEncoder();
-        const iv = crypto.getRandomValues(new Uint8Array(16));
+        const ivBytes = crypto.getRandomValues(new Uint8Array(16));
+        const iv = this.toArrayBuffer(ivBytes);
+        const plaintext = this.toArrayBuffer(this.textEncoder.encode(text));
         
         const encrypted = await crypto.subtle.encrypt(
             { name: 'AES-CBC', iv },
             key,
-            encoder.encode(text)
+            plaintext
         );
 
-        const ivHex = this.arrayBufferToHex(iv.buffer);
+        const ivHex = this.arrayBufferToHex(iv);
         const encryptedHex = this.arrayBufferToHex(encrypted);
         
         return `${ivHex}:${encryptedHex}`;
@@ -182,8 +208,7 @@ export class EncryptedStorage {
             encrypted
         );
 
-        const decoder = new TextDecoder();
-        return decoder.decode(decrypted);
+        return this.textDecoder.decode(decrypted);
     }
 
     /**
