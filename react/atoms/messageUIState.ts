@@ -44,8 +44,15 @@ const removeEntry = <T extends Record<string, unknown>>(map: T, keyToRemove: str
 // ---------------------------------------------------------------------------
 // Search tool call UI
 // ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility of search tool results by key (messageId:toolCallId)
+ */
 export const searchToolVisibilityAtom = atom<BooleanMap>({});
 
+/**
+ * Toggle visibility of a search tool's results
+ */
 export const toggleSearchToolVisibilityAtom = atom(
     null,
     (get, set, key: string) => {
@@ -66,9 +73,20 @@ export const setSearchToolVisibilityAtom = atom(
 // ---------------------------------------------------------------------------
 // Sources + thinking sections on assistant messages
 // ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility of sources sections by messageId
+ */
 export const messageSourcesVisibilityAtom = atom<BooleanMap>({});
+
+/**
+ * Tracks visibility of thinking sections by messageId
+ */
 export const thinkingVisibilityAtom = atom<BooleanMap>({});
 
+/**
+ * Toggle visibility of an assistant message's sources section
+ */
 export const toggleMessageSourcesVisibilityAtom = atom(
     null,
     (get, set, messageId: string) => {
@@ -86,6 +104,9 @@ export const setMessageSourcesVisibilityAtom = atom(
     }
 );
 
+/**
+ * Toggle visibility of an assistant message's thinking section
+ */
 export const toggleThinkingVisibilityAtom = atom(
     null,
     (get, set, messageId: string) => {
@@ -106,10 +127,25 @@ export const setThinkingVisibilityAtom = atom(
 // ---------------------------------------------------------------------------
 // Annotation groups (button + busy states)
 // ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility and applying state of annotation panels by groupId
+ */
 export const annotationPanelStateAtom = atom<AnnotationPanelStateMap>({});
+
+/**
+ * Tracks busy state of individual annotations by groupId:annotationId
+ */
 export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
+
+/**
+ * Caches attachment titles for annotation groups by groupId
+ */
 export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>({});
 
+/**
+ * Update annotation panel state (visibility, isApplying)
+ */
 export const setAnnotationPanelStateAtom = atom(
     null,
     (get, set, { key, updates }: { key: string; updates: Partial<AnnotationPanelState> }) => {
@@ -119,6 +155,9 @@ export const setAnnotationPanelStateAtom = atom(
     }
 );
 
+/**
+ * Toggle visibility of an annotation panel's results
+ */
 export const toggleAnnotationPanelVisibilityAtom = atom(
     null,
     (get, set, key: string) => {
@@ -129,8 +168,7 @@ export const toggleAnnotationPanelVisibilityAtom = atom(
 );
 
 /**
- * Tracks spinner/busy flags for individual proposed actions so both panes show
- * which annotation is being processed.
+ * Set busy state for an individual annotation (shows spinner)
  */
 export const setAnnotationBusyStateAtom = atom(
     null,
@@ -152,6 +190,10 @@ export const setAnnotationAttachmentTitleAtom = atom(
 // ---------------------------------------------------------------------------
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Reset all UI state (used when starting a new thread)
+ */
 export const resetMessageUIStateAtom = atom(
     null,
     (_get, set) => {
@@ -164,6 +206,9 @@ export const resetMessageUIStateAtom = atom(
     }
 );
 
+/**
+ * Clear UI state for a specific message (used when deleting a message)
+ */
 export const clearMessageUIStateAtom = atom(
     null,
     (get, set, messageId: string) => {
