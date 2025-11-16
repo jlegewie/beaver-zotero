@@ -80,6 +80,20 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         learnMoreUrl: "mailto:contact@beaverapp.ai?subject=Beaver Feedback",
         learnMoreLabel: "Give Feedback",
     },
+    {
+        version: "0.7.3",
+        title: "Beaver Version 0.7.3",
+        featureList: [
+            {
+                title: "Under the hood improvements to annotation tools",
+                description: "The annotation tool was rewritten. Please report any issues you encounter.",
+            },
+            {
+                title: "Consistent Beaver UI between library and reader",
+                description: "The Beaver UI is now consistent when switching between the Zotero library and file reader."
+            }
+        ]
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
