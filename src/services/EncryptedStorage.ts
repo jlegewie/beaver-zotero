@@ -1,5 +1,10 @@
 import { logger } from '../utils/logger';
 
+/**
+ * Encrypted storage for authentication tokens.
+ * Provides obfuscation against casual inspection and accidental exposure.
+ * Not designed to protect against attackers with file system access.
+ */
 export class EncryptedStorage {
     private encryptionKey: CryptoKey | null = null;
     private storageDirectory: any | null = null;
