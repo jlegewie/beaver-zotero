@@ -56,6 +56,36 @@ export class EncryptedStorage {
     }
 
     /**
+     * Get the legacy encryption key (for migration from old format)
+     * Uses Zotero.version + Zotero.platform (old method)
+     */
+    private async getLegacyEncryptionKey(): Promise<CryptoKey> {
+        const machineId = Zotero.version + Zotero.platform;
+        const machineIdBytes = this.textEncoder.encode(machineId);
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            this.toArrayBuffer(machineIdBytes),
+            'PBKDF2',
+            false,
+            ['deriveBits', 'deriveKey']
+        );
+
+        const saltBytes = this.textEncoder.encode('beaver-salt');
+        return await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: this.toArrayBuffer(saltBytes),
+                iterations: 10000,
+                hash: 'SHA-256'
+            },
+            keyMaterial,
+            { name: 'AES-CBC', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    /**
      * Convert ArrayBuffer to hex string
      */
     private arrayBufferToHex(buffer: ArrayBuffer): string {
@@ -158,19 +188,43 @@ export class EncryptedStorage {
             return null;
         }
 
+        // Try decrypting with current key first, then fall back to legacy key
+        let decrypted: string | null = null;
+        let keyUsed: 'current' | 'legacy' | null = null;
+
+        // First, try the current key (getLocalUserKey + platform)
         try {
-            const decrypted = await this.decrypt(encrypted as string);
+            const currentKey = await this.getEncryptionKey();
+            decrypted = await this.decryptWithKey(encrypted as string, currentKey);
+            keyUsed = 'current';
+        } catch (error) {
+            // Current key failed, try legacy key (Zotero.version + platform)
             try {
-                await this.writeEncryptedValue(key, encrypted as string);
+                const legacyKey = await this.getLegacyEncryptionKey();
+                decrypted = await this.decryptWithKey(encrypted as string, legacyKey);
+                keyUsed = 'legacy';
+            } catch (legacyError) {
+                logger(`Migration from preferences failed with both keys: ${error}, ${legacyError}`);
+                // Clean up the preference since we couldn't decrypt it with either key
                 Zotero.Prefs.clear(prefKey);
+                return null;
+            }
+        }
+
+        // Successfully decrypted - now persist to disk with the current key
+        if (decrypted && keyUsed) {
+            try {
+                const reencrypted = await this.encrypt(decrypted);
+                await this.writeEncryptedValue(key, reencrypted);
+                Zotero.Prefs.clear(prefKey);
+                logger(`Successfully migrated auth token from preferences using ${keyUsed} key`);
             } catch (persistError) {
                 logger(`Failed to persist migrated auth token: ${persistError}`);
             }
             return decrypted;
-        } catch (error) {
-            logger(`Migration from preferences failed: ${error}`);
-            return null;
         }
+
+        return null;
     }
 
     /**
@@ -195,10 +249,9 @@ export class EncryptedStorage {
     }
 
     /**
-     * Decrypt text using AES-CBC
+     * Decrypt text using AES-CBC with a specific key
      */
-    async decrypt(encryptedText: string): Promise<string> {
-        const key = await this.getEncryptionKey();
+    private async decryptWithKey(encryptedText: string, key: CryptoKey): Promise<string> {
         const parts = encryptedText.split(':');
         
         if (parts.length !== 2) {
@@ -215,6 +268,14 @@ export class EncryptedStorage {
         );
 
         return this.textDecoder.decode(decrypted);
+    }
+
+    /**
+     * Decrypt text using AES-CBC
+     */
+    async decrypt(encryptedText: string): Promise<string> {
+        const key = await this.getEncryptionKey();
+        return this.decryptWithKey(encryptedText, key);
     }
 
     /**
