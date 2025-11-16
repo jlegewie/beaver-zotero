@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ToolCall } from '../../types/chat/apiTypes';
 import MarkdownRenderer from './MarkdownRenderer';
 import {
@@ -13,6 +14,7 @@ import {
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
+import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
 
 interface SearchToolDisplayProps {
@@ -20,8 +22,11 @@ interface SearchToolDisplayProps {
     toolCall: ToolCall;
 }
 
-export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId: _messageId, toolCall }) => {
-    const [resultsVisible, setResultsVisible] = useState(false);
+export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId, toolCall }) => {
+    const searchVisibility = useAtomValue(searchToolVisibilityAtom);
+    const toggleResultsVisibility = useSetAtom(toggleSearchToolVisibilityAtom);
+    const visibilityKey = `${messageId}:${toolCall.id}`;
+    const resultsVisible = searchVisibility[visibilityKey] ?? false;
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
 
@@ -29,7 +34,7 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId:
 
     const toggleResults = () => {
         if (toolCall.status === 'completed' && numResults > 0) {
-            setResultsVisible(!resultsVisible);
+            toggleResultsVisibility(visibilityKey);
         }
     };
 
