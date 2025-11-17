@@ -1,32 +1,154 @@
-import React from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import ZoteroCitation from '../sources/ZoteroCitation';
-import rehypeKatex from 'rehype-katex';
-import deepmerge from 'deepmerge';
+import React, { useMemo, useContext } from 'react';
+import type { Components } from 'react-markdown';
+import MarkdownBody from './MarkdownBody';
+import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
 
-// Create a custom schema that extends GitHub's defaults but allows citation tags
-const customSchema = deepmerge(defaultSchema, {
-    tagNames: [...(defaultSchema.tagNames || []), 'citation'],
-    attributes: {
-        ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive']
+type NoteRendererContextValue = {
+    messageId?: string;
+    exportRendering: boolean;
+    notes: Record<string, StreamingNoteBlock>;
+};
+
+const NoteRendererContext = React.createContext<NoteRendererContextValue | null>(null);
+
+const ATTRIBUTE_REGEX = /([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"/g;
+
+function parseAttributes(attributeString: string): Record<string, string> {
+    const attributes: Record<string, string> = {};
+    attributeString.replace(ATTRIBUTE_REGEX, (_, name, value) => {
+        if (name) {
+            attributes[name] = value;
+        }
+        return '';
+    });
+    return attributes;
+}
+
+function extractNoteBlocks(content: string): { sanitizedContent: string; notes: Record<string, StreamingNoteBlock> } {
+    const notes: Record<string, StreamingNoteBlock> = {};
+    let sanitizedContent = '';
+    let cursor = 0;
+    const openTagRegex = /<note\b[^>]*>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = openTagRegex.exec(content)) !== null) {
+        const startIndex = match.index;
+        const openTag = match[0];
+        const tagEndIndex = startIndex + openTag.length;
+
+        sanitizedContent += content.slice(cursor, startIndex);
+
+        const attributeString = openTag
+            .replace(/^<note/i, '')
+            .replace(/>$/i, '')
+            .trim();
+        const attributes = parseAttributes(attributeString);
+        const noteId = attributes.id;
+
+        if (!noteId) {
+            sanitizedContent += content.slice(startIndex, tagEndIndex);
+            cursor = tagEndIndex;
+            continue;
+        }
+
+        const closingRegex = /<\/note>/gi;
+        closingRegex.lastIndex = tagEndIndex;
+        const closingMatch = closingRegex.exec(content);
+
+        const noteContentEnd = closingMatch ? closingMatch.index : content.length;
+        const innerContent = content.slice(tagEndIndex, noteContentEnd);
+        const hasClosingTag = Boolean(closingMatch);
+        
+        // Debug logging
+        console.log('[extractNoteBlocks] Extracted note:', {
+            noteId,
+            title: attributes.title,
+            contentLength: innerContent.length,
+            contentPreview: innerContent.substring(0, 100),
+            isComplete: hasClosingTag
+        });
+
+        notes[noteId] = {
+            id: noteId,
+            title: attributes.title,
+            itemId: attributes.item_id ?? attributes.itemId ?? null,
+            attributes,
+            content: innerContent,
+            isComplete: hasClosingTag
+        };
+
+        sanitizedContent += `<note id="${noteId}" data-note-id="${noteId}"></note>`;
+
+        if (hasClosingTag && closingMatch) {
+            cursor = closingMatch.index + closingMatch[0].length;
+            openTagRegex.lastIndex = cursor;
+        } else {
+            cursor = content.length;
+            break;
+        }
     }
-});
+
+    if (cursor < content.length) {
+        sanitizedContent += content.slice(cursor);
+    }
+
+    return { sanitizedContent, notes };
+}
+
+const NoteElement: React.FC<any> = ({ node, children, ...props }) => {
+    const context = useContext(NoteRendererContext);
+    if (!context) {
+        console.log('[NoteElement] No context available');
+        return <>{children}</>;
+    }
+    const properties = node?.properties || {};
+    const noteId =
+        (properties['data-note-id'] as string | undefined) ??
+        (properties['dataNoteId'] as string | undefined) ??
+        (properties.id as string | undefined) ??
+        (props['data-note-id'] as string | undefined) ??
+        (props['dataNoteId'] as string | undefined) ??
+        (props.id as string | undefined);
+    if (!noteId) {
+        console.log('[NoteElement] No noteId found in properties:', properties, 'or props:', props);
+        return <>{children}</>;
+    }
+    const noteData = context.notes[noteId];
+    if (!noteData) {
+        console.log('[NoteElement] No note data found for noteId:', noteId, 'Available notes:', Object.keys(context.notes));
+        return <>{children}</>;
+    }
+    
+    console.log('[NoteElement] Rendering note:', {
+        noteId,
+        title: noteData.title,
+        contentLength: noteData.content.length,
+        messageId: context.messageId
+    });
+
+    return (
+        <NoteDisplay
+            note={noteData}
+            messageId={context.messageId}
+            exportMode={context.exportRendering}
+        />
+    );
+};
 
 type MarkdownRendererProps = {
     content: string;
     className?: string;
     exportRendering?: boolean;
+    messageId?: string;
+    enableNoteBlocks?: boolean;
 };
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
     className = 'markdown', 
-    exportRendering = false
+    exportRendering = false,
+    messageId,
+    enableNoteBlocks = true
 }) => {
 
     // Preprocess citation tags:
@@ -114,23 +236,51 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
         .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`);
 
-    return (
-        <ReactMarkdown
-            // "markdown-body"
+    const noteExtraction = useMemo(() => {
+        if (!enableNoteBlocks) {
+            return {
+                sanitizedContent: preprocessedContent,
+                notes: {} as Record<string, StreamingNoteBlock>
+            };
+        }
+        return extractNoteBlocks(preprocessedContent);
+    }, [enableNoteBlocks, preprocessedContent]);
+
+    const noteContextValue = useMemo<NoteRendererContextValue | null>(() => {
+        if (!enableNoteBlocks) {
+            return null;
+        }
+        return {
+            messageId,
+            exportRendering,
+            notes: noteExtraction.notes
+        };
+    }, [enableNoteBlocks, exportRendering, messageId, noteExtraction.notes]);
+
+    const markdownComponents = enableNoteBlocks
+        ? ({
+            note: (props: any) => <NoteElement {...props} />
+        } as Components)
+        : undefined;
+
+    const markdownElement = (
+        <MarkdownBody
             className={className}
-            remarkPlugins={[remarkMath,remarkGfm]}
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
-            // rehypePlugins={[rehypeKatex]}
-            components={{
-                // @ts-expect-error - Custom component not in ReactMarkdown types
-                citation: ({node, ...props}: any) => {
-                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
-                }
-            }}
-        >
-            {preprocessedContent}
-        </ReactMarkdown>
+            exportRendering={exportRendering}
+            content={noteExtraction.sanitizedContent}
+            components={markdownComponents}
+        />
     );
+
+    if (noteContextValue) {
+        return (
+            <NoteRendererContext.Provider value={noteContextValue}>
+                {markdownElement}
+            </NoteRendererContext.Provider>
+        );
+    }
+
+    return markdownElement;
 };
 
 export default MarkdownRenderer;

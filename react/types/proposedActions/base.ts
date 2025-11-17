@@ -27,6 +27,7 @@ export interface NoteProposedData {
     content?: string | null;
     library_id?: number | null;
     zotero_key?: string | null;
+    item_id?: string | null;
 }
 
 export interface NoteResultData {
@@ -171,6 +172,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
+        const itemIdRaw = proposedData.item_id ?? proposedData.itemId;
 
         let normalizedLibraryId: number | undefined;
         if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
@@ -187,6 +189,9 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            item_id: typeof itemIdRaw === 'string'
+                ? itemIdRaw
+                : (itemIdRaw !== undefined && itemIdRaw !== null ? String(itemIdRaw) : undefined),
         } as NoteProposedData;
     }
     

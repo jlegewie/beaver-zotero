@@ -64,7 +64,11 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ messageId, thinkingCo
                 <div
                     className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15 opacity-70 p-3 text-sm`}
                 >
-                    <MarkdownRenderer className="markdown" content={thinkingContent.replace(/^undefined/, '')} />
+                    <MarkdownRenderer
+                        className="markdown"
+                        content={thinkingContent.replace(/^undefined/, '')}
+                        enableNoteBlocks={false}
+                    />
                 </div>
             )}
         </div>

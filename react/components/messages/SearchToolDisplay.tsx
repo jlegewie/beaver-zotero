@@ -107,7 +107,11 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
                 <div className="px-4 py-1 text-sm text-red-600">
-                     <MarkdownRenderer className="markdown" content={toolCall.response.error} />
+                     <MarkdownRenderer
+                        className="markdown"
+                        content={toolCall.response.error}
+                        enableNoteBlocks={false}
+                    />
                 </div>
             )}
 
