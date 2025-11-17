@@ -1333,7 +1333,7 @@
 /* Scroll down button */
 [id^="beaver-pane-"] .scroll-down-button {
     transform: translateY(-29px);
-    background: var(--color-button);
+    background: var(--material-mix-quarternary);
     border: 1px solid var(--color-border50);
     border-radius: 50%;
     width: 2rem;
