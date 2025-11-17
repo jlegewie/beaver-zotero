@@ -1,5 +1,5 @@
-import type { 
-    AnnotationProposedData, 
+import type {
+    AnnotationProposedData,
     AnnotationResultData
 } from './annotations';
 import {
@@ -17,17 +17,30 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note';
 
 /**
  * Union type for all proposed data types
  */
-export type ProposedData = AnnotationProposedData;
+export interface NoteProposedData {
+    title: string;
+    content?: string | null;
+    library_id?: number | null;
+    zotero_key?: string | null;
+}
+
+export interface NoteResultData {
+    library_id: number;
+    zotero_key: string;
+    parent_key?: string;
+}
+
+export type ProposedData = AnnotationProposedData | NoteProposedData;
 
 /**
  * Type of result data after applying an action
  */
-export type ActionResultDataType = AnnotationResultData;
+export type ActionResultDataType = AnnotationResultData | NoteResultData;
 
 /**
  * Get a Zotero item or item reference from a ProposedAction if it has been applied
@@ -54,6 +67,16 @@ export const getZoteroItemFromProposedAction = async (proposedAction: ProposedAc
     return (await Zotero.Items.getByLibraryAndKeyAsync(zoteroItemReference.library_id, zoteroItemReference.zotero_key)) || null;
 };
 
+export type NoteProposedAction = ProposedAction & {
+    action_type: 'zotero_note';
+    proposed_data: NoteProposedData;
+    result_data?: NoteResultData;
+};
+
+export const isZoteroNoteAction = (action: ProposedAction): action is NoteProposedAction => {
+    return action.action_type === 'zotero_note';
+};
+
 /**
  * Core proposed action model matching the backend schema
  */
@@ -75,6 +98,8 @@ export interface ProposedAction {
     // Action-specific proposed data and result data
     proposed_data: Record<string, any>; // Will be cast to specific types based on action_type
     result_data?: Record<string, any>; // Populated after application
+    // proposed_data: ProposedData;
+    // result_data?: ActionResultDataType; // Populated after application
 
     // Timestamps
     created_at: string;
@@ -143,6 +168,26 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
         }
         
         proposedData = normalizedData;
+    } else if (actionType === 'zotero_note') {
+        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
+        const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
+
+        let normalizedLibraryId: number | undefined;
+        if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
+            const parsed = typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw);
+            normalizedLibraryId = Number.isNaN(parsed) ? undefined : parsed;
+        }
+
+        proposedData = {
+            title: proposedData.title ?? '',
+            content: typeof proposedData.content === 'string' || proposedData.content === null
+                ? proposedData.content
+                : (proposedData.content ?? null),
+            library_id: normalizedLibraryId,
+            zotero_key: typeof zoteroKeyRaw === 'string'
+                ? zoteroKeyRaw
+                : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+        } as NoteProposedData;
     }
     
     // Normalize result_data if present
@@ -157,6 +202,17 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
                 zotero_key: zoteroKey,
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
                 attachment_key: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
+            };
+        }
+    } else if (resultData && actionType === 'zotero_note') {
+        const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
+        const libraryId = resultData.library_id ?? resultData.libraryId;
+        const parentKey = resultData.parent_key ?? resultData.parentKey;
+        if (zoteroKey) {
+            resultData = {
+                zotero_key: String(zoteroKey),
+                library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(parentKey ? { parent_key: String(parentKey) } : {})
             };
         }
     }
