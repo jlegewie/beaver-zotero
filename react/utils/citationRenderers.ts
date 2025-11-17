@@ -114,7 +114,8 @@ export function renderToHTML(content: string, className: string = "markdown"): s
     const markdownElement = React.createElement(MarkdownRenderer, {
         content,
         className,
-        exportRendering: true
+        exportRendering: true,
+        enableNoteBlocks: false
     });
 
     // Render the React element to an HTML string
