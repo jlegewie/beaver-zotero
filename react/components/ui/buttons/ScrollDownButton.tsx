@@ -26,7 +26,7 @@ export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 z-10">
                     <button
                         onClick={onClick}
-                        className={`scroll-down-button ${className || ''}`}
+                        className={`scroll-down-button variant-ghost-secondary ${className || ''}`}
                         style={style}
                     >
                         <Icon icon={ArrowDownIcon} />
