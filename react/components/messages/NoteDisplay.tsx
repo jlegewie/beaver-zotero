@@ -164,14 +164,15 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         />
                     </Tooltip>
                 )}
-                <IconButton
-                    icon={CopyIcon}
-                    className="mt-015"
-                    variant="ghost-secondary"
-                    onClick={() => copyToClipboard(noteTitle)}
-                    disabled={isSaving || !isComplete}
-                    title="Copy"
-                />
+                <Tooltip content="Copy" showArrow singleLine>
+                    <IconButton
+                        icon={CopyIcon}
+                        className="mt-015"
+                        variant="ghost-secondary"
+                        onClick={() => copyToClipboard(noteTitle)}
+                        disabled={isSaving || !isComplete}
+                    />
+                </Tooltip>
             </div>
         </div>
     );
@@ -274,8 +275,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         }
         setNotePanelState({ key: note.id, updates: { isSaving: true } });
         try {
+            const noteContent = `<h1>${noteTitle}</h1>\n\n${trimmedContent || note.content}`;
             const result = await saveStreamingNote({
-                markdownContent: trimmedContent || note.content,
+                markdownContent: noteContent,
                 title: noteTitle,
                 parentReference,
                 targetLibraryId
