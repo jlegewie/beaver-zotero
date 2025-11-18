@@ -2,6 +2,10 @@ import type {
     AnnotationProposedData,
     AnnotationResultData
 } from './annotations';
+import type {
+    AddItemProposedData,
+    AddItemResultData
+} from './items';
 import {
     normalizePageLocations,
     normalizeSentenceIdList,
@@ -17,7 +21,7 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'add_item';
 
 /**
  * Union type for all proposed data types
@@ -35,12 +39,12 @@ export interface NoteResultData {
     parent_key?: string;
 }
 
-export type ProposedData = AnnotationProposedData | NoteProposedData;
+export type ProposedData = AnnotationProposedData | NoteProposedData | AddItemProposedData;
 
 /**
  * Type of result data after applying an action
  */
-export type ActionResultDataType = AnnotationResultData | NoteResultData;
+export type ActionResultDataType = AnnotationResultData | NoteResultData | AddItemResultData;
 
 /**
  * Get a Zotero item or item reference from a ProposedAction if it has been applied
@@ -135,6 +139,10 @@ export {
     isAnnotationTool
 } from './annotations';
 
+export {
+    isAddItemAction
+} from './items';
+
 /**
  * Deserializes and normalizes a raw proposed action object from the backend
  * into a typed ProposedAction object.
@@ -188,6 +196,18 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
         } as NoteProposedData;
+    } else if (actionType === 'add_item') {
+        proposedData = {
+             item: proposedData.item ?? {},
+             reason: proposedData.reason,
+             relevance_score: proposedData.relevance_score ?? proposedData.relevanceScore,
+             file_available: proposedData.file_available ?? proposedData.fileAvailable ?? false,
+             downloaded_url: proposedData.downloaded_url ?? proposedData.downloadedUrl,
+             storage_path: proposedData.storage_path ?? proposedData.storagePath,
+             text_path: proposedData.text_path ?? proposedData.textPath,
+             collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
+             suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
+        } as AddItemProposedData;
     }
     
     // Normalize result_data if present
@@ -215,6 +235,19 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
                 ...(parentKey ? { parent_key: String(parentKey) } : {})
             };
         }
+    } else if (resultData && actionType === 'add_item') {
+         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
+         const libraryId = resultData.library_id ?? resultData.libraryId;
+         
+         if (zoteroKey) {
+             resultData = {
+                 zotero_key: String(zoteroKey),
+                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                 attachment_keys: resultData.attachment_keys ?? resultData.attachmentKeys,
+                 file_hash: resultData.file_hash ?? resultData.fileHash,
+                 storage_path: resultData.storage_path ?? resultData.storagePath,
+             };
+         }
     }
 
     return {
