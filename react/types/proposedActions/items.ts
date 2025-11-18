@@ -93,6 +93,6 @@ export function isAddItemAction(action: ProposedAction): action is AddItemPropos
 
 export function isAddItemTool(functionName: string | undefined): boolean {
     if (!functionName) return false;
-    return functionName === 'add_item' || functionName === 'add_items' || functionName === 'add_paper' || functionName === 'add_papers';
+    return functionName === 'search_external_references';
 }
 
