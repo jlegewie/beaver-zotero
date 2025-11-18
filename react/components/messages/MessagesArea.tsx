@@ -8,6 +8,8 @@ import { userScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom } from "../../atoms/threads";
 import { store } from "../../store";
 
+const BOTTOM_THRESHOLD = 120; // pixels
+
 type MessagesAreaProps = {
     messages: ChatMessage[];
 };
@@ -21,7 +23,8 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         const restoredFromAtomRef = useRef(false);
         const scrollContainerRef = useRef<HTMLDivElement | null>(null);
         const storedScrollTop = useAtomValue(currentThreadScrollPositionAtom);
-        const BOTTOM_THRESHOLD = 20; // pixels
+        const scrollDebounceTimer = useRef<number | null>(null);
+        const lastScrollDirectionRef = useRef<'up' | 'down' | null>(null);
 
         const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
             scrollContainerRef.current = node;
@@ -60,6 +63,15 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             lastScrollTopRef.current = container.scrollTop;
         }, [storedScrollTop]);
 
+        // Cleanup debounce timer on unmount
+        useEffect(() => {
+            return () => {
+                if (scrollDebounceTimer.current !== null) {
+                    clearTimeout(scrollDebounceTimer.current);
+                }
+            };
+        }, []);
+
         // Scroll to bottom when messages change
         useEffect(() => {
             if (restoredFromAtomRef.current) {
@@ -88,7 +100,7 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             return groups;
         }, [messages]);
 
-        // Handle user scrolling
+        // Handle user scrolling with debouncing and direction detection
         const handleScroll = () => {
             if (!scrollContainerRef.current) {
                 return;
@@ -97,16 +109,46 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
             const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
             
-            // Check if not at the bottom
-            if (distanceFromBottom > BOTTOM_THRESHOLD) {
+            // Detect scroll direction
+            const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' : 
+                                   scrollTop < lastScrollTopRef.current ? 'up' : null;
+            
+            // Only consider it a "user scroll" if they scroll UP significantly
+            // or if they scroll down but stop far from the bottom
+            // This prevents layout shifts from streaming content from being detected as user scrolls
+            if (scrollDirection === 'up' && Math.abs(scrollTop - lastScrollTopRef.current) > 10) {
+                // Clear any existing debounce timer
+                if (scrollDebounceTimer.current !== null) {
+                    clearTimeout(scrollDebounceTimer.current);
+                }
+                
+                // User deliberately scrolled up
                 store.set(userScrolledAtom, true);
+                lastScrollDirectionRef.current = 'up';
+            } else if (distanceFromBottom > BOTTOM_THRESHOLD) {
+                // Only set userScrolled after a debounce delay to avoid false positives
+                // from rapid layout shifts during streaming
+                if (scrollDebounceTimer.current !== null) {
+                    clearTimeout(scrollDebounceTimer.current);
+                }
+                
+                scrollDebounceTimer.current = Zotero.getMainWindow().setTimeout(() => {
+                    // Double-check after debounce
+                    if (scrollContainerRef.current) {
+                        const { scrollTop: currentScrollTop, scrollHeight: currentScrollHeight, clientHeight: currentClientHeight } = scrollContainerRef.current;
+                        const currentDistanceFromBottom = currentScrollHeight - currentScrollTop - currentClientHeight;
+                        if (currentDistanceFromBottom > BOTTOM_THRESHOLD) {
+                            store.set(userScrolledAtom, true);
+                        }
+                    }
+                }, 150); // 150ms debounce
             } else {
+                // Near the bottom - user hasn't scrolled
                 store.set(userScrolledAtom, false);
+                lastScrollDirectionRef.current = 'down';
             }
 
             store.set(currentThreadScrollPositionAtom, scrollTop);
-            
-            // Still track last scroll position for reference
             lastScrollTopRef.current = scrollTop;
         };
 
