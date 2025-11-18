@@ -99,7 +99,9 @@ export function renderToMarkdown(
     const bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
 
     // Return the formatted content
-    return `${formattedContent}\n## Sources\n\n${bibliography}`;
+    return citedItems.length > 0
+        ? `${formattedContent}\n## Sources\n\n${bibliography}`
+        : formattedContent;
 }
 
 /**
