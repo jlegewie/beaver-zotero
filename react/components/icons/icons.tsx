@@ -24,6 +24,8 @@ export { default as AlertIcon } from './AlertIcon';
 export { default as StopIcon } from './StopIcon';
 export { default as DatabaseStatusIcon } from './DatabaseStatusIcon';
 export { default as UserIcon } from './UserIcon';
+export { default as AuthorGroupIcon } from './AuthorGroupIcon';
+export { default as AuthorIcon } from './AuthorIcon';
 export { default as BookmarkIcon } from './BookmarkIcon';
 export { default as CheckmarkCircleIcon } from './CheckmarkCircleIcon';
 export { default as CancelCircleIcon } from './CancelCircleIcon';
