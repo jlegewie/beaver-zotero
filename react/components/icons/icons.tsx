@@ -13,6 +13,7 @@ export { default as AttachmentIcon } from './AttachmentIcon';
 export { default as ArrowUpIcon } from './ArrowUpIcon';
 export { default as ArrowDownIcon } from './ArrowDownIcon';
 export { default as ArrowLeftIcon } from './ArrowLeftIcon';
+export { default as MoreHorizontalIcon } from './MoreHorizontalIcon';
 export { default as ArrowRightIcon } from './ArrowRightIcon';
 export { default as RepeatIcon } from './RepeatIcon';
 export { default as CopyIcon } from './CopyIcon';
