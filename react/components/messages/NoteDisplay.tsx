@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
+import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import {
@@ -9,9 +10,8 @@ import {
     ArrowRightIcon,
     CopyIcon,
     Spinner,
-    TickIcon
+    PlusSignIcon
 } from '../icons/icons';
-import { Icon } from '../icons/icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import {
     ackProposedActionsAtom,
@@ -29,6 +29,8 @@ import {
     toggleNotePanelVisibilityAtom
 } from '../../atoms/messageUIState';
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
+import { copyToClipboard } from '../../utils/clipboard';
+import Tooltip from '../ui/Tooltip';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -61,9 +63,9 @@ interface NoteHeaderProps {
     contentVisible: boolean;
     hasContent: boolean;
     canToggleContent: boolean;
-    canSave: boolean;
     toggleContent: () => void;
     handleSave: () => void;
+    isLibraryReadOnly: boolean;
 }
 
 const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
@@ -75,9 +77,9 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         contentVisible,
         hasContent,
         canToggleContent,
-        canSave,
         toggleContent,
-        handleSave
+        handleSave,
+        isLibraryReadOnly
     } = props;
 
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -85,7 +87,6 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
     // Memoize the header icon to prevent recomputation on every render
     const HeaderIcon = useMemo(() => {
         if (isSaving) return Spinner;
-        if (status === 'error') return AlertIcon;
         if (!isComplete) return Spinner;
         if (isButtonHovered && !contentVisible) return ArrowRightIcon;
         if (isButtonHovered && contentVisible) return ArrowDownIcon;
@@ -102,10 +103,19 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
             onMouseEnter={() => setIsButtonHovered(true)}
             onMouseLeave={() => setIsButtonHovered(false)}
         >
+            {/* Header */}
             <div className="display-flex flex-row flex-1 gap-3">
+                <IconButton
+                    icon={HeaderIcon}
+                    // className="mt-015"
+                    variant="ghost-secondary"
+                    onClick={toggleContent}
+                    disabled={!canToggleContent}
+                    title="Toggle content"
+                />
                 <Button
                     variant="ghost-secondary"
-                    icon={HeaderIcon}
+                    // icon={HeaderIcon}
                     onClick={toggleContent}
                     className={`
                         text-base scale-105 truncate
@@ -118,14 +128,51 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                 </Button>
                 <div className="flex-1" />
             </div>
-            <IconButton
-                icon={CopyIcon}
-                className="mt-1"
-                variant="ghost-secondary"
-                onClick={handleSave}
-                disabled={!canSave || isSaving}
-                title="Save to Zotero"
-            />
+
+            {/* Action buttons */}
+            <div className="display-flex flex-row gap-3">
+                {status == 'pending'  && !isLibraryReadOnly && (
+                    <Tooltip content="Save note to Zotero" showArrow singleLine>
+                        <IconButton
+                            icon={PlusSignIcon}
+                            className="mt-1"
+                            onClick={handleSave}
+                            variant="ghost-secondary"
+                            disabled={isSaving || !isComplete}
+                        />
+                    </Tooltip>
+                )}
+                {status == 'applied' && !isLibraryReadOnly && (
+                    <Tooltip content="Reveal note in Zotero" showArrow singleLine>
+                        <IconButton
+                            icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
+                            className="mt-1"
+                            // onClick={() => Zotero.getActiveZoteroPane().openNoteWindow(item.id)}
+                            onClick={() => {}}
+                            variant="ghost-secondary"
+                        />
+                    </Tooltip>
+                )}
+                {status === 'error' || isLibraryReadOnly && (
+                    <Tooltip content={isLibraryReadOnly ? `Read-only library` : `Unable to save note`} showArrow singleLine>
+                        <IconButton
+                            icon={AlertIcon}
+                            className="font-color-tertiary mt-1"
+                            onClick={() => {}}
+                            variant="ghost-secondary"
+                            disabled={true}
+                        />
+                    </Tooltip>
+                )}
+                <IconButton
+                    icon={CopyIcon}
+                    className="mt-015"
+                    variant="ghost-secondary"
+                    onClick={() => copyToClipboard(noteTitle)}
+                    disabled={isSaving || !isComplete}
+                    title="Copy"
+                />
+            </div>
         </div>
     );
 }, (prevProps, nextProps) => {
@@ -138,8 +185,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         prevProps.noteTitle === nextProps.noteTitle &&
         prevProps.contentVisible === nextProps.contentVisible &&
         prevProps.hasContent === nextProps.hasContent &&
-        prevProps.canToggleContent === nextProps.canToggleContent &&
-        prevProps.canSave === nextProps.canSave
+        prevProps.canToggleContent === nextProps.canToggleContent
     );
 });
 
@@ -213,6 +259,8 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         toggleNotePanelVisibility(note.id);
     }, [note.id, toggleNotePanelVisibility]);
 
+    const targetLibraryId: number | undefined = parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? undefined;
+
     const canSave =
         !exportMode &&
         Boolean(messageId) &&
@@ -230,7 +278,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 markdownContent: trimmedContent || note.content,
                 title: noteTitle,
                 parentReference,
-                targetLibraryId: parentReference?.library_id ?? noteAction.proposed_data?.library_id ?? undefined
+                targetLibraryId
             });
             await ackProposedActions(messageId, [
                 {
@@ -262,9 +310,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 contentVisible={contentVisible}
                 hasContent={hasContent}
                 canToggleContent={canToggleContent}
-                canSave={canSave}
                 toggleContent={toggleContent}
                 handleSave={handleSave}
+                isLibraryReadOnly={targetLibraryId ? !isLibraryEditable(targetLibraryId) : true}
             />
             <NoteBody
                 trimmedContent={trimmedContent}
