@@ -135,7 +135,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content="Save note to Zotero" showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
-                            className="mt-1"
+                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
                             onClick={handleSave}
                             variant="ghost-secondary"
                             disabled={isSaving || !isComplete}
@@ -146,7 +146,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content="Reveal note in Zotero" showArrow singleLine>
                         <IconButton
                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                            className="mt-1"
+                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
                             // onClick={() => Zotero.getActiveZoteroPane().openNoteWindow(item.id)}
                             onClick={() => {}}
                             variant="ghost-secondary"
@@ -157,7 +157,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content={isLibraryReadOnly ? `Read-only library` : `Unable to save note`} showArrow singleLine>
                         <IconButton
                             icon={AlertIcon}
-                            className="font-color-tertiary mt-1"
+                            className={`font-color-tertiary mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
                             onClick={() => {}}
                             variant="ghost-secondary"
                             disabled={true}
