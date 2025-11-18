@@ -10,7 +10,8 @@ import {
     ArrowRightIcon,
     CopyIcon,
     Spinner,
-    PlusSignIcon
+    PlusSignIcon,
+    TickIcon
 } from '../icons/icons';
 import MarkdownRenderer from './MarkdownRenderer';
 import {
@@ -31,6 +32,7 @@ import {
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
+import { renderToMarkdown } from '../../utils/citationRenderers';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -66,6 +68,7 @@ interface NoteHeaderProps {
     toggleContent: () => void;
     handleSave: () => void;
     isLibraryReadOnly: boolean;
+    handleCopy: () => void;
 }
 
 const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
@@ -79,10 +82,20 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         canToggleContent,
         toggleContent,
         handleSave,
+        handleCopy,
         isLibraryReadOnly
     } = props;
 
     const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [showCopiedState, setShowCopiedState] = useState(false);
+
+    const handleCopyClick = useCallback(() => {
+        handleCopy();
+        setShowCopiedState(true);
+        setTimeout(() => {
+            setShowCopiedState(false);
+        }, 1250);
+    }, [handleCopy]);
 
     // Memoize the header icon to prevent recomputation on every render
     const HeaderIcon = useMemo(() => {
@@ -164,12 +177,12 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         />
                     </Tooltip>
                 )}
-                <Tooltip content="Copy" showArrow singleLine>
+                <Tooltip content="Copy note" showArrow singleLine>
                     <IconButton
-                        icon={CopyIcon}
+                        icon={showCopiedState ? TickIcon : CopyIcon}
                         className="mt-015"
                         variant="ghost-secondary"
-                        onClick={() => copyToClipboard(noteTitle)}
+                        onClick={handleCopyClick}
                         disabled={isSaving || !isComplete}
                     />
                 </Tooltip>
@@ -269,6 +282,11 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         noteAction !== null &&
         ['pending', 'error', 'rejected', 'undone'].includes(status);
 
+    const handleCopy = useCallback(async () => {
+        const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
+        await copyToClipboard(formattedContent);
+    }, [noteTitle, trimmedContent, note.content]);
+
     const handleSave = useCallback(async () => {
         if (!noteAction || !messageId || !note.isComplete) {
             return;
@@ -314,6 +332,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 canToggleContent={canToggleContent}
                 toggleContent={toggleContent}
                 handleSave={handleSave}
+                handleCopy={handleCopy}
                 isLibraryReadOnly={targetLibraryId ? !isLibraryEditable(targetLibraryId) : true}
             />
             <NoteBody
