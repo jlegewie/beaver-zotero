@@ -69,6 +69,7 @@ interface NoteHeaderProps {
     handleSave: () => void;
     isLibraryReadOnly: boolean;
     handleCopy: () => void;
+    revealNote: () => void;
 }
 
 const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
@@ -83,7 +84,8 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         toggleContent,
         handleSave,
         handleCopy,
-        isLibraryReadOnly
+        isLibraryReadOnly,
+        revealNote
     } = props;
 
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -160,8 +162,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         <IconButton
                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
                             className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
-                            // onClick={() => Zotero.getActiveZoteroPane().openNoteWindow(item.id)}
-                            onClick={() => {}}
+                            onClick={revealNote}
                             variant="ghost-secondary"
                         />
                     </Tooltip>
@@ -275,17 +276,21 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
 
     const targetLibraryId: number | undefined = parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? undefined;
 
-    const canSave =
-        !exportMode &&
-        Boolean(messageId) &&
-        note.isComplete &&
-        noteAction !== null &&
-        ['pending', 'error', 'rejected', 'undone'].includes(status);
-
     const handleCopy = useCallback(async () => {
         const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
         await copyToClipboard(formattedContent);
     }, [noteTitle, trimmedContent, note.content]);
+
+    const revealNote = useCallback(async () => {
+        console.log('revealNote', noteAction);
+        if (noteAction?.result_data?.library_id && noteAction?.result_data?.zotero_key) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(noteAction.result_data.library_id, noteAction.result_data.zotero_key);
+            if (item) {
+                // await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+                await Zotero.getActiveZoteroPane().selectItem(item.id);
+            }
+        }
+    }, [noteAction]);
 
     const handleSave = useCallback(async () => {
         if (!noteAction || !messageId || !note.isComplete) {
@@ -333,6 +338,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 toggleContent={toggleContent}
                 handleSave={handleSave}
                 handleCopy={handleCopy}
+                revealNote={revealNote}
                 isLibraryReadOnly={targetLibraryId ? !isLibraryEditable(targetLibraryId) : true}
             />
             <NoteBody
