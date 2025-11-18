@@ -11,8 +11,7 @@ import {
     TickIcon,
     PlusSignIcon,
     CSSItemTypeIcon,
-    AuthorGroupIcon,
-    AuthorIcon,
+    GlobalSearchIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -20,7 +19,6 @@ import {
     applyAddItem,
     deleteAddedItem,
 } from '../../utils/addItemActions';
-import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { 
@@ -116,7 +114,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
         baseClasses.push('opacity-60');
     }
     
-    const authors = itemData.authors ? itemData.authors.join(', ') : '';
+    const authors = itemData.authors ? itemData.authors.slice(0, 3).join(', ') + (itemData.authors.length > 3 ? ' et al.' : '') : '';
     const metaParts = [itemData.publication_title || itemData.venue, itemData.year].filter(Boolean);
     const meta = metaParts.join(', ');
 
@@ -140,9 +138,9 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                     <div className="font-weight-medium">{itemData.title || 'Untitled Item'}</div>
                     {itemData.authors && authors && 
                         <div className="display-flex flex-row items-center gap-1">
-                            {itemData.authors.length > 1
+                            {/* {itemData.authors.length > 1
                                 ? <Icon icon={AuthorGroupIcon} size={18} className="font-color-tertiary" />
-                                : <Icon icon={AuthorIcon} size={16} className="font-color-tertiary" />}
+                                : <Icon icon={AuthorIcon} size={16} className="font-color-tertiary" />} */}
                             <div className="font-color-tertiary truncate">{authors}</div>
                         </div>
                     }
@@ -338,23 +336,21 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
     const getIcon = () => {
         if (isInProgress || isApplying) return Spinner;
         if (isError || allErrors) return AlertIcon;
-        if (isCompleted) {
-            if (resultsVisible) return ArrowDownIcon;
-            if (isButtonHovered && totalActions > 0) return ArrowRightIcon;
-            if (totalActions === 0) return AlertIcon;
-            return <ZoteroIcon icon={ZOTERO_ICONS.ATTACHMENTS} size={12} className="flex-shrink-0" />;
-        }
-        return <ZoteroIcon icon={ZOTERO_ICONS.ATTACHMENTS} size={12} className="flex-shrink-0" />;
+        if (totalActions === 0) return AlertIcon;
+
+        if (isButtonHovered && !resultsVisible) return ArrowRightIcon;
+        if (isButtonHovered && resultsVisible) return ArrowDownIcon;
+        return GlobalSearchIcon;
     };
 
     const getButtonText = () => {
         if (isInProgress) {
-            return `Found Items${''.padEnd(loadingDots, '.')}`;
+            return `Paper Finder${''.padEnd(loadingDots, '.')}`;
         }
         if (isError) {
-            return 'Found Items: Error';
+            return 'Paper Finder: Error';
         }
-        return 'Found Items';
+        return 'Paper Finder';
     };
 
     const hasActionsToShow = totalActions > 0;
@@ -383,7 +379,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        <span>{getButtonText()}</span>
+                        {getButtonText()}
                         {isCompleted && appliedCount > 0 && hasActionsToShow &&
                             <span className="ml-05 mt-015 font-color-green text-xs">+{appliedCount}</span>
                         }
@@ -395,7 +391,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                 </div>
                 {showApplyButton ? (
                     <Button
-                        icon={PlusSignIcon}
+                        rightIcon={PlusSignIcon}
                         iconClassName="-mr-015"
                         variant="ghost-tertiary"
                         onClick={() => handleApplyActions()}
@@ -410,7 +406,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                 )}
             </div>
              {resultsVisible && hasActionsToShow && isCompleted && (
-                <div className="display-flex flex-col gap-1">
+                <div className="display-flex flex-col">
                     {actions.map((action, index) => (
                         <AddItemListItem
                             key={action.id}
