@@ -8,9 +8,11 @@ import {
     ArrowRightIcon,
     Icon,
     DeleteIcon,
-    PlayIcon,
     TickIcon,
-    ArrowUpRightIcon
+    PlusSignIcon,
+    CSSItemTypeIcon,
+    AuthorGroupIcon,
+    AuthorIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -103,7 +105,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
 
     const getTextClasses = () => {
         if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
-        if (action.status === 'pending') return 'font-color-tertiary';
+        if (action.status === 'pending') return 'font-color-secondary';
         return 'font-color-secondary';
     }
 
@@ -115,8 +117,8 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
     }
     
     const authors = itemData.authors ? itemData.authors.join(', ') : '';
-    const metaParts = [itemData.year, itemData.publication_title || itemData.venue].filter(Boolean);
-    const meta = metaParts.join(' • ');
+    const metaParts = [itemData.publication_title || itemData.venue, itemData.year].filter(Boolean);
+    const meta = metaParts.join(', ');
 
     return (
         <div
@@ -127,29 +129,27 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
         >
             <div className="display-flex flex-row items-start gap-3">
                 {hasApplicationError ? (
-                    <ZoteroIcon
-                        icon={ZOTERO_ICONS.DOCUMENT} 
-                        size={13}
-                        className={`flex-shrink-0 mt-020 ${iconColor}`}
-                    />
+                    <CSSItemTypeIcon itemType="journalArticle" className="scale-85"/>
                 ) : (
                     <Icon
                         icon={AlertIcon}
                         className={`flex-shrink-0 mt-020 ${iconColor}`}
                     />
                 )}
-                <div className="flex-1 min-w-0">
-                    <div className={getTextClasses()}>
-                        <div className="font-weight-medium truncate">{itemData.title || 'Untitled Item'}</div>
-                        <div className="text-xs font-color-tertiary truncate">
-                             {authors}
+                <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${getTextClasses()}`}>
+                    <div className="font-weight-medium">{itemData.title || 'Untitled Item'}</div>
+                    {itemData.authors && authors && 
+                        <div className="display-flex flex-row items-center gap-1">
+                            {itemData.authors.length > 1
+                                ? <Icon icon={AuthorGroupIcon} size={18} className="font-color-tertiary" />
+                                : <Icon icon={AuthorIcon} size={16} className="font-color-tertiary" />}
+                            <div className="font-color-tertiary truncate">{authors}</div>
                         </div>
-                         {meta && <div className="text-xs font-color-tertiary truncate">{meta}</div>}
-                        
-                        {action.status === 'applied' &&
-                            <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
-                        }
-                    </div>
+                    }
+                    {meta && <div className="font-color-tertiary truncate">{meta}</div>}
+                    {action.status === 'applied' &&
+                        <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
+                    }
                 </div>
                 {(action.status === 'applied') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
@@ -171,7 +171,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             onClick={handleAction}
                             className="p-1"
                             title='Add item'
-                            icon={PlayIcon}
+                            icon={PlusSignIcon}
                             loading={isBusy}
                         />
                     </div>
@@ -342,9 +342,9 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && totalActions > 0) return ArrowRightIcon;
             if (totalActions === 0) return AlertIcon;
-            return <ZoteroIcon icon={ZOTERO_ICONS.DOCUMENT} size={12} className="flex-shrink-0" />;
+            return <ZoteroIcon icon={ZOTERO_ICONS.ATTACHMENTS} size={12} className="flex-shrink-0" />;
         }
-        return <ZoteroIcon icon={ZOTERO_ICONS.DOCUMENT} size={12} className="flex-shrink-0" />;
+        return <ZoteroIcon icon={ZOTERO_ICONS.ATTACHMENTS} size={12} className="flex-shrink-0" />;
     };
 
     const getButtonText = () => {
@@ -395,13 +395,13 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                 </div>
                 {showApplyButton ? (
                     <Button
-                        icon={PlayIcon}
+                        icon={PlusSignIcon}
                         iconClassName="-mr-015"
                         variant="ghost-tertiary"
                         onClick={() => handleApplyActions()}
                     >
                          <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
-                            Apply All
+                            Add All
                         </span>
                     </Button>
                 ) : (
