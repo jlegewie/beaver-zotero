@@ -342,7 +342,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
 
     return (
         <div
-            className={`${contentVisible && hasContent ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
+            className="border-popup rounded-md display-flex flex-col min-w-0"
         >
             <NoteHeader
                 status={status}
