@@ -143,6 +143,12 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
     const metaParts = [itemData.publication_title || itemData.venue, itemData.year].filter(Boolean);
     const meta = metaParts.join(', ');
 
+    const getItemIcon = () => {
+        if (action.status === 'applied') return TickIcon;
+        if (action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') return DownloadIcon;
+        return AlertIcon;
+    }
+
     return (
         <div
             className={`${baseClasses.join(' ')} ${className}`}
@@ -151,14 +157,18 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                {hasApplicationError ? (
-                    <CSSItemTypeIcon itemType="journalArticle" className="scale-85"/>
-                ) : (
-                    <Icon
-                        icon={AlertIcon}
-                        className={`flex-shrink-0 mt-020 ${iconColor}`}
-                    />
-                )}
+                <IconButton
+                    icon={getItemIcon()}
+                    variant="ghost-secondary"
+                    className={`
+                        flex-shrink-0
+                        ${action.status === 'error' ? 'scale-100' : 'scale-12'}
+                        ${action.status === 'applied' ? '' : 'mt-020'}
+                    `}
+                    title={action.status === 'applied' ? 'Delete item' : 'Import item'}
+                    onClick={handleAction}
+                    loading={isBusy}
+                />
                 <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${getTextClasses()}`}>
                     <div className="font-weight-medium">{itemData.title || 'Untitled Item'}</div>
                     {itemData.authors && authors && 
@@ -183,7 +193,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                         />
                     </div>
                 )} */}
-                <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                {/* <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                     {(action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') && (
                         <IconButton
                             variant="ghost-secondary"
@@ -204,7 +214,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             loading={isBusy}
                         />
                     )}
-                </div>
+                </div> */}
             </div>
         </div>
     );
