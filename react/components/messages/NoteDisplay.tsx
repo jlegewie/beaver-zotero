@@ -90,7 +90,8 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         revealNote
     } = props;
 
-    const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [isRowHovered, setIsRowHovered] = useState(false);
+    const [isTitleHovered, setIsTitleHovered] = useState(false);
     const [showCopiedState, setShowCopiedState] = useState(false);
 
     const handleCopyClick = useCallback(() => {
@@ -105,10 +106,10 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
     const HeaderIcon = useMemo(() => {
         if (isSaving) return Spinner;
         if (!isComplete) return Spinner;
-        if (isButtonHovered && !contentVisible) return ArrowRightIcon;
-        if (isButtonHovered && contentVisible) return ArrowDownIcon;
-        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="-mr-0035"/>;
-    }, [isSaving, status, isComplete, isButtonHovered, contentVisible]);
+        if (isTitleHovered && !contentVisible) return ArrowRightIcon;
+        if (isTitleHovered && contentVisible) return ArrowDownIcon;
+        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="mr-0085"/>;
+    }, [isSaving, status, isComplete, isTitleHovered, contentVisible]);
 
     const headerText = useMemo(() => {
         return truncateText(noteTitle, 40);
@@ -117,32 +118,29 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
     return (
         <div
             className={`display-flex flex-row bg-senary items-start py-15 px-25 ${contentVisible && hasContent ? 'border-bottom-quinary' : ''}`}
-            onMouseEnter={() => setIsButtonHovered(true)}
-            onMouseLeave={() => setIsButtonHovered(false)}
+            onMouseEnter={() => setIsRowHovered(true)}
+            onMouseLeave={() => setIsRowHovered(false)}
         >
             {/* Header */}
-            <div className="display-flex flex-row flex-1 gap-3">
-                <IconButton
-                    icon={HeaderIcon}
-                    // className="mt-015"
-                    variant="ghost-secondary"
-                    onClick={toggleContent}
-                    disabled={!canToggleContent}
-                    title="Toggle content"
-                />
-                <Button
-                    variant="ghost-secondary"
-                    // icon={HeaderIcon}
-                    onClick={toggleContent}
+            <div
+                className={`display-flex flex-row flex-1 gap-2 items-start min-w-0 ${canToggleContent ? 'cursor-pointer' : ''}`}
+                onMouseEnter={() => setIsTitleHovered(true)}
+                onMouseLeave={() => setIsTitleHovered(false)}
+                onClick={canToggleContent ? toggleContent : undefined}
+                title={canToggleContent ? "Toggle content" : undefined}
+            >
+                <div className="mt-015" style={{ justifyContent: 'center' }}>
+                    <Icon icon={HeaderIcon} className="font-color-secondary" />
+                </div>
+                <div
                     className={`
-                        text-base scale-105 truncate
+                        text-base truncate font-color-secondary
                         ${!canToggleContent ? 'disabled-but-styled' : ''}
                         ${status === 'error' ? 'font-color-warning' : ''}
                     `}
-                    disabled={!canToggleContent}
                 >
                     <span>{headerText}</span>
-                </Button>
+                </div>
                 <div className="flex-1" />
             </div>
 
@@ -152,7 +150,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content="Save note to Zotero" showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
-                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
+                            className={`mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
                             onClick={handleSave}
                             variant="ghost-secondary"
                             disabled={isSaving || !isComplete}
@@ -163,7 +161,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content="Reveal note in Zotero" showArrow singleLine>
                         <IconButton
                             icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
+                            className={`mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
                             onClick={revealNote}
                             variant="ghost-secondary"
                         />
@@ -173,7 +171,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     <Tooltip content={isLibraryReadOnly ? `Read-only library` : `Unable to save note`} showArrow singleLine>
                         <IconButton
                             icon={AlertIcon}
-                            className={`font-color-tertiary mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
+                            className={`font-color-tertiary mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
                             onClick={() => {}}
                             variant="ghost-secondary"
                             disabled={true}
