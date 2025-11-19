@@ -8,7 +8,9 @@ import {
     AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
+    ArrowUpIcon,
     CopyIcon,
+    Icon,
     Spinner,
     PlusSignIcon,
     TickIcon
@@ -208,21 +210,36 @@ interface NoteBodyProps {
     trimmedContent: string;
     contentVisible: boolean;
     hasContent: boolean;
+    toggleContent: () => void;
 }
 
 const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
-    const { trimmedContent, contentVisible, hasContent } = props;
+    const { trimmedContent, contentVisible, hasContent, toggleContent } = props;
+    const [isHovered, setIsHovered] = useState(false);
 
     if (!contentVisible || !hasContent) {
         return null;
     }
 
     return (
-        <div className="display-flex flex-col p-25 gap-2 bg-senary">
-            <div className="markdown note-body">
-                <MarkdownRenderer 
-                    content={trimmedContent || '_No content yet._'} 
-                    enableNoteBlocks={false}
+        <div className="display-flex flex-col bg-senary">
+            <div className="display-flex flex-col px-25 pt-2 gap-2">
+                <div className="markdown note-body">
+                    <MarkdownRenderer 
+                        content={trimmedContent || '_No content yet._'} 
+                        enableNoteBlocks={false}
+                    />
+                </div>
+            </div>
+            <div 
+                className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 ${isHovered ? 'bg-quinary' : ''}`}
+                onClick={toggleContent}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+            >
+                <Icon
+                    icon={ArrowUpIcon}
+                    className={`scale-75 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
                 />
             </div>
         </div>
@@ -345,6 +362,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 trimmedContent={trimmedContent}
                 contentVisible={contentVisible}
                 hasContent={hasContent}
+                toggleContent={toggleContent}
             />
         </div>
     );
