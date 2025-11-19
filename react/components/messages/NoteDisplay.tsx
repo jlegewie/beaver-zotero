@@ -202,7 +202,8 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         prevProps.noteTitle === nextProps.noteTitle &&
         prevProps.contentVisible === nextProps.contentVisible &&
         prevProps.hasContent === nextProps.hasContent &&
-        prevProps.canToggleContent === nextProps.canToggleContent
+        prevProps.canToggleContent === nextProps.canToggleContent &&
+        prevProps.isLibraryReadOnly === nextProps.isLibraryReadOnly
     );
 });
 
