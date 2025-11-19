@@ -170,13 +170,9 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                         </div>
                     }
                     {meta && <div className="font-color-tertiary">{meta}</div>}
-                    {action.status === 'applied' &&
-                        <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
-                    }
                 </div>
-                {(action.status === 'applied') && (
+                {/* {(action.status === 'applied') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                         {/* Link to open item if needed, handled by click on main area mostly */}
                         <IconButton
                             variant="ghost-secondary"
                             onClick={handleAction}
@@ -186,9 +182,9 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             loading={isBusy}
                         />
                     </div>
-                )}
-                {(action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') && (
-                    <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                )} */}
+                <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                    {(action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') && (
                         <IconButton
                             variant="ghost-secondary"
                             onClick={handleAction}
@@ -197,8 +193,18 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             icon={DownloadIcon}
                             loading={isBusy}
                         />
-                    </div>
-                )}
+                    )}
+                    {action.status === 'applied' && (
+                        <IconButton
+                            variant="ghost-secondary"
+                            onClick={handleAction}
+                            className="p-1 scale-12"
+                            title='Import item'
+                            icon={TickIcon}
+                            loading={isBusy}
+                        />
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -299,17 +305,25 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
 
             setPanelState({ key: groupId, updates: { resultsVisible: true, isApplying: false } });
 
-            // Select first applied item in Zotero
+            // Select applied items in Zotero
             if (actionsToAck.length > 0) {
-                const firstResult = actionsToAck[0].result_data as AddItemResultData;
-                if (firstResult.zotero_key) {
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(firstResult.library_id, firstResult.zotero_key);
-                    if (item) {
-                         // Use ZoteroPane to select
-                         const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
-                         if (ZoteroPane) {
-                             ZoteroPane.selectItem(item.id);
-                         }
+                const itemIds: number[] = [];
+                for (const ack of actionsToAck) {
+                     const result = ack.result_data as AddItemResultData;
+                     if (result.zotero_key) {
+                         const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                         if (item) itemIds.push(item.id);
+                     }
+                }
+
+                if (itemIds.length > 0) {
+                    const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                    if (ZoteroPane) {
+                        if (itemIds.length === 1) {
+                             ZoteroPane.selectItem(itemIds[0]);
+                        } else {
+                             ZoteroPane.selectItems(itemIds);
+                        }
                     }
                 }
             }
