@@ -49,6 +49,9 @@ export function renderToMarkdown(
     // Clean up backticks around complete citations
     text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
 
+    // Remove note tags (keep content)
+    text = text.replace(/<note\s+(?:[^>]*?)>/g, '').replace(/<\/note>/g, '');
+
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
         // Parse the attributes
@@ -100,7 +103,7 @@ export function renderToMarkdown(
 
     // Return the formatted content
     return citedItems.length > 0
-        ? `${formattedContent}\n## Sources\n\n${bibliography}`
+        ? `${formattedContent}\n\n## Sources\n\n${bibliography}`
         : formattedContent;
 }
 
