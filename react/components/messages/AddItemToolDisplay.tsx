@@ -128,8 +128,8 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
 
     const getTextClasses = () => {
         if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
-        if (action.status === 'pending') return 'font-color-secondary';
-        return 'font-color-secondary';
+        if (action.status === 'pending') return 'font-color-primary';
+        return 'font-color-primary';
     }
 
     if (isHovered) {
@@ -163,24 +163,24 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                     variant="ghost-secondary"
                     className={`
                         flex-shrink-0
-                        ${action.status === 'error' ? 'scale-100' : 'scale-12'}
-                        ${action.status === 'applied' ? '' : 'mt-020'}
+                        ${action.status === 'error' ? 'scale-100' : 'scale-11'}
+                        ${action.status === 'applied' ? '' : 'mt-010'}
                     `}
                     title={action.status === 'applied' ? 'Delete item' : 'Import item'}
                     onClick={handleAction}
                     loading={isBusy}
                 />
                 <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${getTextClasses()}`}>
-                    <div className="font-weight-medium">{itemData.title || 'Untitled Item'}</div>
+                    <div>{itemData.title || 'Untitled Item'}</div>
                     {itemData.authors && authors && 
                         <div className="display-flex flex-row items-center gap-1">
                             {/* {itemData.authors.length > 1
                                 ? <Icon icon={AuthorGroupIcon} size={18} className="font-color-tertiary" />
                                 : <Icon icon={AuthorIcon} size={16} className="font-color-tertiary" />} */}
-                            <div className="font-color-tertiary truncate">{authors}</div>
+                            <div className="font-color-secondary truncate">{authors}</div>
                         </div>
                     }
-                    {meta && <div className="font-color-tertiary">{meta}</div>}
+                    {meta && <div className="font-color-secondary">{meta}</div>}
                 </div>
                 {/* {(action.status === 'applied') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
