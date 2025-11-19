@@ -192,7 +192,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                         <IconButton
                             variant="ghost-secondary"
                             onClick={handleAction}
-                            className="p-1"
+                            className="p-1 scale-12"
                             title='Import item'
                             icon={DownloadIcon}
                             loading={isBusy}
