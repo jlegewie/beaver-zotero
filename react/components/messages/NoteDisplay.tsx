@@ -240,7 +240,7 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
             >
                 <Icon
                     icon={ArrowUpIcon}
-                    className={`scale-75 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                    className={`scale-75 -mb-1 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
                 />
             </div>
         </div>
