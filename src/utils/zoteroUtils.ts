@@ -524,3 +524,39 @@ export function getActiveZoteroLibraryId(): number | null {
 
     return null;
 };
+
+/**
+ * Get the current library in the library view, or the library of the currently open file
+ * when in Zotero reader.
+ *
+ * @returns {Zotero.Library|null} The current library object, or null if no library is available
+ */
+export function getCurrentLibrary(): Zotero.Library | null {
+	const win = Zotero.getMainWindow();
+	if (!win) {
+		return null;
+	}
+	
+	// Check if we're in a reader tab
+	if (win.Zotero_Tabs && win.Zotero_Tabs.selectedType === 'reader') {
+		const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+		if (reader && reader.itemID) {
+			const item = Zotero.Items.get(reader.itemID);
+			if (item && item.libraryID) {
+				return Zotero.Libraries.get(item.libraryID) || null;
+			}
+		}
+		return null;
+	}
+	
+	// Otherwise, get library from library view
+	const zp = win.ZoteroPane;
+	if (zp && zp.collectionsView) {
+		const libraryID = zp.getSelectedLibraryID();
+		if (libraryID) {
+			return Zotero.Libraries.get(libraryID) || null;
+		}
+	}
+	
+	return null;
+}
