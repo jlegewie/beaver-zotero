@@ -180,7 +180,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             <div className="font-color-secondary truncate">{authors}</div>
                         </div>
                     }
-                    {meta && <div className="font-color-secondary">{meta}</div>}
+                    {meta && <div className={`${(action.status === 'rejected' || action.status === 'undone') ? 'font-color-tertiary' : 'font-color-secondary'}`}>{meta}</div>}
                     {/* {(itemData.citation_count || itemData.abstract) &&
                         <div className="display-flex flex-row items-center gap-1">
                             <Button variant="surface-light" className="py-1" style={{ padding: '2px 4px' }}>Abstract</Button>
