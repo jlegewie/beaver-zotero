@@ -400,8 +400,8 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
 
     const getIcon = () => {
         if (isInProgress || isApplying) return Spinner;
+        if (totalActions === 0) return GlobalSearchIcon;
         if (isError || allErrors) return AlertIcon;
-        if (totalActions === 0) return AlertIcon;
 
         if (isButtonHovered && !resultsVisible) return ArrowRightIcon;
         if (isButtonHovered && resultsVisible) return ArrowDownIcon;
@@ -415,6 +415,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
         if (isError) {
             return 'Paper Finder: Error';
         }
+        if (totalActions === 0) return 'Paper Finder: No results';
         return 'Paper Finder';
     };
 
