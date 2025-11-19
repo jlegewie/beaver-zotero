@@ -144,6 +144,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
     const meta = metaParts.join(', ');
 
     const getItemIcon = () => {
+        if (isBusy) return Spinner;
         if (action.status === 'applied') return TickIcon;
         if (action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') return DownloadIcon;
         return AlertIcon;
@@ -290,6 +291,11 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                 return;
             }
 
+            // Mark items as busy
+            actionsToApply.forEach(action => {
+                setBusy({ key: groupId, annotationId: action.id, isBusy: true });
+            });
+
             const applyResults: (AckLink | null)[] = await Promise.all(
                 actionsToApply.map(async (action) => {
                     try {
@@ -304,6 +310,8 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                         logger(`handleApplyActions: failed to add item ${action.id}: ${errorMessage}`, 1);
                         setProposedActionsToError([action.id], errorMessage);
                         return null;
+                    } finally {
+                        setBusy({ key: groupId, annotationId: action.id, isBusy: false });
                     }
                 })
             );
