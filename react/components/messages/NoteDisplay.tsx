@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
-import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
+import { getCurrentLibrary, isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import {
@@ -292,7 +292,8 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         toggleNotePanelVisibility(note.id);
     }, [note.id, toggleNotePanelVisibility]);
 
-    const targetLibraryId: number | undefined = parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? undefined;
+    const targetLibraryId: number | undefined =
+        parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? getCurrentLibrary()?.id ?? undefined;
 
     const handleCopy = useCallback(async () => {
         const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
