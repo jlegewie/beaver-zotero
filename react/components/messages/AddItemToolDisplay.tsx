@@ -181,6 +181,13 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                         </div>
                     }
                     {meta && <div className="font-color-secondary">{meta}</div>}
+                    {/* {(itemData.citation_count || itemData.abstract) &&
+                        <div className="display-flex flex-row items-center gap-1">
+                            <Button variant="surface-light" className="py-1" style={{ padding: '2px 4px' }}>Abstract</Button>
+                            <div className="flex-1"/>
+                            {itemData.citation_count && <div className="font-color-tertiary">{`Cited by ${itemData.citation_count.toLocaleString()}`}</div>}
+                        </div>
+                    } */}
                 </div>
                 {/* {(action.status === 'applied') && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
