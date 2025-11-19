@@ -18,7 +18,7 @@ type AnnotationBusyStateMap = Record<string, Record<string, boolean>>;
 type AnnotationAttachmentTitleMap = Record<string, string | null>;
 
 export const defaultAnnotationPanelState: AnnotationPanelState = {
-    resultsVisible: true,
+    resultsVisible: false,
     isApplying: false
 };
 

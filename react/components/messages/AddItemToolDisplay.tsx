@@ -9,9 +9,10 @@ import {
     Icon,
     DeleteIcon,
     TickIcon,
-    PlusSignIcon,
+    DownloadIcon,
     CSSItemTypeIcon,
     GlobalSearchIcon,
+    ArrowUpIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -50,6 +51,30 @@ interface AddItemListItemProps {
     onMouseLeave: () => void;
     className?: string;
 }
+
+const formatAuthors = (authors?: string[]): string => {
+    if (!authors || authors.length === 0) return '';
+
+    const clean = authors.filter(Boolean).map(a => a.trim());
+
+    if (clean.length === 0) return '';
+
+    if (clean.length > 3) {
+        return `${clean[0]} et al.`;
+    }
+
+    if (clean.length === 1) {
+        return clean[0];
+    }
+
+    if (clean.length === 2) {
+        return `${clean[0]} and ${clean[1]}`;
+    }
+
+    // exactly 3
+    return `${clean[0]}, ${clean[1]} and ${clean[2]}`;
+}
+
 
 const AddItemListItem: React.FC<AddItemListItemProps> = ({
     action,
@@ -114,7 +139,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
         baseClasses.push('opacity-60');
     }
     
-    const authors = itemData.authors ? itemData.authors.slice(0, 3).join(', ') + (itemData.authors.length > 3 ? ' et al.' : '') : '';
+    const authors = formatAuthors(itemData.authors);
     const metaParts = [itemData.publication_title || itemData.venue, itemData.year].filter(Boolean);
     const meta = metaParts.join(', ');
 
@@ -144,7 +169,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             <div className="font-color-tertiary truncate">{authors}</div>
                         </div>
                     }
-                    {meta && <div className="font-color-tertiary truncate">{meta}</div>}
+                    {meta && <div className="font-color-tertiary">{meta}</div>}
                     {action.status === 'applied' &&
                         <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
                     }
@@ -168,8 +193,8 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
                             variant="ghost-secondary"
                             onClick={handleAction}
                             className="p-1"
-                            title='Add item'
-                            icon={PlusSignIcon}
+                            title='Import item'
+                            icon={DownloadIcon}
                             loading={isBusy}
                         />
                     </div>
@@ -196,6 +221,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
 
     // Track hover states
     const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [isExpandHovered, setIsExpandHovered] = useState(false);
     const [hoveredActionId, setHoveredActionId] = useState<string | null>(null);
 
     // Tool calls state
@@ -364,7 +390,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
             className={`${resultsVisible && hasActionsToShow ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
         >
              <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible && hasActionsToShow ? 'border-bottom-quinary' : ''}`}
+                className={`display-flex flex-row bg-senary py-15 px-2 ${hasActionsToShow && isCompleted ? 'border-bottom-quinary' : ''}`}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
@@ -391,23 +417,21 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                 </div>
                 {showApplyButton ? (
                     <Button
-                        rightIcon={PlusSignIcon}
+                        rightIcon={DownloadIcon}
                         iconClassName="-mr-015"
                         variant="ghost-tertiary"
                         onClick={() => handleApplyActions()}
                     >
-                         <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
-                            Add All
-                        </span>
+                        Import All
                     </Button>
                 ) : (
                     <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
                     </div>
                 )}
             </div>
-             {resultsVisible && hasActionsToShow && isCompleted && (
+             {hasActionsToShow && isCompleted && (
                 <div className="display-flex flex-col">
-                    {actions.map((action, index) => (
+                    {(resultsVisible ? actions : actions.slice(0, 3)).map((action, index) => (
                         <AddItemListItem
                             key={action.id}
                             action={action}
@@ -421,6 +445,19 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                             className={index === 0 ? 'pt-2' : ''}
                         />
                     ))}
+                    {actions.length > 3 && (
+                        <div 
+                            className={`display-flex flex-row justify-center items-center cursor-pointer -mt-1 ${isExpandHovered ? 'bg-senary' : ''}`}
+                            onClick={toggleResults}
+                            onMouseEnter={() => setIsExpandHovered(true)}
+                            onMouseLeave={() => setIsExpandHovered(false)}
+                        >
+                            <Icon
+                                icon={resultsVisible ? ArrowUpIcon : ArrowDownIcon}
+                                className={`scale-75 ${isExpandHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                            />
+                        </div>
+                    )}
                 </div>
             )}
         </div>
