@@ -103,11 +103,11 @@ async function createItemManually(itemData: ProposedItem): Promise<Zotero.Item> 
         item.setField('date', itemData.year.toString());
     }
     
-    if (itemData.url && (item as any).isValidField('url')) {
+    if (itemData.url && Zotero.ItemFields.isValidForType('url', item.itemTypeID)) {
         item.setField('url', itemData.url);
     }
     
-    if (itemData.abstract && (item as any).isValidField('abstractNote')) {
+    if (itemData.abstract && Zotero.ItemFields.isValidForType('abstractNote', item.itemTypeID)) {
         item.setField('abstractNote', itemData.abstract);
     }
     
@@ -115,20 +115,20 @@ async function createItemManually(itemData: ProposedItem): Promise<Zotero.Item> 
         const pubTitle = itemData.publication_title || itemData.venue;
         if (pubTitle) {
             if (itemType === 'journalArticle') {
-                 if ((item as any).isValidField('publicationTitle')) item.setField('publicationTitle', pubTitle);
+                 if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) item.setField('publicationTitle', pubTitle);
             } else if (itemType === 'conferencePaper') {
-                 if ((item as any).isValidField('proceedingsTitle')) item.setField('proceedingsTitle', pubTitle);
-            } else if ((item as any).isValidField('publicationTitle')) {
+                 if (Zotero.ItemFields.isValidForType('proceedingsTitle', item.itemTypeID)) item.setField('proceedingsTitle', pubTitle);
+            } else if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) {
                  item.setField('publicationTitle', pubTitle);
             }
         }
     }
     
     // 3. Identifiers (stored in specific fields or 'extra')
-    if (itemData.identifiers?.doi && (item as any).isValidField('DOI')) {
+    if (itemData.identifiers?.doi && Zotero.ItemFields.isValidForType('DOI', item.itemTypeID)) {
         item.setField('DOI', itemData.identifiers.doi);
     }
-    if (itemData.identifiers?.isbn && (item as any).isValidField('ISBN')) {
+    if (itemData.identifiers?.isbn && Zotero.ItemFields.isValidForType('ISBN', item.itemTypeID)) {
         item.setField('ISBN', itemData.identifiers.isbn);
     }
     
