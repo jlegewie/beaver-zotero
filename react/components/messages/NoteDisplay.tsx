@@ -178,7 +178,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         />
                     </Tooltip>
                 )}
-                <Tooltip content="Copy note" showArrow singleLine>
+                <Tooltip content="Copy" showArrow singleLine>
                     <IconButton
                         icon={showCopiedState ? TickIcon : CopyIcon}
                         className="mt-015"
