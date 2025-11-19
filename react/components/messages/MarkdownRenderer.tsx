@@ -247,7 +247,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                             key={`note-${segment.data.id}-${index}`}
                             note={segment.data}
                             messageId={messageId}
-                            exportMode={exportRendering}
+                            exportRendering={exportRendering}
                         />
                     );
                 }

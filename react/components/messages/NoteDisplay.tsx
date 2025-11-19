@@ -48,7 +48,7 @@ export interface StreamingNoteBlock {
 interface NoteDisplayProps {
     note: StreamingNoteBlock;
     messageId?: string;
-    exportMode?: boolean;
+    exportRendering?: boolean;
 }
 
 type NoteStatus =
@@ -210,10 +210,11 @@ interface NoteBodyProps {
     contentVisible: boolean;
     hasContent: boolean;
     toggleContent: () => void;
+    exportRendering?: boolean;
 }
 
 const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
-    const { trimmedContent, contentVisible, hasContent, toggleContent } = props;
+    const { trimmedContent, contentVisible, hasContent, toggleContent, exportRendering = false } = props;
     const [isHovered, setIsHovered] = useState(false);
 
     if (!contentVisible || !hasContent) {
@@ -227,6 +228,7 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
                     <MarkdownRenderer 
                         content={trimmedContent || '_No content yet._'} 
                         enableNoteBlocks={false}
+                        exportRendering={exportRendering}
                     />
                 </div>
             </div>
@@ -245,7 +247,7 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
     );
 });
 
-const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode = false }) => {
+const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRendering = false }) => {
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
@@ -363,6 +365,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 contentVisible={contentVisible}
                 hasContent={hasContent}
                 toggleContent={toggleContent}
+                exportRendering={exportRendering}
             />
         </div>
     );
