@@ -387,7 +387,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
     return (
         <div
             id={`tool-${toolCalls[0].id}`}
-            className={`${resultsVisible && hasActionsToShow ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
+            className="border-popup rounded-md display-flex flex-col min-w-0"
         >
              <div
                 className={`display-flex flex-row bg-senary py-15 px-2 ${hasActionsToShow && isCompleted ? 'border-bottom-quinary' : ''}`}
