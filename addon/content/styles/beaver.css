@@ -298,11 +298,11 @@
 [id^="beaver-pane-"] .gap-05 { column-gap: 0.125rem; row-gap: 0.125rem; }
 [id^="beaver-pane-"] .gap-1 { column-gap: 0.375rem; row-gap: 0.25rem; }
 [id^="beaver-pane-"] .gap-2 { column-gap: 0.5rem; row-gap: 0.35rem; }
+[id^="beaver-pane-"] .gap-25 { column-gap: 0.625rem; row-gap: 0.45rem; }
 [id^="beaver-pane-"] .gap-3 { column-gap: 0.75rem; row-gap: 0.5rem; }
 [id^="beaver-pane-"] .gap-4 { column-gap: 1rem; row-gap: 0.75rem; }
 [id^="beaver-pane-"] .gap-5 { column-gap: 1.25rem; row-gap: 1.2rem; }
 [id^="beaver-pane-"] .gap-1 { column-gap: 0.375rem; row-gap: 0.25rem; }
-[id^="beaver-pane-"] .gap-2 { column-gap: 0.5rem; row-gap: 0.35rem; }
 [id^="beaver-pane-"] .gap-col-1 { column-gap: 0.25rem; }
 [id^="beaver-pane-"] .gap-col-2 { column-gap: 0.35rem; }
 [id^="beaver-pane-"] .gap-col-3 { column-gap: 0.5rem; }

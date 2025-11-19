@@ -123,7 +123,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         >
             {/* Header */}
             <div
-                className={`display-flex flex-row flex-1 gap-2 items-start min-w-0 ${canToggleContent ? 'cursor-pointer' : ''}`}
+                className={`display-flex flex-row flex-1 gap-25 items-start min-w-0 ${canToggleContent ? 'cursor-pointer' : ''}`}
                 onMouseEnter={() => setIsTitleHovered(true)}
                 onMouseLeave={() => setIsTitleHovered(false)}
                 onClick={canToggleContent ? toggleContent : undefined}
