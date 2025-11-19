@@ -560,3 +560,76 @@ export function getCurrentLibrary(): Zotero.Library | null {
 	
 	return null;
 }
+
+/**
+ * Creates a citation HTML string for a Zotero item
+ * @param {Zotero.Item|Number|String} itemOrID - Zotero item object or item ID
+ * @param {String} [page] - Optional page number or locator (e.g., "123", "123-145")
+ * @returns {String} HTML string with citation markup
+ */
+export function createCitationHTML(itemOrID: Zotero.Item | number | string, page?: string): string {
+    // Get the item if an ID was passed
+    const item = typeof itemOrID === 'object' ? itemOrID : Zotero.Items.get(itemOrID);
+    
+    if (!item) {
+        throw new Error('Item not found');
+    }
+    
+    // Handle attachments: cite the parent item if it exists
+    let itemToCite = item;
+    if (item.isAttachment()) {
+        if (item.parentID) {
+            itemToCite = Zotero.Items.get(item.parentID);
+            if (!itemToCite || !itemToCite.isRegularItem()) {
+                throw new Error('Attachment parent is not a regular item');
+            }
+        } else {
+            throw new Error('Cannot cite standalone attachments - they must have a parent item');
+        }
+    }
+    
+    if (!itemToCite.isRegularItem()) {
+        throw new Error('Item is not a regular item and cannot be cited');
+    }
+    
+    // Convert item to CSL JSON format
+    const itemData = Zotero.Utilities.Item.itemToCSLJSON(itemToCite);
+    
+    // Get the item URI
+    const uri = Zotero.URI.getItemURI(itemToCite);
+    
+    // Create citation item with optional page locator
+    const citationItem: any = {
+        uris: [uri],
+        itemData: itemData
+    };
+    
+    // Add page locator if provided
+    if (page) {
+        citationItem.locator = page;
+        citationItem.label = "page";
+    }
+    
+    // Create citation object
+    const citation = {
+        citationItems: [citationItem],
+        properties: {}
+    };
+    
+    // Format the citation text (e.g., "(Author, Year)" or "(Author, Year, p. 123)")
+    const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+    
+    // Create the HTML span element
+    const citationHTML = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">${formatted}</span>`;
+    
+    return citationHTML;
+}
+
+// Citation without page
+// const citation1 = createCitationHTML(item);
+
+// Citation with page number
+// const citation2 = createCitationHTML(item, "123");
+
+// Citation with page range
+// const citation3 = createCitationHTML(item, "123-145");
