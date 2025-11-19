@@ -56,6 +56,46 @@ async function tryImportFromIdentifiers(identifiers: any): Promise<Zotero.Item |
 }
 
 /**
+ * Import an item from a URL using Zotero's RemoteTranslate and HiddenBrowser.
+ * @param url - The URL to import the item from.
+ * @returns A Promise that resolves to the imported Zotero.Item or null if the import fails.
+ */
+async function importFromUrl(url: string): Promise<Zotero.Item | null> {
+    if (!url) return null;
+
+    // Dynamic import for Zotero modules
+    // const { RemoteTranslate } = ChromeUtils.import_("chrome://zotero/content/RemoteTranslate.jsm");
+    // const { HiddenBrowser } = ChromeUtils.import_("chrome://zotero/content/HiddenBrowser.jsm");
+    const { RemoteTranslate } = ChromeUtils.importESModule("chrome://zotero/content/RemoteTranslate.mjs");
+    const { HiddenBrowser } = ChromeUtils.importESModule("chrome://zotero/content/HiddenBrowser.mjs");
+
+    const browser = new HiddenBrowser();
+    const translate = new RemoteTranslate();
+    
+    try {
+        logger(`importFromUrl: Attempting import from URL: ${url}`, 2);
+        await browser.load(url);
+        await translate.setBrowser(browser);
+        
+        const translators = await translate.detect();
+        if (!translators || translators.length === 0) return null;
+
+        const newItems = await translate.translate({
+            libraryID: Zotero.Libraries.userLibraryID,
+            saveAttachments: true
+        });
+
+        return newItems && newItems.length ? newItems[0] : null;
+    } catch (e) {
+        logger(`importFromUrl: URL import failed: ${e}`, 1);
+        return null;
+    } finally {
+        browser.destroy();
+    }
+}
+
+
+/**
  * Helper to attach a PDF from a URL to an existing item
  */
 async function attachPdfFromUrl(parentItem: Zotero.Item, url: string) {
@@ -167,16 +207,29 @@ async function createZoteroItem(proposedItem: ProposedItem): Promise<Zotero.Item
         try {
             const translatedItem = await tryImportFromIdentifiers(proposedItem.identifiers);
             if (translatedItem) {
-                logger("Successfully imported item via identifiers", 2);
+                logger("createZoteroItem: Successfully imported item via identifiers", 2);
                 return translatedItem;
             }
         } catch (e) {
-            logger(`Failed to import via identifier, falling back to manual creation: ${e}`, 1);
+            logger(`createZoteroItem: Failed to import via identifier: ${e}`, 1);
+        }
+    }
+
+    // 2. Try URL Translation (Semantic Scholar / Article Page)
+    if (proposedItem.url) {
+        try {
+            const urlItem = await importFromUrl(proposedItem.url);
+            if (urlItem) {
+                logger("createZoteroItem: Successfully imported item via URL", 2);
+                return urlItem;
+            }
+        } catch (e) {
+            logger(`createZoteroItem: Failed to import via URL: ${e}`, 1);
         }
     }
 
     // 2. Fallback: Create item manually from available metadata
-    logger("Falling back to manual item creation", 2);
+    logger("createZoteroItem: Falling back to manual item creation", 2);
     return await createItemManually(proposedItem);
 }
 
