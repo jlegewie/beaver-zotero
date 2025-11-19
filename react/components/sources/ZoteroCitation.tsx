@@ -133,8 +133,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
     
     // Add the URL to open the PDF/Note
-    const pages = getCitationPages(attachmentCitation);
-
+    const pages = [...new Set(getCitationPages(attachmentCitation))];
     const firstPage = pages ? pages[0] : null;
     url = firstPage ? `${url}?page=${firstPage}` : url;
     
@@ -383,7 +382,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
-    /*if (exportRendering) {
+    if (exportRendering) {
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) return null;
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
@@ -391,7 +390,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             citationItems: [{
                 uris: [Zotero.URI.getItemURI(item.parentItem || item)],
                 itemData: itemData,
-                locator: pages || null
+                locator: firstPage || undefined,
             }],
             properties: {}
         };
@@ -404,7 +403,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 {formatted}
             </span>
         );
-    }*/
+    }
 
     const citationElement = (
         <span 

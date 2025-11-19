@@ -1,5 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Provider } from 'jotai';
+import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 
@@ -123,6 +125,9 @@ export function renderToHTML(content: string, className: string = "markdown"): s
         enableNoteBlocks: false
     });
 
+    // Wrap in Jotai Provider to share state
+    const wrappedElement = React.createElement(Provider, { store }, markdownElement);
+
     // Render the React element to an HTML string
-    return renderToStaticMarkup(markdownElement);
+    return renderToStaticMarkup(wrappedElement);
 }
