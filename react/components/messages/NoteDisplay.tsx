@@ -411,7 +411,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     
     // Current library check for read-only state in UI
     const currentLib = getCurrentLibrary();
-    const isReadOnly = currentLib ? !isLibraryEditable(currentLib.id) : true;
+    const isReadOnly = currentLib ? !isLibraryEditable(currentLib.libraryID) : true;
 
     return (
         <div
