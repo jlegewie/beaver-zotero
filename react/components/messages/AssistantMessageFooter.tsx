@@ -8,7 +8,7 @@ import MenuButton from '../ui/MenuButton';
 import { regenerateFromMessageAtom } from '../../atoms/generateMessages';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
-import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
+import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
@@ -146,7 +146,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     };
 
     const saveAsNote = async (citation?: CitationData) => {
-        const formattedContent = renderToHTML(combinedContent);
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
         if (citation && citation.parentKey) {
