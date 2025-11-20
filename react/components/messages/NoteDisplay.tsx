@@ -247,7 +247,7 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
                 </div>
             </div>
             <div 
-                className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 ${isHovered ? 'bg-quinary' : ''}`}
+                className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 mt-1 ${isHovered ? 'bg-quinary' : ''}`}
                 onClick={toggleContent}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
