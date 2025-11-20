@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
 import { getCurrentLibrary, isLibraryEditable } from '../../../src/utils/zoteroUtils';
-import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import {
     AlertIcon,
@@ -34,7 +33,9 @@ import {
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
-import { renderToMarkdown } from '../../utils/citationRenderers';
+import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
+import { selectItem } from '../../../src/utils/selectItem';
+import { getCurrentReaderItemAsync } from '../../utils/readerUtils';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -90,7 +91,6 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         revealNote
     } = props;
 
-    const [isRowHovered, setIsRowHovered] = useState(false);
     const [isTitleHovered, setIsTitleHovered] = useState(false);
     const [showCopiedState, setShowCopiedState] = useState(false);
 
@@ -115,11 +115,14 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         return truncateText(noteTitle, 40);
     }, [noteTitle]);
 
+    const isSaveDisabled = isSaving || !isComplete || isLibraryReadOnly;
+    const saveTooltip = isLibraryReadOnly 
+            ? "Library is read-only" 
+            : "Create Zotero Note";
+
     return (
         <div
             className={`display-flex flex-row bg-senary items-start py-15 px-25 ${contentVisible && hasContent ? 'border-bottom-quinary' : ''}`}
-            onMouseEnter={() => setIsRowHovered(true)}
-            onMouseLeave={() => setIsRowHovered(false)}
         >
             {/* Header */}
             <div
@@ -146,38 +149,24 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
 
             {/* Action buttons */}
             <div className="display-flex flex-row gap-3">
-                {status == 'pending'  && !isLibraryReadOnly && (
-                    <Tooltip content="Save note to Zotero" showArrow singleLine>
-                        <IconButton
-                            icon={PlusSignIcon}
-                            className={`mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={handleSave}
-                            variant="ghost-secondary"
-                            disabled={isSaving || !isComplete}
-                        />
-                    </Tooltip>
-                )}
-                {status == 'applied' && !isLibraryReadOnly && (
-                    <Tooltip content="Reveal note in Zotero" showArrow singleLine>
-                        <IconButton
-                            icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                            className={`mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={revealNote}
-                            variant="ghost-secondary"
-                        />
-                    </Tooltip>
-                )}
-                {status === 'error' || isLibraryReadOnly && (
-                    <Tooltip content={isLibraryReadOnly ? `Read-only library` : `Unable to save note`} showArrow singleLine>
-                        <IconButton
-                            icon={AlertIcon}
-                            className={`font-color-tertiary mt-1 fadeIn ${isRowHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={() => {}}
-                            variant="ghost-secondary"
-                            disabled={true}
-                        />
-                    </Tooltip>
-                )}
+                {/* <Tooltip content={saveTooltip} showArrow singleLine>
+                    <IconButton
+                        icon={status === 'applied' ? () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} /> : PlusSignIcon}
+                        className="mt-015"
+                        variant="ghost-secondary"
+                        onClick={status === 'applied' ? revealNote : handleSave}
+                        disabled={status === 'applied' ? false : isSaveDisabled}
+                    />
+                </Tooltip> */}
+                <Tooltip content={saveTooltip} showArrow singleLine>
+                    <IconButton
+                        icon={PlusSignIcon}
+                        className="mt-015"
+                        variant="ghost-secondary"
+                        onClick={handleSave}
+                        disabled={isSaveDisabled}
+                    />
+                </Tooltip>
                 <Tooltip content="Copy" showArrow singleLine>
                     <IconButton
                         icon={showCopiedState ? TickIcon : CopyIcon}
@@ -250,7 +239,6 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
 const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRendering = false }) => {
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
-    const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
 
     // UI state for collapsible note panel
@@ -271,29 +259,10 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     const noteTitle = note.title || noteAction?.proposed_data?.title || 'New note';
     const trimmedContent = note.content.replace(/^\n+/, '');
 
-    const parentReference: ZoteroItemReference | null = useMemo(() => {
-        if (
-            noteAction?.proposed_data?.library_id !== undefined &&
-            noteAction?.proposed_data?.zotero_key
-        ) {
-            return {
-                library_id: noteAction.proposed_data.library_id as number,
-                zotero_key: noteAction.proposed_data.zotero_key
-            };
-        }
-        if (note.itemId) {
-            return createZoteroItemReference(note.itemId);
-        }
-        return null;
-    }, [noteAction, note.itemId]);
-
     // Toggle visibility of note content
     const toggleContent = useCallback(() => {
         toggleNotePanelVisibility(note.id);
     }, [note.id, toggleNotePanelVisibility]);
-
-    const targetLibraryId: number | undefined =
-        parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? getCurrentLibrary()?.id ?? undefined;
 
     const handleCopy = useCallback(async () => {
         const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
@@ -301,7 +270,6 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     }, [noteTitle, trimmedContent, note.content]);
 
     const revealNote = useCallback(async () => {
-        console.log('revealNote', noteAction);
         if (noteAction?.result_data?.library_id && noteAction?.result_data?.zotero_key) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(noteAction.result_data.library_id, noteAction.result_data.zotero_key);
             if (item) {
@@ -315,15 +283,89 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
         if (!noteAction || !messageId || !note.isComplete) {
             return;
         }
+        
         setNotePanelState({ key: note.id, updates: { isSaving: true } });
         try {
+            const win = Zotero.getMainWindow();
+            const zp = Zotero.getActiveZoteroPane();
+            
+            let targetLibId: number | undefined = undefined;
+            let parentRef: ZoteroItemReference | null = null;
+            let collectionToAddTo: Zotero.Collection | null = null;
+
+            // Reader view
+            const readerItem = await getCurrentReaderItemAsync(win);            
+            if (readerItem) {
+                targetLibId = readerItem.libraryID;
+                parentRef = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey } as ZoteroItemReference
+                    : null;
+
+            // Library view
+            } else {
+                const selectedItems = zp.getSelectedItems();
+                
+                // If multiple selected, use the first one
+                if (selectedItems.length >= 1) {
+                    const firstItem = selectedItems[0];
+                    const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+                    targetLibId = item.libraryID;
+                    
+                    if (item.isRegularItem()) {
+                        parentRef = { library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference;
+                    } else if (item.isNote() || item.isAttachment()) {
+                        // Add to parent (sibling)
+                        parentRef = item.parentKey
+                            ? { library_id: item.libraryID, zotero_key: item.parentKey } as ZoteroItemReference
+                            : null;
+                    }
+
+                // No selection or other cases (0 items) - add to current library/collection
+                } else {
+                    targetLibId = zp.getSelectedLibraryID();
+                    const collection = zp.getSelectedCollection();
+                    if (collection) {
+                        collectionToAddTo = collection;
+                    }
+                    parentRef = null;
+                }
+            }
+
+            if (!targetLibId) {
+                throw new Error("Could not determine target library");
+            }
+            
+            if (!isLibraryEditable(targetLibId)) {
+                throw new Error("Library is read-only");
+            }
+
             const noteContent = `<h1>${noteTitle}</h1>\n\n${trimmedContent || note.content}`;
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title: noteTitle,
-                parentReference,
-                targetLibraryId
+                parentReference: parentRef,
+                targetLibraryId: targetLibId
             });
+            
+            // Handle collection addition if needed
+            if (collectionToAddTo && result.zotero_key) {
+                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                 if (newItem) {
+                     await Zotero.DB.executeTransaction(async function () {
+                        // @ts-ignore - Zotero types
+                        await collectionToAddTo.addItem(newItem.id);
+                     });
+                 }
+            }
+
+            // Select the item
+            if (result.zotero_key) {
+                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                 if (newItem) {
+                     await selectItem(newItem);
+                 }
+            }
+
             await ackProposedActions(messageId, [
                 {
                     action_id: noteAction.id,
@@ -336,11 +378,15 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
         } finally {
             setNotePanelState({ key: note.id, updates: { isSaving: false } });
         }
-    }, [ackProposedActions, messageId, note.id, note.content, note.isComplete, noteAction, noteTitle, parentReference, setProposedActionsToError, setNotePanelState, trimmedContent]);
+    }, [ackProposedActions, messageId, note.id, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setProposedActionsToError, setNotePanelState]);
 
     // Determine when content can be toggled
     const canToggleContent = note.isComplete;
     const hasContent = trimmedContent.length > 0;
+    
+    // Current library check for read-only state in UI
+    const currentLib = getCurrentLibrary();
+    const isReadOnly = currentLib ? !isLibraryEditable(currentLib.id) : true;
 
     return (
         <div
@@ -358,7 +404,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
                 handleSave={handleSave}
                 handleCopy={handleCopy}
                 revealNote={revealNote}
-                isLibraryReadOnly={targetLibraryId ? !isLibraryEditable(targetLibraryId) : true}
+                isLibraryReadOnly={isReadOnly}
             />
             <NoteBody
                 trimmedContent={trimmedContent}
@@ -372,4 +418,3 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
 };
 
 export default NoteDisplay;
-
