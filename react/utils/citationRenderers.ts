@@ -51,8 +51,14 @@ export function renderToMarkdown(
     // Clean up backticks around complete citations
     text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
 
-    // Remove note tags (keep content)
-    text = text.replace(/<note\s+(?:[^>]*?)>/g, '').replace(/<\/note>/g, '');
+    // Remove note tags (keep content), add title as markdown header if present
+    text = text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
+        const attrs = parseAttributes(attrString);
+        if (attrs.title) {
+            return `\n\n## ${attrs.title}\n\n`;
+        }
+        return before + after;
+    }).replace(/<\/note>/g, '');
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
@@ -105,7 +111,7 @@ export function renderToMarkdown(
 
     // Return the formatted content
     return citedItems.length > 0
-        ? `${formattedContent}\n\n## Sources\n\n${bibliography}`
+        ? `${formattedContent.trim()}\n\n## Sources\n\n${bibliography}`
         : formattedContent;
 }
 
