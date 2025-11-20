@@ -386,11 +386,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) return null;
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
+        const startPage = Array.isArray(pages) ? pages[0] : pages; 
+        const navLocator = startPage ? String(startPage) : undefined;
         const citation = {
             citationItems: [{
                 uris: [Zotero.URI.getItemURI(item.parentItem || item)],
                 itemData: itemData,
-                locator: firstPage || undefined,
+                locator: navLocator,
+                // label: 'p.'
             }],
             properties: {}
         };
