@@ -45,8 +45,29 @@ export class ApiService {
         
         return {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            ...this.getVersionHeaders()
         };
+    }
+
+    /**
+    * Adds Zotero and plugin version identifiers to outgoing headers when available
+    */
+    private getVersionHeaders(): Record<string, string> {
+        const versionHeaders: Record<string, string> = {};
+
+        if (typeof Zotero !== 'undefined') {
+            const { version, Beaver } = Zotero;
+            if (version && typeof version === 'string') {
+                versionHeaders['X-Zotero-Version'] = version;
+            }
+            const pluginVersion = Beaver?.pluginVersion;
+            if (pluginVersion && typeof pluginVersion === 'string') {
+                versionHeaders['X-Beaver-Version'] = pluginVersion;
+            }
+        }
+
+        return versionHeaders;
     }
     
     /**
