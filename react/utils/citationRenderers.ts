@@ -1,5 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Provider } from 'jotai';
+import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 
@@ -34,6 +36,25 @@ function parseId(id: string): { libraryID: number; itemKey: string } {
 }
 
 /**
+ * Preprocesses markdown content to replace note tags with headers and separators.
+ * @param text Raw markdown text containing note tags
+ * @returns Processed markdown with note tags replaced by headers/lines
+ */
+export function preprocessNoteContent(text: string): string {
+    // Clean up backticks around complete citations
+    text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
+
+    // Remove note tags (keep content), add title as markdown header if present
+    return text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
+        const attrs = parseAttributes(attrString);
+        if (attrs.title) {
+            return `\n\n---\n## ${attrs.title}\n\n`;
+        }
+        return before + '---\n' + after;
+    }).replace(/<\/note>/g, '\n---');
+}
+
+/**
  * Converts markdown content to plain text
  * @param text Text to format
  * @param cslEngine CSL engine
@@ -46,8 +67,8 @@ export function renderToMarkdown(
     // Array of cited items
     const citedItems: Zotero.Item[] = [];
 
-    // Clean up backticks around complete citations
-    text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
+    // Preprocess note tags and clean up backticks
+    text = preprocessNoteContent(text);
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
@@ -100,7 +121,7 @@ export function renderToMarkdown(
 
     // Return the formatted content
     return citedItems.length > 0
-        ? `${formattedContent}\n## Sources\n\n${bibliography}`
+        ? `${formattedContent.trim()}\n\n## Sources\n\n${bibliography}`
         : formattedContent;
 }
 
@@ -120,6 +141,9 @@ export function renderToHTML(content: string, className: string = "markdown"): s
         enableNoteBlocks: false
     });
 
+    // Wrap in Jotai Provider to share state
+    const wrappedElement = React.createElement(Provider, { store }, markdownElement);
+
     // Render the React element to an HTML string
-    return renderToStaticMarkup(markdownElement);
+    return renderToStaticMarkup(wrappedElement);
 }

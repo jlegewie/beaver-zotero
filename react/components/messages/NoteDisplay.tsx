@@ -1,14 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
-import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
-import Button from '../ui/Button';
+import { getCurrentLibrary, isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import IconButton from '../ui/IconButton';
 import {
-    AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
+    ArrowUpIcon,
     CopyIcon,
+    Icon,
     Spinner,
     PlusSignIcon,
     TickIcon
@@ -17,11 +17,10 @@ import MarkdownRenderer from './MarkdownRenderer';
 import {
     ackProposedActionsAtom,
     getProposedActionByIdAtom,
-    rejectProposedActionStateAtom,
     setProposedActionsToErrorAtom
 } from '../../atoms/proposedActions';
 import { isZoteroNoteAction } from '../../types/proposedActions/base';
-import { createZoteroItemReference, ZoteroItemReference } from '../../types/zotero';
+import { ZoteroItemReference } from '../../types/zotero';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
     notePanelStateAtom,
@@ -33,6 +32,8 @@ import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
 import { renderToMarkdown } from '../../utils/citationRenderers';
+import { selectItem } from '../../../src/utils/selectItem';
+import { getCurrentReaderItemAsync } from '../../utils/readerUtils';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -46,7 +47,7 @@ export interface StreamingNoteBlock {
 interface NoteDisplayProps {
     note: StreamingNoteBlock;
     messageId?: string;
-    exportMode?: boolean;
+    exportRendering?: boolean;
 }
 
 type NoteStatus =
@@ -88,10 +89,12 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         revealNote
     } = props;
 
-    const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [isTitleHovered, setIsTitleHovered] = useState(false);
     const [showCopiedState, setShowCopiedState] = useState(false);
+    const [showSavedState, setShowSavedState] = useState(false);
 
     const handleCopyClick = useCallback(() => {
+        // if (showCopiedState) return;
         handleCopy();
         setShowCopiedState(true);
         setTimeout(() => {
@@ -99,92 +102,104 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         }, 1250);
     }, [handleCopy]);
 
+    const handleSaveClick = useCallback(() => {
+        // if (showSavedState) return;
+        handleSave();
+        setShowSavedState(true);
+        setTimeout(() => {
+            setShowSavedState(false);
+        }, 1250);
+    }, [handleSave]);
+
+    // Create a wrapper for Spinner that converts width/height props to size
+    const SpinnerWrapper = useMemo(() => {
+        return (props: React.SVGProps<SVGSVGElement>) => {
+            // Extract size from width prop (Icon component passes width={size})
+            const size = typeof props.width === 'number' ? props.width : 
+                        typeof props.width === 'string' && props.width !== '1em' 
+                            ? parseInt(props.width) || 12 : 12;
+            const className = `${props.className || ''} `.trim();
+            return <Spinner size={size} className={className} />;
+        };
+    }, []);
+
     // Memoize the header icon to prevent recomputation on every render
     const HeaderIcon = useMemo(() => {
-        if (isSaving) return Spinner;
-        if (!isComplete) return Spinner;
-        if (isButtonHovered && !contentVisible) return ArrowRightIcon;
-        if (isButtonHovered && contentVisible) return ArrowDownIcon;
-        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="-mr-0035"/>;
-    }, [isSaving, status, isComplete, isButtonHovered, contentVisible]);
+        if (isSaving) return SpinnerWrapper;
+        if (!isComplete) return SpinnerWrapper;
+        if (isTitleHovered && !contentVisible) return ArrowRightIcon;
+        if (isTitleHovered && contentVisible) return ArrowDownIcon;
+        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} />;
+    }, [isSaving, status, isComplete, isTitleHovered, contentVisible, SpinnerWrapper]);
 
     const headerText = useMemo(() => {
         return truncateText(noteTitle, 40);
     }, [noteTitle]);
 
+    const isSaveDisabled = isSaving || !isComplete || isLibraryReadOnly;
+    const saveTooltip = isLibraryReadOnly 
+            ? "Library is read-only" 
+            : "Create Zotero Note";
+
     return (
         <div
             className={`display-flex flex-row bg-senary items-start py-15 px-25 ${contentVisible && hasContent ? 'border-bottom-quinary' : ''}`}
-            onMouseEnter={() => setIsButtonHovered(true)}
-            onMouseLeave={() => setIsButtonHovered(false)}
         >
             {/* Header */}
-            <div className="display-flex flex-row flex-1 gap-3">
-                <IconButton
-                    icon={HeaderIcon}
-                    // className="mt-015"
-                    variant="ghost-secondary"
-                    onClick={toggleContent}
-                    disabled={!canToggleContent}
-                    title="Toggle content"
-                />
-                <Button
-                    variant="ghost-secondary"
-                    // icon={HeaderIcon}
-                    onClick={toggleContent}
+            <div
+                className={`display-flex flex-row flex-1 gap-25 items-start min-w-0 ${canToggleContent ? 'cursor-pointer' : ''}`}
+                onMouseEnter={() => setIsTitleHovered(true)}
+                onMouseLeave={() => setIsTitleHovered(false)}
+                onClick={canToggleContent ? toggleContent : undefined}
+            >
+                <div className="mt-015" style={{ justifyContent: 'center' }}>
+                    <Icon 
+                        icon={HeaderIcon} 
+                        className="font-color-secondary" 
+                        size={12}
+                        aria-label="Toggle content"
+                    />
+                </div>
+                <div
                     className={`
-                        text-base scale-105 truncate
+                        text-base truncate font-color-secondary
                         ${!canToggleContent ? 'disabled-but-styled' : ''}
                         ${status === 'error' ? 'font-color-warning' : ''}
                     `}
-                    disabled={!canToggleContent}
+                    title={noteTitle}
                 >
                     <span>{headerText}</span>
-                </Button>
+                </div>
                 <div className="flex-1" />
             </div>
 
             {/* Action buttons */}
             <div className="display-flex flex-row gap-3">
-                {status == 'pending'  && !isLibraryReadOnly && (
-                    <Tooltip content="Save note to Zotero" showArrow singleLine>
-                        <IconButton
-                            icon={PlusSignIcon}
-                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={handleSave}
-                            variant="ghost-secondary"
-                            disabled={isSaving || !isComplete}
-                        />
-                    </Tooltip>
-                )}
-                {status == 'applied' && !isLibraryReadOnly && (
-                    <Tooltip content="Reveal note in Zotero" showArrow singleLine>
-                        <IconButton
-                            icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                            className={`mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={revealNote}
-                            variant="ghost-secondary"
-                        />
-                    </Tooltip>
-                )}
-                {status === 'error' || isLibraryReadOnly && (
-                    <Tooltip content={isLibraryReadOnly ? `Read-only library` : `Unable to save note`} showArrow singleLine>
-                        <IconButton
-                            icon={AlertIcon}
-                            className={`font-color-tertiary mt-1 fadeIn ${isButtonHovered ? 'opacity-100' : 'opacity-0'}`}
-                            onClick={() => {}}
-                            variant="ghost-secondary"
-                            disabled={true}
-                        />
-                    </Tooltip>
-                )}
-                <Tooltip content="Copy note" showArrow singleLine>
+                {/* <Tooltip content={saveTooltip} showArrow singleLine>
+                    <IconButton
+                        icon={status === 'applied' ? () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} /> : PlusSignIcon}
+                        className="mt-015"
+                        variant="ghost-secondary"
+                        onClick={status === 'applied' ? revealNote : handleSave}
+                        disabled={status === 'applied' ? false : isSaveDisabled}
+                    />
+                </Tooltip> */}
+                <Tooltip content={saveTooltip} showArrow singleLine>
+                    <IconButton
+                        icon={showSavedState ? TickIcon : PlusSignIcon}
+                        className="mt-015"
+                        variant="ghost-secondary"
+                        onClick={handleSaveClick}
+                        disabled={isSaveDisabled}
+                    />
+                </Tooltip>
+                <Tooltip content="Copy" showArrow singleLine>
                     <IconButton
                         icon={showCopiedState ? TickIcon : CopyIcon}
                         className="mt-015"
                         variant="ghost-secondary"
                         onClick={handleCopyClick}
-                        disabled={isSaving || !isComplete}
+                        disabled={!isComplete}
                     />
                 </Tooltip>
             </div>
@@ -200,7 +215,8 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         prevProps.noteTitle === nextProps.noteTitle &&
         prevProps.contentVisible === nextProps.contentVisible &&
         prevProps.hasContent === nextProps.hasContent &&
-        prevProps.canToggleContent === nextProps.canToggleContent
+        prevProps.canToggleContent === nextProps.canToggleContent &&
+        prevProps.isLibraryReadOnly === nextProps.isLibraryReadOnly
     );
 });
 
@@ -208,31 +224,59 @@ interface NoteBodyProps {
     trimmedContent: string;
     contentVisible: boolean;
     hasContent: boolean;
+    toggleContent: () => void;
+    exportRendering?: boolean;
 }
 
 const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
-    const { trimmedContent, contentVisible, hasContent } = props;
+    const { trimmedContent, contentVisible, hasContent, toggleContent, exportRendering = false } = props;
 
     if (!contentVisible || !hasContent) {
         return null;
     }
 
     return (
-        <div className="display-flex flex-col p-25 gap-2 bg-senary">
-            <div className="markdown note-body">
-                <MarkdownRenderer 
-                    content={trimmedContent || '_No content yet._'} 
-                    enableNoteBlocks={false}
-                />
+        <div className="display-flex flex-col bg-senary">
+            <div className="display-flex flex-col px-25 pt-2 gap-2">
+                <div className="markdown note-body">
+                    <MarkdownRenderer 
+                        content={trimmedContent || '_No content yet._'} 
+                        enableNoteBlocks={false}
+                        exportRendering={exportRendering}
+                    />
+                </div>
             </div>
+            <NoteFooter toggleContent={toggleContent} />
         </div>
     );
 });
 
-const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode = false }) => {
+interface NoteFooterProps {
+    toggleContent: () => void;
+}
+
+const NoteFooter = React.memo(function NoteFooter(props: NoteFooterProps) {
+    const { toggleContent } = props;
+    const [isHovered, setIsHovered] = useState(false);
+    return (
+        <div 
+            className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 mt-1 transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
+            onClick={toggleContent}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            <Icon
+                icon={ArrowUpIcon}
+                className={`scale-75 -mb-1 transition-colors duration-150 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                aria-label="Toggle content"
+            />
+        </div>
+    );
+});
+
+const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRendering = false }) => {
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
-    const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
 
     // UI state for collapsible note panel
@@ -253,28 +297,10 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
     const noteTitle = note.title || noteAction?.proposed_data?.title || 'New note';
     const trimmedContent = note.content.replace(/^\n+/, '');
 
-    const parentReference: ZoteroItemReference | null = useMemo(() => {
-        if (
-            noteAction?.proposed_data?.library_id !== undefined &&
-            noteAction?.proposed_data?.zotero_key
-        ) {
-            return {
-                library_id: noteAction.proposed_data.library_id as number,
-                zotero_key: noteAction.proposed_data.zotero_key
-            };
-        }
-        if (note.itemId) {
-            return createZoteroItemReference(note.itemId);
-        }
-        return null;
-    }, [noteAction, note.itemId]);
-
     // Toggle visibility of note content
     const toggleContent = useCallback(() => {
         toggleNotePanelVisibility(note.id);
     }, [note.id, toggleNotePanelVisibility]);
-
-    const targetLibraryId: number | undefined = parentReference?.library_id ?? noteAction?.proposed_data?.library_id ?? undefined;
 
     const handleCopy = useCallback(async () => {
         const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
@@ -282,7 +308,6 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
     }, [noteTitle, trimmedContent, note.content]);
 
     const revealNote = useCallback(async () => {
-        console.log('revealNote', noteAction);
         if (noteAction?.result_data?.library_id && noteAction?.result_data?.zotero_key) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(noteAction.result_data.library_id, noteAction.result_data.zotero_key);
             if (item) {
@@ -296,15 +321,89 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         if (!noteAction || !messageId || !note.isComplete) {
             return;
         }
+        
         setNotePanelState({ key: note.id, updates: { isSaving: true } });
         try {
+            const win = Zotero.getMainWindow();
+            const zp = Zotero.getActiveZoteroPane();
+            
+            let targetLibId: number | undefined = undefined;
+            let parentRef: ZoteroItemReference | null = null;
+            let collectionToAddTo: Zotero.Collection | null = null;
+
+            // Reader view
+            const readerItem = await getCurrentReaderItemAsync(win);            
+            if (readerItem) {
+                targetLibId = readerItem.libraryID;
+                parentRef = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey } as ZoteroItemReference
+                    : null;
+
+            // Library view
+            } else {
+                const selectedItems = zp.getSelectedItems();
+                
+                // If multiple selected, use the first one
+                if (selectedItems.length >= 1) {
+                    const firstItem = selectedItems[0];
+                    const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+                    targetLibId = item.libraryID;
+                    
+                    if (item.isRegularItem()) {
+                        parentRef = { library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference;
+                    } else if (item.isNote() || item.isAttachment()) {
+                        // Add to parent (sibling)
+                        parentRef = item.parentKey
+                            ? { library_id: item.libraryID, zotero_key: item.parentKey } as ZoteroItemReference
+                            : null;
+                    }
+
+                // No selection or other cases (0 items) - add to current library/collection
+                } else {
+                    targetLibId = zp.getSelectedLibraryID();
+                    const collection = zp.getSelectedCollection();
+                    if (collection) {
+                        collectionToAddTo = collection;
+                    }
+                    parentRef = null;
+                }
+            }
+
+            if (!targetLibId) {
+                throw new Error("Could not determine target library");
+            }
+            
+            if (!isLibraryEditable(targetLibId)) {
+                throw new Error("Library is read-only");
+            }
+
             const noteContent = `<h1>${noteTitle}</h1>\n\n${trimmedContent || note.content}`;
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title: noteTitle,
-                parentReference,
-                targetLibraryId
+                parentReference: parentRef,
+                targetLibraryId: targetLibId
             });
+            
+            // Handle collection addition if needed
+            if (collectionToAddTo && result.zotero_key) {
+                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                 if (newItem) {
+                     await Zotero.DB.executeTransaction(async function () {
+                        // @ts-ignore - Zotero types
+                        await collectionToAddTo.addItem(newItem.id);
+                     });
+                 }
+            }
+
+            // Select the item
+            if (result.zotero_key) {
+                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                 if (newItem) {
+                     await selectItem(newItem);
+                 }
+            }
+
             await ackProposedActions(messageId, [
                 {
                     action_id: noteAction.id,
@@ -317,15 +416,19 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
         } finally {
             setNotePanelState({ key: note.id, updates: { isSaving: false } });
         }
-    }, [ackProposedActions, messageId, note.id, note.content, note.isComplete, noteAction, noteTitle, parentReference, setProposedActionsToError, setNotePanelState, trimmedContent]);
+    }, [ackProposedActions, messageId, note.id, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setProposedActionsToError, setNotePanelState]);
 
     // Determine when content can be toggled
     const canToggleContent = note.isComplete;
     const hasContent = trimmedContent.length > 0;
+    
+    // Current library check for read-only state in UI
+    const currentLib = getCurrentLibrary();
+    const isReadOnly = currentLib ? !isLibraryEditable(currentLib.libraryID) : true;
 
     return (
         <div
-            className={`${contentVisible && hasContent ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
+            className="border-popup rounded-md display-flex flex-col min-w-0"
         >
             <NoteHeader
                 status={status}
@@ -339,16 +442,17 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportMode =
                 handleSave={handleSave}
                 handleCopy={handleCopy}
                 revealNote={revealNote}
-                isLibraryReadOnly={targetLibraryId ? !isLibraryEditable(targetLibraryId) : true}
+                isLibraryReadOnly={isReadOnly}
             />
             <NoteBody
                 trimmedContent={trimmedContent}
                 contentVisible={contentVisible}
                 hasContent={hasContent}
+                toggleContent={toggleContent}
+                exportRendering={exportRendering}
             />
         </div>
     );
 };
 
 export default NoteDisplay;
-

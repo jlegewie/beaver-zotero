@@ -175,6 +175,20 @@ function getCurrentItem(reader: any): Zotero.Item {
     return Zotero.Items.get(reader.itemID);
 }
 
+/**
+ * Retrieves the item of the current reader.
+ * 
+ * @returns The item.
+ */
+async function getCurrentReaderItemAsync(win?: Window): Promise<Zotero.Item | null> {
+    win = win || Zotero.getMainWindow();
+    const selectedTabType = win.Zotero_Tabs.selectedType;
+    if (selectedTabType !== 'reader') return null;
+    const reader = getCurrentReader(win);
+    if (!reader || !reader.itemID) return null;
+    return await Zotero.Items.getAsync(reader.itemID);
+}
+
 
 /**
  * Context for the reader.
@@ -246,6 +260,7 @@ async function ensureReaderInitialized(reader: ZoteroReader, waitForView: boolea
 }
 
 export {
+    getCurrentReaderItemAsync,
     getCurrentReader,
     getCurrentReaderAndWaitForView,
     getCurrentPage,

@@ -8,7 +8,7 @@ import MenuButton from '../ui/MenuButton';
 import { regenerateFromMessageAtom } from '../../atoms/generateMessages';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
-import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
+import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
@@ -27,6 +27,18 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const contentRef = useRef<HTMLDivElement | null>(null);
     const citations = useAtomValue(citationDataAtom);
     const lastMessage = messages[messages.length - 1];
+
+    // Find all messages in the current assistant turn
+    const assistantTurnMessages = useMemo(() => {
+        let lastUserIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') {
+                lastUserIndex = i;
+                break;
+            }
+        }
+        return messages.slice(lastUserIndex + 1).filter(m => m.role === 'assistant');
+    }, [messages]);
 
     // Message IDs for the message group
     const messageIds = useMemo(() => {
@@ -95,13 +107,46 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         await regenerateFromMessage(lastMessage.id);
     }
 
+    const getToolDetails = (toolCall: any) => { // Using any for toolCall to avoid complex type issues, or import ToolCall
+        const label = toolCall.label || toolCall.function.name;
+        let query = "";
+        try {
+            const args = typeof toolCall.function.arguments === 'string' 
+                ? JSON.parse(toolCall.function.arguments) 
+                : toolCall.function.arguments;
+            query = args.query || args.q || args.keywords || args.topic || args.search_term || "";
+        } catch (e) {
+            console.error('Error parsing tool call arguments:', e);
+        }
+        
+        const count = toolCall.response?.attachments?.length ?? 0;
+        
+        let details = `[${label}`;
+        if (query) details += `: "${query}"`;
+        if (toolCall.status === 'completed') details += ` (${count} results)`;
+        details += `]`;
+        return details;
+    };
+
+    const combinedContent = useMemo(() => {
+        return assistantTurnMessages.map(msg => {
+            let part = msg.content || '';
+            if (msg.tool_calls && msg.tool_calls.length > 0) {
+                const toolDescriptions = msg.tool_calls.map(getToolDetails).join('\n\n');
+                if (part) part += '\n\n';
+                part += toolDescriptions;
+            }
+            return part;
+        }).filter(Boolean).join('\n\n');
+    }, [assistantTurnMessages]);
+
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(lastMessage.content);
+        const formattedContent = renderToMarkdown(combinedContent);
         await copyToClipboard(formattedContent);
     };
 
     const saveAsNote = async (citation?: CitationData) => {
-        const formattedContent = renderToHTML(lastMessage.content);
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
         if (citation && citation.parentKey) {
@@ -168,7 +213,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                     />
                     {lastMessage.status !== 'error' &&
                         <CopyButton
-                            content={lastMessage.content}
+                            content={combinedContent}
                             formatContent={renderToMarkdown}
                             className="scale-11"
                         />
