@@ -55,10 +55,10 @@ export function renderToMarkdown(
     text = text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
         const attrs = parseAttributes(attrString);
         if (attrs.title) {
-            return `\n\n## ${attrs.title}\n\n`;
+            return `\n\n---\n## ${attrs.title}\n\n`;
         }
-        return before + after;
-    }).replace(/<\/note>/g, '');
+        return before + '---\n' + after;
+    }).replace(/<\/note>/g, '\n---');
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
