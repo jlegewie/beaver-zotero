@@ -151,13 +151,13 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                 onMouseEnter={() => setIsTitleHovered(true)}
                 onMouseLeave={() => setIsTitleHovered(false)}
                 onClick={canToggleContent ? toggleContent : undefined}
-                title={canToggleContent ? "Toggle content" : undefined}
             >
                 <div className="mt-015" style={{ justifyContent: 'center' }}>
                     <Icon 
                         icon={HeaderIcon} 
                         className="font-color-secondary" 
                         size={12}
+                        aria-label="Toggle content"
                     />
                 </div>
                 <div
@@ -166,6 +166,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         ${!canToggleContent ? 'disabled-but-styled' : ''}
                         ${status === 'error' ? 'font-color-warning' : ''}
                     `}
+                    title={noteTitle}
                 >
                     <span>{headerText}</span>
                 </div>
