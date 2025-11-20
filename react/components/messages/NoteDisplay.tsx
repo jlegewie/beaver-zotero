@@ -4,7 +4,6 @@ import { truncateText } from '../../utils/stringUtils';
 import { getCurrentLibrary, isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import IconButton from '../ui/IconButton';
 import {
-    AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
     ArrowUpIcon,
@@ -18,11 +17,10 @@ import MarkdownRenderer from './MarkdownRenderer';
 import {
     ackProposedActionsAtom,
     getProposedActionByIdAtom,
-    rejectProposedActionStateAtom,
     setProposedActionsToErrorAtom
 } from '../../atoms/proposedActions';
 import { isZoteroNoteAction } from '../../types/proposedActions/base';
-import { createZoteroItemReference, ZoteroItemReference } from '../../types/zotero';
+import { ZoteroItemReference } from '../../types/zotero';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
     notePanelStateAtom,
@@ -33,7 +31,7 @@ import {
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
-import { renderToMarkdown, renderToHTML } from '../../utils/citationRenderers';
+import { renderToMarkdown } from '../../utils/citationRenderers';
 import { selectItem } from '../../../src/utils/selectItem';
 import { getCurrentReaderItemAsync } from '../../utils/readerUtils';
 
@@ -93,8 +91,10 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
 
     const [isTitleHovered, setIsTitleHovered] = useState(false);
     const [showCopiedState, setShowCopiedState] = useState(false);
+    const [showSavedState, setShowSavedState] = useState(false);
 
     const handleCopyClick = useCallback(() => {
+        // if (showCopiedState) return;
         handleCopy();
         setShowCopiedState(true);
         setTimeout(() => {
@@ -102,14 +102,35 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         }, 1250);
     }, [handleCopy]);
 
+    const handleSaveClick = useCallback(() => {
+        // if (showSavedState) return;
+        handleSave();
+        setShowSavedState(true);
+        setTimeout(() => {
+            setShowSavedState(false);
+        }, 1250);
+    }, [handleSave]);
+
+    // Create a wrapper for Spinner that converts width/height props to size
+    const SpinnerWrapper = useMemo(() => {
+        return (props: React.SVGProps<SVGSVGElement>) => {
+            // Extract size from width prop (Icon component passes width={size})
+            const size = typeof props.width === 'number' ? props.width : 
+                        typeof props.width === 'string' && props.width !== '1em' 
+                            ? parseInt(props.width) || 12 : 12;
+            const className = `${props.className || ''} mr-0085`.trim();
+            return <Spinner size={size} className={className} />;
+        };
+    }, []);
+
     // Memoize the header icon to prevent recomputation on every render
     const HeaderIcon = useMemo(() => {
-        if (isSaving) return Spinner;
-        if (!isComplete) return Spinner;
+        if (isSaving) return SpinnerWrapper;
+        if (!isComplete) return SpinnerWrapper;
         if (isTitleHovered && !contentVisible) return ArrowRightIcon;
         if (isTitleHovered && contentVisible) return ArrowDownIcon;
         return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="mr-0085"/>;
-    }, [isSaving, status, isComplete, isTitleHovered, contentVisible]);
+    }, [isSaving, status, isComplete, isTitleHovered, contentVisible, SpinnerWrapper]);
 
     const headerText = useMemo(() => {
         return truncateText(noteTitle, 40);
@@ -133,7 +154,11 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                 title={canToggleContent ? "Toggle content" : undefined}
             >
                 <div className="mt-015" style={{ justifyContent: 'center' }}>
-                    <Icon icon={HeaderIcon} className="font-color-secondary" />
+                    <Icon 
+                        icon={HeaderIcon} 
+                        className="font-color-secondary" 
+                        size={12}
+                    />
                 </div>
                 <div
                     className={`
@@ -160,10 +185,10 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                 </Tooltip> */}
                 <Tooltip content={saveTooltip} showArrow singleLine>
                     <IconButton
-                        icon={PlusSignIcon}
+                        icon={showSavedState ? TickIcon : PlusSignIcon}
                         className="mt-015"
                         variant="ghost-secondary"
-                        onClick={handleSave}
+                        onClick={handleSaveClick}
                         disabled={isSaveDisabled}
                     />
                 </Tooltip>
@@ -173,7 +198,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                         className="mt-015"
                         variant="ghost-secondary"
                         onClick={handleCopyClick}
-                        disabled={isSaving || !isComplete}
+                        disabled={!isComplete}
                     />
                 </Tooltip>
             </div>
