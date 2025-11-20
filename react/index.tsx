@@ -11,6 +11,7 @@ import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
+import { useProtocolHandler } from './hooks/useProtocolHandler';
 
 
 /**
@@ -23,6 +24,9 @@ const GlobalContextInitializer = () => {
 
     // Handle plugin upgrade tasks
     useUpgradeHandler();
+
+    // Handle protocol handler events
+    useProtocolHandler();
 
     // Handle Zotero sync
     useZoteroSync();

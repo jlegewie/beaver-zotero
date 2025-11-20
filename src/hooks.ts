@@ -66,6 +66,8 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
     }
 }
 
+import { registerProtocolHandler, unregisterProtocolHandler } from "./services/protocolHandler";
+
 async function onStartup() {
 	await Promise.all([
 		Zotero.initializationPromise,
@@ -105,6 +107,9 @@ async function onStartup() {
 	
 	// -------- Register keyboard shortcuts --------
 	BeaverUIFactory.registerShortcuts();
+
+    // -------- Register protocol handler --------
+    registerProtocolHandler();
 
 	// -------- Add event bus to window --------
 	Zotero.getMainWindow().__beaverEventBus = eventBus;
@@ -259,6 +264,9 @@ async function onShutdown(): Promise<void> {
 	
 	// Unregister keyboard shortcuts
 	BeaverUIFactory.unregisterShortcuts();
+    
+    // Unregister protocol handler
+    unregisterProtocolHandler();
 	
 	// Unload stylesheets
 	unloadKatexStylesheet();
