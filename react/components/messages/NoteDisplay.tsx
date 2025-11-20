@@ -118,7 +118,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
             const size = typeof props.width === 'number' ? props.width : 
                         typeof props.width === 'string' && props.width !== '1em' 
                             ? parseInt(props.width) || 12 : 12;
-            const className = `${props.className || ''} mr-0085`.trim();
+            const className = `${props.className || ''} `.trim();
             return <Spinner size={size} className={className} />;
         };
     }, []);
@@ -129,7 +129,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         if (!isComplete) return SpinnerWrapper;
         if (isTitleHovered && !contentVisible) return ArrowRightIcon;
         if (isTitleHovered && contentVisible) return ArrowDownIcon;
-        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="mr-0085"/>;
+        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} />;
     }, [isSaving, status, isComplete, isTitleHovered, contentVisible, SpinnerWrapper]);
 
     const headerText = useMemo(() => {
