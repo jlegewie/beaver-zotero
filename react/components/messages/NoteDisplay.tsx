@@ -230,7 +230,6 @@ interface NoteBodyProps {
 
 const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
     const { trimmedContent, contentVisible, hasContent, toggleContent, exportRendering = false } = props;
-    const [isHovered, setIsHovered] = useState(false);
 
     if (!contentVisible || !hasContent) {
         return null;
@@ -247,17 +246,30 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
                     />
                 </div>
             </div>
-            <div 
-                className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 mt-1 ${isHovered ? 'bg-quinary' : ''}`}
-                onClick={toggleContent}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-            >
-                <Icon
-                    icon={ArrowUpIcon}
-                    className={`scale-75 -mb-1 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
-                />
-            </div>
+            <NoteFooter toggleContent={toggleContent} />
+        </div>
+    );
+});
+
+interface NoteFooterProps {
+    toggleContent: () => void;
+}
+
+const NoteFooter = React.memo(function NoteFooter(props: NoteFooterProps) {
+    const { toggleContent } = props;
+    const [isHovered, setIsHovered] = useState(false);
+    return (
+        <div 
+            className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 mt-1 transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
+            onClick={toggleContent}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            <Icon
+                icon={ArrowUpIcon}
+                className={`scale-75 -mb-1 transition-colors duration-150 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                aria-label="Toggle content"
+            />
         </div>
     );
 });
