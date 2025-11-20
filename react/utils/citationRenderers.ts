@@ -1,5 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Provider } from 'jotai';
+import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 
@@ -48,6 +50,9 @@ export function renderToMarkdown(
 
     // Clean up backticks around complete citations
     text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
+
+    // Remove note tags (keep content)
+    text = text.replace(/<note\s+(?:[^>]*?)>/g, '').replace(/<\/note>/g, '');
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match, attrString) => {
@@ -99,7 +104,9 @@ export function renderToMarkdown(
     const bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
 
     // Return the formatted content
-    return `${formattedContent}\n## Sources\n\n${bibliography}`;
+    return citedItems.length > 0
+        ? `${formattedContent}\n\n## Sources\n\n${bibliography}`
+        : formattedContent;
 }
 
 /**
@@ -114,9 +121,13 @@ export function renderToHTML(content: string, className: string = "markdown"): s
     const markdownElement = React.createElement(MarkdownRenderer, {
         content,
         className,
-        exportRendering: true
+        exportRendering: true,
+        enableNoteBlocks: false
     });
 
+    // Wrap in Jotai Provider to share state
+    const wrappedElement = React.createElement(Provider, { store }, markdownElement);
+
     // Render the React element to an HTML string
-    return renderToStaticMarkup(markdownElement);
+    return renderToStaticMarkup(wrappedElement);
 }

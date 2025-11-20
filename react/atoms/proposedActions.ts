@@ -66,6 +66,12 @@ export const getProposedActionsByMessageAtom = atom(
     (get) => (messageId: string, filter: (action: ProposedAction) => boolean = () => true) => get(proposedActionsByMessageAtom).get(messageId)?.filter(filter) || []
 );
 
+export const getProposedActionByIdAtom = atom(
+    (get) => (actionId: string): ProposedAction | null => {
+        return get(threadProposedActionsAtom).find((action) => action.id === actionId) ?? null;
+    }
+);
+
 /*
  * Add, delete, and update proposed actions in the thread.
  */

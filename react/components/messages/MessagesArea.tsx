@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, forwardRef, useMemo, useLayoutEffect, useCallback } from "react";
+import React, { useEffect, useRef, forwardRef, useMemo, useLayoutEffect } from "react";
 import { useAtomValue } from "jotai";
 import UserMessageDisplay from "./UserMessageDisplay"
 import { scrollToBottom } from "../../utils/scrollToBottom";
@@ -7,6 +7,9 @@ import AssistantMessagesGroup from "./AssistantMessagesGroup";
 import { userScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom } from "../../atoms/threads";
 import { store } from "../../store";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
+
+const BOTTOM_THRESHOLD = 120; // pixels
 
 type MessagesAreaProps = {
     messages: ChatMessage[];
@@ -17,26 +20,15 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
         { messages }: MessagesAreaProps,
         ref: React.ForwardedRef<HTMLDivElement>
     ) {
-        const lastScrollTopRef = useRef(0);
         const restoredFromAtomRef = useRef(false);
-        const scrollContainerRef = useRef<HTMLDivElement | null>(null);
         const storedScrollTop = useAtomValue(currentThreadScrollPositionAtom);
-        const BOTTOM_THRESHOLD = 20; // pixels
+        
+        // Use the auto-scroll hook
+        const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
+            threshold: BOTTOM_THRESHOLD
+        });
 
-        const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
-            scrollContainerRef.current = node;
-
-            if (!ref) {
-                return;
-            }
-
-            if (typeof ref === "function") {
-                ref(node);
-            } else {
-                ref.current = node;
-            }
-        }, [ref]);
-
+        // Restore scroll position from atom
         useLayoutEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) {
@@ -57,7 +49,6 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
             const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
             store.set(userScrolledAtom, !isNearBottom);
-            lastScrollTopRef.current = container.scrollTop;
         }, [storedScrollTop]);
 
         // Scroll to bottom when messages change
@@ -87,28 +78,6 @@ export const MessagesArea = forwardRef<HTMLDivElement, MessagesAreaProps>(
             
             return groups;
         }, [messages]);
-
-        // Handle user scrolling
-        const handleScroll = () => {
-            if (!scrollContainerRef.current) {
-                return;
-            }
-
-            const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-            
-            // Check if not at the bottom
-            if (distanceFromBottom > BOTTOM_THRESHOLD) {
-                store.set(userScrolledAtom, true);
-            } else {
-                store.set(userScrolledAtom, false);
-            }
-
-            store.set(currentThreadScrollPositionAtom, scrollTop);
-            
-            // Still track last scroll position for reference
-            lastScrollTopRef.current = scrollTop;
-        };
 
         return (
             <div 
