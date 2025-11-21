@@ -23,7 +23,7 @@ import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
-import { shortItemTitle } from '../../../src/utils/zoteroUtils';
+import { isLibraryEditable, shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
 import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/proposedActions/base';
 import { AckLink } from '../../../src/services/proposedActionsService';
@@ -37,6 +37,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../atoms/messageUIState';
+import { getAttachmentIdFromToolCall } from './AssistantMessageTools';
 
 interface AnnotationListItemProps {
     annotation: AnnotationProposedAction;
@@ -214,6 +215,9 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     const isInProgress = toolCalls.some((toolCall) => toolCall.status === 'in_progress');
     const isCompleted = toolCalls.every((toolCall) => toolCall.status === 'completed');
     const isError = toolCalls.some((toolCall) => toolCall.status === 'error');
+    const readOnlyLibrary = toolCalls.some((toolCall) =>
+        getAttachmentIdFromToolCall(toolCall) && !isLibraryEditable(Number(getAttachmentIdFromToolCall(toolCall)?.split('-')[0]))
+    );
     
     // Loading animation for in-progress tool calls
     const loadingDots = useLoadingDots(isInProgress);
@@ -514,7 +518,12 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                     </Button>
                     <div className="flex-1"/>
                 </div>
-                {showApplyButton ? (
+                {readOnlyLibrary && (
+                    <div className="text-sm font-color-tertiary mt-015">
+                        Read-only library
+                    </div>
+                )}
+                {showApplyButton && !readOnlyLibrary && (
                     <Button
                         icon={PlayIcon}
                         iconClassName="-mr-015"
@@ -525,7 +534,8 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                             {!isAttachmentOpen && attachmentTitle ? `Apply to ${attachmentTitle}` : 'Apply'}
                         </span>
                     </Button>
-                ) : (
+                )}
+                {!showApplyButton && !readOnlyLibrary && (
                     <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
                         {attachmentTitle}
                     </div>
