@@ -17,7 +17,7 @@ interface AssistantMessageToolsProps {
  * @param toolCall - The tool call to extract attachment_id from
  * @returns The attachment_id if found, null otherwise
  */
-function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
+export function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
     try {
         if (!toolCall.function?.arguments) return null;
         const args = typeof toolCall.function.arguments === 'string'
