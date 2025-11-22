@@ -1,16 +1,17 @@
 import React, { useState, useCallback } from 'react';
-import { SearchExternalReferencesResult, ExternalReferenceResult } from '../../types/chat/apiTypes';
+import { SearchExternalReferencesResult, ExternalReferenceResult, ToolCall } from '../../types/chat/apiTypes';
 import {
     GlobalSearchIcon,
     ArrowDownIcon,
     ArrowRightIcon,
+    Spinner,
+    AlertIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
-import Tooltip from '../ui/Tooltip';
 
 interface SearchExternalReferencesToolDisplayProps {
-    result: SearchExternalReferencesResult;
+    toolCall: ToolCall;
     isHovered: boolean;
 }
 
@@ -99,16 +100,16 @@ const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
 };
 
 const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesToolDisplayProps> = ({
-    result,
+    toolCall,
     isHovered,
 }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
-    const references = result.references || [];
-    const totalCount = result.returned_count || references.length;
-    const hasReferences = references.length > 0;
+    const references = toolCall?.result?.references ?? [];
+    const totalCount = toolCall?.result?.returned_count ?? references.length;
+    const hasReferences = totalCount > 0;
     
     const toggleResults = useCallback(() => {
         if (hasReferences) {
@@ -117,6 +118,8 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     }, [hasReferences, resultsVisible]);
 
     const getIcon = () => {
+        if (toolCall.status === 'in_progress') return Spinner;
+        if (toolCall.status === 'error') return AlertIcon;
         if (totalCount === 0) return GlobalSearchIcon;
 
         if (isButtonHovered && !resultsVisible) return ArrowRightIcon;
@@ -125,8 +128,8 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     };
     
     const getButtonText = () => {
-        if (totalCount === 0) return 'Paper Finder: No results';
-        return 'Paper Finder';
+        if (totalCount === 0) return 'Web Search: No results';
+        return 'Web Search';
     };
 
     const canToggleResults = hasReferences;
