@@ -4,6 +4,7 @@ import { ExternalReference } from '../../types/externalReferences';
 import {
     ArrowUpRightIcon,
     DownloadIcon,
+    PdfIcon,
 } from '../icons/icons';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
@@ -40,17 +41,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 >
                     Abstract
                 </Button>
-            )}
-            <Button
-                variant="surface-light"
-                icon={ArrowUpRightIcon}
-                className="font-color-secondary truncate"
-                onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined}
-                disabled={!item.publication_url && !item.url}
-                style={{ padding: '1px 4px' }}
-            >
-                Website
-            </Button>                        
+            )}                      
             <Button
                 variant="surface-light"
                 icon={DownloadIcon}
@@ -61,6 +52,29 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             >
                 Import
             </Button>
+            <Button
+                variant="surface-light"
+                icon={ArrowUpRightIcon}
+                className="font-color-secondary truncate"
+                onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined}
+                disabled={!item.publication_url && !item.url}
+                style={{ padding: '1px 4px' }}
+            >
+                Website
+            </Button>
+            {item.open_access_url && (
+                <Button
+                    variant="surface-light"
+                    icon={PdfIcon}
+                    className="font-color-secondary truncate"
+                    iconClassName="icon-11"
+                    onClick={() => item.open_access_url? Zotero.launchURL(item.open_access_url!) : undefined}
+                    disabled={!item.open_access_url}
+                    style={{ padding: '1px 4px' }}
+                >
+                    PDF
+                </Button>  
+            )}
             <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
         </div>
     );
