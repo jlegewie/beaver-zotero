@@ -6,7 +6,6 @@ import IconButton from '../ui/IconButton';
 import {
     ArrowDownIcon,
     ArrowRightIcon,
-    ArrowUpIcon,
     CopyIcon,
     Icon,
     Spinner,
