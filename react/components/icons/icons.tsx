@@ -8,6 +8,7 @@ export { default as ClockIcon } from './ClockIcon';
 export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
+export { default as PdfIcon } from './PdfIcon';
 export { default as PinIcon } from './PinIcon';
 export { default as DownloadIcon } from './DownloadIcon';
 export { default as AttachmentIcon } from './AttachmentIcon';
