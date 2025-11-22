@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { SearchExternalReferencesResult, ExternalReferenceResult } from '../../types/chat/apiTypes';
 import {
-    Icon,
     GlobalSearchIcon,
     ArrowDownIcon,
-    ArrowUpIcon,
     ArrowRightIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
+import { ToolDisplayFooter } from './ToolDisplayFooter';
 
 interface SearchExternalReferencesToolDisplayProps {
     result: SearchExternalReferencesResult;
@@ -104,7 +103,6 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
 }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-    const [isExpandHovered, setIsExpandHovered] = useState(false);
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
     const references = result.references || [];
@@ -161,9 +159,9 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                 </div>
             </div>
 
-            {hasReferences && (
+            {hasReferences && resultsVisible && (
                 <div className="display-flex flex-col">
-                    {(resultsVisible ? references : references.slice(0, 3)).map((item, index) => (
+                    {references.map((item, index) => (
                         <ExternalReferenceItem
                             key={index}
                             item={item}
@@ -173,19 +171,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                             className={index === 0 ? 'pt-2' : ''}
                         />
                     ))}
-                    {references.length > 3 && (
-                        <div 
-                            className={`display-flex flex-row justify-center items-center cursor-pointer -mt-1 ${isExpandHovered ? 'bg-senary' : ''}`}
-                            onClick={toggleResults}
-                            onMouseEnter={() => setIsExpandHovered(true)}
-                            onMouseLeave={() => setIsExpandHovered(false)}
-                        >
-                            <Icon
-                                icon={resultsVisible ? ArrowUpIcon : ArrowDownIcon}
-                                className={`scale-75 ${isExpandHovered ? 'font-color-primary' : 'font-color-secondary'}`}
-                            />
-                        </div>
-                    )}
+                    <ToolDisplayFooter toggleContent={toggleResults} />
                 </div>
             )}
         </div>
