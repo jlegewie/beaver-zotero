@@ -1,12 +1,12 @@
 import React from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { ToolCall } from '../../types/chat/apiTypes';
+import { SearchExternalReferencesResult, ToolCall } from '../../types/chat/apiTypes';
 import { isAnnotationTool } from '../../types/proposedActions/base';
-import { isAddItemTool } from '../../types/proposedActions/items';
+import { isCreateZoteroItemTool, isSearchExternalReferencesTool } from '../../types/proposedActions/items';
 import AnnotationToolDisplay from './AnnotationToolDisplay';
 import AddItemToolDisplay from './AddItemToolDisplay';
 import { SearchToolDisplay } from './SearchToolDisplay';
-
+import SearchExternalReferencesToolDisplay from './SearchExternalReferencesToolDisplay';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
@@ -53,7 +53,6 @@ function buildGroupId(messageId: string, toolCalls: ToolCall[]): string {
 function groupToolCalls(toolCalls: ToolCall[], messageId: string): ToolCallGroup[] {
     const groups: ToolCallGroup[] = [];
     const annotationGroups = new Map<string, ToolCall[]>();
-    const addItemTools: ToolCall[] = [];
 
     for (const toolCall of toolCalls) {
         if (isAnnotationTool(toolCall.function?.name)) {
@@ -68,10 +67,8 @@ function groupToolCalls(toolCalls: ToolCall[], messageId: string): ToolCallGroup
                 // No attachment_id found, keep as individual group
                 groups.push({ id: buildGroupId(messageId, [toolCall]), toolCalls: [toolCall] });
             }
-        } else if (isAddItemTool(toolCall.function?.name)) {
-            addItemTools.push(toolCall);
         } else {
-            // Non-annotation/non-add-item tools are kept as individual groups
+            // Non-annotation tools are kept as individual groups
             groups.push({ id: buildGroupId(messageId, [toolCall]), toolCalls: [toolCall] });
         }
     }
@@ -79,11 +76,6 @@ function groupToolCalls(toolCalls: ToolCall[], messageId: string): ToolCallGroup
     // Add all annotation groups to the main groups array
     for (const [attachmentId, group] of annotationGroups.entries()) {
         groups.push({ id: `${messageId}:${attachmentId}`, toolCalls: group });
-    }
-
-    // Add all add item tools as a single group
-    if (addItemTools.length > 0) {
-        groups.push({ id: `${messageId}:add_items`, toolCalls: addItemTools });
     }
 
     return groups;
@@ -118,15 +110,16 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
             {toolCallGroups.map((group, groupIndex) => {
                 const firstTool = group.toolCalls[0];
 
+                // Annotation tool calls
                 if (isAnnotationTool(firstTool.function?.name)) {
                      return (
                         <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
                             <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
                         </div>
                     );
-                }
 
-                if (isAddItemTool(firstTool.function?.name)) {
+                // Create Zotero item tool calls are handled by AddItemToolDisplay
+                } else if (isCreateZoteroItemTool(firstTool.function?.name)) {
                     return (
                         <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
                             <AddItemToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
@@ -134,7 +127,16 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                     );
                 }
 
-                // Search tool calls are handled by SearchToolDisplay
+                // External references tool calls
+                if (isSearchExternalReferencesTool(firstTool.function?.name)) {
+                    return (
+                        <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
+                            <SearchExternalReferencesToolDisplay key={group.id} result={firstTool.result as SearchExternalReferencesResult} isHovered={false} />
+                        </div>
+                    );
+                }
+
+                // Search external references tool calls
                 return <SearchToolDisplay key={firstTool.id} messageId={message.id} toolCall={firstTool} />;
             })}
         </div>
