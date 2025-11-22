@@ -6,9 +6,12 @@ import {
     ArrowRightIcon,
     Spinner,
     AlertIcon,
+    ArrowUpRightIcon,
+    DownloadIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
+import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface SearchExternalReferencesToolDisplayProps {
     toolCall: ToolCall;
@@ -59,7 +62,7 @@ const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
 
     const baseClasses = [
         'px-3',
-        'py-15',
+        'py-2',
         'display-flex',
         'flex-col',
         'gap-1',
@@ -93,6 +96,39 @@ const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
                         </div>
                     }
                     {meta && <div className="font-color-secondary">{meta}</div>}
+                    <div className="display-flex flex-row items-center gap-3">
+                        <Button
+                            variant="surface-light"
+                            // icon={ArrowUpRightIcon}
+                            className="font-color-secondary truncate"
+                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
+                            disabled={!item.abstract}
+                            style={{ padding: '1px 4px' }}
+                        >
+                            Abstract
+                        </Button>
+                                                <Button
+                            variant="surface-light"
+                            icon={ArrowUpRightIcon}
+                            className="font-color-secondary truncate"
+                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
+                            disabled={!item.publication_url && !item.url}
+                            style={{ padding: '1px 4px' }}
+                        >
+                            Website
+                        </Button>                        
+                        <Button
+                            variant="surface-light"
+                            icon={DownloadIcon}
+                            className="font-color-secondary truncate"
+                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
+                            disabled={!item.publication_url && !item.url}
+                            style={{ padding: '1px 4px' }}
+                        >
+                            Import
+                        </Button>
+                        <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -106,6 +142,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     const [resultsVisible, setResultsVisible] = useState(false);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
+    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
 
     const references = toolCall?.result?.references ?? [];
     const totalCount = toolCall?.result?.returned_count ?? references.length;
@@ -128,6 +165,8 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     };
     
     const getButtonText = () => {
+        if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
+        
         if (totalCount === 0) return 'Web Search: No results';
         return 'Web Search';
     };
