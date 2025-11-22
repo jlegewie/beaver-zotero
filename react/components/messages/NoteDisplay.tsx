@@ -34,6 +34,7 @@ import Tooltip from '../ui/Tooltip';
 import { renderToMarkdown } from '../../utils/citationRenderers';
 import { selectItem } from '../../../src/utils/selectItem';
 import { getCurrentReaderItemAsync } from '../../utils/readerUtils';
+import { ToolDisplayFooter } from './ToolDisplayFooter';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -246,33 +247,11 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
                     />
                 </div>
             </div>
-            <NoteFooter toggleContent={toggleContent} />
+            <ToolDisplayFooter toggleContent={toggleContent} />
         </div>
     );
 });
 
-interface NoteFooterProps {
-    toggleContent: () => void;
-}
-
-const NoteFooter = React.memo(function NoteFooter(props: NoteFooterProps) {
-    const { toggleContent } = props;
-    const [isHovered, setIsHovered] = useState(false);
-    return (
-        <div 
-            className={`display-flex flex-row justify-center items-center cursor-pointer pb-1 mt-1 transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
-            onClick={toggleContent}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-        >
-            <Icon
-                icon={ArrowUpIcon}
-                className={`scale-75 -mb-1 transition-colors duration-150 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
-                aria-label="Toggle content"
-            />
-        </div>
-    );
-});
 
 const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRendering = false }) => {
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
