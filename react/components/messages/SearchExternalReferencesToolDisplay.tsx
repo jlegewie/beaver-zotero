@@ -7,6 +7,7 @@ import {
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
+import Tooltip from '../ui/Tooltip';
 
 interface SearchExternalReferencesToolDisplayProps {
     result: SearchExternalReferencesResult;
@@ -106,7 +107,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
     const references = result.references || [];
-    const totalCount = result.total_available || references.length;
+    const totalCount = result.returned_count || references.length;
     const hasReferences = references.length > 0;
     
     const toggleResults = useCallback(() => {
@@ -133,8 +134,11 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
 
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
-             <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${hasReferences ? 'border-bottom-quinary' : ''}`}
+            <div
+                className={`
+                    display-flex flex-row bg-senary py-15 px-2
+                    ${hasReferences && resultsVisible ? 'border-bottom-quinary' : ''}
+                `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
@@ -154,8 +158,6 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                         }
                     </Button>
                     <div className="flex-1"/>
-                </div>
-                <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
                 </div>
             </div>
 
