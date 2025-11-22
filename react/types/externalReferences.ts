@@ -36,6 +36,7 @@ export interface ExternalReference {
     year?: number; // Publication year
     publication_date?: string; // Full publication date (YYYY-MM-DD or YYYY)
     publication_title?: string; // Journal/publication name
+    publication_url?: string; // URL to the publication page
     venue?: string; // Publication venue (simple string)
     abstract?: string; // Abstract text
     url?: string; // URL to the paper
