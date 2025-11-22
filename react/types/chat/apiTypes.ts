@@ -1,6 +1,7 @@
 import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 import { CitationMetadata } from "../citations";
+import { ExternalReference } from "../externalReferences";
 
 export interface ThreadModel {
     id: string;
@@ -8,6 +9,19 @@ export interface ThreadModel {
     name?: string;
     created_at: string;
     updated_at: string;
+}
+
+export interface ExternalReferenceResult extends ExternalReference {
+    rank?: number;
+    similarity?: number;
+}
+
+export interface SearchExternalReferencesResult {
+    tool_name: "search_external_references";
+    total_available: number;
+    returned_count: number;
+    references: ExternalReferenceResult[];
+    params: any;
 }
 
 export interface ToolFunction {
@@ -22,11 +36,14 @@ export interface ToolCallResponse {
     metadata?: Record<string, any>;
 }
 
+export type ToolResultUnion = SearchExternalReferencesResult;
+
 export interface ToolCall {
     id: string;
     type: "function";
     function: ToolFunction;
     response?: ToolCallResponse;
+    result?: ToolResultUnion;
     label?: string;
     status?: 'in_progress' | 'completed' | 'error';
 }
