@@ -34,7 +34,7 @@ const ExternalReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ ite
                         <div className="display-flex flex-col gap-1">
                             <div className="font-bold font-color-primary uppercase tracking-wider sticky top-0 z-10 pb-1">Abstract</div>
                             <div className="font-color-primary leading-relaxed select-text">
-                                {item.abstract}
+                                {item.abstract.trim()}
                             </div>
                         </div>
                 </div>
