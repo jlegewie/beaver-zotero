@@ -57,8 +57,8 @@ const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
     className,
 }) => {
     const authors = formatAuthors(item.authors);
-    const metaParts = [item.publication_title || item.venue, item.year].filter(Boolean);
-    const meta = metaParts.join(', ');
+    const publicationTitle = item.publication_title || item.venue;
+    const year = item.year;
 
     const baseClasses = [
         'px-3',
@@ -95,7 +95,13 @@ const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
                             <div className="font-color-secondary truncate">{authors}</div>
                         </div>
                     }
-                    {meta && <div className="font-color-secondary">{meta}</div>}
+                    {(publicationTitle || year) && (
+                        <div className="font-color-secondary">
+                            {publicationTitle && <i>{publicationTitle}</i>}
+                            {publicationTitle && year && ', '}
+                            {year}
+                        </div>
+                    )}
                     <div className="display-flex flex-row items-center gap-3">
                         <Button
                             variant="surface-light"
