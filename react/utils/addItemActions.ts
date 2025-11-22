@@ -1,4 +1,4 @@
-import { AddItemProposedAction, AddItemResultData, ProposedItem, NormalizedPublicationType } from '../types/proposedActions/items';
+import { AddItemProposedAction, AddItemResultData, ExternalReference, NormalizedPublicationType } from '../types/proposedActions/items';
 import { logger } from '../../src/utils/logger';
 
 // Helper to map publication types
@@ -11,14 +11,17 @@ function mapPublicationType(types: NormalizedPublicationType[] | undefined): str
         case 'conference_paper': return 'conferencePaper';
         case 'book': return 'book';
         case 'book_chapter': return 'bookSection';
-        case 'preprint': return 'preprint';
         case 'review': return 'journalArticle';
+        case 'meta_analysis': return 'journalArticle';
+        case 'editorial': return 'newsArticle';
+        case 'case_report': return 'report';
+        case 'clinical_trial': return 'journalArticle';
+        case 'dissertation': return 'thesis';
+        case 'preprint': return 'preprint';
         case 'dataset': return 'dataset';
-        case 'thesis': return 'thesis';
         case 'report': return 'report';
-        case 'editorial': return 'journalArticle';
-        case 'other': return 'document';
-        default: return 'journalArticle';
+        case 'news': return 'newsArticle';
+        default: return 'document';
     }
 }
 
@@ -117,9 +120,9 @@ async function attachPdfFromUrl(parentItem: Zotero.Item, url: string) {
 
 /**
  * ATTEMPT 2: Manual Creation
- * Manually maps ProposedItem fields to a new Zotero Item.
+ * Manually maps ExternalReference fields to a new Zotero Item.
  */
-async function createItemManually(itemData: ProposedItem): Promise<Zotero.Item> {
+async function createItemManually(itemData: ExternalReference): Promise<Zotero.Item> {
     const libraryId = Zotero.Libraries.userLibraryID;
 
     // 1. Determine Item Type
@@ -197,15 +200,15 @@ async function createItemManually(itemData: ProposedItem): Promise<Zotero.Item> 
 }
 
 /**
- * Creates a Zotero item from a ProposedItem object.
+ * Creates a Zotero item from a ExternalReference object.
  * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
  * Falls back to manual creation if translation fails.
  */
-async function createZoteroItem(proposedItem: ProposedItem): Promise<Zotero.Item> {
+async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
-    if (proposedItem.identifiers) {
+    if (reference.identifiers) {
         try {
-            const translatedItem = await tryImportFromIdentifiers(proposedItem.identifiers);
+            const translatedItem = await tryImportFromIdentifiers(reference.identifiers);
             if (translatedItem) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
                 return translatedItem;
@@ -216,9 +219,9 @@ async function createZoteroItem(proposedItem: ProposedItem): Promise<Zotero.Item
     }
 
     // 2. Try URL Translation (Semantic Scholar / Article Page)
-    if (proposedItem.url) {
+    if (reference.url) {
         try {
-            const urlItem = await importFromUrl(proposedItem.url);
+            const urlItem = await importFromUrl(reference.url);
             if (urlItem) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
                 return urlItem;
@@ -230,7 +233,7 @@ async function createZoteroItem(proposedItem: ProposedItem): Promise<Zotero.Item
 
     // 2. Fallback: Create item manually from available metadata
     logger("createZoteroItem: Falling back to manual item creation", 2);
-    return await createItemManually(proposedItem);
+    return await createItemManually(reference);
 }
 
 export async function applyAddItem(action: AddItemProposedAction): Promise<AddItemResultData> {
