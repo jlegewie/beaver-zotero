@@ -131,7 +131,11 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 if (isSearchExternalReferencesTool(firstTool.function?.name)) {
                     return (
                         <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
-                            <SearchExternalReferencesToolDisplay key={group.id} result={firstTool.result as SearchExternalReferencesResult} isHovered={false} />
+                            <SearchExternalReferencesToolDisplay
+                                key={group.id}
+                                toolCall={firstTool}
+                                isHovered={false}
+                            />
                         </div>
                     );
                 }
