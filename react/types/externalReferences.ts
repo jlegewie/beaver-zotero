@@ -19,6 +19,13 @@ enum NormalizedPublicationType {
     OTHER = "other",
 }
 
+export interface Journal {
+    name?: string;
+    volume?: string;
+    issue?: string;
+    pages?: string;
+}
+
 
 export interface ExternalReference {
     /**
@@ -35,9 +42,9 @@ export interface ExternalReference {
     authors?: string[]; // List of author names
     year?: number; // Publication year
     publication_date?: string; // Full publication date (YYYY-MM-DD or YYYY)
-    publication_title?: string; // Journal/publication name
-    publication_url?: string; // URL to the publication page
+    journal?: Journal; // Journal metadata
     venue?: string; // Publication venue (simple string)
+    publication_url?: string; // URL to the publication page
     abstract?: string; // Abstract text
     url?: string; // URL to the paper
     identifiers?: BibliographicIdentifier; // DOI, arXiv, ISBN, etc.

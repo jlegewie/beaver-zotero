@@ -20,7 +20,7 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceItemPListrops> = ({
     className,
 }) => {
     const authors = formatAuthors(item.authors);
-    const publicationTitle = item.publication_title || item.venue;
+    const publicationTitle = item.journal?.name || item.venue;
     const year = item.year;
 
     const baseClasses = [
