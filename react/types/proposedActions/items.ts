@@ -6,15 +6,19 @@ export type NormalizedPublicationType =
     | "conference_paper"
     | "book"
     | "book_chapter"
-    | "preprint"
     | "review"
-    | "dataset"
-    | "thesis"
-    | "report"
+    | "meta_analysis"
     | "editorial"
+    | "case_report"
+    | "clinical_trial"
+    | "dissertation"
+    | "preprint"
+    | "dataset"
+    | "report"
+    | "news"
     | "other";
 
-export interface ProposedItem {
+export interface ExternalReference {
     // Source identifiers
     semantic_scholar_id?: string;
     openalex_id?: string;
@@ -34,6 +38,7 @@ export interface ProposedItem {
     identifiers?: BibliographicIdentifier;
 
     // User library identifiers (if item already exists in user's library)
+    item_exists: boolean;
     item_id?: string;
     library_id?: number;
     zotero_key?: string;
@@ -55,7 +60,7 @@ export interface ProposedItem {
 
 export interface AddItemProposedData {
     // Core item data
-    item: ProposedItem;
+    item: ExternalReference;
     reason?: string;  // LLM-generated explanation of relevance
     relevance_score?: number;  // 0.0 to 1.0
 
@@ -91,8 +96,13 @@ export function isAddItemAction(action: ProposedAction): action is AddItemPropos
     return action.action_type === 'add_item';
 }
 
-export function isAddItemTool(functionName: string | undefined): boolean {
+export function isSearchExternalReferencesTool(functionName: string | undefined): boolean {
     if (!functionName) return false;
     return functionName === 'search_external_references';
+}
+
+export function isCreateZoteroItemTool(functionName: string | undefined): boolean {
+    if (!functionName) return false;
+    return functionName === 'create_zotero_item';
 }
 
