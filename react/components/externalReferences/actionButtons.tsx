@@ -107,7 +107,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                         variant="surface-light"
                         icon={PdfIcon}
                         className="font-color-secondary truncate"
-                        iconClassName="icon-12"
+                        iconClassName="scale-11"
                         ariaLabel="Open PDF"
                         onClick={() => item.open_access_url ? Zotero.launchURL(item.open_access_url!) : undefined}
                         disabled={!item.open_access_url}
