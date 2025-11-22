@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon, Spinner } from '../icons/icons';
 
-type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary';
+type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary' | 'surface-light';
 
 interface IconButtonProps {
     /** Icon to display */
@@ -18,6 +18,8 @@ interface IconButtonProps {
     ariaLabel?: string;
     /** Whether the button is disabled */
     disabled?: boolean;
+    /** Additional style for the button */
+    style?: React.CSSProperties;
     /** Loading state */
     loading?: boolean;
     /** Optional title attribute for tooltips */
@@ -39,6 +41,7 @@ const IconButton: React.FC<IconButtonProps> = ({
     iconClassName = '',
     ariaLabel,
     disabled = false,
+    style,
     loading = false,
     title,
     onMouseEnter,
@@ -59,6 +62,7 @@ const IconButton: React.FC<IconButtonProps> = ({
             disabled={disabled || loading}
             title={title}
             type="button"
+            style={style}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
