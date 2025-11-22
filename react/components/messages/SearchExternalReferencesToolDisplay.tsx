@@ -1,145 +1,21 @@
 import React, { useState, useCallback } from 'react';
-import { SearchExternalReferencesResult, ExternalReferenceResult, ToolCall } from '../../types/chat/apiTypes';
+import { ToolCall } from '../../types/chat/apiTypes';
 import {
     GlobalSearchIcon,
     ArrowDownIcon,
     ArrowRightIcon,
     Spinner,
     AlertIcon,
-    ArrowUpRightIcon,
-    DownloadIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
+import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
 
 interface SearchExternalReferencesToolDisplayProps {
     toolCall: ToolCall;
     isHovered: boolean;
 }
-
-const formatAuthors = (authors?: string[]): string => {
-    if (!authors || authors.length === 0) return '';
-
-    const clean = authors.filter(Boolean).map(a => a.trim());
-
-    if (clean.length === 0) return '';
-
-    if (clean.length > 3) {
-        return `${clean[0]} et al.`;
-    }
-
-    if (clean.length === 1) {
-        return clean[0];
-    }
-
-    if (clean.length === 2) {
-        return `${clean[0]} and ${clean[1]}`;
-    }
-
-    // exactly 3
-    return `${clean[0]}, ${clean[1]} and ${clean[2]}`;
-}
-
-interface ExternalReferenceItemProps {
-    item: ExternalReferenceResult;
-    isHovered: boolean;
-    onMouseEnter: () => void;
-    onMouseLeave: () => void;
-    className?: string;
-}
-
-const ExternalReferenceItem: React.FC<ExternalReferenceItemProps> = ({
-    item,
-    isHovered,
-    onMouseEnter,
-    onMouseLeave,
-    className,
-}) => {
-    const authors = formatAuthors(item.authors);
-    const publicationTitle = item.publication_title || item.venue;
-    const year = item.year;
-
-    const baseClasses = [
-        'px-3',
-        'py-2',
-        'display-flex',
-        'flex-col',
-        'gap-1',
-        'cursor-pointer',
-        'rounded-sm',
-        'transition',
-        'user-select-none',
-    ];
-
-    if (isHovered) {
-        baseClasses.push('bg-quinary');
-    }
-
-    const handleClick = useCallback(() => {
-        // Future: Navigate to item or show details
-    }, []);
-
-    return (
-        <div
-            className={`${baseClasses.join(' ')} ${className}`}
-            onClick={handleClick}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
-        >
-            <div className="display-flex flex-row items-start gap-3">
-                <div className="display-flex flex-col flex-1 gap-1 min-w-0 font-color-primary">
-                    <div>{item.title || 'Untitled Item'}</div>
-                    {authors && 
-                        <div className="display-flex flex-row items-center gap-1">
-                            <div className="font-color-secondary truncate">{authors}</div>
-                        </div>
-                    }
-                    {(publicationTitle || year) && (
-                        <div className="font-color-secondary">
-                            {publicationTitle && <i>{publicationTitle}</i>}
-                            {publicationTitle && year && ', '}
-                            {year}
-                        </div>
-                    )}
-                    <div className="display-flex flex-row items-center gap-3">
-                        <Button
-                            variant="surface-light"
-                            // icon={ArrowUpRightIcon}
-                            className="font-color-secondary truncate"
-                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
-                            disabled={!item.abstract}
-                            style={{ padding: '1px 4px' }}
-                        >
-                            Abstract
-                        </Button>
-                                                <Button
-                            variant="surface-light"
-                            icon={ArrowUpRightIcon}
-                            className="font-color-secondary truncate"
-                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
-                            disabled={!item.publication_url && !item.url}
-                            style={{ padding: '1px 4px' }}
-                        >
-                            Website
-                        </Button>                        
-                        <Button
-                            variant="surface-light"
-                            icon={DownloadIcon}
-                            className="font-color-secondary truncate"
-                            onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
-                            disabled={!item.publication_url && !item.url}
-                            style={{ padding: '1px 4px' }}
-                        >
-                            Import
-                        </Button>
-                        <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
 
 const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesToolDisplayProps> = ({
     toolCall,
@@ -212,7 +88,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
             {hasReferences && resultsVisible && (
                 <div className="display-flex flex-col">
                     {references.map((item, index) => (
-                        <ExternalReferenceItem
+                        <ExternalReferenceListItem
                             key={index}
                             item={item}
                             isHovered={hoveredItemIndex === index}
