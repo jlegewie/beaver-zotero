@@ -14,6 +14,9 @@ import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { validateAppliedAction } from "../utils/proposedActions";
 import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
+import { checkExternalReferencesAtom } from "./externalReferences";
+import { ExternalReference } from "../types/externalReferences";
+import { AddItemProposedAction, isAddItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -197,6 +200,23 @@ export const loadThreadAtom = atom(
             const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
+                // Extract external references from tool calls and populate cache
+                const externalReferences: ExternalReference[] = [];
+                for (const message of messages) {
+                    if (message.tool_calls) {
+                        for (const toolCall of message.tool_calls) {
+                            if (isSearchExternalReferencesTool(toolCall.function?.name)) {
+                                externalReferences.push(...(toolCall.result?.references || [] as ExternalReference[]));
+                            }
+                        }
+                    }
+                }
+                
+                if (externalReferences.length > 0) {
+                    logger(`loadThreadAtom: Checking ${externalReferences.length} external references for caching`, 1);
+                    set(checkExternalReferencesAtom, externalReferences);
+                }
+                
                 // Load item data
                 const allItemReferences = new Set<string>();
                 [...userAttachments, ...citationMetadata, ...toolAttachments]
@@ -237,6 +257,14 @@ export const loadThreadAtom = atom(
                     }
                     return isValid;
                 }));
+
+                // Check for external references and populate cache
+                const addItemActions = proposedActions.filter(isAddItemAction) as AddItemProposedAction[];
+                if (addItemActions.length > 0) {
+                    logger(`loadThreadAtom: Checking external references for caching`, 1);
+                    const references = addItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                    set(checkExternalReferencesAtom, references);
+                }
                 
             }
         } catch (error) {

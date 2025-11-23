@@ -44,7 +44,9 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
-
+import { checkExternalReferencesAtom } from './externalReferences';
+import { isSearchExternalReferencesTool, isAddItemAction, AddItemProposedAction } from '../types/proposedActions/items';
+import { ExternalReference } from '../types/externalReferences';
 
 export function getCurrentReaderState(): ReaderState | null {
     // Get current reader attachment
@@ -566,6 +568,14 @@ async function _processChatCompletionViaBackend(
             onToolcall: async (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${JSON.stringify(toolcall)}`, 1);
 
+                // Check for external references and populate cache
+                if (isSearchExternalReferencesTool(toolcall.function?.name)) {
+                    logger(`onToolcall: Checking external references for caching`, 1);
+                    if (toolcall.result?.references) {
+                        set(checkExternalReferencesAtom, toolcall.result?.references);
+                    }
+                }
+
                 // Load item data
                 const toolcallAttachments = getResultAttachmentsFromToolcall(toolcall) || [];
                 const attachmentPromises = toolcallAttachments.map(att => Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key));
@@ -583,10 +593,7 @@ async function _processChatCompletionViaBackend(
                 rawAction: Record<string, any> | Record<string, any>[]
             ) => {
                 const asArray = Array.isArray(rawAction) ? rawAction : [rawAction];
-                logger(
-                    `event 'onProposedAction': messageId: ${messageId}, toolcallId: ${toolcallId}, actionsCount: ${asArray.length}`,
-                    1
-                );
+                logger(`event 'onProposedAction': messageId: ${messageId}, toolcallId: ${toolcallId}, actionsCount: ${asArray.length}`, 1);
                 async function processActions(rawActions: Record<string, any>[]) {
                     try {
                         // Convert raw actions to ProposedAction
@@ -608,6 +615,13 @@ async function _processChatCompletionViaBackend(
 
                         // Add proposed actions to the thread proposed actions
                         set(addProposedActionsAtom, actions);
+
+                        const addItemActions = actions.filter(isAddItemAction) as AddItemProposedAction[];
+                        if (addItemActions.length > 0) {
+                            logger(`onToolcall: Checking external references for caching`, 1);
+                            const references = addItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                            set(checkExternalReferencesAtom, references);
+                        }
 
                         // Separate annotation actions from other actions
                         const annotationActions = actions.filter(isAnnotationAction) as AnnotationProposedAction[];
