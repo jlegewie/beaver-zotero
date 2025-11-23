@@ -48,6 +48,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             : null
     );
     const [isLoading, setIsLoading] = useState(false);
+    const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
     
     // Check cache and validate on mount
     useEffect(() => {
@@ -60,6 +61,16 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         if (cached !== undefined) {
             setItemExists(cached !== null);
             setZoteroItemRef(cached);
+            
+            // Check for best attachment if item exists
+            if (cached !== null) {
+                const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
+                if (zoteroItem && zoteroItem.isRegularItem()) {
+                    zoteroItem.getBestAttachment().then(attachment => {
+                        setBestAttachment(attachment || null);
+                    });
+                }
+            }
             return;
         }
         
@@ -69,6 +80,16 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             checkReference(item).then(result => {
                 setItemExists(result !== null);
                 setZoteroItemRef(result);
+                
+                // Check for best attachment if item exists
+                if (result !== null) {
+                    const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
+                    if (zoteroItem && zoteroItem.isRegularItem()) {
+                        zoteroItem.getBestAttachment().then(attachment => {
+                            setBestAttachment(attachment || null);
+                        });
+                    }
+                }
                 setIsLoading(false);
             }).catch(() => {
                 setIsLoading(false);
@@ -90,6 +111,16 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 setItemExists(cached !== null);
                 setZoteroItemRef(cached);
                 setIsLoading(false);
+                
+                // Check for best attachment if item exists
+                if (cached !== null) {
+                    const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
+                    if (zoteroItem && zoteroItem.isRegularItem()) {
+                        zoteroItem.getBestAttachment().then(attachment => {
+                            setBestAttachment(attachment || null);
+                        });
+                    }
+                }
             }
         }
     }, [isChecking(item), getCachedReference, item]);
@@ -163,7 +194,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     style={{ padding: '3px 4px' }}
                 />
             </Tooltip> */}
-            {item.open_access_url && (
+            {(item.open_access_url || (itemExists && zoteroItemRef && bestAttachment)) && (
                 <Tooltip content="Open PDF">
                     <IconButton
                         variant="surface-light"
@@ -171,8 +202,14 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                         className="font-color-secondary truncate"
                         iconClassName="scale-11"
                         ariaLabel="Open PDF"
-                        onClick={() => item.open_access_url ? Zotero.launchURL(item.open_access_url!) : undefined}
-                        disabled={!item.open_access_url}
+                        onClick={() => {
+                            if (bestAttachment) {
+                                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                            } else if (item.open_access_url) {
+                                Zotero.launchURL(item.open_access_url);
+                            }
+                        }}
+                        disabled={!item.open_access_url && !bestAttachment}
                         style={{ padding: '3px 4px' }}
                     />
                 </Tooltip>
