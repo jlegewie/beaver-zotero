@@ -1,4 +1,4 @@
-import { BibliographicIdentifier } from "./zotero";
+import { BibliographicIdentifier, ZoteroItemReference } from "./zotero";
 
 
 enum NormalizedPublicationType {
@@ -26,6 +26,19 @@ export interface Journal {
     pages?: string;
 }
 
+export interface FulltextStatus {
+    available: boolean;
+    status: "available" | "processing" | "unavailable";
+    reason?: string;
+}
+
+export interface LibraryItem extends ZoteroItemReference {
+    /**
+     * Library item information
+     */
+    item_id: string; // Item ID (UUID) if already in user's library
+    fulltext_status?: FulltextStatus; // Fulltext status of primary attachment
+}
 
 export interface ExternalReference {
     /**
@@ -50,10 +63,7 @@ export interface ExternalReference {
     identifiers?: BibliographicIdentifier; // DOI, arXiv, ISBN, etc.
 
     // User library identifiers
-    item_exists: boolean; // Whether the item already exists in user's library
-    item_id?: string; // Item ID if already in user's library
-    library_id?: number; // Library ID if already in user's library
-    zotero_key?: string; // Zotero key if already in user's library
+    library_items: LibraryItem[]; // List of existing items in user's library
 
     // Publication metadata
     raw_publication_types?: string[]; // Raw publication types from source API

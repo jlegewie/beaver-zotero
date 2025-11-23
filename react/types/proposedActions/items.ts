@@ -1,5 +1,6 @@
 import type { ProposedAction } from "./base";
 import type { BibliographicIdentifier } from "../zotero";
+import type { LibraryItem } from "../externalReferences";
 
 export type NormalizedPublicationType =
     | "journal_article"
@@ -37,11 +38,8 @@ export interface ExternalReference {
     // Identifiers (DOI, arXiv, etc.)
     identifiers?: BibliographicIdentifier;
 
-    // User library identifiers (if item already exists in user's library)
-    item_exists: boolean;
-    item_id?: string;
-    library_id?: number;
-    zotero_key?: string;
+    // User library identifiers
+    library_items: LibraryItem[];  // List of existing items in user's library
 
     // Publication metadata
     raw_publication_types?: string[];  // Raw types from source API

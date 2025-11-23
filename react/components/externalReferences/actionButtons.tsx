@@ -41,10 +41,10 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
     
     // Track the actual item existence state
-    const [itemExists, setItemExists] = useState(item.item_exists);
+    const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
     const [zoteroItemRef, setZoteroItemRef] = useState(
-        item.library_id && item.zotero_key 
-            ? { library_id: item.library_id, zotero_key: item.zotero_key }
+        item.library_items && item.library_items.length > 0
+            ? { library_id: item.library_items[0].library_id, zotero_key: item.library_items[0].zotero_key }
             : null
     );
     const [isLoading, setIsLoading] = useState(false);

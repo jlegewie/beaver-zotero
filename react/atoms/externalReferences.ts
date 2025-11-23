@@ -31,7 +31,7 @@ export const checkingExternalReferencesAtom = atom<Set<string>>(new Set<string>(
  * 
  * Flow:
  * 1. Check cache - return if found
- * 2. Check backend data (item_exists + library_id + zotero_key) - validate and cache
+ * 2. Check backend data (library_items) - validate first item and cache
  * 3. Fall back to findExistingReference - search and cache
  */
 export const checkExternalReferenceAtom = atom(
@@ -64,18 +64,19 @@ export const checkExternalReferenceAtom = atom(
         try {
             let result: ZoteroItemReference | null = null;
             
-            // First, validate backend data if it claims the item exists
-            if (externalRef.item_exists && externalRef.library_id && externalRef.zotero_key) {
+            // First, validate backend data if library_items exist
+            if (externalRef.library_items && externalRef.library_items.length > 0) {
+                const firstItem = externalRef.library_items[0];
                 logger(`checkExternalReference: Validating backend data for ${refId}`, 1);
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    externalRef.library_id,
-                    externalRef.zotero_key
+                    firstItem.library_id,
+                    firstItem.zotero_key
                 );
                 
                 if (item) {
                     result = {
-                        library_id: externalRef.library_id,
-                        zotero_key: externalRef.zotero_key
+                        library_id: firstItem.library_id,
+                        zotero_key: firstItem.zotero_key
                     };
                     logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
                 } else {
@@ -163,16 +164,17 @@ export const checkExternalReferencesAtom = atom(
                     let result: ZoteroItemReference | null = null;
                     
                     // Validate backend data first
-                    if (ref.item_exists && ref.library_id && ref.zotero_key) {
+                    if (ref.library_items && ref.library_items.length > 0) {
+                        const firstItem = ref.library_items[0];
                         const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                            ref.library_id,
-                            ref.zotero_key
+                            firstItem.library_id,
+                            firstItem.zotero_key
                         );
                         
                         if (item) {
                             result = {
-                                library_id: ref.library_id,
-                                zotero_key: ref.zotero_key
+                                library_id: firstItem.library_id,
+                                zotero_key: firstItem.zotero_key
                             };
                         }
                     }
