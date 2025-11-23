@@ -69,3 +69,15 @@ export interface ExternalReference {
     influential_citation_count?: number; // Number of influential citations
     reference_count?: number; // Number of references
 }
+
+
+export function extractAuthorLastName(author: string): string | undefined {
+    // Extract the last name of an author.
+    if (author.includes(",")) {
+        const lastName = author.split(",")[0].trim();
+        return lastName;
+    } else {
+        const lastName = author.split(" ").pop()?.trim();
+        return lastName;
+    }
+}
