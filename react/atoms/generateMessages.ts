@@ -328,9 +328,10 @@ export const regenerateFromMessageAtom = atom(
         );
 
         // Update citation metadata
-        // set(citationMetadataAtom, (prev: CitationMetadata[]) => {
-        //     return prev.filter(a => a.messageId && messageIds.includes(a.messageId));
-        // });
+        set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+            return prev.filter(a => a.message_id && messageIds.includes(a.message_id));
+        });
+        set(updateCitationDataAtom);
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);

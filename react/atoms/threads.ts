@@ -380,6 +380,10 @@ export const removeMessageAtom = atom(
     null,
     (get, set, { id }: { id: string }) => {
         set(threadMessagesAtom, get(threadMessagesAtom).filter(message => message.id !== id));
+        set(citationMetadataAtom, (prev) => 
+            prev.filter(a => a.message_id !== id)
+        );
+        set(updateCitationDataAtom);
         set(clearMessageUIStateAtom, id);
     }
 );
