@@ -5,7 +5,8 @@ import {
     ArrowUpRightIcon,
     DownloadIcon,
     PdfIcon,
-    InformationCircleIcon
+    InformationCircleIcon,
+    Spinner,
 } from '../icons/icons';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
@@ -23,16 +24,34 @@ import {
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
 } from '../../atoms/externalReferences';
-import { SpinnerIcon } from '../status/icons';
+
+/** Display mode for action buttons */
+export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
 
 interface ActionButtonsProps {
     item: ExternalReference | ExternalReferenceResult;
-    showAbstractButton?: boolean;
+    /** Display mode for the Reveal button (shown when item exists in library) */
+    revealButtonMode?: ButtonDisplayMode;
+    /** Display mode for the Import button (shown when item doesn't exist in library) */
+    importButtonMode?: ButtonDisplayMode;
+    /** Display mode for the Details button */
+    detailsButtonMode?: ButtonDisplayMode;
+    /** Display mode for the Web button */
+    webButtonMode?: ButtonDisplayMode;
+    /** Display mode for the PDF button */
+    pdfButtonMode?: ButtonDisplayMode;
+    /** Whether to show citation count */
+    showCitationCount?: boolean;
 }
 
 const ActionButtons: React.FC<ActionButtonsProps> = ({
     item,
-    showAbstractButton = true,
+    revealButtonMode = 'full',
+    importButtonMode = 'full',
+    detailsButtonMode = 'full',
+    webButtonMode = 'full',
+    pdfButtonMode = 'icon-only',
+    showCitationCount = true,
 }) => {
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
@@ -125,96 +144,123 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         }
     }, [isChecking(item), getCachedReference, item]);
 
-    return (
-        <div className="display-flex flex-row items-center gap-3">
-            {itemExists && zoteroItemRef && (
-                <Tooltip content="Reveal in Zotero">
-                    <Button
-                        variant="surface-light"
-                        icon={isLoading ? SpinnerIcon : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
-                        className="font-color-secondary truncate"
-                        style={{ padding: '1px 4px' }}
-                        onClick={() => revealSource(zoteroItemRef)}
-                        disabled={isLoading}
-                    >
-                        Reveal
-                    </Button>
-                </Tooltip>
-            )}
-            {!itemExists && (
-                <Tooltip content="Import to Zotero">
-                    <Button
-                        variant="surface-light"
-                        icon={isLoading ? SpinnerIcon : DownloadIcon}
-                        className="font-color-secondary truncate"
-                        onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined}
-                        disabled={(!item.publication_url && !item.url) || isLoading}
-                        style={{ padding: '1px 4px' }}
-                    >
-                        Import
-                    </Button>
-                </Tooltip>
-            )}
-            {showAbstractButton && (
-                <Tooltip content="Open details">
-                    <Button
-                        variant="surface-light"
-                        icon={InformationCircleIcon}
-                        className="font-color-secondary truncate"
-                        onClick={() => {
-                            setSelectedReference(item);
-                            setIsDetailsVisible(true);
-                        }}
-                        disabled={!item.abstract}
-                        style={{ padding: '1px 4px' }}
-                    >
-                        Details
-                    </Button>
-                </Tooltip>
-            )}
-            <Tooltip content="Open website">
-                <Button
-                    variant="surface-light"
-                    icon={ArrowUpRightIcon}
-                    className="font-color-secondary truncate"
-                    onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined}
-                    disabled={!item.publication_url && !item.url}
-                    style={{ padding: '1px 4px' }}
-                >
-                    Web
-                </Button>
-            </Tooltip>
-            {/* <Tooltip content="Open website">
-                <IconButton
-                    variant="surface-light"
-                    icon={ArrowUpRightIcon}
-                    className="font-color-secondary truncate"
-                    onClick={() => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined}
-                    disabled={!item.publication_url && !item.url}
-                    style={{ padding: '3px 4px' }}
-                />
-            </Tooltip> */}
-            {(item.open_access_url || (itemExists && zoteroItemRef && bestAttachment)) && (
-                <Tooltip content="Open PDF">
+    // Helper to render a button in different modes
+    const renderButton = (
+        mode: ButtonDisplayMode,
+        tooltipContent: string,
+        label: string,
+        icon: React.ComponentType<{ className?: string }> | (() => React.ReactElement),
+        onClick: () => void,
+        disabled: boolean,
+        ariaLabel?: string,
+    ) => {
+        if (mode === 'none') return null;
+        
+        if (mode === 'icon-only') {
+            return (
+                <Tooltip content={tooltipContent}>
                     <IconButton
                         variant="surface-light"
-                        icon={PdfIcon}
-                        className="font-color-secondary truncate"
-                        iconClassName="scale-11"
-                        ariaLabel="Open PDF"
-                        onClick={() => {
-                            if (bestAttachment) {
-                                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
-                            } else if (item.open_access_url) {
-                                Zotero.launchURL(item.open_access_url);
-                            }
-                        }}
-                        disabled={!item.open_access_url && !bestAttachment}
+                        icon={icon}
+                        className="font-color-secondary"
+                        ariaLabel={ariaLabel || label}
+                        onClick={onClick}
+                        disabled={disabled}
                         style={{ padding: '3px 4px' }}
                     />
                 </Tooltip>
+            );
+        }
+        
+        // mode === 'full'
+        return (
+            <Tooltip content={tooltipContent}>
+                <Button
+                    variant="surface-light"
+                    icon={icon}
+                    className="font-color-secondary truncate"
+                    style={{ padding: '1px 4px' }}
+                    onClick={onClick}
+                    disabled={disabled}
+                >
+                    {label}
+                </Button>
+            </Tooltip>
+        );
+    };
+
+    const hasPdf = item.open_access_url || (itemExists && zoteroItemRef && bestAttachment);
+
+    return (
+        <div className="display-flex flex-row items-center gap-3">
+            {/* Reveal button - shown when item exists in library */}
+            {itemExists && zoteroItemRef && renderButton(
+                revealButtonMode,
+                'Reveal in Zotero',
+                'Reveal',
+                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />,
+                () => revealSource(zoteroItemRef),
+                isLoading,
+                'Reveal in Zotero'
             )}
-            <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+            
+            {/* Import button - shown when item doesn't exist in library */}
+            {!itemExists && renderButton(
+                importButtonMode,
+                'Import to Zotero',
+                'Import',
+                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
+                () => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined,
+                (!item.publication_url && !item.url) || isLoading,
+                'Import to Zotero'
+            )}
+            
+            {/* Details button */}
+            {renderButton(
+                detailsButtonMode,
+                'Open details',
+                'Details',
+                InformationCircleIcon,
+                () => {
+                    setSelectedReference(item);
+                    setIsDetailsVisible(true);
+                },
+                !item.abstract,
+                'Open details'
+            )}
+            
+            {/* Web button */}
+            {renderButton(
+                webButtonMode,
+                'Open website',
+                'Web',
+                ArrowUpRightIcon,
+                () => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined,
+                !item.publication_url && !item.url,
+                'Open website'
+            )}
+            
+            {/* PDF button - always rendered, disabled when no PDF available */}
+            {renderButton(
+                pdfButtonMode,
+                hasPdf ? 'Open PDF' : 'No PDF available',
+                'PDF',
+                PdfIcon,
+                () => {
+                    if (bestAttachment) {
+                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                    } else if (item.open_access_url) {
+                        Zotero.launchURL(item.open_access_url);
+                    }
+                },
+                !hasPdf,
+                'Open PDF'
+            )}
+            
+            {/* Citation count */}
+            {showCitationCount && (
+                <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+            )}
         </div>
     );
 };

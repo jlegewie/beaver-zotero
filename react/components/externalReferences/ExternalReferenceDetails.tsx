@@ -41,7 +41,7 @@ const ExternalReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ ite
             )}
 
             <div className="p-4 pt-3 border-t border-quaternary shrink-0">
-                <ActionButtons item={item} showAbstractButton={false} />
+                <ActionButtons item={item} detailsButtonMode="none" />
             </div>
         </div>
     );
