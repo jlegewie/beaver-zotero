@@ -162,7 +162,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         
         if (mode === 'icon-only') {
             return (
-                <Tooltip content={tooltipContent}>
+                <Tooltip content={tooltipContent} singleLine>
                     <IconButton
                         variant={buttonVariant}
                         icon={icon}
@@ -178,7 +178,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         
         // mode === 'full'
         return (
-            <Tooltip content={tooltipContent}>
+            <Tooltip content={tooltipContent} singleLine>
                 <Button
                     variant={buttonVariant}
                     icon={icon}
