@@ -21,8 +21,8 @@ export type NormalizedPublicationType =
 
 export interface ExternalReference {
     // Source identifiers
-    semantic_scholar_id?: string;
-    openalex_id?: string;
+    id?: string;
+    source_id?: string;
     source: "semantic_scholar" | "openalex";
 
     // Core bibliographic fields

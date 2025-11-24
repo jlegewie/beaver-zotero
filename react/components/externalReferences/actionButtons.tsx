@@ -21,7 +21,6 @@ import {
     checkExternalReferenceAtom, 
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
-    getExternalReferenceId 
 } from '../../atoms/externalReferences';
 import { SpinnerIcon } from '../status/icons';
 
@@ -52,7 +51,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     
     // Check cache and validate on mount
     useEffect(() => {
-        const refId = getExternalReferenceId(item);
+        const refId = item.id;
         if (!refId) return;
         
         const cached = getCachedReference(item);

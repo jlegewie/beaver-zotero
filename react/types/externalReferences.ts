@@ -45,10 +45,10 @@ export interface ExternalReference {
      * External reference from a semantic scholar or open alex search.
      */
 
-    // Source identifiers
-    semantic_scholar_id?: string; // Semantic Scholar paper ID
-    openalex_id?: string; // OpenAlex work ID
+    // identifiers
+    id?: string; // Unique identifier for the item (UUID)
     source: "semantic_scholar" | "openalex"; // Source of the item data
+    source_id?: string; // Source ID
 
     // Core bibliographic fields
     title?: string; // Title of the item
