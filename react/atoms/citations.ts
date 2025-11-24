@@ -63,6 +63,7 @@ export const updateCitationDataAtom = atom(
                 // For external citations, use the metadata directly
                 newCitationData.push({
                     ...citation,
+                    type: "external",
                     parentKey: null,
                     icon: 'webpage-gray',  // Default icon for external references
                     name: citation.author_year || null,
@@ -89,6 +90,7 @@ export const updateCitationDataAtom = atom(
                 
                 newCitationData.push({
                     ...citation,
+                    type: item.isRegularItem() ? "item" : item.isAttachment() ? "attachment" : item.isNote() ? "note" : item.isAnnotation() ? "annotation" : "external",
                     parentKey: parentItem?.key || null,
                     icon: item.getItemTypeIconName(),
                     name: getDisplayNameFromItem(itemToCite),
@@ -101,6 +103,7 @@ export const updateCitationDataAtom = atom(
                 logger(`updateCitationDataAtom: Error processing citation ${citation.citation_id}: ${error instanceof Error ? error.message : String(error)}`);
                 newCitationData.push({
                     ...citation,
+                    type: "item",
                     parentKey: null,
                     icon: null,
                     name: citation.author_year || null,

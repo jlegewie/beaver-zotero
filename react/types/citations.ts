@@ -113,6 +113,7 @@ export const getUniqueKey = (citation: CitationMetadata): string => {
 };
 
 export interface CitationData extends CitationMetadata {
+    type: "item" | "attachment" | "note" | "annotation" | "external";
     parentKey: string | null;    // Key of the parent item
     icon: string | null;         // Icon for the zotero attachment
     name: string | null;         // Display name
