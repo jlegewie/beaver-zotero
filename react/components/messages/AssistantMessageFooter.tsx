@@ -12,7 +12,7 @@ import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../uti
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
-import { CitationData } from '../../types/citations';
+import { CitationData, getUniqueKey } from '../../types/citations';
 import { store } from '../../store';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
@@ -53,7 +53,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         const messageCitations = citations.filter(citation => messageIds.includes(citation.message_id));
         
         for (const citation of messageCitations) {
-            const key = `${citation.library_id}-${citation.zotero_key}`;
+            const key = getUniqueKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
                 unique.push({
@@ -277,10 +277,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
             {/* Sources section */}
             {sourcesVisible && (
-                <CitedSourcesList
-                    saveAsNote={saveAsNote}
-                    citations={uniqueCitations}
-                />
+                <CitedSourcesList citations={uniqueCitations} />
             )}
         </>
     );
