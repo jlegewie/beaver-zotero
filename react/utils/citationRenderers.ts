@@ -1,9 +1,13 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Provider } from 'jotai';
+import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
+import { citationDataAtom } from '../atoms/citations';
+import { externalReferenceItemMappingAtom } from '../atoms/externalReferences';
+import { CitationData } from '../types/citations';
+import { ZoteroItemReference } from '../types/zotero';
 
 // Regex for citation syntax
 const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
@@ -125,13 +129,39 @@ export function renderToMarkdown(
         : formattedContent;
 }
 
+export interface RenderContextData {
+    citations?: CitationData[];
+    externalMapping?: Record<string, ZoteroItemReference | null>;
+}
+
 /**
  * Converts markdown content to HTML string using the MarkdownRenderer component
  * @param content Markdown content to convert
  * @param className Optional class name to apply to the markdown (defaults to "markdown")
+ * @param contextData Optional context data (citations, mappings) to populate store for static render
  * @returns HTML string representation of the markdown
  */
-export function renderToHTML(content: string, className: string = "markdown"): string {
+export function renderToHTML(
+    content: string, 
+    className: string = "markdown",
+    contextData?: RenderContextData
+): string {
+    let renderStore = store;
+
+    // If context data is provided, we create a temporary store to ensure the data 
+    // is available during the synchronous static render.
+    if (contextData) {
+        renderStore = createStore();
+        
+        if (contextData.citations) {
+            renderStore.set(citationDataAtom, contextData.citations);
+        }
+        
+        if (contextData.externalMapping) {
+            renderStore.set(externalReferenceItemMappingAtom, contextData.externalMapping);
+        }
+    }
+
     // Create a React element using the existing MarkdownRenderer component
     // @ts-ignore createElement exists in React
     const markdownElement = React.createElement(MarkdownRenderer, {
@@ -142,7 +172,7 @@ export function renderToHTML(content: string, className: string = "markdown"): s
     });
 
     // Wrap in Jotai Provider to share state
-    const wrappedElement = React.createElement(Provider, { store }, markdownElement);
+    const wrappedElement = React.createElement(Provider, { store: renderStore }, markdownElement);
 
     // Render the React element to an HTML string
     return renderToStaticMarkup(wrappedElement);

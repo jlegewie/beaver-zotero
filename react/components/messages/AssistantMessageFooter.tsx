@@ -11,6 +11,7 @@ import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataAtom } from '../../atoms/citations';
+import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData, getUniqueKey } from '../../types/citations';
 import { store } from '../../store';
@@ -27,6 +28,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
     const citations = useAtomValue(citationDataAtom);
+    const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const lastMessage = messages[messages.length - 1];
 
     // Find all messages in the current assistant turn
@@ -164,7 +166,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
     /** Save as standalone note to current library/collection */
     const saveToLibrary = async () => {
-        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", { 
+            citations, 
+            externalMapping: externalReferenceMapping 
+        });
         const context = getZoteroTargetContextSync();
         
         const newNote = new Zotero.Item('note');
@@ -184,7 +189,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
     /** Save as child note attached to selected/current item */
     const saveToItem = async () => {
-        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", { 
+            citations, 
+            externalMapping: externalReferenceMapping 
+        });
         const context = getZoteroTargetContextSync();
         
         if (!context.parentReference) return;
@@ -199,7 +207,10 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 
     /** Save as child note for a specific citation (used by CitedSourcesList) */
     const saveAsNote = async (citation?: CitationData) => {
-        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", { 
+            citations, 
+            externalMapping: externalReferenceMapping 
+        });
         const newNote = new Zotero.Item('note');
         newNote.setNote(formattedContent);
         if (citation && citation.parentKey) {

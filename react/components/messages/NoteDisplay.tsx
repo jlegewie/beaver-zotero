@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
 import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
+import { citationDataAtom } from '../../atoms/citations';
+import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 import IconButton from '../ui/IconButton';
 import {
     ArrowDownIcon,
@@ -254,6 +256,8 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
+    const citations = useAtomValue(citationDataAtom);
+    const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
 
     // UI state for collapsible note panel
     const panelStates = useAtomValue(notePanelStateAtom);
@@ -314,8 +318,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title: noteTitle,
-                parentReference: parentReference,
-                targetLibraryId: targetLibraryId
+                parentReference: parentReference || undefined,
+                targetLibraryId: targetLibraryId,
+                contextData: { citations, externalMapping }
             });
             
             // Handle collection addition if needed
