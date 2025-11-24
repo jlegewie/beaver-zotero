@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
-import { CitationMetadata, CitationData } from '../types/citations';
+import { CitationMetadata, CitationData, isExternalCitation, getUniqueKey } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
 
@@ -40,7 +40,8 @@ export const updateCitationDataAtom = atom(
 
         // Extend the citation metadata with the attachment citation data
         for (const citation of metadata) {
-            const citationKey = `${citation.library_id}-${citation.zotero_key}`;
+            // Get unique key (works for both Zotero and external citations)
+            const citationKey = getUniqueKey(citation);
             const prevCitation = prev.find((c) => c.citation_id === citation.citation_id);
 
             // Get or assign numeric citation for this citationKey
@@ -57,8 +58,28 @@ export const updateCitationDataAtom = atom(
 
             logger(`updateCitationDataAtom: Computing citation ${citation.author_year} (${citation.citation_id})`);
 
-            // Compute new extended metadata
+            // Handle external citations differently
+            if (isExternalCitation(citation)) {
+                // For external citations, use the metadata directly
+                newCitationData.push({
+                    ...citation,
+                    parentKey: null,
+                    icon: 'webpage-gray',  // Default icon for external references
+                    name: citation.author_year || null,
+                    citation: citation.author_year || null,
+                    formatted_citation: citation.preview || null,
+                    url: null,  // External citations don't have Zotero URLs
+                    numericCitation
+                });
+                continue;
+            }
+
+            // Compute new extended metadata for Zotero citations
             try {
+                if (!citation.library_id || !citation.zotero_key) {
+                    throw new Error(`Missing library_id or zotero_key for citation ${citation.citation_id}`);
+                }
+
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);
                 if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
                 await loadFullItemDataWithAllTypes([item]);

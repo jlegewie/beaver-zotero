@@ -66,9 +66,19 @@ export interface CitationPart {
     locations?: PageLocation[];
 }
 
-export interface CitationMetadata extends ZoteroItemReference {
+export interface CitationMetadata {
     /** A unique ID for this specific citation instance. */
     citation_id: string;
+    
+    // Zotero reference fields (for items and attachments)
+    library_id?: number;
+    zotero_key?: string;
+    
+    // External reference fields (for external references)
+    external_source?: "semantic_scholar" | "openalex";
+    external_source_id?: string;
+    
+    // Common fields for all citation types
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -80,6 +90,27 @@ export interface CitationMetadata extends ZoteroItemReference {
     /** The message ID of the citation. */
     message_id: string;
 }
+
+/**
+ * Helper functions for CitationMetadata
+ */
+export const isExternalCitation = (citation: CitationMetadata): boolean => {
+    return !!(citation.external_source && citation.external_source_id);
+};
+
+export const isZoteroCitation = (citation: CitationMetadata): boolean => {
+    return !!(citation.library_id && citation.zotero_key);
+};
+
+export const getUniqueKey = (citation: CitationMetadata): string => {
+    if (citation.library_id && citation.zotero_key) {
+        return `${citation.library_id}-${citation.zotero_key}`;
+    }
+    if (citation.external_source_id) {
+        return citation.external_source_id;
+    }
+    return '';
+};
 
 export interface CitationData extends CitationMetadata {
     parentKey: string | null;    // Key of the parent item

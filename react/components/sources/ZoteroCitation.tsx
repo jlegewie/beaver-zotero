@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { citationDataAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
+import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox, isExternalCitation, isZoteroCitation } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { getPageViewportInfo, applyRotationToBoundingBox } from '../../utils/pdfUtils';
@@ -14,15 +14,17 @@ import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../../src/utils/zoteroUtils';
+import { getCachedReferenceForObjectAtom, checkExternalReferenceAtom, externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
 
 // Define prop types for the component
 interface ZoteroCitationProps {
-    id: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization)
-    cid: string;
-    pages?: string;       // Format: "3-6,19"
+    id?: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization) - for Zotero citations
+    cid: string;           // Citation ID
+    external_id?: string;  // External source ID for external reference citations
+    pages?: string;        // Format: "3-6,19"
     consecutive?: boolean;
     children?: React.ReactNode;
     exportRendering?: boolean;
@@ -31,25 +33,68 @@ interface ZoteroCitationProps {
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
     id: unique_key,
     cid: citationId,
+    external_id,
     consecutive = false,
     children,
     exportRendering = false
 }) => {
     // Get the sources from atom state
     const citationsData = useAtomValue(citationDataAtom);
+    const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
+    const checkExternalReference = useSetAtom(checkExternalReferenceAtom);
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
 
-    if (!unique_key || !citationId) return null;
+    if (!citationId) return null;
     
-    // Parse the id to get libraryID and itemKey
-    unique_key = unique_key.replace('user-content-', '');
-    const [libraryIDString, itemKey] = unique_key.includes('-') ? unique_key.split('-') : [unique_key, unique_key];
-    const libraryID = parseInt(libraryIDString) || 1;
-
-    // Find the attachmentCitation in the available sources
-    const attachmentCitation = citationsData.find(a => a.citation_id === citationId);
+    // Find the citation in the available sources
+    const citationMetadata = citationsData.find(a => a.citation_id === citationId);
+    
+    // Determine if this is an external citation
+    const isExternal = citationMetadata ? isExternalCitation(citationMetadata) : !!external_id;
+    
+    // For external citations, check if they map to a Zotero item
+    const [mappedZoteroItem, setMappedZoteroItem] = useState<ZoteroItemReference | null | undefined>(undefined);
+    
+    useEffect(() => {
+        if (isExternal && citationMetadata && isExternalCitation(citationMetadata)) {
+            // Check if we have a cached mapping
+            const externalRef = {
+                id: citationMetadata.external_source_id,
+                source: citationMetadata.external_source!,
+                library_items: []
+            };
+            
+            const cached = getCachedReference(externalRef);
+            if (cached !== undefined) {
+                setMappedZoteroItem(cached);
+            } else {
+                // Trigger a check
+                checkExternalReference(externalRef).then(result => {
+                    setMappedZoteroItem(result);
+                });
+            }
+        }
+    }, [citationMetadata, isExternal, getCachedReference, checkExternalReference]);
+    
+    // Parse the id to get libraryID and itemKey (for Zotero citations)
+    let libraryID: number | undefined;
+    let itemKey: string | undefined;
+    
+    if (unique_key) {
+        const cleanKey = unique_key.replace('user-content-', '');
+        const [libraryIDString, key] = cleanKey.includes('-') ? cleanKey.split('-') : [cleanKey, cleanKey];
+        libraryID = parseInt(libraryIDString) || 1;
+        itemKey = key;
+    } else if (citationMetadata && isZoteroCitation(citationMetadata)) {
+        libraryID = citationMetadata.library_id;
+        itemKey = citationMetadata.zotero_key;
+    } else if (mappedZoteroItem) {
+        // Use the mapped Zotero item for external citations
+        libraryID = mappedZoteroItem.library_id;
+        itemKey = mappedZoteroItem.zotero_key;
+    }
 
     // Fallback citation data (when citation metadata is not available)
     const [fallbackCitation, setFallbackCitation] = useState<{
@@ -62,42 +107,48 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Load fallback citation data when citation metadata is not available
     useEffect(() => {
         const loadFallbackCitation = async () => {
-            // Only load if we don't have attachmentCitation and haven't loaded fallback yet
-            if (!attachmentCitation && !fallbackCitation) {
-                setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
-                
-                try {
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
-                    if (!item) {
-                        logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
-                        setFallbackCitation(null);
-                        return;
-                    }
-
-                    await loadFullItemDataWithAllTypes([item]);
-
-                    const parentItem = item.parentItem;
-                    const itemToCite = item.isNote() ? item : parentItem || item;
-                    
-                    const citation = getDisplayNameFromItem(itemToCite);
-                    const formatted_citation = getReferenceFromItem(itemToCite);
-                    const url = createZoteroURI(item);
-
-                    setFallbackCitation({
-                        formatted_citation,
-                        citation,
-                        url,
-                        loading: false
-                    });
-                } catch (error) {
-                    logger('ZoteroCitation: Error loading fallback citation: ' + error);
+            // Skip if we have citation metadata
+            if (citationMetadata) return;
+            
+            // Skip if we already have fallback data or it's loading
+            if (fallbackCitation) return;
+            
+            // Skip if we don't have the necessary IDs
+            if (!libraryID || !itemKey) return;
+            
+            setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+            
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+                if (!item) {
+                    logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
                     setFallbackCitation(null);
+                    return;
                 }
+
+                await loadFullItemDataWithAllTypes([item]);
+
+                const parentItem = item.parentItem;
+                const itemToCite = item.isNote() ? item : parentItem || item;
+                
+                const citation = getDisplayNameFromItem(itemToCite);
+                const formatted_citation = getReferenceFromItem(itemToCite);
+                const url = createZoteroURI(item);
+
+                setFallbackCitation({
+                    formatted_citation,
+                    citation,
+                    url,
+                    loading: false
+                });
+            } catch (error) {
+                logger('ZoteroCitation: Error loading fallback citation: ' + error);
+                setFallbackCitation(null);
             }
         };
 
         loadFallbackCitation();
-    }, [attachmentCitation, libraryID, itemKey, unique_key]);
+    }, [citationMetadata, libraryID, itemKey, unique_key, fallbackCitation]);
 
     // Update the citation data logic
     let formatted_citation = '';
@@ -105,13 +156,31 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     let url = '';
     let previewText = '';
 
-    if (attachmentCitation) {
-        formatted_citation = attachmentCitation.formatted_citation || '';
-        citation = attachmentCitation.citation || '';
-        url = attachmentCitation.url || '';
-        previewText = attachmentCitation.preview
-            ? `"${attachmentCitation.preview}"`
-            : formatted_citation || '';
+    if (citationMetadata) {
+        if (isExternalCitation(citationMetadata)) {
+            // External citation - use metadata directly
+            citation = citationMetadata.author_year || '';
+            formatted_citation = citationMetadata.preview || citation;
+            previewText = citationMetadata.preview
+                ? `"${citationMetadata.preview}"`
+                : formatted_citation;
+            
+            // If mapped to Zotero item, try to get URL
+            if (mappedZoteroItem) {
+                const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                if (item) {
+                    url = createZoteroURI(item);
+                }
+            }
+        } else if (isZoteroCitation(citationMetadata)) {
+            // Zotero citation with metadata
+            formatted_citation = citationMetadata.formatted_citation || '';
+            citation = citationMetadata.citation || '';
+            url = citationMetadata.url || '';
+            previewText = citationMetadata.preview
+                ? `"${citationMetadata.preview}"`
+                : formatted_citation || '';
+        }
     } else if (fallbackCitation) {
         if (fallbackCitation.loading) {
             // Show loading state
@@ -133,9 +202,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
     
     // Add the URL to open the PDF/Note
-    const pages = [...new Set(getCitationPages(attachmentCitation))];
+    const pages = [...new Set(getCitationPages(citationMetadata))];
     const firstPage = pages ? pages[0] : null;
-    url = firstPage ? `${url}?page=${firstPage}` : url;
+    url = firstPage && url ? `${url}?page=${firstPage}` : url;
     
         // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
@@ -253,24 +322,37 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         e.preventDefault();
         logger('ZoteroCitation: Handle citation click');
         
+        // Check if this is an external citation without a Zotero mapping
+        if (isExternal && !mappedZoteroItem) {
+            logger('ZoteroCitation: External citation without Zotero mapping - no action');
+            return;
+        }
+        
         // Cleanup any existing temporary annotations
         await BeaverTemporaryAnnotations.cleanupAll();
         
         // Get the item key and library ID from the data attributes or URL
-        let itemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
-        let libraryID: number | null = parseInt((e.target as HTMLElement).dataset.libraryId || '0');
+        let currentItemKey: string | null = (e.target as HTMLElement).dataset.itemKey || null;
+        let currentLibraryID: number | null = parseInt((e.target as HTMLElement).dataset.libraryId || '0');
         
-        // Fallback: parse the URL if the data attributes are not set
-        if (!libraryID || !itemKey) {
-            ({ libraryID, itemKey } = parseZoteroURI(url));
+        // Fallback: use the component's libraryID and itemKey
+        if (!currentLibraryID || !currentItemKey) {
+            if (libraryID && itemKey) {
+                currentLibraryID = libraryID;
+                currentItemKey = itemKey;
+            } else if (url) {
+                // Parse the URL if the data attributes are not set
+                ({ libraryID: currentLibraryID, itemKey: currentItemKey } = parseZoteroURI(url));
+            }
         }
-        if (!libraryID || !itemKey) return;
+        
+        if (!currentLibraryID || !currentItemKey) return;
 
         // Get the item
-        logger(`ZoteroCitation: Zotero Item (${libraryID}, ${itemKey})`);
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+        logger(`ZoteroCitation: Zotero Item (${currentLibraryID}, ${currentItemKey})`);
+        const item = Zotero.Items.getByLibraryAndKey(currentLibraryID, currentItemKey);
         if (!item) {
-            logger(`ZoteroCitation: Failed to get Zotero item (${libraryID}, ${itemKey})`);
+            logger(`ZoteroCitation: Failed to get Zotero item (${currentLibraryID}, ${currentItemKey})`);
             return;
         }
 
@@ -296,8 +378,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // }
 
         // Get bounding box data from citation
-        const boundingBoxData = getCitationBoundingBoxes(attachmentCitation);
-        const pages = getCitationPages(attachmentCitation);
+        const boundingBoxData = getCitationBoundingBoxes(citationMetadata);
+        const pages = getCitationPages(citationMetadata);
         logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
         try {
@@ -375,7 +457,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             ? (pages.length > 0 ? `p.${formatNumberRanges(pages)}` : 'Ibid')
             : (pages.length > 0 ? `${citation}, p.${formatNumberRanges(pages)}` : citation);
     } else {
-        displayText = attachmentCitation?.numericCitation || citation;
+        displayText = citationMetadata?.numericCitation || citation;
     }
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
@@ -383,12 +465,23 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
+        // External citations cannot be exported as proper Zotero citations
+        if (isExternal) {
+            return (
+                <span className="citation external-citation">
+                    {displayText}
+                </span>
+            );
+        }
+        
+        // For Zotero citations, use proper CSL format
+        if (!libraryID || !itemKey) return null;
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) return null;
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
         const startPage = Array.isArray(pages) ? pages[0] : pages; 
         const navLocator = startPage ? String(startPage) : undefined;
-        const citation = {
+        const citationObj = {
             citationItems: [{
                 uris: [Zotero.URI.getItemURI(item.parentItem || item)],
                 itemData: itemData,
@@ -397,21 +490,26 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             }],
             properties: {}
         };
-        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
         return (
             <span
                 className="citation" 
-                data-citation={encodeURIComponent(JSON.stringify(citation))}
+                data-citation={encodeURIComponent(JSON.stringify(citationObj))}
             >
                 {formatted}
             </span>
         );
     }
 
+    // Determine the CSS class based on citation type
+    const citationClass = isExternal && !mappedZoteroItem
+        ? "zotero-citation external-citation"
+        : "zotero-citation";
+
     const citationElement = (
         <span 
             onClick={handleClick} 
-            className="zotero-citation"
+            className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
             data-library-id={libraryID}
@@ -432,6 +530,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             <span className="font-color-secondary text-sm px-3 py-15 block">
                 {previewText}
             </span>
+            {isExternal && !mappedZoteroItem && (
+                <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
+                    External reference (not in your library)
+                </span>
+            )}
         </span>
     )
     

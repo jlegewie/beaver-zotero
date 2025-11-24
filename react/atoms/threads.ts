@@ -6,6 +6,7 @@ import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
+import { isExternalCitation } from "../types/citations";
 import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
@@ -14,7 +15,7 @@ import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { validateAppliedAction } from "../utils/proposedActions";
 import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
-import { checkExternalReferencesAtom } from "./externalReferences";
+import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { AddItemProposedAction, isAddItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 
@@ -171,6 +172,7 @@ export const newThreadAtom = atom(
         set(currentMessageContentAtom, '');
         set(resetMessageUIStateAtom);
         set(isPreferencePageVisibleAtom, false);
+        set(clearExternalReferenceCacheAtom);
         // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
         if (isLibraryTab && addSelectedItemsOnNewThread) {
@@ -195,6 +197,7 @@ export const loadThreadAtom = atom(
             // Set the current thread ID
             set(currentThreadIdAtom, threadId);
             set(isPreferencePageVisibleAtom, false);
+            set(clearExternalReferenceCacheAtom);
             
             // Use remote API
             const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
@@ -219,7 +222,12 @@ export const loadThreadAtom = atom(
                 
                 // Load item data
                 const allItemReferences = new Set<string>();
-                [...userAttachments, ...citationMetadata, ...toolAttachments]
+                
+                // Filter out external citations before trying to load item data
+                const zoteroCitations = citationMetadata.filter(citation => !isExternalCitation(citation));
+                
+                [...userAttachments, ...zoteroCitations, ...toolAttachments]
+                    .filter(att => att.library_id && att.zotero_key) // Extra safety check
                     .map(att => `${att.library_id}-${att.zotero_key}`)
                     .forEach(ref => allItemReferences.add(ref));
 

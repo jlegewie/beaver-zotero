@@ -37,7 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
-import { CitationMetadata } from '../types/citations';
+import { CitationMetadata, isExternalCitation } from '../types/citations';
 import { userIdAtom } from './auth';
 import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/proposedActions/base';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
@@ -688,10 +688,18 @@ async function _processChatCompletionViaBackend(
             },
             onCitationMetadata: async (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
-                // Load item data
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(citationMetadata.library_id, citationMetadata.zotero_key);
-                if (item) {
-                    await loadFullItemDataWithAllTypes([item]);
+                
+                // Only load item data for Zotero citations (not external citations)
+                if (!isExternalCitation(citationMetadata)) {
+                    if (citationMetadata.library_id && citationMetadata.zotero_key) {
+                        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                            citationMetadata.library_id, 
+                            citationMetadata.zotero_key
+                        );
+                        if (item) {
+                            await loadFullItemDataWithAllTypes([item]);
+                        }
+                    }
                 }
 
                 // Update state

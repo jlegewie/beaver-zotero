@@ -5,7 +5,7 @@ import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
-import { CitationData } from '../../types/citations';
+import { CitationData, getUniqueKey } from '../../types/citations';
 
 interface CitedSourcesListProps {
     saveAsNote: (source?: CitationData) => Promise<void>;
@@ -24,7 +24,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         <div className="mt-2 rounded-md border border-popup">
             <div className="space-y-3">
                 {citations.map((citation, index) => (
-                    <div key={`${citation.library_id}-${citation.zotero_key}`} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                    <div key={getUniqueKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                         {/* Left column */}
                         {!authorYearFormat &&
                             <div className="p-2">
