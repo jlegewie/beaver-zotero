@@ -5,6 +5,7 @@ import {
     ArrowUpRightIcon,
     DownloadIcon,
     PdfIcon,
+    InformationCircleIcon
 } from '../icons/icons';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
@@ -158,7 +159,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 <Tooltip content="Open details">
                     <Button
                         variant="surface-light"
-                        // icon={ArrowUpRightIcon}
+                        icon={InformationCircleIcon}
                         className="font-color-secondary truncate"
                         onClick={() => {
                             setSelectedReference(item);
