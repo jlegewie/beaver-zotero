@@ -225,7 +225,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             {/* Details button */}
             {renderButton(
                 detailsButtonMode,
-                'Open details',
+                'Show details',
                 'Details',
                 InformationCircleIcon,
                 () => {
@@ -233,7 +233,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     setIsDetailsVisible(true);
                 },
                 !item.abstract,
-                'Open details'
+                'Show details'
             )}
             
             {/* Web button */}
