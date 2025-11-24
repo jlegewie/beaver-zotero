@@ -40,7 +40,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">
-                                    <div className="source-citation text-sm">
+                                    <div className={`source-citation text-sm ${citation.type === 'external' ? 'mt-020 source-citation-external' : ''}`}>
                                         {citation.numericCitation}
                                     </div>
                                 </div>

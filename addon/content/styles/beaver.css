@@ -1320,6 +1320,12 @@
     color: var(--fill-secondary);
 }
 
+[id^="beaver-pane-"] .source-citation-external {
+    background: var(--tag-blue-quinary) !important;
+    border-color: var(--tag-blue-tertiary) !important;
+    color: var(--tag-blue) !important;
+}
+
 /* Make disabled buttons look normal */
 [id^="beaver-pane-"] .disabled-but-styled {
     cursor: not-allowed;
