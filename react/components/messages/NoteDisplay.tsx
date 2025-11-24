@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
-import { getCurrentLibrary, isLibraryEditable } from '../../../src/utils/zoteroUtils';
+import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
 import IconButton from '../ui/IconButton';
 import {
     ArrowDownIcon,
@@ -19,7 +19,6 @@ import {
     setProposedActionsToErrorAtom
 } from '../../atoms/proposedActions';
 import { isZoteroNoteAction } from '../../types/proposedActions/base';
-import { ZoteroItemReference } from '../../types/zotero';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
     notePanelStateAtom,
@@ -32,7 +31,6 @@ import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
 import { renderToMarkdown } from '../../utils/citationRenderers';
 import { selectItem } from '../../../src/utils/selectItem';
-import { getCurrentReaderItemAsync } from '../../utils/readerUtils';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 
 export interface StreamingNoteBlock {
@@ -302,56 +300,13 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
         
         setNotePanelState({ key: note.id, updates: { isSaving: true } });
         try {
-            const win = Zotero.getMainWindow();
-            const zp = Zotero.getActiveZoteroPane();
-            
-            let targetLibId: number | undefined = undefined;
-            let parentRef: ZoteroItemReference | null = null;
-            let collectionToAddTo: Zotero.Collection | null = null;
+            const { targetLibraryId, parentReference, collectionToAddTo } = await getZoteroTargetContext();
 
-            // Reader view
-            const readerItem = await getCurrentReaderItemAsync(win);            
-            if (readerItem) {
-                targetLibId = readerItem.libraryID;
-                parentRef = readerItem.parentKey
-                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey } as ZoteroItemReference
-                    : null;
-
-            // Library view
-            } else {
-                const selectedItems = zp.getSelectedItems();
-                
-                // If multiple selected, use the first one
-                if (selectedItems.length >= 1) {
-                    const firstItem = selectedItems[0];
-                    const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
-                    targetLibId = item.libraryID;
-                    
-                    if (item.isRegularItem()) {
-                        parentRef = { library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference;
-                    } else if (item.isNote() || item.isAttachment()) {
-                        // Add to parent (sibling)
-                        parentRef = item.parentKey
-                            ? { library_id: item.libraryID, zotero_key: item.parentKey } as ZoteroItemReference
-                            : null;
-                    }
-
-                // No selection or other cases (0 items) - add to current library/collection
-                } else {
-                    targetLibId = zp.getSelectedLibraryID();
-                    const collection = zp.getSelectedCollection();
-                    if (collection) {
-                        collectionToAddTo = collection;
-                    }
-                    parentRef = null;
-                }
-            }
-
-            if (!targetLibId) {
+            if (!targetLibraryId) {
                 throw new Error("Could not determine target library");
             }
             
-            if (!isLibraryEditable(targetLibId)) {
+            if (!isLibraryEditable(targetLibraryId)) {
                 throw new Error("Library is read-only");
             }
 
@@ -359,8 +314,8 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title: noteTitle,
-                parentReference: parentRef,
-                targetLibraryId: targetLibId
+                parentReference: parentReference,
+                targetLibraryId: targetLibraryId
             });
             
             // Handle collection addition if needed
