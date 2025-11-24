@@ -118,7 +118,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 min-w-0 overflow-hidden text-ellipsis">
                                     {isExternal && externalRef 
                                         ? formatExternalCitation(externalRef)
-                                        : citation.formatted_citation
+                                        : stripUrlsFromCitation(citation.formatted_citation)
                                     }
                                 </div>
                             </div>
@@ -129,6 +129,19 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         </div>
     );
 };
+
+/**
+ * Remove URLs from a formatted citation string
+ */
+function stripUrlsFromCitation(citation: string | null | undefined): string {
+    if (!citation) return '';
+    // Remove URLs (http/https) and clean up trailing punctuation/whitespace
+    return citation
+        .replace(/https?:\/\/[^\s]+/g, '')
+        .replace(/\s+\.$/, '.')  // Clean up " ." at end
+        .replace(/\s{2,}/g, ' ') // Collapse multiple spaces
+        .trim();
+}
 
 /**
  * Format a bibliographic citation string for external references
