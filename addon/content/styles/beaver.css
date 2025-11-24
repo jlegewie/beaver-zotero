@@ -595,6 +595,18 @@
     /* border: 1px solid var(--fill-quarternary); */
 }
 
+/* External citation styling - slightly different color for distinction */
+[id^="beaver-pane-"] .markdown span.zotero-citation.external-citation {
+    background: var(--tag-blue-quinary);
+    border-color: var(--tag-blue-tertiary);
+    color: var(--tag-blue);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.external-citation:hover {
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+}
+
 [id^="beaver-pane-"] .markdown h1,
 [id^="beaver-pane-"] .markdown h2,
 [id^="beaver-pane-"] .markdown h3,
