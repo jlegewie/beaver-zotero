@@ -85,7 +85,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                 onClick: () => handleCopy()
             },
             {
-                label: 'Save as Standalone Note',
+                label: 'Save as Note',
                 onClick: () => saveToLibrary()
             },
             {
