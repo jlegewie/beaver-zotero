@@ -513,7 +513,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             </span>
             {isExternal && !mappedZoteroItem && (
                 <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
-                    External reference (not in your library)
+                    External reference
                 </span>
             )}
         </span>
