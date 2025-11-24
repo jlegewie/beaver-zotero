@@ -4,6 +4,12 @@ import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
 
+/**
+ * Cache mapping external reference source IDs to ExternalReference objects
+ * Format: { sourceId: ExternalReference }
+ * Key is the source_id (e.g., Semantic Scholar ID, OpenAlex ID)
+ */
+export const externalReferenceMappingAtom = atom<Record<string, ExternalReference>>({});
 
 /**
  * Cache mapping external reference source IDs to Zotero item references
@@ -256,9 +262,43 @@ export const invalidateExternalReferenceCacheAtom = atom(
 export const clearExternalReferenceCacheAtom = atom(
     null,
     (get, set) => {
+        set(externalReferenceMappingAtom, {});
         set(externalReferenceItemMappingAtom, {});
         set(checkingExternalReferencesAtom, new Set());
         logger('clearExternalReferenceCache: all mappings cleared', 1);
+    }
+);
+
+/**
+ * Add external references to the mapping cache
+ * Used during streaming and when loading threads
+ */
+export const addExternalReferencesToMappingAtom = atom(
+    null,
+    (get, set, references: ExternalReference[]) => {
+        if (!references || references.length === 0) return;
+        
+        const currentMapping = get(externalReferenceMappingAtom);
+        const newMapping = { ...currentMapping };
+        
+        for (const ref of references) {
+            const sourceId = ref.source_id;
+            if (sourceId && !newMapping[sourceId]) {
+                newMapping[sourceId] = ref;
+            }
+        }
+        
+        set(externalReferenceMappingAtom, newMapping);
+        logger(`addExternalReferencesToMapping: Added ${references.length} references`, 1);
+    }
+);
+
+/**
+ * Get external reference from mapping by source ID
+ */
+export const getExternalReferenceAtom = atom(
+    (get) => (sourceId: string): ExternalReference | undefined => {
+        return get(externalReferenceMappingAtom)[sourceId];
     }
 );
 

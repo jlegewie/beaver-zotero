@@ -44,7 +44,7 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
-import { checkExternalReferencesAtom } from './externalReferences';
+import { checkExternalReferencesAtom, addExternalReferencesToMappingAtom } from './externalReferences';
 import { isSearchExternalReferencesTool, isAddItemAction, AddItemProposedAction } from '../types/proposedActions/items';
 import { ExternalReference } from '../types/externalReferences';
 
@@ -573,6 +573,9 @@ async function _processChatCompletionViaBackend(
                 if (isSearchExternalReferencesTool(toolcall.function?.name)) {
                     logger(`onToolcall: Checking external references for caching`, 1);
                     if (toolcall.result?.references) {
+                        // Add to external reference mapping for UI display
+                        set(addExternalReferencesToMappingAtom, toolcall.result?.references as ExternalReference[]);
+                        // Check if references exist in Zotero
                         set(checkExternalReferencesAtom, toolcall.result?.references);
                     }
                 }
@@ -619,8 +622,11 @@ async function _processChatCompletionViaBackend(
 
                         const addItemActions = actions.filter(isAddItemAction) as AddItemProposedAction[];
                         if (addItemActions.length > 0) {
-                            logger(`onToolcall: Checking external references for caching`, 1);
+                            logger(`onProposedAction: Checking external references for caching`, 1);
                             const references = addItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                            // Add to external reference mapping for UI display
+                            set(addExternalReferencesToMappingAtom, references);
+                            // Check if references exist in Zotero
                             set(checkExternalReferencesAtom, references);
                         }
 
