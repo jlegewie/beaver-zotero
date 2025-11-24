@@ -39,6 +39,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../atoms/messageUIState';
+import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
 
 interface AddItemListItemProps {
     action: AddItemProposedAction;
@@ -260,6 +261,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
     const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
     const undoProposedAction = useSetAtom(undoProposedActionAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
 
     // Extract actions
     const getProposedActionsByToolcall = useAtomValue(getProposedActionsByToolcallAtom);
@@ -308,6 +310,16 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                     try {
                         const result: AddItemResultData = await applyAddItem(action);
                         logger(`handleApplyActions: applied item ${action.id}: ${JSON.stringify(result)}`, 1);
+                        
+                        // Update external reference cache if this was an external reference import
+                        const sourceId = action.proposed_data?.item?.source_id;
+                        if (sourceId) {
+                            markExternalReferenceImported(sourceId, {
+                                library_id: result.library_id,
+                                zotero_key: result.zotero_key
+                            });
+                        }
+                        
                         return {
                             action_id: action.id,
                             result_data: result,

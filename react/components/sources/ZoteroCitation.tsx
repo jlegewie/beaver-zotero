@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { citationDataAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
@@ -14,7 +14,7 @@ import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../../src/utils/zoteroUtils';
-import { getCachedReferenceForObjectAtom, checkExternalReferenceAtom, externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -40,8 +40,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 }) => {
     // Get the sources from atom state
     const citationsData = useAtomValue(citationDataAtom);
-    const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
-    const checkExternalReference = useSetAtom(checkExternalReferenceAtom);
+    const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
 
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
@@ -55,28 +54,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const isExternal = citationMetadata ? isExternalCitation(citationMetadata) : !!external_id;
     
     // For external citations, check if they map to a Zotero item
-    const [mappedZoteroItem, setMappedZoteroItem] = useState<ZoteroItemReference | null | undefined>(undefined);
-    
-    useEffect(() => {
-        if (isExternal && citationMetadata && isExternalCitation(citationMetadata)) {
-            // Check if we have a cached mapping
-            const externalRef = {
-                id: citationMetadata.external_source_id,
-                source: citationMetadata.external_source!,
-                library_items: []
-            };
-            
-            const cached = getCachedReference(externalRef);
-            if (cached !== undefined) {
-                setMappedZoteroItem(cached);
-            } else {
-                // Trigger a check
-                checkExternalReference(externalRef).then(result => {
-                    setMappedZoteroItem(result);
-                });
-            }
-        }
-    }, [citationMetadata, isExternal, getCachedReference, checkExternalReference]);
+    // By subscribing to the atom directly, this will automatically re-render when mappings are added
+    const mappedZoteroItem = isExternal && citationMetadata && isExternalCitation(citationMetadata)
+        ? externalReferenceMapping[citationMetadata.external_source_id!]
+        : undefined;
     
     // Parse the id to get libraryID and itemKey (for Zotero citations)
     let libraryID: number | undefined;

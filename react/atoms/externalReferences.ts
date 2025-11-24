@@ -6,8 +6,9 @@ import { logger } from '../../src/utils/logger';
 
 
 /**
- * Cache mapping external reference IDs to Zotero item references
- * Format: { externalRefId: ZoteroItemReference | null }
+ * Cache mapping external reference source IDs to Zotero item references
+ * Format: { sourceId: ZoteroItemReference | null }
+ * Key is the source_id (e.g., Semantic Scholar ID, OpenAlex ID)
  * null indicates the reference was checked but doesn't exist in Zotero
  */
 export const externalReferenceItemMappingAtom = atom<Record<string, ZoteroItemReference | null>>({});
@@ -15,6 +16,7 @@ export const externalReferenceItemMappingAtom = atom<Record<string, ZoteroItemRe
 /**
  * Atom tracking which external references are currently being checked
  * Used to prevent duplicate checks and show loading states
+ * Keyed by source_id
  */
 export const checkingExternalReferencesAtom = atom<Set<string>>(new Set<string>());
 
@@ -26,13 +28,15 @@ export const checkingExternalReferencesAtom = atom<Set<string>>(new Set<string>(
  * 1. Check cache - return if found
  * 2. Check backend data (library_items) - validate first item and cache
  * 3. Fall back to findExistingReference - search and cache
+ * 
+ * Cache is keyed by source_id (e.g., Semantic Scholar ID, OpenAlex ID)
  */
 export const checkExternalReferenceAtom = atom(
     null,
     async (get, set, externalRef: ExternalReference): Promise<ZoteroItemReference | null> => {
-        const refId = externalRef.id;
+        const refId = externalRef.source_id; // Use source_id as the cache key
         if (!refId) {
-            logger('checkExternalReference: No valid ID found for external reference', 1);
+            logger('checkExternalReference: No valid source_id found for external reference', 1);
             return null;
         }
         
@@ -122,6 +126,7 @@ export const checkExternalReferenceAtom = atom(
 /**
  * Bulk check multiple external references at once
  * More efficient than checking one by one
+ * Uses source_id as the cache key
  */
 export const checkExternalReferencesAtom = atom(
     null,
@@ -131,7 +136,7 @@ export const checkExternalReferencesAtom = atom(
         
         // Filter out already cached or currently checking references
         const refsToCheck = externalRefs.filter(ref => {
-            const refId = ref.id;
+            const refId = ref.source_id;
             return refId && !(refId in cache) && !checking.has(refId);
         });
         
@@ -142,7 +147,7 @@ export const checkExternalReferencesAtom = atom(
         // Mark all as checking
         const newChecking = new Set(checking);
         refsToCheck.forEach(ref => {
-            const refId = ref.id;
+            const refId = ref.source_id;
             if (refId) newChecking.add(refId);
         });
         set(checkingExternalReferencesAtom, newChecking);
@@ -151,7 +156,7 @@ export const checkExternalReferencesAtom = atom(
             // Check all references in parallel
             const results = await Promise.all(
                 refsToCheck.map(async (ref): Promise<[string, ZoteroItemReference | null] | null> => {
-                    const refId = ref.id;
+                    const refId = ref.source_id;
                     if (!refId) return null;
                     
                     let result: ZoteroItemReference | null = null;
@@ -204,7 +209,7 @@ export const checkExternalReferencesAtom = atom(
             // Remove all from checking set
             const finalChecking = new Set(get(checkingExternalReferencesAtom));
             refsToCheck.forEach(ref => {
-                const refId = ref.id;
+                const refId = ref.source_id;
                 if (refId) finalChecking.delete(refId);
             });
             set(checkingExternalReferencesAtom, finalChecking);
@@ -215,30 +220,32 @@ export const checkExternalReferencesAtom = atom(
 /**
  * Mark external reference as imported with its Zotero item details
  * Used after successfully importing a reference
+ * Uses source_id as the cache key
  */
 export const markExternalReferenceImportedAtom = atom(
     null,
-    (get, set, externalRefId: string, itemReference: ZoteroItemReference) => {
+    (get, set, sourceId: string, itemReference: ZoteroItemReference) => {
         const cache = get(externalReferenceItemMappingAtom);
         set(externalReferenceItemMappingAtom, {
             ...cache,
-            [externalRefId]: itemReference
+            [sourceId]: itemReference
         });
-        logger(`markExternalReferenceImported: ${externalRefId} -> ${itemReference.library_id}-${itemReference.zotero_key}`, 1);
+        logger(`markExternalReferenceImported: ${sourceId} -> ${itemReference.library_id}-${itemReference.zotero_key}`, 1);
     }
 );
 
 /**
  * Invalidate cache for specific external reference
  * Forces a recheck next time the reference is accessed
+ * Uses source_id as the cache key
  */
 export const invalidateExternalReferenceCacheAtom = atom(
     null,
-    (get, set, externalRefId: string) => {
+    (get, set, sourceId: string) => {
         const cache = get(externalReferenceItemMappingAtom);
-        const { [externalRefId]: _, ...rest } = cache;
+        const { [sourceId]: _, ...rest } = cache;
         set(externalReferenceItemMappingAtom, rest);
-        logger(`invalidateExternalReferenceCache: ${externalRefId}`, 1);
+        logger(`invalidateExternalReferenceCache: ${sourceId}`, 1);
     }
 );
 
@@ -256,26 +263,28 @@ export const clearExternalReferenceCacheAtom = atom(
 );
 
 /**
- * Get cached reference for an external reference ID
+ * Get cached reference for an external reference source ID
  * Returns undefined if not cached, null if checked but not found, or ZoteroItemReference if found
+ * Uses source_id as the lookup key
  */
 export const getCachedReferenceAtom = atom(
-    (get) => (externalRefId: string): ZoteroItemReference | null | undefined => {
+    (get) => (sourceId: string): ZoteroItemReference | null | undefined => {
         const cache = get(externalReferenceItemMappingAtom);
-        if (!(externalRefId in cache)) {
+        if (!(sourceId in cache)) {
             return undefined; // Not cached
         }
-        return cache[externalRefId]; // null or ZoteroItemReference
+        return cache[sourceId]; // null or ZoteroItemReference
     }
 );
 
 /**
  * Get cached reference for an external reference object
  * Returns undefined if not cached, null if checked but not found, or ZoteroItemReference if found
+ * Uses source_id from the object as the lookup key
  */
 export const getCachedReferenceForObjectAtom = atom(
     (get) => (externalRef: ExternalReference): ZoteroItemReference | null | undefined => {
-        const refId = externalRef.id;
+        const refId = externalRef.source_id;
         if (!refId) return undefined;
         
         const cache = get(externalReferenceItemMappingAtom);
@@ -288,19 +297,21 @@ export const getCachedReferenceForObjectAtom = atom(
 
 /**
  * Check if an external reference is currently being checked
+ * Uses source_id as the lookup key
  */
 export const isCheckingReferenceAtom = atom(
-    (get) => (externalRefId: string): boolean => {
-        return get(checkingExternalReferencesAtom).has(externalRefId);
+    (get) => (sourceId: string): boolean => {
+        return get(checkingExternalReferencesAtom).has(sourceId);
     }
 );
 
 /**
  * Check if an external reference object is currently being checked
+ * Uses source_id from the object as the lookup key
  */
 export const isCheckingReferenceObjectAtom = atom(
     (get) => (externalRef: ExternalReference): boolean => {
-        const refId = externalRef.id;
+        const refId = externalRef.source_id;
         if (!refId) return false;
         return get(checkingExternalReferencesAtom).has(refId);
     }
