@@ -15,6 +15,7 @@ import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData } from '../../types/citations';
 import { store } from '../../store';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
+import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 
 interface AssistantMessageFooterProps {
     messages: ChatMessage[];
@@ -70,27 +71,40 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const toggleSourcesVisibility = useSetAtom(toggleMessageSourcesVisibilityAtom);
     const setSourcesVisibility = useSetAtom(setMessageSourcesVisibilityAtom);
         
-    const shareMenuItems = [
-        {
-            label: 'Copy',
-            onClick: () => handleCopy()
-        },
-        {
-            label: 'Save as Note',
-            onClick: () => saveAsNote()
-        },
-        {
-            label: 'Copy Request ID',
-            onClick: () => copyRequestId()
-        }
-    ];
+    // Build menu items - computed fresh each render to determine disabled state
+    const getShareMenuItems = () => {
+        const context = getZoteroTargetContextSync();
+        const hasParent = context.parentReference !== null;
 
-    if (Zotero.Beaver.data.env === "development") {
-        shareMenuItems.push({
-            label: 'Copy Citation Metadata',
-            onClick: () => copyCitationMetadata()
-        });
-    }
+        const items = [
+            {
+                label: 'Copy',
+                onClick: () => handleCopy()
+            },
+            {
+                label: 'Save as Standalone Note',
+                onClick: () => saveToLibrary()
+            },
+            {
+                label: 'Save as Child Note',
+                onClick: () => saveToItem(),
+                disabled: !hasParent
+            },
+            {
+                label: 'Copy Request ID',
+                onClick: () => copyRequestId()
+            }
+        ];
+
+        if (Zotero.Beaver.data.env === "development") {
+            items.push({
+                label: 'Copy Citation Metadata',
+                onClick: () => copyCitationMetadata()
+            });
+        }
+
+        return items;
+    };
 
     // Toggle sources visibility
     const toggleSources = () => {
@@ -145,6 +159,42 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         await copyToClipboard(formattedContent);
     };
 
+    /** Save as standalone note to current library/collection */
+    const saveToLibrary = async () => {
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
+        const context = getZoteroTargetContextSync();
+        
+        const newNote = new Zotero.Item('note');
+        if (context.targetLibraryId !== undefined) {
+            newNote.libraryID = context.targetLibraryId;
+        }
+        newNote.setNote(formattedContent);
+        await newNote.saveTx();
+        
+        // Add to collection if one is selected
+        if (context.collectionToAddTo) {
+            await context.collectionToAddTo.addItem(newNote.id);
+        }
+        
+        selectItem(newNote);
+    };
+
+    /** Save as child note attached to selected/current item */
+    const saveToItem = async () => {
+        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
+        const context = getZoteroTargetContextSync();
+        
+        if (!context.parentReference) return;
+        
+        const newNote = new Zotero.Item('note');
+        newNote.libraryID = context.parentReference.library_id;
+        newNote.parentKey = context.parentReference.zotero_key;
+        newNote.setNote(formattedContent);
+        await newNote.saveTx();
+        selectItem(newNote);
+    };
+
+    /** Save as child note for a specific citation (used by CitedSourcesList) */
     const saveAsNote = async (citation?: CitationData) => {
         const formattedContent = renderToHTML(preprocessNoteContent(combinedContent));
         const newNote = new Zotero.Item('note');
@@ -154,7 +204,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         }
         await newNote.saveTx();
         selectItem(newNote);
-    }
+    };
 
     const copyRequestId = async () => {
         await copyToClipboard(lastMessage.id);
@@ -198,7 +248,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                     {lastMessage.status !== 'error' &&
                         <MenuButton
                             icon={ShareIcon}
-                            menuItems={shareMenuItems}
+                            menuItems={getShareMenuItems()}
                             className="scale-11"
                             ariaLabel="Share"
                             variant="ghost"
