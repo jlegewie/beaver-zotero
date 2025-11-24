@@ -58,6 +58,7 @@ export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment
     try {
         let libId: number;
         let itemKeyValue: string;
+        if (!source.library_id || !source.zotero_key) return null;
 
         if ('library_id' in source && 'zotero_key' in source) {
             libId = source.library_id;
@@ -240,6 +241,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 }
 
 export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData) {
+    if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
         selectItemById(itemID);
