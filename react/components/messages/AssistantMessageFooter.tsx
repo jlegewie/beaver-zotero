@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -70,6 +70,9 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const sourcesVisible = sourcesVisibilityMap[lastMessage.id] ?? false;
     const toggleSourcesVisibility = useSetAtom(toggleMessageSourcesVisibilityAtom);
     const setSourcesVisibility = useSetAtom(setMessageSourcesVisibilityAtom);
+    
+    // Force re-render when menu opens to get fresh context for disabled state
+    const [, forceUpdate] = useState({});
         
     // Build menu items - computed fresh each render to determine disabled state
     const getShareMenuItems = () => {
@@ -253,6 +256,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
                             ariaLabel="Share"
                             variant="ghost"
                             positionAdjustment={{ x: 0, y: 0 }}
+                            toggleCallback={(isOpen) => { if (isOpen) forceUpdate({}); }}
                         />
                     }
                     <IconButton
