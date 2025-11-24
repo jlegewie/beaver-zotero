@@ -1,13 +1,13 @@
 import React from 'react';
 import { Icon, Spinner } from '../icons/icons';
+import { ButtonVariant } from './Button';
 
-type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary' | 'surface-light';
 
 interface IconButtonProps {
     /** Icon to display */
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Button variant */
-    variant?: IconButtonVariant;
+    variant?: ButtonVariant;
     /** Click handler */
     onClick: (e: React.MouseEvent) => void;
     /** Additional class names for the button */

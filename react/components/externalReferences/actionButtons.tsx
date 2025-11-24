@@ -24,12 +24,15 @@ import {
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
 } from '../../atoms/externalReferences';
+import { ButtonVariant } from '../ui/Button';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
 
 interface ActionButtonsProps {
     item: ExternalReference | ExternalReferenceResult;
+    /** Button variant */
+    buttonVariant?: ButtonVariant;
     /** Display mode for the Reveal button (shown when item exists in library) */
     revealButtonMode?: ButtonDisplayMode;
     /** Display mode for the Import button (shown when item doesn't exist in library) */
@@ -46,6 +49,7 @@ interface ActionButtonsProps {
 
 const ActionButtons: React.FC<ActionButtonsProps> = ({
     item,
+    buttonVariant = 'surface-light',
     revealButtonMode = 'full',
     importButtonMode = 'full',
     detailsButtonMode = 'full',
@@ -160,7 +164,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             return (
                 <Tooltip content={tooltipContent}>
                     <IconButton
-                        variant="surface-light"
+                        variant={buttonVariant}
                         icon={icon}
                         className="font-color-secondary"
                         ariaLabel={ariaLabel || label}
@@ -176,7 +180,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         return (
             <Tooltip content={tooltipContent}>
                 <Button
-                    variant="surface-light"
+                    variant={buttonVariant}
                     icon={icon}
                     className="font-color-secondary truncate"
                     style={{ padding: '1px 4px' }}
