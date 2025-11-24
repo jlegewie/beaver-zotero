@@ -33,6 +33,8 @@ interface ActionButtonsProps {
     item: ExternalReference | ExternalReferenceResult;
     /** Button variant */
     buttonVariant?: ButtonVariant;
+    /** Button size */
+    className?: string;
     /** Display mode for the Reveal button (shown when item exists in library) */
     revealButtonMode?: ButtonDisplayMode;
     /** Display mode for the Import button (shown when item doesn't exist in library) */
@@ -50,6 +52,7 @@ interface ActionButtonsProps {
 const ActionButtons: React.FC<ActionButtonsProps> = ({
     item,
     buttonVariant = 'surface-light',
+    className = '',
     revealButtonMode = 'full',
     importButtonMode = 'full',
     detailsButtonMode = 'full',
@@ -166,7 +169,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     <IconButton
                         variant={buttonVariant}
                         icon={icon}
-                        className="font-color-secondary"
+                        className={`font-color-secondary ${className}`}
                         ariaLabel={ariaLabel || label}
                         onClick={onClick}
                         disabled={disabled}
@@ -182,7 +185,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 <Button
                     variant={buttonVariant}
                     icon={icon}
-                    className="font-color-secondary truncate"
+                    className={`font-color-secondary truncate ${className}`}
                     style={{ padding: '1px 4px' }}
                     onClick={onClick}
                     disabled={disabled}
