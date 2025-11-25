@@ -204,7 +204,7 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
  * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
  * Falls back to manual creation if translation fails.
  */
-async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
+export async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
     if (reference.identifiers) {
         try {
