@@ -15,12 +15,10 @@ import ExternalReferenceListItem from '../externalReferences/ExternalReferenceLi
 
 interface SearchExternalReferencesToolDisplayProps {
     toolCall: ToolCall;
-    isHovered: boolean;
 }
 
 const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesToolDisplayProps> = ({
     toolCall,
-    isHovered,
 }) => {
     const [resultsVisible, setResultsVisible] = useState(false);
     const [isButtonHovered, setIsButtonHovered] = useState(false);

@@ -134,7 +134,6 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                             <SearchExternalReferencesToolDisplay
                                 key={group.id}
                                 toolCall={firstTool}
-                                isHovered={false}
                             />
                         </div>
                     );
