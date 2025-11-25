@@ -8,9 +8,10 @@ import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
 import { CitationData, getUniqueKey, isExternalCitation } from '../../types/citations';
 import Tooltip from '../ui/Tooltip';
-import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceMappingAtom, externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 import ActionButtons from '../externalReferences/actionButtons';
 import { ExternalReference } from '../../types/externalReferences';
+import { ZoteroItemReference } from '../../types/zotero';
 
 interface CitedSourcesListProps {
     citations: CitationData[];
@@ -21,11 +22,19 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
 }) => {
     const authorYearFormat = getPref("citationFormat") !== "numeric";
     const externalReferenceMapping = useAtomValue(externalReferenceMappingAtom);
+    const externalItemMapping = useAtomValue(externalReferenceItemMappingAtom);
     
     // Helper to get external reference from mapping
     const getExternalReference = (citation: CitationData): ExternalReference | undefined => {
         if (!isExternalCitation(citation) || !citation.external_source_id) return undefined;
         return externalReferenceMapping[citation.external_source_id];
+    };
+    
+    // Helper to get mapped Zotero item for external citations
+    const getMappedZoteroItem = (citation: CitationData): ZoteroItemReference | undefined => {
+        if (!isExternalCitation(citation) || !citation.external_source_id) return undefined;
+        const mapping = externalItemMapping[citation.external_source_id];
+        return mapping ?? undefined; // Convert null to undefined
     };
     
     return (
@@ -34,13 +43,25 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 {citations.map((citation, index) => {
                     const isExternal = isExternalCitation(citation);
                     const externalRef = getExternalReference(citation);
+                    const mappedZoteroItem = getMappedZoteroItem(citation);
+                    
+                    // Only show as external if there's no mapped Zotero item
+                    const showAsExternal = isExternal && !mappedZoteroItem;
+                    
+                    // Get item type icon for mapped external citations
+                    const getMappedItemType = (): string | undefined => {
+                        if (!mappedZoteroItem) return undefined;
+                        const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                        return item ? item.itemType : undefined;
+                    };
+                    const mappedItemType = isExternal && mappedZoteroItem ? getMappedItemType() : undefined;
                     
                     return (
                         <div key={getUniqueKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">
-                                    <div className={`source-citation text-sm ${citation.type === 'external' ? 'mt-020 source-citation-external' : ''}`}>
+                                    <div className={`source-citation text-sm ${showAsExternal ? 'mt-020 source-citation-external' : ''}`}>
                                         {citation.numericCitation}
                                     </div>
                                 </div>
@@ -53,11 +74,12 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     
                                     <div className="display-flex flex-1 min-w-0 p-2">
                                         {/* Icon */}
-                                        {isExternal ? (
+                                        {showAsExternal ? (
                                             <></>
-                                            // <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
-                                            //     <LinkIcon className="scale-75 font-color-secondary" />
-                                            // </span>
+                                        ) : mappedItemType ? (
+                                            <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
+                                                <CSSItemTypeIcon className="scale-85" itemType={mappedItemType} />
+                                            </span>
                                         ) : citation.icon && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                                 <CSSItemTypeIcon className="scale-85" itemType={citation.icon} />
@@ -71,7 +93,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     
                                     {/* Action buttons */}
                                     <div className="display-flex gap-4 flex-shrink-0 p-2">
-                                        {isExternal && externalRef ? (
+                                        {showAsExternal && externalRef ? (
                                             <ActionButtons
                                                 item={externalRef}
                                                 buttonVariant="ghost-secondary"
@@ -89,23 +111,40 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                     <IconButton
                                                         icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
                                                         variant="ghost-secondary"
-                                                        onClick={() => revealSource(citation)}
+                                                        onClick={() => revealSource(mappedZoteroItem || citation)}
                                                         ariaLabel="Reveal source"
                                                         title="Reveal in Zotero"
                                                         className="display-flex scale-11"
-                                                        disabled={citation.type !== "item" && citation.type !== "attachment"}
+                                                        disabled={!mappedZoteroItem && citation.type !== "item" && citation.type !== "attachment"}
                                                     />
                                                 </Tooltip>
                                                 <Tooltip content="Open PDF" singleLine>
                                                     <IconButton
-                                                        // icon={() => <ZoteroIcon icon={ZOTERO_ICONS.OPEN} size={10} />}
                                                         icon={PdfIcon}
                                                         variant="ghost-secondary"
-                                                        onClick={() => openSource(citation)}
+                                                        onClick={async () => {
+                                                            if (mappedZoteroItem) {
+                                                                // Handle mapped external citation
+                                                                const item = Zotero.Items.getByLibraryAndKey(
+                                                                    mappedZoteroItem.library_id,
+                                                                    mappedZoteroItem.zotero_key
+                                                                );
+                                                                if (item && item.isRegularItem()) {
+                                                                    const bestAttachment = await item.getBestAttachment();
+                                                                    if (bestAttachment) {
+                                                                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                    }
+                                                                } else if (item && item.isAttachment()) {
+                                                                    Zotero.getActiveZoteroPane().viewAttachment(item.id);
+                                                                }
+                                                            } else {
+                                                                openSource(citation);
+                                                            }
+                                                        }}
                                                         ariaLabel="Open PDF"
                                                         title="Open PDF"
                                                         className="display-flex scale-12"
-                                                        disabled={citation.type !== "attachment"}
+                                                        disabled={!mappedZoteroItem && citation.type !== "attachment"}
                                                     />
                                                 </Tooltip>
                                             </>
@@ -116,7 +155,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                 {/* Right bottom section - formatted citation */}
                                 <div className="flex-1 px-2 text-sm font-color-secondary
                                                 min-w-0 overflow-hidden text-ellipsis">
-                                    {isExternal && externalRef 
+                                    {showAsExternal && externalRef 
                                         ? formatExternalCitation(externalRef)
                                         : stripUrlsFromCitation(citation.formatted_citation)
                                     }
