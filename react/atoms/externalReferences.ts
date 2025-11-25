@@ -76,7 +76,7 @@ export const checkExternalReferenceAtom = atom(
                     firstItem.zotero_key
                 );
                 
-                if (item) {
+                if (item && !item.deleted) {
                     result = {
                         library_id: firstItem.library_id,
                         zotero_key: firstItem.zotero_key
