@@ -253,8 +253,13 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
 
     // 4. Try to find PDF using Zotero's "Find Full Text" logic
     // This uses all methods: doi (visits publisher page), url, oa (Unpaywall), custom resolvers
-    const attachments = await item.getAttachments();
-    if (!attachments || attachments.length === 0) {
+    const attachmentIds = await item.getAttachments();
+    const attachmentPromises = attachmentIds.map(async (attachmentId: number) => {
+        return await Zotero.Items.getAsync(attachmentId);
+    });
+    const pdfAttachments = (await Promise.all(attachmentPromises))
+        .filter((attachment): attachment is Zotero.Item => attachment && !attachment.deleted && attachment.isPDFAttachment());
+    if (!pdfAttachments || pdfAttachments.length === 0) {
         try {
             // addAvailableFile uses the same logic as "Find Full Text" button in Zotero UI
             const attachment = await (Zotero.Attachments as any).addAvailableFile(item);
