@@ -51,8 +51,8 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
         if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
         
         if (totalCount === 0) return 'Web Search: No results';
-        if (toolCall.result?.params?.query) return toolCall.result.params.query;
         if (toolCall.label) return toolCall.label;
+        // if (toolCall.result?.params?.topic_query) return toolCall.result.params.topic_query;
         return "Web Search";
     };
 
@@ -86,8 +86,14 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                                 <Icon icon={getIcon()} />
                             </div>
                             
-                            <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
+                            <div>
                                 {getButtonText()}
+                                {/* <span className={`font-semibold ${resultsVisible ? 'font-color-primary' : ''}`}>
+                                    Web Search
+                                    <span className="font-color-tertiary ml-2 font-medium">
+                                        {'"' + (toolCall?.result?.params?.topic_query ?? '') + '"'}
+                                    </span>
+                                </span> */}
                             </div>
                             
                         </div>
