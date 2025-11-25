@@ -6,6 +6,7 @@ import {
     ArrowRightIcon,
     Spinner,
     AlertIcon,
+    Icon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
@@ -50,18 +51,21 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
         if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
         
         if (totalCount === 0) return 'Web Search: No results';
-        return 'Web Search';
+        if (toolCall.result?.params?.query) return toolCall.result.params.query;
+        if (toolCall.label) return toolCall.label;
+        return "Web Search";
     };
 
     const canToggleResults = hasReferences;
     const isButtonDisabled = !hasReferences;
 
     return (
-        <div className="border-popup rounded-md display-flex flex-col min-w-0">
+        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0`}>
             <div
                 className={`
-                    display-flex flex-row bg-senary py-15 px-2
+                    display-flex flex-row  py-15
                     ${hasReferences && resultsVisible ? 'border-bottom-quinary' : ''}
+                    ${resultsVisible ? 'bg-senary' : ''}
                 `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
@@ -69,17 +73,28 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                  <div className="display-flex flex-row flex-1" onClick={toggleResults}>
                     <Button
                         variant="ghost-secondary"
-                        icon={getIcon()}
+                        // icon={getIcon()}
                         className={`
-                            text-base scale-105
+                            text-base scale-105 min-w-0 align-start text-left
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                         `}
+                        style={{ padding: '2px 6px', maxHeight: 'none'}}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        {getButtonText()}
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                                <Icon icon={getIcon()} />
+                            </div>
+                            
+                            <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
+                                {getButtonText()}
+                            </div>
+                            
+                        </div>
+                        {/* {getButtonText()}
                         {hasReferences &&
                             <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalCount}x</span>
-                        }
+                        } */}
                     </Button>
                     <div className="flex-1"/>
                 </div>
