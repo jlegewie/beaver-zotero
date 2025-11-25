@@ -141,7 +141,7 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
     }
     
     const authors = formatAuthors(itemData.authors);
-    const metaParts = [itemData.publication_title || itemData.venue, itemData.year].filter(Boolean);
+    const metaParts = [itemData.journal?.name || itemData.venue, itemData.year].filter(Boolean);
     const meta = metaParts.join(', ');
 
     const getItemIcon = () => {

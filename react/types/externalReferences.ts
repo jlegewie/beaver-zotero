@@ -1,7 +1,7 @@
 import { BibliographicIdentifier, ZoteroItemReference } from "./zotero";
 
 
-enum NormalizedPublicationType {
+export enum NormalizedPublicationType {
     JOURNAL_ARTICLE = "journal_article",
     CONFERENCE_PAPER = "conference_paper",
     BOOK = "book",

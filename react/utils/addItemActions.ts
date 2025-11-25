@@ -1,4 +1,5 @@
-import { AddItemProposedAction, AddItemResultData, ExternalReference, NormalizedPublicationType } from '../types/proposedActions/items';
+import { AddItemProposedAction, AddItemResultData } from '../types/proposedActions/items';
+import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
 
 // Helper to map publication types
@@ -154,16 +155,28 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
         item.setField('abstractNote', itemData.abstract);
     }
     
-    if (itemData.publication_title || itemData.venue) {
-        const pubTitle = itemData.publication_title || itemData.venue;
-        if (pubTitle) {
-            if (itemType === 'journalArticle') {
-                 if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) item.setField('publicationTitle', pubTitle);
-            } else if (itemType === 'conferencePaper') {
-                 if (Zotero.ItemFields.isValidForType('proceedingsTitle', item.itemTypeID)) item.setField('proceedingsTitle', pubTitle);
-            } else if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) {
-                 item.setField('publicationTitle', pubTitle);
-            }
+    // Handle publication title from journal object or venue
+    const pubTitle = itemData.journal?.name || itemData.venue;
+    if (pubTitle) {
+        if (itemType === 'journalArticle') {
+            if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) item.setField('publicationTitle', pubTitle);
+        } else if (itemType === 'conferencePaper') {
+            if (Zotero.ItemFields.isValidForType('proceedingsTitle', item.itemTypeID)) item.setField('proceedingsTitle', pubTitle);
+        } else if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) {
+            item.setField('publicationTitle', pubTitle);
+        }
+    }
+    
+    // Handle additional journal metadata
+    if (itemData.journal) {
+        if (itemData.journal.volume && Zotero.ItemFields.isValidForType('volume', item.itemTypeID)) {
+            item.setField('volume', itemData.journal.volume);
+        }
+        if (itemData.journal.issue && Zotero.ItemFields.isValidForType('issue', item.itemTypeID)) {
+            item.setField('issue', itemData.journal.issue);
+        }
+        if (itemData.journal.pages && Zotero.ItemFields.isValidForType('pages', item.itemTypeID)) {
+            item.setField('pages', itemData.journal.pages);
         }
     }
     

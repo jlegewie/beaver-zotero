@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ExternalReference } from '../../types/externalReferences';
 import {
@@ -23,8 +23,11 @@ import {
     checkExternalReferenceAtom, 
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
+    markExternalReferenceImportedAtom,
 } from '../../atoms/externalReferences';
 import { ButtonVariant } from '../ui/Button';
+import { createZoteroItem } from '../../utils/addItemActions';
+import { logger } from '../../../src/utils/logger';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
@@ -65,6 +68,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const checkReference = useSetAtom(checkExternalReferenceAtom);
     const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
@@ -74,7 +78,55 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             : null
     );
     const [isLoading, setIsLoading] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
+
+    /**
+     * Handle importing the external reference to Zotero
+     */
+    const handleImport = useCallback(async () => {
+        if (isImporting || isLoading) return;
+        
+        setIsImporting(true);
+        try {
+            logger(`ActionButtons: Importing item "${item.title}"`, 1);
+            
+            const newItem = await createZoteroItem(item);
+            
+            const libraryId = Zotero.Libraries.userLibraryID;
+            const newZoteroRef = {
+                library_id: libraryId,
+                zotero_key: newItem.key
+            };
+            
+            // Update cache
+            if (item.source_id) {
+                markExternalReferenceImported(item.source_id, newZoteroRef);
+            }
+            
+            // Update local state to switch from Import to Reveal button
+            setZoteroItemRef(newZoteroRef);
+            setItemExists(true);
+            
+            // Check for best attachment
+            if (newItem.isRegularItem()) {
+                const attachment = await newItem.getBestAttachment();
+                setBestAttachment(attachment || null);
+            }
+            
+            // Select the new item in Zotero
+            const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+            if (ZoteroPane) {
+                ZoteroPane.selectItem(newItem.id);
+            }
+            
+            logger(`ActionButtons: Successfully imported "${item.title}" (key: ${newItem.key})`, 1);
+        } catch (error) {
+            logger(`ActionButtons: Failed to import "${item.title}": ${error}`, 1);
+        } finally {
+            setIsImporting(false);
+        }
+    }, [item, isImporting, isLoading, markExternalReferenceImported]);
     
     // Check cache and validate on mount
     useEffect(() => {
@@ -216,9 +268,9 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 importButtonMode,
                 'Import to Zotero',
                 'Import',
-                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
-                () => (item.publication_url || item.url) ? Zotero.launchURL(item.publication_url || item.url!) : undefined,
-                (!item.publication_url && !item.url) || isLoading,
+                (isLoading || isImporting) ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
+                handleImport,
+                isLoading || isImporting,
                 'Import to Zotero'
             )}
             
