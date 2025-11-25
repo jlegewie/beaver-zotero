@@ -78,7 +78,13 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
     const isButtonDisabled = toolCall.status === 'in_progress' || toolCall.status === 'error' || (toolCall.status === 'completed' && !hasAttachmentsToShow && !toolCall.response?.content);
 
     return (
-        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0 py-1`}>
+        <div
+            id={`tool-${toolCall.id}`}
+            className={`
+                rounded-md flex flex-col min-w-0 py-1
+                ${resultsVisible ? 'border-popup bg-senary' : 'border-transparent'}
+            `}
+        >
             <Button
                 variant="ghost-secondary"
                 onClick={toggleResults}
