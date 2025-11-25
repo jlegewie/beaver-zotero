@@ -15,6 +15,7 @@ import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
+import { ToolDisplayFooter } from './ToolDisplayFooter';
 
 
 interface SearchToolDisplayProps {
@@ -81,35 +82,46 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
         <div
             id={`tool-${toolCall.id}`}
             className={`
-                rounded-md flex flex-col min-w-0 py-1
-                ${resultsVisible ? 'border-popup bg-senary' : 'border-transparent'}
+                rounded-md flex flex-col min-w-0
+                ${resultsVisible ? 'border-popup' : 'border-transparent'}
             `}
         >
-            <Button
-                variant="ghost-secondary"
-                onClick={toggleResults}
+            <div
+                className={`
+                    display-flex flex-row  py-15
+                    ${resultsVisible ? 'border-bottom-quinary' : ''}
+                    ${resultsVisible ? 'bg-senary' : ''}
+                `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
-                className={`
-                    text-base scale-105 w-full min-w-0 align-start text-left
-                    ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                    ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
-                    ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
-                `}
-                style={{ padding: '2px 6px', maxHeight: 'none'}}
-                disabled={isButtonDisabled && !canToggleResults}
             >
-                <div className="display-flex flex-row px-3 gap-2">
-                    <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        <Icon icon={getIcon()} />
+
+                <Button
+                    variant="ghost-secondary"
+                    onClick={toggleResults}
+                    onMouseEnter={() => setIsButtonHovered(true)}
+                    onMouseLeave={() => setIsButtonHovered(false)}
+                    className={`
+                        text-base scale-105 w-full min-w-0 align-start text-left
+                        ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
+                        ${!hasAttachmentsToShow && toolCall.status === 'completed' && toolCall.response?.content ? 'justify-start' : ''}
+                        ${toolCall.status === 'completed' && toolCall.response?.attachments && toolCall.response.attachments.length > 0 ? 'justify-start' : ''}
+                    `}
+                    style={{ padding: '2px 6px', maxHeight: 'none'}}
+                    disabled={isButtonDisabled && !canToggleResults}
+                >
+                    <div className="display-flex flex-row px-3 gap-2">
+                        <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                            <Icon icon={getIcon()} />
+                        </div>
+                        
+                        <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
+                            {getButtonText()}
+                        </div>
+                        
                     </div>
-                    
-                    <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
-                        {getButtonText()}
-                    </div>
-                    
-                </div>
-            </Button>
+                </Button>
+            </div>
 
             {toolCall.status === 'error' && toolCall.response?.error && !toolCall.response?.content && (
                 <div className="px-4 py-1 text-sm text-red-600">
@@ -122,8 +134,11 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
             )}
 
             {resultsVisible && hasAttachmentsToShow && toolCall.response && toolCall.response.attachments && (
-                <div className={`py-1 ${resultsVisible ? 'border-top-quinary' : ''} mt-15`}>
+                <div className="display-flex flex-col">
                     <ZoteroItemsList messageAttachments={toolCall.response.attachments} />
+                    {toolCall.response.attachments.length > 4 && (
+                        <ToolDisplayFooter toggleContent={toggleResults} />
+                    )}
                 </div>
             )}
         </div>

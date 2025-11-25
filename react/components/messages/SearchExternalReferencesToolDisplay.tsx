@@ -60,7 +60,13 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     const isButtonDisabled = !hasReferences;
 
     return (
-        <div id={`tool-${toolCall.id}`} className={`${resultsVisible ? 'border-popup' : 'border-transparent'} rounded-md flex flex-col min-w-0`}>
+        <div
+            id={`tool-${toolCall.id}`}
+            className={`
+                rounded-md flex flex-col min-w-0
+                ${resultsVisible ? 'border-popup' : 'border-transparent'}
+            `}
+        >
             <div
                 className={`
                     display-flex flex-row  py-15
