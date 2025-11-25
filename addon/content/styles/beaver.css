@@ -436,6 +436,27 @@
 [id^="beaver-pane-"] .font-color-purple { color: var(--tag-purple); opacity: 0.8; }
 [id^="beaver-pane-"] .font-color-error { color: var(--tag-red); opacity: 0.8; }
 
+/* Hover effects for colored icons inside buttons */
+[id^="beaver-pane-"] .variant-ghost:hover .font-color-green,
+[id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-green,
+[id^="beaver-pane-"] .icon-button:hover .font-color-green { color: var(--tag-green); opacity: 1; }
+
+[id^="beaver-pane-"] .variant-ghost:hover .font-color-red,
+[id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-red,
+[id^="beaver-pane-"] .icon-button:hover .font-color-red { color: var(--tag-red); opacity: 1; }
+
+[id^="beaver-pane-"] .variant-ghost:hover .font-color-orange,
+[id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-orange,
+[id^="beaver-pane-"] .icon-button:hover .font-color-orange { color: var(--tag-orange); opacity: 1; }
+
+[id^="beaver-pane-"] .variant-ghost:hover .font-color-blue,
+[id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-blue,
+[id^="beaver-pane-"] .icon-button:hover .font-color-blue { color: var(--tag-blue); opacity: 1; }
+
+[id^="beaver-pane-"] .variant-ghost:hover .font-color-purple,
+[id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-purple,
+[id^="beaver-pane-"] .icon-button:hover .font-color-purple { color: var(--tag-purple); opacity: 1; }
+
 [id^="beaver-pane-"] .user-select-none { user-select: none; }
 [id^="beaver-pane-"] .user-select-text { user-select: text; }
 
