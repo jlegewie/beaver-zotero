@@ -216,15 +216,17 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
  * Creates a Zotero item from a ExternalReference object.
  * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
  * Falls back to manual creation if translation fails.
+ * After item creation, uses Zotero's "Find Full Text" logic to find PDFs.
  */
 export async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
+    let item: Zotero.Item | null = null;
+
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
     if (reference.identifiers) {
         try {
-            const translatedItem = await tryImportFromIdentifiers(reference.identifiers);
-            if (translatedItem) {
+            item = await tryImportFromIdentifiers(reference.identifiers);
+            if (item) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
-                return translatedItem;
             }
         } catch (e) {
             logger(`createZoteroItem: Failed to import via identifier: ${e}`, 1);
@@ -232,21 +234,39 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     }
 
     // 2. Try URL Translation (Semantic Scholar / Article Page)
-    if (reference.url) {
+    if (!item && reference.url) {
         try {
-            const urlItem = await importFromUrl(reference.url);
-            if (urlItem) {
+            item = await importFromUrl(reference.url);
+            if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
-                return urlItem;
             }
         } catch (e) {
             logger(`createZoteroItem: Failed to import via URL: ${e}`, 1);
         }
     }
 
-    // 2. Fallback: Create item manually from available metadata
-    logger("createZoteroItem: Falling back to manual item creation", 2);
-    return await createItemManually(reference);
+    // 3. Fallback: Create item manually from available metadata
+    if (!item) {
+        logger("createZoteroItem: Falling back to manual item creation", 2);
+        item = await createItemManually(reference);
+    }
+
+    // 4. Try to find PDF using Zotero's "Find Full Text" logic
+    // This uses all methods: doi (visits publisher page), url, oa (Unpaywall), custom resolvers
+    const attachments = await item.getAttachments();
+    if (!attachments || attachments.length === 0) {
+        try {
+            // addAvailableFile uses the same logic as "Find Full Text" button in Zotero UI
+            const attachment = await (Zotero.Attachments as any).addAvailableFile(item);
+            if (attachment) {
+                logger("createZoteroItem: Found PDF via addAvailableFile", 2);
+            }
+        } catch (e) {
+            logger(`createZoteroItem: addAvailableFile failed: ${e}`, 1);
+        }
+    }
+
+    return item;
 }
 
 export async function applyAddItem(action: AddItemProposedAction): Promise<AddItemResultData> {
