@@ -17,7 +17,7 @@ import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
-import { AddItemProposedAction, isAddItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
+import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -270,10 +270,10 @@ export const loadThreadAtom = atom(
                 }));
 
                 // Check for external references and populate cache
-                const addItemActions = proposedActions.filter(isAddItemAction) as AddItemProposedAction[];
-                if (addItemActions.length > 0) {
+                const createItemActions = proposedActions.filter(isCreateItemAction) as CreateItemProposedAction[];
+                if (createItemActions.length > 0) {
                     logger(`loadThreadAtom: Adding external references from proposed actions to mapping`, 1);
-                    const references = addItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                    const references = createItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
                     // Add to external reference mapping for UI display
                     set(addExternalReferencesToMappingAtom, references);
                     // Check if references exist in Zotero

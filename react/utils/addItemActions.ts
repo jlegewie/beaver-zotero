@@ -1,4 +1,4 @@
-import { AddItemProposedAction, AddItemResultData } from '../types/proposedActions/items';
+import { CreateItemProposedAction, CreateItemResultData } from '../types/proposedActions/items';
 import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
 
@@ -274,7 +274,7 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     return item;
 }
 
-export async function applyAddItem(action: AddItemProposedAction): Promise<AddItemResultData> {
+export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
     const itemData = action.proposed_data.item;
     const libraryId = Zotero.Libraries.userLibraryID;
 
@@ -339,7 +339,7 @@ export async function applyAddItem(action: AddItemProposedAction): Promise<AddIt
     if ((!attachments || attachments.length === 0) && action.proposed_data.file_available) {
          const url = itemData.open_access_url || action.proposed_data.downloaded_url || itemData.url;
          if (url) {
-             logger(`applyAddItem: Attaching file from ${url} (post-creation)`, 2);
+             logger(`applyCreateItem: Attaching file from ${url} (post-creation)`, 2);
              await attachPdfFromUrl(item, url);
          }
     }
@@ -360,7 +360,7 @@ export async function applyAddItem(action: AddItemProposedAction): Promise<AddIt
     };
 }
 
-export async function deleteAddedItem(action: AddItemProposedAction): Promise<void> {
+export async function deleteAddedItem(action: CreateItemProposedAction): Promise<void> {
     if (!action.result_data?.zotero_key) {
         throw new Error('Item key missing for deletion');
     }

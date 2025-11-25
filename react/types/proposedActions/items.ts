@@ -1,7 +1,7 @@
 import type { ProposedAction } from "./base";
 import type { ExternalReference } from "../externalReferences";
 
-export interface AddItemProposedData {
+export interface CreateItemProposedData {
     // Core item data
     item: ExternalReference;
     reason?: string;  // LLM-generated explanation of relevance
@@ -18,25 +18,25 @@ export interface AddItemProposedData {
     suggested_tags?: string[];  // Tags suggested for the item
 }
 
-export interface AddItemResultData {
+export interface CreateItemResultData {
     // From ZoteroItemReference
     library_id: number;
     zotero_key: string;  // The Zotero key assigned to the new item
     
-    // Additional fields specific to add_item
+    // Additional fields specific to create_item
     attachment_keys?: string;  // Keys of any attachments (PDFs) added
     file_hash?: string;  // Hash of the attached file
     storage_path?: string;  // Final storage path
 }
 
-export type AddItemProposedAction = ProposedAction & {
-    action_type: 'add_item';
-    proposed_data: AddItemProposedData;
-    result_data?: AddItemResultData;
+export type CreateItemProposedAction = ProposedAction & {
+    action_type: 'create_item';
+    proposed_data: CreateItemProposedData;
+    result_data?: CreateItemResultData;
 };
 
-export function isAddItemAction(action: ProposedAction): action is AddItemProposedAction {
-    return action.action_type === 'add_item';
+export function isCreateItemAction(action: ProposedAction): action is CreateItemProposedAction {
+    return action.action_type === 'create_item';
 }
 
 export function isSearchExternalReferencesTool(functionName: string | undefined): boolean {

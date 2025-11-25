@@ -17,7 +17,7 @@ import {
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import {
-    applyAddItem,
+    applyCreateItem,
     deleteAddedItem,
 } from '../../utils/addItemActions';
 import { logger } from '../../../src/utils/logger';
@@ -29,7 +29,7 @@ import {
     ackProposedActionsAtom, 
     undoProposedActionAtom 
 } from '../../atoms/proposedActions';
-import { AddItemProposedAction, isAddItemAction, AddItemResultData } from '../../types/proposedActions/items';
+import { CreateItemProposedAction, isCreateItemAction, CreateItemResultData } from '../../types/proposedActions/items';
 import { AckLink } from '../../../src/services/proposedActionsService';
 import {
     annotationBusyAtom,
@@ -42,11 +42,11 @@ import {
 import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
 
 interface AddItemListItemProps {
-    action: AddItemProposedAction;
+    action: CreateItemProposedAction;
     isBusy: boolean;
-    onClick: (action: AddItemProposedAction) => Promise<void>;
-    onDelete: (action: AddItemProposedAction) => Promise<void>;
-    onReAdd: (action: AddItemProposedAction) => Promise<void>;
+    onClick: (action: CreateItemProposedAction) => Promise<void>;
+    onDelete: (action: CreateItemProposedAction) => Promise<void>;
+    onReAdd: (action: CreateItemProposedAction) => Promise<void>;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -265,7 +265,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
 
     // Extract actions
     const getProposedActionsByToolcall = useAtomValue(getProposedActionsByToolcallAtom);
-    const actions = toolCalls.map((toolCall) => getProposedActionsByToolcall(toolCall.id, isAddItemAction)).flat() as AddItemProposedAction[];
+    const actions = toolCalls.map((toolCall) => getProposedActionsByToolcall(toolCall.id, isCreateItemAction)).flat() as CreateItemProposedAction[];
     const totalActions = actions.length;
 
     // Derived states
@@ -308,7 +308,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
             const applyResults: (AckLink | null)[] = await Promise.all(
                 actionsToApply.map(async (action) => {
                     try {
-                        const result: AddItemResultData = await applyAddItem(action);
+                        const result: CreateItemResultData = await applyCreateItem(action);
                         logger(`handleApplyActions: applied item ${action.id}: ${JSON.stringify(result)}`, 1);
                         
                         // Update external reference cache if this was an external reference import
@@ -346,7 +346,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
             if (actionsToAck.length > 0) {
                 const itemIds: number[] = [];
                 for (const ack of actionsToAck) {
-                     const result = ack.result_data as AddItemResultData;
+                     const result = ack.result_data as CreateItemResultData;
                      if (result.zotero_key) {
                          const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
                          if (item) itemIds.push(item.id);
@@ -371,7 +371,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
         }
     }, [actions, groupId, messageId, setPanelState, ackProposedActions, setProposedActionsToError]);
 
-    const handleActionClick = useCallback(async (action: AddItemProposedAction) => {
+    const handleActionClick = useCallback(async (action: CreateItemProposedAction) => {
         if (action.status === 'applied' && action.result_data?.zotero_key) {
              const item = await Zotero.Items.getByLibraryAndKeyAsync(
                  action.result_data.library_id, 
@@ -388,7 +388,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
         }
     }, [handleApplyActions]);
 
-    const handleDelete = useCallback(async (action: AddItemProposedAction) => {
+    const handleDelete = useCallback(async (action: CreateItemProposedAction) => {
         setBusy({ key: groupId, annotationId: action.id, isBusy: true });
         try {
             if (action.status !== 'applied' || !action.result_data?.zotero_key) {
@@ -405,7 +405,7 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
         }
     }, [groupId, rejectProposedAction, setBusy, setProposedActionsToError, undoProposedAction]);
 
-    const handleReAdd = useCallback(async (action: AddItemProposedAction) => {
+    const handleReAdd = useCallback(async (action: CreateItemProposedAction) => {
         await handleActionClick(action);
     }, [handleActionClick]);
 

@@ -3,8 +3,8 @@ import type {
     AnnotationResultData
 } from './annotations';
 import type {
-    AddItemProposedData,
-    AddItemResultData
+    CreateItemProposedData,
+    CreateItemResultData
 } from './items';
 import {
     normalizePageLocations,
@@ -21,7 +21,7 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'add_item';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item';
 
 /**
  * Union type for all proposed data types
@@ -39,12 +39,12 @@ export interface NoteResultData {
     parent_key?: string;
 }
 
-export type ProposedData = AnnotationProposedData | NoteProposedData | AddItemProposedData;
+export type ProposedData = AnnotationProposedData | NoteProposedData | CreateItemProposedData;
 
 /**
  * Type of result data after applying an action
  */
-export type ActionResultDataType = AnnotationResultData | NoteResultData | AddItemResultData;
+export type ActionResultDataType = AnnotationResultData | NoteResultData | CreateItemResultData;
 
 /**
  * Get a Zotero item or item reference from a ProposedAction if it has been applied
@@ -140,7 +140,7 @@ export {
 } from './annotations';
 
 export {
-    isAddItemAction
+    isCreateItemAction
 } from './items';
 
 /**
@@ -196,7 +196,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
         } as NoteProposedData;
-    } else if (actionType === 'add_item') {
+    } else if (actionType === 'create_item') {
         proposedData = {
              item: proposedData.item ?? {},
              reason: proposedData.reason,
@@ -207,7 +207,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
              text_path: proposedData.text_path ?? proposedData.textPath,
              collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
              suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
-        } as AddItemProposedData;
+        } as CreateItemProposedData;
     }
     
     // Normalize result_data if present
@@ -235,7 +235,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
                 ...(parentKey ? { parent_key: String(parentKey) } : {})
             };
         }
-    } else if (resultData && actionType === 'add_item') {
+    } else if (resultData && actionType === 'create_item') {
          const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
          const libraryId = resultData.library_id ?? resultData.libraryId;
          

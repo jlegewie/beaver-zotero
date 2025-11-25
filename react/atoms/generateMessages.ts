@@ -45,7 +45,7 @@ import { removePopupMessagesByTypeAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { checkExternalReferencesAtom, addExternalReferencesToMappingAtom } from './externalReferences';
-import { isSearchExternalReferencesTool, isAddItemAction, AddItemProposedAction } from '../types/proposedActions/items';
+import { isSearchExternalReferencesTool, isCreateItemAction, CreateItemProposedAction } from '../types/proposedActions/items';
 import { ExternalReference } from '../types/externalReferences';
 
 export function getCurrentReaderState(): ReaderState | null {
@@ -620,10 +620,10 @@ async function _processChatCompletionViaBackend(
                         // Add proposed actions to the thread proposed actions
                         set(addProposedActionsAtom, actions);
 
-                        const addItemActions = actions.filter(isAddItemAction) as AddItemProposedAction[];
-                        if (addItemActions.length > 0) {
+                        const createItemActions = actions.filter(isCreateItemAction) as CreateItemProposedAction[];
+                        if (createItemActions.length > 0) {
                             logger(`onProposedAction: Checking external references for caching`, 1);
-                            const references = addItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                            const references = createItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
                             // Add to external reference mapping for UI display
                             set(addExternalReferencesToMappingAtom, references);
                             // Check if references exist in Zotero
