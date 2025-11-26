@@ -212,6 +212,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         onClick: () => void,
         disabled: boolean,
         ariaLabel?: string,
+        iconClassName?: string,
     ) => {
         if (mode === 'none') return null;
         
@@ -225,7 +226,8 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                         ariaLabel={ariaLabel || label}
                         onClick={onClick}
                         disabled={disabled}
-                        style={{ padding: '3px 4px' }}
+                        style={{ padding: '2px' }}
+                        iconClassName={iconClassName}
                     />
                 </Tooltip>
             );
@@ -252,28 +254,6 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
 
     return (
         <div className="display-flex flex-row items-center gap-3">
-            {/* Reveal button - shown when item exists in library */}
-            {itemExists && zoteroItemRef && renderButton(
-                revealButtonMode,
-                'Reveal in Zotero',
-                'Reveal',
-                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />,
-                () => revealSource(zoteroItemRef),
-                isLoading,
-                'Reveal in Zotero'
-            )}
-            
-            {/* Import button - shown when item doesn't exist in library */}
-            {!itemExists && renderButton(
-                importButtonMode,
-                'Import to Zotero',
-                'Import',
-                (isLoading || isImporting) ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
-                handleImport,
-                isLoading || isImporting,
-                'Import to Zotero'
-            )}
-            
             {/* Details button */}
             {renderButton(
                 detailsButtonMode,
@@ -285,7 +265,8 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     setIsDetailsVisible(true);
                 },
                 !item.abstract,
-                'Show details'
+                'Show details',
+                detailsButtonMode=='icon-only' ? 'scale-90' : undefined
             )}
             
             {/* Web button */}
@@ -319,6 +300,29 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             {/* Citation count */}
             {showCitationCount && (
                 <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+            )}
+            <div className="flex-1"/>
+
+            {/* Reveal button - shown when item exists in library */}
+            {itemExists && zoteroItemRef && renderButton(
+                revealButtonMode,
+                'Reveal in Zotero',
+                'Reveal',
+                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />,
+                () => revealSource(zoteroItemRef),
+                isLoading,
+                'Reveal in Zotero'
+            )}
+            
+            {/* Import button - shown when item doesn't exist in library */}
+            {!itemExists && renderButton(
+                importButtonMode,
+                'Import to Zotero',
+                'Import',
+                (isLoading || isImporting) ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
+                handleImport,
+                isLoading || isImporting,
+                'Import to Zotero'
             )}
         </div>
     );
