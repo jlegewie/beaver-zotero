@@ -504,6 +504,8 @@
 [id^="beaver-pane-"] .scale-13 { transform: scale(1.3); }
 [id^="beaver-pane-"] .scale-14 { transform: scale(1.4); }
 [id^="beaver-pane-"] .scale-15 { transform: scale(1.5); }
+[id^="beaver-pane-"] .scale-16 { transform: scale(1.6); }
+[id^="beaver-pane-"] .scale-17 { transform: scale(1.7); }
 
 /* Overflow */
 [id^="beaver-pane-"] .overflow-scroll { overflow: scroll; }
