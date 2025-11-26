@@ -198,6 +198,58 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
 
     return (
         <div className="display-flex flex-row items-center gap-3 flex-wrap">
+
+            {/* Details button - always available if abstract exists */}
+            {hasDetails && (
+                <Tooltip content="Show details" singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={InformationCircleIcon}
+                        className={`font-color-secondary ${className}`}
+                        ariaLabel="Show details"
+                        onClick={handleShowDetails}
+                        style={{ padding: '3px 4px' }}
+                    />
+                </Tooltip>
+            )}
+
+            {/* Web button */}
+            {hasWeb && (
+                <Tooltip content="Open website" singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={ArrowUpRightIcon}
+                        className={`font-color-secondary ${className}`}
+                        ariaLabel="Open website"
+                        onClick={handleOpenWeb}
+                        style={{ padding: '3px 4px' }}
+                    />
+                </Tooltip>
+            )}
+
+            {/* PDF button */}
+            {hasPdf && (
+                <Tooltip content="Open PDF" singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={PdfIcon}
+                        className={`font-color-secondary ${className}`}
+                        ariaLabel="Open PDF"
+                        onClick={handleOpenPdf}
+                        style={{ padding: '3px 4px' }}
+                    />
+                </Tooltip>
+            )}
+
+            {/* Citation count */}
+            {item.citation_count !== undefined && item.citation_count > 0 && (
+                <div className="font-color-tertiary text-sm">
+                    Cited by {item.citation_count.toLocaleString()}
+                </div>
+            )}
+
+            <div className="flex-1"/>
+
             {/* Pending: Reject button */}
             {showRejectButton && (
                 <Tooltip content="Don't add to library" singleLine>
@@ -260,55 +312,6 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         Re-add
                     </Button>
                 </Tooltip>
-            )}
-
-            {/* Details button - always available if abstract exists */}
-            {hasDetails && (
-                <Tooltip content="Show details" singleLine>
-                    <IconButton
-                        variant={buttonVariant}
-                        icon={InformationCircleIcon}
-                        className={`font-color-secondary ${className}`}
-                        ariaLabel="Show details"
-                        onClick={handleShowDetails}
-                        style={{ padding: '3px 4px' }}
-                    />
-                </Tooltip>
-            )}
-
-            {/* Web button */}
-            {hasWeb && (
-                <Tooltip content="Open website" singleLine>
-                    <IconButton
-                        variant={buttonVariant}
-                        icon={ArrowUpRightIcon}
-                        className={`font-color-secondary ${className}`}
-                        ariaLabel="Open website"
-                        onClick={handleOpenWeb}
-                        style={{ padding: '3px 4px' }}
-                    />
-                </Tooltip>
-            )}
-
-            {/* PDF button */}
-            {hasPdf && (
-                <Tooltip content="Open PDF" singleLine>
-                    <IconButton
-                        variant={buttonVariant}
-                        icon={PdfIcon}
-                        className={`font-color-secondary ${className}`}
-                        ariaLabel="Open PDF"
-                        onClick={handleOpenPdf}
-                        style={{ padding: '3px 4px' }}
-                    />
-                </Tooltip>
-            )}
-
-            {/* Citation count */}
-            {item.citation_count !== undefined && item.citation_count > 0 && (
-                <div className="font-color-tertiary text-sm">
-                    Cited by {item.citation_count.toLocaleString()}
-                </div>
             )}
         </div>
     );
