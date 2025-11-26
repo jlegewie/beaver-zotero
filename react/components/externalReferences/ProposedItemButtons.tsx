@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     ArrowUpRightIcon,
-    DownloadIcon,
     PdfIcon,
     InformationCircleIcon,
     Spinner,
@@ -46,10 +45,10 @@ interface ProposedItemButtonsProps {
  * 
  * For pending items, checks if item already exists in library:
  * - If exists: calls onExistingMatch callback for auto-acknowledge
- * - If not: shows Import button
+ * - If not: shows Add button
  * 
  * For applied items: shows Reveal, Details, Web, PDF buttons
- * For rejected/undone: shows Re-add button
+ * For rejected/undone: shows Add button
  */
 const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
     action,
@@ -192,8 +191,9 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
 
     // Determine which buttons to show based on status
     const showRevealButton = action.status === 'applied' || (action.status === 'pending' && existingItemRef);
-    const showImportButton = action.status === 'pending' && !existingItemRef && !isCheckingLibrary;
-    const showReaddButton = action.status === 'rejected' || action.status === 'undone';
+    const showAddButton = (action.status === 'pending' && !existingItemRef && !isCheckingLibrary) 
+        || action.status === 'rejected' 
+        || action.status === 'undone';
     const showRejectButton = action.status === 'pending' && !existingItemRef;
 
     return (
@@ -265,8 +265,8 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                 </Tooltip>
             )}
 
-            {/* Pending without existing match: Import button */}
-            {showImportButton && (
+            {/* Add button: shown for pending (no match), rejected, or undone */}
+            {showAddButton && (
                 <Tooltip content="Add to library" singleLine>
                     <Button
                         variant={buttonVariant}
@@ -294,22 +294,6 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         disabled={isLoading}
                     >
                         {action.status === 'pending' ? 'In Library' : 'Reveal'}
-                    </Button>
-                </Tooltip>
-            )}
-
-            {/* Rejected/Undone: Re-add button */}
-            {showReaddButton && (
-                <Tooltip content="Add to library" singleLine>
-                    <Button
-                        variant={buttonVariant}
-                        icon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon}
-                        className={`font-color-secondary ${className}`}
-                        style={{ padding: '1px 4px' }}
-                        onClick={onApply}
-                        disabled={isLoading}
-                    >
-                        Re-add
                     </Button>
                 </Tooltip>
             )}
