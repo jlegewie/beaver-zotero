@@ -17,6 +17,7 @@ import {
     applyCreateItem,
     deleteAddedItem,
 } from '../../utils/addItemActions';
+import { ensureItemSynced, ensureItemsSynced } from '../../../src/utils/sync';
 import { logger } from '../../../src/utils/logger';
 import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { 
@@ -220,6 +221,12 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
             markExternalReferenceImported(action.proposed_data.item.source_id, itemRef);
         }
 
+        // Sync the existing item to backend (it may not be synced yet)
+        // Fire-and-forget: don't block the acknowledge flow
+        // ensureItemSynced(itemRef.library_id, itemRef.zotero_key).catch(err => {
+        //     logger(`handleExistingMatch: Failed to sync existing item: ${err.message}`, 2);
+        // });
+
         // Acknowledge the action with the existing item reference
         const resultData: CreateItemResultData = {
             library_id: itemRef.library_id,
@@ -251,6 +258,9 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
                     zotero_key: result.zotero_key
                 });
             }
+
+            // Sync the newly created item to backend immediately to ensure it's available for follow-up AI queries
+            await ensureItemSynced(result.library_id, result.zotero_key);
 
             // Acknowledge the action with result data
             await ackProposedActions(messageId, [{
@@ -316,6 +326,24 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
             const successfulResults = applyResults.filter((result): result is AckLink => result !== null);
             if (successfulResults.length > 0) {
                 await ackProposedActions(messageId, successfulResults);
+                
+                // Batch sync all successfully created items (more efficient than individual calls)
+                // Group by library and sync each library's items together
+                const itemsByLibrary = new Map<number, string[]>();
+                for (const result of successfulResults) {
+                    const data = result.result_data as CreateItemResultData;
+                    if (!itemsByLibrary.has(data.library_id)) {
+                        itemsByLibrary.set(data.library_id, []);
+                    }
+                    itemsByLibrary.get(data.library_id)!.push(data.zotero_key);
+                }
+                
+                // Sync each library's items (fire-and-forget to not block UI)
+                for (const [libraryId, keys] of itemsByLibrary) {
+                    ensureItemsSynced(libraryId, keys).catch(err => {
+                        logger(`handleApplyAll: Failed to sync items in library ${libraryId}: ${err.message}`, 2);
+                    });
+                }
             }
 
             // Show the results panel

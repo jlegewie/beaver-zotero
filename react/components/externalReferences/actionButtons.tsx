@@ -28,6 +28,7 @@ import {
 import { ButtonVariant } from '../ui/Button';
 import { createZoteroItem } from '../../utils/addItemActions';
 import { logger } from '../../../src/utils/logger';
+import { ensureItemSynced } from '../../../src/utils/sync';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
@@ -103,6 +104,12 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             if (item.source_id) {
                 markExternalReferenceImported(item.source_id, newZoteroRef);
             }
+            
+            // Sync the newly created item to backend immediately
+            // This ensures it's available for follow-up AI queries
+            ensureItemSynced(libraryId, newItem.key).catch(err => {
+                logger(`ActionButtons: Failed to sync imported item: ${err.message}`, 2);
+            });
             
             // Update local state to switch from Import to Reveal button
             setZoteroItemRef(newZoteroRef);
