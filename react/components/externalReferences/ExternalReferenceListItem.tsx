@@ -65,7 +65,14 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceItemPListrops> = ({
                             {year}
                         </div>
                     )}
-                    <ActionButtons item={item} />
+                    <ActionButtons
+                        item={item}
+                        detailsButtonMode="icon-only"
+                        webButtonMode="icon-only"
+                        pdfButtonMode="icon-only"
+                        // revealButtonMode="icon-only"
+                        // importButtonMode="icon-only"
+                    />
                 </div>
             </div>
         </div>
