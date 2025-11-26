@@ -361,6 +361,7 @@
 [id^="beaver-pane-"] .mr-3 { margin-right: 0.75rem; }
 [id^="beaver-pane-"] .mr-4 { margin-right: 1rem; }
 [id^="beaver-pane-"] .mr-5 { margin-right: 1.25rem; }
+[id^="beaver-pane-"] .ml-025 { margin-left: 0.0625rem; }
 [id^="beaver-pane-"] .ml-05 { margin-left: 0.125rem; }
 [id^="beaver-pane-"] .ml-1 { margin-left: 0.25rem; }
 [id^="beaver-pane-"] .ml-15 { margin-left: 0.375rem; }
