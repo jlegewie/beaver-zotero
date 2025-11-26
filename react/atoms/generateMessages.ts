@@ -26,7 +26,7 @@ import { addProposedActionsAtom, threadProposedActionsAtom } from './proposedAct
 import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { currentReaderAttachmentAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters, web_search_request } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters, search_external_references_request } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -463,7 +463,7 @@ async function _processChatCompletionViaBackend(
         attachments: attachments,
         reader_state: readerState,
         filters: filtersPayload,
-        tool_request: isWebSearchEnabled ? web_search_request : null,
+        tool_request: isWebSearchEnabled ? search_external_references_request : null,
         status: "completed"
     } as MessageData;
 
