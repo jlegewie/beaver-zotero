@@ -39,6 +39,7 @@ import {
 import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import ProposedItemButtons from '../externalReferences/ProposedItemButtons';
+import ReferenceMetadataDisplay from '../externalReferences/ReferenceMetadataDisplay';
 import { ZoteroItemReference } from '../../types/zotero';
 
 interface CreateItemListItemProps {
@@ -104,38 +105,20 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
         return defaultClass;
     };
 
-    // Format authors for display
-    const formatAuthors = (authors: string[] | undefined) => {
-        if (!authors || authors.length === 0) return null;
-        if (authors.length === 1) return authors[0];
-        if (authors.length === 2) return authors.join(' & ');
-        return `${authors[0]} et al.`;
-    };
-
-    const authors = formatAuthors(item.authors);
-    const publicationTitle = item.journal?.name || item.venue;
-    const year = item.year;
-
     return (
         <div
             className={`${baseClasses.join(' ')} ${className}`}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <div className="display-flex flex-col gap-1 min-w-0">
-                <div className={getTextClasses()}>
-                    {item.title || 'Untitled Item'}
-                </div>
-                {authors && (
-                    <div className={`${getTextClasses('font-color-secondary')} truncate`}>{authors}</div>
-                )}
-                {(publicationTitle || year) && (
-                    <div className={getTextClasses('font-color-secondary')}>
-                        {publicationTitle && <i>{publicationTitle}</i>}
-                        {publicationTitle && year && ', '}
-                        {year}
-                    </div>
-                )}
+            <div className="display-flex flex-col gap-2 min-w-0">
+                <ReferenceMetadataDisplay
+                    title={item.title}
+                    authors={item.authors}
+                    publicationTitle={item.journal?.name || item.venue}
+                    year={item.year}
+                    getTextClasses={getTextClasses}
+                />
                 <ProposedItemButtons
                     action={action}
                     isBusy={isBusy}

@@ -1,8 +1,8 @@
 import React, { useCallback } from 'react';
 import { ExternalReference } from '../../types/externalReferences';
 import { ExternalReferenceResult } from '../../types/chat/apiTypes';
-import { formatAuthors } from './utils';
 import ActionButtons from './actionButtons';
+import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
 
 interface ExternalReferenceItemPListrops {
     item: ExternalReference | ExternalReferenceResult;
@@ -19,10 +19,6 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceItemPListrops> = ({
     onMouseLeave,
     className,
 }) => {
-    const authors = formatAuthors(item.authors);
-    const publicationTitle = item.journal?.name || item.venue;
-    const year = item.year;
-
     const baseClasses = [
         'px-3',
         'py-2',
@@ -51,20 +47,13 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceItemPListrops> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                <div className="display-flex flex-col flex-1 gap-1 min-w-0 font-color-primary">
-                    <div>{item.title || 'Untitled Item'}</div>
-                    {authors && 
-                        <div className="display-flex flex-row items-center gap-1">
-                            <div className="font-color-secondary truncate">{authors}</div>
-                        </div>
-                    }
-                    {(publicationTitle || year) && (
-                        <div className="font-color-secondary">
-                            {publicationTitle && <i>{publicationTitle}</i>}
-                            {publicationTitle && year && ', '}
-                            {year}
-                        </div>
-                    )}
+                <div className="display-flex flex-col flex-1 gap-2 min-w-0 font-color-primary">
+                    <ReferenceMetadataDisplay
+                        title={item.title}
+                        authors={item.authors}
+                        publicationTitle={item.journal?.name || item.venue}
+                        year={item.year}
+                    />
                     <ActionButtons
                         item={item}
                         detailsButtonMode="icon-only"
