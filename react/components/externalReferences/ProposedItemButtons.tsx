@@ -205,9 +205,10 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                     variant={buttonVariant}
                     icon={InformationCircleIcon}
                     className={`font-color-secondary ${className}`}
+                    iconClassName="scale-90"
                     ariaLabel="Show details"
                     onClick={handleShowDetails}
-                    style={{ padding: '3px 3px' }}
+                    style={{ padding: '2px' }}
                 />
             </Tooltip>
 
@@ -220,7 +221,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         className={`font-color-secondary ${className}`}
                         ariaLabel="Open website"
                         onClick={handleOpenWeb}
-                        style={{ padding: '3px 3px' }}
+                        style={{ padding: '2px' }}
                     />
                 </Tooltip>
             )}
@@ -234,7 +235,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         className={`font-color-secondary ${className}`}
                         ariaLabel="Open PDF"
                         onClick={handleOpenPdf}
-                        style={{ padding: '3px 3px' }}
+                        style={{ padding: '2px' }}
                     />
                 </Tooltip>
             )}
@@ -255,10 +256,11 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         variant={buttonVariant}
                         icon={CancelIcon}
                         className={`font-color-secondary ${className}`}
+                        iconClassName="scale-90"
                         ariaLabel="Reject Item"
                         onClick={onReject}
                         disabled={isLoading}
-                        style={{ padding: '3px 3px' }}
+                        style={{ padding: '2px' }}
                     />
                 </Tooltip>
             )}
@@ -271,7 +273,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         icon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : TickIcon}
                         iconClassName="scale-12"
                         className={`font-color-secondary ${className}`}
-                        style={{ padding: '3px 3px' }}
+                        style={{ padding: '2px' }}
                         onClick={onApply}
                         ariaLabel="Add to library"
                         disabled={isLoading}
@@ -286,7 +288,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         variant={buttonVariant}
                         rightIcon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
                         className={`font-color-secondary ${className}`}
-                        style={{ padding: '2px 4px' }}
+                        style={{ padding: '1px 4px' }}
                         onClick={handleReveal}
                         disabled={isLoading}
                     >
