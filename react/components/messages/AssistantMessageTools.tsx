@@ -122,7 +122,7 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                 } else if (isCreateZoteroItemTool(firstTool.function?.name)) {
                     return (
                         <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
-                            <AddItemToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
+                            <AddItemToolDisplay key={group.id} messageId={message.id} toolCall={firstTool} />
                         </div>
                     );
                 }

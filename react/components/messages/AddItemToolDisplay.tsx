@@ -6,16 +6,15 @@ import {
     AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
-    Icon,
-    DeleteIcon,
     TickIcon,
-    DownloadIcon,
-    CSSItemTypeIcon,
-    GlobalSearchIcon,
-    ArrowUpIcon,
+    CancelIcon,
+    DocumentValidationIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
+import Tooltip from '../ui/Tooltip';
+import { CSSItemTypeIcon } from '../icons/icons';
+import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import {
     applyCreateItem,
     deleteAddedItem,
@@ -40,84 +39,61 @@ import {
     toggleAnnotationPanelVisibilityAtom
 } from '../../atoms/messageUIState';
 import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
+import { ToolDisplayFooter } from './ToolDisplayFooter';
+import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
+import { revealSource } from '../../utils/sourceUtils';
 
-interface AddItemListItemProps {
+interface CreateItemListItemProps {
     action: CreateItemProposedAction;
     isBusy: boolean;
     onClick: (action: CreateItemProposedAction) => Promise<void>;
     onDelete: (action: CreateItemProposedAction) => Promise<void>;
-    onReAdd: (action: CreateItemProposedAction) => Promise<void>;
+    onApply: (action: CreateItemProposedAction) => Promise<void>;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
     className?: string;
 }
 
-const formatAuthors = (authors?: string[]): string => {
-    if (!authors || authors.length === 0) return '';
-
-    const clean = authors.filter(Boolean).map(a => a.trim());
-
-    if (clean.length === 0) return '';
-
-    if (clean.length > 3) {
-        return `${clean[0]} et al.`;
-    }
-
-    if (clean.length === 1) {
-        return clean[0];
-    }
-
-    if (clean.length === 2) {
-        return `${clean[0]} and ${clean[1]}`;
-    }
-
-    // exactly 3
-    return `${clean[0]}, ${clean[1]} and ${clean[2]}`;
-}
-
-
-const AddItemListItem: React.FC<AddItemListItemProps> = ({
+const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     action,
     isBusy,
     onClick,
     onDelete,
-    onReAdd,
+    onApply,
     isHovered,
     onMouseEnter,
     onMouseLeave,
     className,
 }) => {
+    const item = action.proposed_data.item;
+
     const handleClick = useCallback(() => {
         if (isBusy) return;
         onClick(action);
     }, [action, isBusy, onClick]);
 
-    const handleAction = useCallback(
+    const handleReject = useCallback(
         (event: React.SyntheticEvent) => {
             event.stopPropagation();
             if (isBusy) return;
-            if (action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') {
-                onReAdd(action);
-            } else {
-                onDelete(action);
-            }
+            onDelete(action);
         },
-        [action, isBusy, onDelete, onReAdd]
+        [action, isBusy, onDelete]
     );
 
-    const hasApplicationError = action.status !== 'error';
-    const itemData = action.proposed_data.item;
-
-    // Icon color
-    let iconColor = action.status === 'rejected' || action.status === 'pending' || action.status === 'undone'
-        ? 'font-color-tertiary'
-        : 'font-color-secondary';
-    iconColor = action.status === 'error' ? 'font-color-secondary' : iconColor;
+    const handleApply = useCallback(
+        (event: React.SyntheticEvent) => {
+            event.stopPropagation();
+            if (isBusy) return;
+            onApply(action);
+        },
+        [action, isBusy, onApply]
+    );
 
     const baseClasses = [
         'px-3',
-        'py-15',
+        'py-2',
         'display-flex',
         'flex-col',
         'gap-1',
@@ -127,29 +103,30 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
         'user-select-none',
     ];
 
-    const getTextClasses = () => {
-        if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
-        if (action.status === 'pending') return 'font-color-primary';
-        return 'font-color-primary';
-    }
-
     if (isHovered) {
         baseClasses.push('bg-quinary');
     }
     if (action.status === 'rejected' || action.status === 'undone' || action.status === 'error') {
         baseClasses.push('opacity-60');
     }
-    
-    const authors = formatAuthors(itemData.authors);
-    const metaParts = [itemData.journal?.name || itemData.venue, itemData.year].filter(Boolean);
-    const meta = metaParts.join(', ');
 
-    const getItemIcon = () => {
-        if (isBusy) return Spinner;
-        if (action.status === 'applied') return TickIcon;
-        if (action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') return DownloadIcon;
-        return AlertIcon;
-    }
+    const getTextClasses = () => {
+        if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
+        if (action.status === 'pending') return 'font-color-secondary';
+        return 'font-color-primary';
+    };
+
+    // Format authors for display
+    const formatAuthors = (authors: string[] | undefined) => {
+        if (!authors || authors.length === 0) return null;
+        if (authors.length === 1) return authors[0];
+        if (authors.length === 2) return authors.join(' & ');
+        return `${authors[0]} et al.`;
+    };
+
+    const authors = formatAuthors(item.authors);
+    const publicationTitle = item.journal?.name || item.venue;
+    const year = item.year;
 
     return (
         <div
@@ -159,71 +136,73 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                <IconButton
-                    icon={getItemIcon()}
-                    variant="ghost-secondary"
-                    className={`
-                        flex-shrink-0
-                        ${action.status === 'error' ? 'scale-100' : 'scale-11'}
-                        ${action.status === 'applied' ? '' : 'mt-010'}
-                    `}
-                    title={action.status === 'applied' ? 'Delete item' : 'Import item'}
-                    onClick={handleAction}
-                    loading={isBusy}
-                />
-                <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${getTextClasses()}`}>
-                    <div>{itemData.title || 'Untitled Item'}</div>
-                    {itemData.authors && authors && 
+                <div className="display-flex flex-col flex-1 gap-1 min-w-0">
+                    <div className={getTextClasses()}>
+                        {item.title || 'Untitled Item'}
+                    </div>
+                    {authors && (
                         <div className="display-flex flex-row items-center gap-1">
-                            {/* {itemData.authors.length > 1
-                                ? <Icon icon={AuthorGroupIcon} size={18} className="font-color-tertiary" />
-                                : <Icon icon={AuthorIcon} size={16} className="font-color-tertiary" />} */}
                             <div className="font-color-secondary truncate">{authors}</div>
                         </div>
-                    }
-                    {meta && <div className={`${(action.status === 'rejected' || action.status === 'undone') ? 'font-color-tertiary' : 'font-color-secondary'}`}>{meta}</div>}
-                    {/* {(itemData.citation_count || itemData.abstract) &&
-                        <div className="display-flex flex-row items-center gap-1">
-                            <Button variant="surface-light" className="py-1" style={{ padding: '2px 4px' }}>Abstract</Button>
-                            <div className="flex-1"/>
-                            {itemData.citation_count && <div className="font-color-tertiary">{`Cited by ${itemData.citation_count.toLocaleString()}`}</div>}
+                    )}
+                    {(publicationTitle || year) && (
+                        <div className="font-color-secondary">
+                            {publicationTitle && <i>{publicationTitle}</i>}
+                            {publicationTitle && year && ', '}
+                            {year}
                         </div>
-                    } */}
+                    )}
                 </div>
-                {/* {(action.status === 'applied') && (
+
+                {/* Applied: show delete button on hover */}
+                {action.status === 'applied' && (
                     <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
-                            onClick={handleAction}
+                            onClick={handleReject}
                             className="p-1"
-                            title='Delete item'
-                            icon={DeleteIcon}
+                            title="Delete item"
+                            icon={CancelIcon}
                             loading={isBusy}
                         />
                     </div>
-                )} */}
-                {/* <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                    {(action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') && (
+                )}
+
+                {/* Rejected/Undone: show re-add button on hover */}
+                {(action.status === 'rejected' || action.status === 'undone') && (
+                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
-                            onClick={handleAction}
-                            className="p-1 scale-12"
-                            title='Import item'
-                            icon={DownloadIcon}
-                            loading={isBusy}
-                        />
-                    )}
-                    {action.status === 'applied' && (
-                        <IconButton
-                            variant="ghost-secondary"
-                            onClick={handleAction}
-                            className="p-1 scale-12"
-                            title='Import item'
+                            onClick={handleApply}
+                            className="p-1 scale-13"
+                            title="Add item"
                             icon={TickIcon}
                             loading={isBusy}
                         />
-                    )}
-                </div> */}
+                    </div>
+                )}
+
+                {/* Pending: show both reject and apply buttons on hover */}
+                {action.status === 'pending' && (
+                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                        <IconButton
+                            variant="ghost-tertiary"
+                            onClick={handleReject}
+                            className="p-1"
+                            title="Reject item"
+                            icon={CancelIcon}
+                            loading={isBusy}
+                        />
+                        <IconButton
+                            variant="ghost-tertiary"
+                            onClick={handleApply}
+                            className="p-1 scale-13"
+                            title="Add item"
+                            icon={TickIcon}
+                            loading={isBusy}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -231,169 +210,193 @@ const AddItemListItem: React.FC<AddItemListItemProps> = ({
 
 interface AddItemToolDisplayProps {
     messageId: string;
-    groupId: string;
-    toolCalls: ToolCall[];
+    toolCall: ToolCall;
 }
 
-const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, groupId, toolCalls }) => {
+/**
+ * Component that displays and manages AI-proposed Zotero items.
+ * Handles the lifecycle of items from proposal to creation in Zotero.
+ *
+ * Item lifecycle:
+ * 1. pending -> Item proposed by AI, user can accept or reject
+ * 2. applied -> Item created in Zotero library
+ * 3. rejected/undone -> User declined or removed the item
+ */
+const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, toolCall }) => {
+    const groupId = `${messageId}:${toolCall.id}`;
 
-    // UI state
+    // UI state for collapsible item list
     const panelStates = useAtomValue(annotationPanelStateAtom);
     const panelState = panelStates[groupId] ?? defaultAnnotationPanelState;
     const { resultsVisible, isApplying } = panelState;
     const busyStateMap = useAtomValue(annotationBusyAtom);
     const busyState = busyStateMap[groupId] ?? {};
 
-    // Track hover states
+    // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-    const [isExpandHovered, setIsExpandHovered] = useState(false);
     const [hoveredActionId, setHoveredActionId] = useState<string | null>(null);
 
-    // Tool calls state
-    const isInProgress = toolCalls.some((toolCall) => toolCall.status === 'in_progress');
-    const isCompleted = toolCalls.every((toolCall) => toolCall.status === 'completed');
-    const isError = toolCalls.some((toolCall) => toolCall.status === 'error');
-    
+    // Tool call state
+    const isInProgress = toolCall.status === 'in_progress';
+    const isCompleted = toolCall.status === 'completed';
+    const isError = toolCall.status === 'error';
+
+    // Loading animation for in-progress tool calls
     const loadingDots = useLoadingDots(isInProgress);
-    
-    // Atoms
+
+    // Proposed actions state management
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const rejectProposedAction = useSetAtom(rejectProposedActionStateAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
     const undoProposedAction = useSetAtom(undoProposedActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
 
-    // Extract actions
+    // Extract create item actions from proposed actions
     const getProposedActionsByToolcall = useAtomValue(getProposedActionsByToolcallAtom);
-    const actions = toolCalls.map((toolCall) => getProposedActionsByToolcall(toolCall.id, isCreateItemAction)).flat() as CreateItemProposedAction[];
-    const totalActions = actions.length;
+    const createItemActions = getProposedActionsByToolcall(toolCall.id, isCreateItemAction) as CreateItemProposedAction[];
+    const totalItems = createItemActions.length;
 
-    // Derived states
-    const somePending = actions.some((action) => action.status === 'pending');
-    const someErrors = actions.some((action) => action.status === 'error');
-    const appliedCount = actions.filter((action) => action.status === 'applied').length;
-    const allErrors = actions.every((action) => action.status === 'error');
-
+    // Panel state management
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
     const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
-    const setBusy = useSetAtom(setAnnotationBusyStateAtom);
+    const setBusyState = useSetAtom(setAnnotationBusyStateAtom);
 
+    // Compute overall state of all items
+    const somePending = createItemActions.some((action) => action.status === 'pending');
+    const someErrors = createItemActions.some((action) => action.status === 'error');
+    const appliedCount = createItemActions.filter((action) => action.status === 'applied').length;
+    const rejectedCount = createItemActions.filter((action) => action.status === 'rejected' || action.status === 'undone').length;
+    const allErrors = createItemActions.every((action) => action.status === 'error');
+
+    // Toggle visibility of item list
     const toggleResults = useCallback(() => {
-        if (isCompleted && totalActions > 0) {
+        if (isCompleted && totalItems > 0) {
             togglePanelVisibility(groupId);
         }
-    }, [groupId, isCompleted, totalActions, togglePanelVisibility]);
+    }, [groupId, isCompleted, totalItems, togglePanelVisibility]);
 
-    const handleApplyActions = useCallback(async (actionId?: string) => {
-        if (actions.length === 0) return;
+    /**
+     * Apply a single create item action
+     */
+    const handleApplyItem = useCallback(async (action: CreateItemProposedAction) => {
+        setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
+
+        try {
+            // Create the item in Zotero
+            const result: CreateItemResultData = await applyCreateItem(action);
+
+            logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
+
+            // Update external reference cache
+            if (action.proposed_data.item.source_id) {
+                markExternalReferenceImported(action.proposed_data.item.source_id, {
+                    library_id: result.library_id,
+                    zotero_key: result.zotero_key
+                });
+            }
+
+            // Acknowledge the action with result data
+            await ackProposedActions(messageId, [{
+                action_id: action.id,
+                result_data: result
+            }]);
+
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to create item';
+            logger(`handleApplyItem: failed to create item ${action.id}: ${errorMessage}`, 1);
+            setProposedActionsToError([action.id], errorMessage);
+        } finally {
+            setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
+        }
+    }, [ackProposedActions, groupId, markExternalReferenceImported, messageId, setBusyState, setProposedActionsToError]);
+
+    /**
+     * Apply all pending items
+     */
+    const handleApplyAll = useCallback(async () => {
+        if (createItemActions.length === 0) return;
         setPanelState({ key: groupId, updates: { isApplying: true } });
 
         try {
-            const actionsToApply = actions.filter(action => {
-                if (action.status === 'applied') return false;
-                if (actionId && action.id !== actionId) return false;
-                return true;
-            });
+            const actionsToApply = createItemActions.filter(
+                action => action.status === 'pending' || action.status === 'error'
+            );
 
             if (actionsToApply.length === 0) {
                 setPanelState({ key: groupId, updates: { isApplying: false } });
                 return;
             }
 
-            // Mark items as busy
-            actionsToApply.forEach(action => {
-                setBusy({ key: groupId, annotationId: action.id, isBusy: true });
-            });
-
+            // Apply all items in parallel
             const applyResults: (AckLink | null)[] = await Promise.all(
                 actionsToApply.map(async (action) => {
                     try {
                         const result: CreateItemResultData = await applyCreateItem(action);
-                        logger(`handleApplyActions: applied item ${action.id}: ${JSON.stringify(result)}`, 1);
                         
-                        // Update external reference cache if this was an external reference import
-                        const sourceId = action.proposed_data?.item?.source_id;
-                        if (sourceId) {
-                            markExternalReferenceImported(sourceId, {
+                        // Update external reference cache
+                        if (action.proposed_data.item.source_id) {
+                            markExternalReferenceImported(action.proposed_data.item.source_id, {
                                 library_id: result.library_id,
                                 zotero_key: result.zotero_key
                             });
                         }
-                        
+
+                        logger(`handleApplyAll: created item ${action.id}: ${JSON.stringify(result)}`, 1);
                         return {
                             action_id: action.id,
-                            result_data: result,
+                            result_data: result
                         } as AckLink;
                     } catch (error: any) {
-                        const errorMessage = error?.message || 'Failed to add item';
-                        logger(`handleApplyActions: failed to add item ${action.id}: ${errorMessage}`, 1);
+                        const errorMessage = error?.message || 'Failed to create item';
+                        logger(`handleApplyAll: failed to create item ${action.id}: ${errorMessage}`, 1);
                         setProposedActionsToError([action.id], errorMessage);
                         return null;
-                    } finally {
-                        setBusy({ key: groupId, annotationId: action.id, isBusy: false });
                     }
                 })
             );
 
-            const actionsToAck = applyResults.filter(result => result !== null) as AckLink[];
-            if (actionsToAck.length > 0) {
-                await ackProposedActions(messageId, actionsToAck);
+            // Acknowledge successfully created items
+            const successfulResults = applyResults.filter((result): result is AckLink => result !== null);
+            if (successfulResults.length > 0) {
+                await ackProposedActions(messageId, successfulResults);
             }
 
+            // Show the results panel
             setPanelState({ key: groupId, updates: { resultsVisible: true, isApplying: false } });
 
-            // Select applied items in Zotero
-            if (actionsToAck.length > 0) {
-                const itemIds: number[] = [];
-                for (const ack of actionsToAck) {
-                     const result = ack.result_data as CreateItemResultData;
-                     if (result.zotero_key) {
-                         const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                         if (item) itemIds.push(item.id);
-                     }
-                }
-
-                if (itemIds.length > 0) {
-                    const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
-                    if (ZoteroPane) {
-                        if (itemIds.length === 1) {
-                             ZoteroPane.selectItem(itemIds[0]);
-                        } else {
-                             ZoteroPane.selectItems(itemIds);
-                        }
-                    }
-                }
-            }
-
         } catch (error) {
-            logger(`handleApplyActions: unexpected error: ${error}`, 1);
+            logger(`handleApplyAll: unexpected error: ${error}`, 1);
             setPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [actions, groupId, messageId, setPanelState, ackProposedActions, setProposedActionsToError]);
+    }, [ackProposedActions, createItemActions, groupId, markExternalReferenceImported, messageId, setPanelState, setProposedActionsToError]);
 
-    const handleActionClick = useCallback(async (action: CreateItemProposedAction) => {
+    /**
+     * Handle clicking an item - reveal if applied, otherwise apply
+     */
+    const handleItemClick = useCallback(async (action: CreateItemProposedAction) => {
         if (action.status === 'applied' && action.result_data?.zotero_key) {
-             const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                 action.result_data.library_id, 
-                 action.result_data.zotero_key
-             );
-             if (item) {
-                 const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
-                 if (ZoteroPane) {
-                     ZoteroPane.selectItem(item.id);
-                 }
-             }
-        } else if (action.status === 'rejected' || action.status === 'pending' || action.status === 'undone') {
-            await handleApplyActions(action.id);
+            // Reveal the item in Zotero
+            revealSource({
+                library_id: action.result_data.library_id,
+                zotero_key: action.result_data.zotero_key
+            });
+        } else if (action.status === 'pending' || action.status === 'rejected' || action.status === 'undone') {
+            // Apply the item
+            await handleApplyItem(action);
         }
-    }, [handleApplyActions]);
+    }, [handleApplyItem]);
 
+    /**
+     * Handle deleting/rejecting an item
+     */
     const handleDelete = useCallback(async (action: CreateItemProposedAction) => {
-        setBusy({ key: groupId, annotationId: action.id, isBusy: true });
+        setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
         try {
             if (action.status !== 'applied' || !action.result_data?.zotero_key) {
+                // Item not created yet - just mark as rejected
                 rejectProposedAction(action.id);
             } else {
+                // Delete the item from Zotero
                 await deleteAddedItem(action);
                 undoProposedAction(action.id);
             }
@@ -401,52 +404,67 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
             const errorMessage = error?.message || 'Failed to delete item';
             setProposedActionsToError([action.id], errorMessage);
         } finally {
-            setBusy({ key: groupId, annotationId: action.id, isBusy: false });
+            setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
-    }, [groupId, rejectProposedAction, setBusy, setProposedActionsToError, undoProposedAction]);
+    }, [groupId, rejectProposedAction, setBusyState, setProposedActionsToError, undoProposedAction]);
 
-    const handleReAdd = useCallback(async (action: CreateItemProposedAction) => {
-        await handleActionClick(action);
-    }, [handleActionClick]);
+    /**
+     * Reject all pending items
+     */
+    const handleRejectAll = useCallback(() => {
+        const pendingActions = createItemActions.filter(
+            action => action.status === 'pending' || action.status === 'error'
+        );
+        pendingActions.forEach(action => {
+            rejectProposedAction(action.id);
+        });
+    }, [createItemActions, rejectProposedAction]);
 
-
+    // Determine which icon to show
     const getIcon = () => {
         if (isInProgress || isApplying) return Spinner;
-        if (totalActions === 0) return GlobalSearchIcon;
         if (isError || allErrors) return AlertIcon;
-
-        if (isButtonHovered && !resultsVisible) return ArrowRightIcon;
-        if (isButtonHovered && resultsVisible) return ArrowDownIcon;
-        return GlobalSearchIcon;
+        if (isCompleted) {
+            if (resultsVisible) return ArrowDownIcon;
+            if (isButtonHovered && totalItems > 0) return ArrowRightIcon;
+            if (totalItems === 0) return AlertIcon;
+            // return <CSSItemTypeIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+            return DocumentValidationIcon
+        }
+        return DocumentValidationIcon
     };
 
+    // Generate button text
     const getButtonText = () => {
         if (isInProgress) {
-            return `Paper Finder${''.padEnd(loadingDots, '.')}`;
+            return `Add Items${''.padEnd(loadingDots, '.')}`;
         }
         if (isError) {
-            return 'Paper Finder: Error';
+            return 'Add Items: Error';
         }
-        if (totalActions === 0) return 'Paper Finder: No results';
-        return 'Paper Finder';
+        return 'Add Items';
     };
 
-    const hasActionsToShow = totalActions > 0;
-    const canToggleResults = isCompleted && hasActionsToShow && !allErrors;
-    const isButtonDisabled = isInProgress || isError || (isCompleted && !hasActionsToShow);
+    // Determine when results can be toggled and when button should be disabled
+    const hasItemsToShow = totalItems > 0;
+    const canToggleResults = isCompleted && hasItemsToShow && !allErrors;
+    const isButtonDisabled = isInProgress || isError || (isCompleted && !hasItemsToShow);
+
+    // Determine when to show apply button
     const showApplyButton = isCompleted && (somePending || someErrors) && !isApplying;
 
     return (
         <div
-            id={`tool-${toolCalls[0].id}`}
+            id={`tool-${toolCall.id}`}
             className="border-popup rounded-md display-flex flex-col min-w-0"
         >
-             <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${hasActionsToShow && isCompleted ? 'border-bottom-quinary' : ''}`}
+            {/* Header with button and action icons */}
+            <div
+                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible && hasItemsToShow ? 'border-bottom-quinary' : ''}`}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
-                 <div className="display-flex flex-row flex-1" onClick={toggleResults}>
+                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
                     <Button
                         variant="ghost-secondary"
                         icon={getIcon()}
@@ -457,59 +475,67 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        {getButtonText()}
-                        {isCompleted && appliedCount > 0 && hasActionsToShow &&
-                            <span className="ml-05 mt-015 font-color-green text-xs">+{appliedCount}</span>
-                        }
-                        {isCompleted && appliedCount === 0 && hasActionsToShow &&
-                            <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalActions}x</span>
-                        }
+                        <span className="mr-1">{getButtonText()}</span>
+
+                        {/* Item metrics */}
+                        {isCompleted && hasItemsToShow && (
+                            <div className="display-flex flex-row items-center gap-1">
+                                {appliedCount > 0 && (
+                                    <div className="font-color-green text-sm">+{appliedCount}</div>
+                                )}
+                                {rejectedCount > 0 && (
+                                    <div className="font-color-tertiary text-sm">-{rejectedCount}</div>
+                                )}
+                                {rejectedCount === 0 && appliedCount === 0 && (
+                                    <div className="font-color-tertiary text-sm">({totalItems})</div>
+                                )}
+                            </div>
+                        )}
                     </Button>
-                    <div className="flex-1"/>
+                    <div className="flex-1" />
                 </div>
-                {showApplyButton ? (
-                    <Button
-                        rightIcon={DownloadIcon}
-                        iconClassName="-mr-015"
-                        variant="ghost-tertiary"
-                        onClick={() => handleApplyActions()}
-                    >
-                        Import All
-                    </Button>
-                ) : (
-                    <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
+
+                {/* Apply/Reject all buttons */}
+                {showApplyButton && (
+                    <div className="display-flex flex-row items-center gap-3 mr-015">
+                        <Tooltip content="Reject all" showArrow singleLine>
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-red"
+                                onClick={handleRejectAll}
+                            />
+                        </Tooltip>
+                        <Tooltip content="Add all items" showArrow singleLine>
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-green scale-14"
+                                onClick={handleApplyAll}
+                            />
+                        </Tooltip>
                     </div>
                 )}
             </div>
-             {hasActionsToShow && isCompleted && (
-                <div className="display-flex flex-col">
-                    {(resultsVisible ? actions : actions.slice(0, 3)).map((action, index) => (
-                        <AddItemListItem
+
+            {/* Expandable list of individual items */}
+            {resultsVisible && hasItemsToShow && isCompleted && (
+                <div className="display-flex flex-col gap-1">
+                    {createItemActions.map((action, index) => (
+                        <CreateItemListItem
                             key={action.id}
                             action={action}
                             isBusy={Boolean(busyState[action.id])}
-                            onClick={handleActionClick}
+                            onClick={handleItemClick}
                             onDelete={handleDelete}
-                            onReAdd={handleReAdd}
+                            onApply={handleApplyItem}
                             isHovered={hoveredActionId === action.id}
                             onMouseEnter={() => setHoveredActionId(action.id)}
                             onMouseLeave={() => setHoveredActionId(null)}
                             className={index === 0 ? 'pt-2' : ''}
                         />
                     ))}
-                    {actions.length > 3 && (
-                        <div 
-                            className={`display-flex flex-row justify-center items-center cursor-pointer -mt-1 ${isExpandHovered ? 'bg-senary' : ''}`}
-                            onClick={toggleResults}
-                            onMouseEnter={() => setIsExpandHovered(true)}
-                            onMouseLeave={() => setIsExpandHovered(false)}
-                        >
-                            <Icon
-                                icon={resultsVisible ? ArrowUpIcon : ArrowDownIcon}
-                                className={`scale-75 ${isExpandHovered ? 'font-color-primary' : 'font-color-secondary'}`}
-                            />
-                        </div>
-                    )}
+                    <ToolDisplayFooter toggleContent={toggleResults} />
                 </div>
             )}
         </div>
@@ -517,4 +543,3 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, grou
 };
 
 export default AddItemToolDisplay;
-
