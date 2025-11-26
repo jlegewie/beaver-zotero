@@ -164,7 +164,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
     }, [item, setSelectedReference, setIsDetailsVisible]);
 
     const handleOpenWeb = useCallback(() => {
-        const url = item.publication_url || item.url;
+        const url = item.url || item.publication_url;
         if (url) {
             Zotero.launchURL(url);
         }
@@ -186,7 +186,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
 
     const isLoading = isBusy || isCheckingLibrary || isChecking(item);
     const hasPdf = item.open_access_url || bestAttachment;
-    const hasWeb = item.publication_url || item.url;
+    const hasWeb = item.url || item.publication_url;
     const hasDetails = Boolean(item.abstract);
 
     // Determine which buttons to show based on status
@@ -199,19 +199,17 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
     return (
         <div className="display-flex flex-row items-center gap-3 flex-wrap">
 
-            {/* Details button - always available if abstract exists */}
-            {hasDetails && (
-                <Tooltip content="Show details" singleLine>
-                    <IconButton
-                        variant={buttonVariant}
-                        icon={InformationCircleIcon}
-                        className={`font-color-secondary ${className}`}
-                        ariaLabel="Show details"
-                        onClick={handleShowDetails}
-                        style={{ padding: '3px 4px' }}
-                    />
-                </Tooltip>
-            )}
+            {/* Details button */}
+            <Tooltip content={`${hasDetails ? 'Show details' : 'No details available'}`} singleLine>
+                <IconButton
+                    variant={buttonVariant}
+                    icon={InformationCircleIcon}
+                    className={`font-color-secondary ${className}`}
+                    ariaLabel="Show details"
+                    onClick={handleShowDetails}
+                    style={{ padding: '3px 3px' }}
+                />
+            </Tooltip>
 
             {/* Web button */}
             {hasWeb && (
@@ -222,7 +220,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         className={`font-color-secondary ${className}`}
                         ariaLabel="Open website"
                         onClick={handleOpenWeb}
-                        style={{ padding: '3px 4px' }}
+                        style={{ padding: '3px 3px' }}
                     />
                 </Tooltip>
             )}
@@ -236,13 +234,13 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         className={`font-color-secondary ${className}`}
                         ariaLabel="Open PDF"
                         onClick={handleOpenPdf}
-                        style={{ padding: '3px 4px' }}
+                        style={{ padding: '3px 3px' }}
                     />
                 </Tooltip>
             )}
 
             {/* Citation count */}
-            {item.citation_count !== undefined && item.citation_count > 0 && (
+            {item.citation_count !== undefined && (
                 <div className="font-color-tertiary text-sm">
                     Cited by {item.citation_count.toLocaleString()}
                 </div>
@@ -252,15 +250,15 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
 
             {/* Pending: Reject button */}
             {showRejectButton && (
-                <Tooltip content="Don't add to library" singleLine>
+                <Tooltip content="Reject Item" singleLine>
                     <IconButton
                         variant={buttonVariant}
                         icon={CancelIcon}
                         className={`font-color-secondary ${className}`}
-                        ariaLabel="Reject"
+                        ariaLabel="Reject Item"
                         onClick={onReject}
                         disabled={isLoading}
-                        style={{ padding: '3px 4px' }}
+                        style={{ padding: '3px 3px' }}
                     />
                 </Tooltip>
             )}
@@ -268,17 +266,16 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
             {/* Add button: shown for pending (no match), rejected, or undone */}
             {showAddButton && (
                 <Tooltip content="Add to library" singleLine>
-                    <Button
+                    <IconButton
                         variant={buttonVariant}
                         icon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : TickIcon}
                         iconClassName="scale-12"
                         className={`font-color-secondary ${className}`}
-                        style={{ padding: '1px 4px' }}
+                        style={{ padding: '3px 3px' }}
                         onClick={onApply}
+                        ariaLabel="Add to library"
                         disabled={isLoading}
-                    >
-                        Add
-                    </Button>
+                    />
                 </Tooltip>
             )}
 
@@ -287,9 +284,9 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                 <Tooltip content={action.status === 'pending' ? 'Already in library - click to reveal' : 'Reveal in Zotero'} singleLine>
                     <Button
                         variant={buttonVariant}
-                        icon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
+                        rightIcon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
                         className={`font-color-secondary ${className}`}
-                        style={{ padding: '1px 4px' }}
+                        style={{ padding: '3px 3px' }}
                         onClick={handleReveal}
                         disabled={isLoading}
                     >

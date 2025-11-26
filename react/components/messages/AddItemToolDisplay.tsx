@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { ToolCall } from '../../types/chat/apiTypes';
 import {
@@ -13,8 +13,6 @@ import {
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
-import { CSSItemTypeIcon } from '../icons/icons';
-import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import {
     applyCreateItem,
     deleteAddedItem,
@@ -40,15 +38,15 @@ import {
 } from '../../atoms/messageUIState';
 import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
-import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
-import { revealSource } from '../../utils/sourceUtils';
+import ProposedItemButtons from '../externalReferences/ProposedItemButtons';
+import { ZoteroItemReference } from '../../types/zotero';
 
 interface CreateItemListItemProps {
     action: CreateItemProposedAction;
     isBusy: boolean;
-    onClick: (action: CreateItemProposedAction) => Promise<void>;
-    onDelete: (action: CreateItemProposedAction) => Promise<void>;
     onApply: (action: CreateItemProposedAction) => Promise<void>;
+    onReject: (action: CreateItemProposedAction) => void;
+    onExistingMatch: (action: CreateItemProposedAction, itemRef: ZoteroItemReference) => void;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -58,9 +56,9 @@ interface CreateItemListItemProps {
 const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     action,
     isBusy,
-    onClick,
-    onDelete,
     onApply,
+    onReject,
+    onExistingMatch,
     isHovered,
     onMouseEnter,
     onMouseLeave,
@@ -68,28 +66,19 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
 }) => {
     const item = action.proposed_data.item;
 
-    const handleClick = useCallback(() => {
+    const handleApply = useCallback(() => {
         if (isBusy) return;
-        onClick(action);
-    }, [action, isBusy, onClick]);
+        onApply(action);
+    }, [action, isBusy, onApply]);
 
-    const handleReject = useCallback(
-        (event: React.SyntheticEvent) => {
-            event.stopPropagation();
-            if (isBusy) return;
-            onDelete(action);
-        },
-        [action, isBusy, onDelete]
-    );
+    const handleReject = useCallback(() => {
+        if (isBusy) return;
+        onReject(action);
+    }, [action, isBusy, onReject]);
 
-    const handleApply = useCallback(
-        (event: React.SyntheticEvent) => {
-            event.stopPropagation();
-            if (isBusy) return;
-            onApply(action);
-        },
-        [action, isBusy, onApply]
-    );
+    const handleExistingMatch = useCallback((itemRef: ZoteroItemReference) => {
+        onExistingMatch(action, itemRef);
+    }, [action, onExistingMatch]);
 
     const baseClasses = [
         'px-3',
@@ -97,7 +86,6 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
         'display-flex',
         'flex-col',
         'gap-1',
-        'cursor-pointer',
         'rounded-sm',
         'transition',
         'user-select-none',
@@ -110,10 +98,10 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
         baseClasses.push('opacity-60');
     }
 
-    const getTextClasses = () => {
+    const getTextClasses = (defaultClass: string = 'font-color-primary') => {
         if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
         if (action.status === 'pending') return 'font-color-secondary';
-        return 'font-color-primary';
+        return defaultClass;
     };
 
     // Format authors for display
@@ -131,78 +119,30 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     return (
         <div
             className={`${baseClasses.join(' ')} ${className}`}
-            onClick={handleClick}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <div className="display-flex flex-row items-start gap-3">
-                <div className="display-flex flex-col flex-1 gap-1 min-w-0">
-                    <div className={getTextClasses()}>
-                        {item.title || 'Untitled Item'}
-                    </div>
-                    {authors && (
-                        <div className="display-flex flex-row items-center gap-1">
-                            <div className="font-color-secondary truncate">{authors}</div>
-                        </div>
-                    )}
-                    {(publicationTitle || year) && (
-                        <div className="font-color-secondary">
-                            {publicationTitle && <i>{publicationTitle}</i>}
-                            {publicationTitle && year && ', '}
-                            {year}
-                        </div>
-                    )}
+            <div className="display-flex flex-col gap-1 min-w-0">
+                <div className={getTextClasses()}>
+                    {item.title || 'Untitled Item'}
                 </div>
-
-                {/* Applied: show delete button on hover */}
-                {action.status === 'applied' && (
-                    <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                        <IconButton
-                            variant="ghost-secondary"
-                            onClick={handleReject}
-                            className="p-1"
-                            title="Delete item"
-                            icon={CancelIcon}
-                            loading={isBusy}
-                        />
+                {authors && (
+                    <div className={`${getTextClasses('font-color-secondary')} truncate`}>{authors}</div>
+                )}
+                {(publicationTitle || year) && (
+                    <div className={getTextClasses('font-color-secondary')}>
+                        {publicationTitle && <i>{publicationTitle}</i>}
+                        {publicationTitle && year && ', '}
+                        {year}
                     </div>
                 )}
-
-                {/* Rejected/Undone: show re-add button on hover */}
-                {(action.status === 'rejected' || action.status === 'undone') && (
-                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                        <IconButton
-                            variant="ghost-secondary"
-                            onClick={handleApply}
-                            className="p-1 scale-13"
-                            title="Add item"
-                            icon={TickIcon}
-                            loading={isBusy}
-                        />
-                    </div>
-                )}
-
-                {/* Pending: show both reject and apply buttons on hover */}
-                {action.status === 'pending' && (
-                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                        <IconButton
-                            variant="ghost-tertiary"
-                            onClick={handleReject}
-                            className="p-1"
-                            title="Reject item"
-                            icon={CancelIcon}
-                            loading={isBusy}
-                        />
-                        <IconButton
-                            variant="ghost-tertiary"
-                            onClick={handleApply}
-                            className="p-1 scale-13"
-                            title="Add item"
-                            icon={TickIcon}
-                            loading={isBusy}
-                        />
-                    </div>
-                )}
+                <ProposedItemButtons
+                    action={action}
+                    isBusy={isBusy}
+                    onApply={handleApply}
+                    onReject={handleReject}
+                    onExistingMatch={handleExistingMatch}
+                />
             </div>
         </div>
     );
@@ -219,7 +159,8 @@ interface AddItemToolDisplayProps {
  *
  * Item lifecycle:
  * 1. pending -> Item proposed by AI, user can accept or reject
- * 2. applied -> Item created in Zotero library
+ *    - If item already exists in library, auto-acknowledge with existing reference
+ * 2. applied -> Item created in or linked to Zotero library
  * 3. rejected/undone -> User declined or removed the item
  */
 const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, toolCall }) => {
@@ -235,6 +176,9 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
     // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredActionId, setHoveredActionId] = useState<string | null>(null);
+
+    // Track which actions have been auto-acknowledged to prevent duplicates
+    const autoAcknowledgedRef = useRef<Set<string>>(new Set());
 
     // Tool call state
     const isInProgress = toolCall.status === 'in_progress';
@@ -274,6 +218,36 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
             togglePanelVisibility(groupId);
         }
     }, [groupId, isCompleted, totalItems, togglePanelVisibility]);
+
+    /**
+     * Handle existing library match - auto-acknowledge the action
+     * This is called when ProposedItemButtons finds an existing library item
+     */
+    const handleExistingMatch = useCallback(async (action: CreateItemProposedAction, itemRef: ZoteroItemReference) => {
+        // Prevent duplicate auto-acknowledges
+        if (autoAcknowledgedRef.current.has(action.id)) {
+            return;
+        }
+        autoAcknowledgedRef.current.add(action.id);
+
+        logger(`handleExistingMatch: Auto-acknowledging action ${action.id} with existing item ${itemRef.library_id}-${itemRef.zotero_key}`, 1);
+
+        // Update external reference cache
+        if (action.proposed_data.item.source_id) {
+            markExternalReferenceImported(action.proposed_data.item.source_id, itemRef);
+        }
+
+        // Acknowledge the action with the existing item reference
+        const resultData: CreateItemResultData = {
+            library_id: itemRef.library_id,
+            zotero_key: itemRef.zotero_key
+        };
+
+        await ackProposedActions(messageId, [{
+            action_id: action.id,
+            result_data: resultData
+        }]);
+    }, [ackProposedActions, markExternalReferenceImported, messageId]);
 
     /**
      * Apply a single create item action
@@ -371,25 +345,9 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
     }, [ackProposedActions, createItemActions, groupId, markExternalReferenceImported, messageId, setPanelState, setProposedActionsToError]);
 
     /**
-     * Handle clicking an item - reveal if applied, otherwise apply
+     * Handle rejecting an item (for pending items) or deleting (for applied items)
      */
-    const handleItemClick = useCallback(async (action: CreateItemProposedAction) => {
-        if (action.status === 'applied' && action.result_data?.zotero_key) {
-            // Reveal the item in Zotero
-            revealSource({
-                library_id: action.result_data.library_id,
-                zotero_key: action.result_data.zotero_key
-            });
-        } else if (action.status === 'pending' || action.status === 'rejected' || action.status === 'undone') {
-            // Apply the item
-            await handleApplyItem(action);
-        }
-    }, [handleApplyItem]);
-
-    /**
-     * Handle deleting/rejecting an item
-     */
-    const handleDelete = useCallback(async (action: CreateItemProposedAction) => {
+    const handleReject = useCallback(async (action: CreateItemProposedAction) => {
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
         try {
             if (action.status !== 'applied' || !action.result_data?.zotero_key) {
@@ -428,10 +386,9 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && totalItems > 0) return ArrowRightIcon;
             if (totalItems === 0) return AlertIcon;
-            // return <CSSItemTypeIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
-            return DocumentValidationIcon
+            return DocumentValidationIcon;
         }
-        return DocumentValidationIcon
+        return DocumentValidationIcon;
     };
 
     // Generate button text
@@ -520,15 +477,15 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
 
             {/* Expandable list of individual items */}
             {resultsVisible && hasItemsToShow && isCompleted && (
-                <div className="display-flex flex-col gap-1">
+                <div className="display-flex flex-col">
                     {createItemActions.map((action, index) => (
                         <CreateItemListItem
                             key={action.id}
                             action={action}
                             isBusy={Boolean(busyState[action.id])}
-                            onClick={handleItemClick}
-                            onDelete={handleDelete}
                             onApply={handleApplyItem}
+                            onReject={handleReject}
+                            onExistingMatch={handleExistingMatch}
                             isHovered={hoveredActionId === action.id}
                             onMouseEnter={() => setHoveredActionId(action.id)}
                             onMouseLeave={() => setHoveredActionId(null)}
