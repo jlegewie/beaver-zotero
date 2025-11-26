@@ -286,7 +286,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
                         variant={buttonVariant}
                         rightIcon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
                         className={`font-color-secondary ${className}`}
-                        style={{ padding: '3px 3px' }}
+                        style={{ padding: '2px 4px' }}
                         onClick={handleReveal}
                         disabled={isLoading}
                     >
