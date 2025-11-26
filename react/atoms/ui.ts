@@ -6,6 +6,7 @@ import { ExternalReferenceResult } from '../types/chat/apiTypes';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
+export const isWebSearchEnabledAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
 export const showFileStatusDetailsAtom = atom(false);
 
