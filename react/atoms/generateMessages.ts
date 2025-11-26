@@ -26,7 +26,7 @@ import { addProposedActionsAtom, threadProposedActionsAtom } from './proposedAct
 import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { currentReaderAttachmentAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters, web_search_request } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -41,7 +41,7 @@ import { CitationMetadata, isExternalCitation } from '../types/citations';
 import { userIdAtom } from './auth';
 import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/proposedActions/base';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { removePopupMessagesByTypeAtom } from './ui';
+import { removePopupMessagesByTypeAtom, isWebSearchEnabledAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
 import { checkExternalReferencesAtom, addExternalReferencesToMappingAtom } from './externalReferences';
@@ -455,6 +455,7 @@ async function _processChatCompletionViaBackend(
     } as MessageSearchFilters;
 
     // User message
+    const isWebSearchEnabled = get(isWebSearchEnabledAtom);
     const userMessage = {
         id: userMessageId,
         role: "user",
@@ -462,7 +463,7 @@ async function _processChatCompletionViaBackend(
         attachments: attachments,
         reader_state: readerState,
         filters: filtersPayload,
-        tool_request: null,
+        tool_request: isWebSearchEnabled ? web_search_request : null,
         status: "completed"
     } as MessageData;
 

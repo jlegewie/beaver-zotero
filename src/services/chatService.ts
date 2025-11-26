@@ -7,13 +7,17 @@ import { CitationMetadata } from '../../react/types/citations';
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from '../../react/types/zotero';
 
 export interface ToolRequest {
-    function: "rag_search";
+    function: "rag_search" | "web_search";
     parameters: Record<string, any>;
 }
 
 export const search_tool_request: ToolRequest = {
     function: "rag_search",
-    // function: "related_items_search",
+    parameters: {}
+}
+
+export const web_search_request: ToolRequest = {
+    function: "web_search",
     parameters: {}
 }
 
