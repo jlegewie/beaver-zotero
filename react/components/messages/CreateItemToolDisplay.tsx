@@ -101,7 +101,7 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
 
     const getTextClasses = (defaultClass: string = 'font-color-primary') => {
         if (action.status === 'rejected' || action.status === 'undone') return 'font-color-tertiary line-through';
-        if (action.status === 'pending') return 'font-color-secondary';
+        // if (action.status === 'pending') return 'font-color-secondary';
         return defaultClass;
     };
 
