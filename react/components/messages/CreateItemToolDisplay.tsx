@@ -148,7 +148,7 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     );
 };
 
-interface AddItemToolDisplayProps {
+interface CreateItemToolDisplayProps {
     messageId: string;
     toolCall: ToolCall;
 }
@@ -163,7 +163,7 @@ interface AddItemToolDisplayProps {
  * 2. applied -> Item created in or linked to Zotero library
  * 3. rejected/undone -> User declined or removed the item
  */
-const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, toolCall }) => {
+const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId, toolCall }) => {
     const groupId = `${messageId}:${toolCall.id}`;
 
     // UI state for collapsible item list
@@ -499,4 +499,4 @@ const AddItemToolDisplay: React.FC<AddItemToolDisplayProps> = ({ messageId, tool
     );
 };
 
-export default AddItemToolDisplay;
+export default CreateItemToolDisplay;

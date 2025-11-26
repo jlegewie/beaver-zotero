@@ -4,7 +4,7 @@ import { SearchExternalReferencesResult, ToolCall } from '../../types/chat/apiTy
 import { isAnnotationTool } from '../../types/proposedActions/base';
 import { isCreateZoteroItemTool, isSearchExternalReferencesTool } from '../../types/proposedActions/items';
 import AnnotationToolDisplay from './AnnotationToolDisplay';
-import AddItemToolDisplay from './AddItemToolDisplay';
+import CreateItemToolDisplay from './CreateItemToolDisplay';
 import { SearchToolDisplay } from './SearchToolDisplay';
 import SearchExternalReferencesToolDisplay from './SearchExternalReferencesToolDisplay';
 
@@ -118,11 +118,11 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
                         </div>
                     );
 
-                // Create Zotero item tool calls are handled by AddItemToolDisplay
+                // Create Zotero item tool calls are handled by CreateItemToolDisplay
                 } else if (isCreateZoteroItemTool(firstTool.function?.name)) {
                     return (
                         <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
-                            <AddItemToolDisplay key={group.id} messageId={message.id} toolCall={firstTool} />
+                            <CreateItemToolDisplay key={group.id} messageId={message.id} toolCall={firstTool} />
                         </div>
                     );
                 }
