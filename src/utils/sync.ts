@@ -754,16 +754,20 @@ export async function syncZoteroDatabase(
                 syncLog = await Zotero.Beaver.db.getSyncLogWithMostRecentDate(userId, libraryID);
             }
 
+            // Store metadata from local sync log check for potential reuse
+            let cachedItemMeta: ItemSyncMetadata[] | null = null;
+            let cachedCollMeta: CollectionSyncMetadata[] | null = null;
+
             // Use local sync log to confirm whether the library is up to date
             if (syncLog) {
-                const itemMeta = await getItemMetadataForSync(
+                cachedItemMeta = await getItemMetadataForSync(
                     libraryID,
                     false,
                     syncMethod,
                     syncLog.library_date_modified,
                     syncLog.library_version
                 );
-                const collMeta = await getCollectionMetadataForSync(
+                cachedCollMeta = await getCollectionMetadataForSync(
                     libraryID,
                     false,
                     syncMethod,
@@ -771,7 +775,7 @@ export async function syncZoteroDatabase(
                     syncLog.library_version
                 );
 
-                if (itemMeta.length === 0 && collMeta.length === 0) {
+                if (cachedItemMeta.length === 0 && cachedCollMeta.length === 0) {
                     logger(`Beaver Sync '${syncSessionId}':   Library ${libraryID} (${libraryName}) is up to date based on local sync log. (${syncMethod}: ${syncLog.library_date_modified}, ${syncLog.library_version})`, 3);
                     updateSyncStatus(libraryID, { status: 'completed' });
                     continue;
@@ -805,20 +809,34 @@ export async function syncZoteroDatabase(
             // ----- 3. Get item and collection metadata -----
             logger(`Beaver Sync '${syncSessionId}': (2) Get item and collection metadata`, 3);
             
-            const itemMetadata = await getItemMetadataForSync(
-                libraryID,
-                isInitialSync,
-                syncMethod,
-                lastSyncDate,
-                lastSyncVersion
-            );
-            const collectionMetadata = await getCollectionMetadataForSync(
-                libraryID,
-                isInitialSync,
-                syncMethod,
-                lastSyncDate,
-                lastSyncVersion
-            );
+            // Reuse cached metadata from local sync log check if local sync log matches backend sync state
+            const canReuseCachedMetadata = syncLog && syncState && !isInitialSync &&
+                syncLog.library_version === lastSyncVersion &&
+                syncLog.library_date_modified === syncState.last_sync_date_modified;
+
+            let itemMetadata: ItemSyncMetadata[];
+            let collectionMetadata: CollectionSyncMetadata[];
+
+            if (canReuseCachedMetadata && cachedItemMeta && cachedCollMeta) {
+                logger(`Beaver Sync '${syncSessionId}':   Reusing cached metadata (local sync log matches backend)`, 4);
+                itemMetadata = cachedItemMeta;
+                collectionMetadata = cachedCollMeta;
+            } else {
+                itemMetadata = await getItemMetadataForSync(
+                    libraryID,
+                    isInitialSync,
+                    syncMethod,
+                    lastSyncDate,
+                    lastSyncVersion
+                );
+                collectionMetadata = await getCollectionMetadataForSync(
+                    libraryID,
+                    isInitialSync,
+                    syncMethod,
+                    lastSyncDate,
+                    lastSyncVersion
+                );
+            }
             
             // Update library-specific progress and status
             const itemCount = itemMetadata.length + collectionMetadata.length;
