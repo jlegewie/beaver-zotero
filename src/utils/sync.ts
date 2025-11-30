@@ -787,7 +787,11 @@ export async function syncZoteroDatabase(
             const syncState = await syncService.getSyncState(libraryID, syncMethod);
 
             const isInitialSync = syncState === null;
-            const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
+            const lastSyncDate = syncState
+                ? (Zotero.Date.isISODate(syncState.last_sync_date_modified)
+                    ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified)
+                    : syncState.last_sync_date_modified)
+                : null;
             const lastSyncVersion = syncState ? syncState.last_sync_version : null;
             const syncLogDate = syncLog
                 ? (Zotero.Date.isISODate(syncLog.library_date_modified)
@@ -955,7 +959,11 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
                 continue;
             }
 
-            const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
+            const lastSyncDate = syncState
+                ? (Zotero.Date.isISODate(syncState.last_sync_date_modified)
+                    ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified)
+                    : syncState.last_sync_date_modified)
+                : null;
             const lastSyncVersion = syncState ? syncState.last_sync_version : null;
 
             logger(`Beaver Collection Sync '${syncSessionId}':   Last sync: version=${lastSyncVersion}, date=${lastSyncDate}`, 3);
