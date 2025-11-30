@@ -382,15 +382,19 @@ export async function syncItemsToBackend(
             );
             
             // ------- Extract collection data for this batch -------
+            // On the last batch, include ALL remaining collections to ensure the sync cursor
+            // advances to cover both items and collections (collections also advance the cursor)
+            const isLastBatch = i === itemBatches.length - 1;
             const batchCollectionsMeta: CollectionSyncMetadata[] = [];
             
             while (collectionIndex < collectionMetadata.length) {
                 const collMeta = collectionMetadata[collectionIndex];
                 
-                // Check if this collection should be in this batch based on sync method
-                const shouldInclude = syncMethod === 'version' 
+                // On the last batch, include all remaining collections regardless of version/date
+                // This ensures collections with higher version/date than all items are synced
+                const shouldInclude = isLastBatch || (syncMethod === 'version' 
                     ? collMeta.version <= batchMaxVersion
-                    : new Date(collMeta.clientDateModified).getTime() <= batchMaxDateTimestamp;
+                    : new Date(collMeta.clientDateModified).getTime() <= batchMaxDateTimestamp);
                 
                 if (shouldInclude) {
                     batchCollectionsMeta.push(collMeta);
