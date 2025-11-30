@@ -279,7 +279,7 @@ export async function performConsistencyCheck(
 
             // Delete items from backend that don't exist locally
             const allKeysToDelete = [...itemsToDelete, ...attachmentsToDelete];
-            if (allKeysToDelete.length > 0) {
+            if (sendUpdates && allKeysToDelete.length > 0) {
                 logger(`Beaver Consistency Check '${consistencyId}': ${allKeysToDelete.length} items not found locally, deleting from backend.`, 3);
                 try {
                     await deleteItems(userId, libraryID, allKeysToDelete);
