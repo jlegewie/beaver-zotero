@@ -789,6 +789,11 @@ export async function syncZoteroDatabase(
             const isInitialSync = syncState === null;
             const lastSyncDate = syncState ? Zotero.Date.isoToSQL(syncState.last_sync_date_modified) : null;
             const lastSyncVersion = syncState ? syncState.last_sync_version : null;
+            const syncLogDate = syncLog
+                ? (Zotero.Date.isISODate(syncLog.library_date_modified)
+                    ? Zotero.Date.isoToSQL(syncLog.library_date_modified)
+                    : syncLog.library_date_modified)
+                : null;
             
             const derivedSyncType = isInitialSync ? 'initial' : (syncType ?? 'incremental');
             // TODO: Transition from local to zotero sync library
@@ -812,7 +817,7 @@ export async function syncZoteroDatabase(
             // Reuse cached metadata from local sync log check if local sync log matches backend sync state
             const canReuseCachedMetadata = syncLog && syncState && !isInitialSync &&
                 syncLog.library_version === lastSyncVersion &&
-                syncLog.library_date_modified === syncState.last_sync_date_modified;
+                syncLogDate === lastSyncDate;
 
             let itemMetadata: ItemSyncMetadata[];
             let collectionMetadata: CollectionSyncMetadata[];
