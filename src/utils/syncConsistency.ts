@@ -322,9 +322,19 @@ export async function performConsistencyCheck(
         if (allKeysToSync.size > 0) {
             try {
                 // Get all items and create metadata
-                const zoteroItems = (await Promise.all(
-                    Array.from(allKeysToSync).map(key => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key))
-                )).filter((item): item is Zotero.Item => !!item && syncingItemFilter(item));
+                // Process in chunks to avoid overwhelming the DB/thread
+                const allKeys = Array.from(allKeysToSync);
+                const zoteroItems: Zotero.Item[] = [];
+                const chunkSize = 50; // Smaller chunk size for individual key lookups
+                
+                for (let i = 0; i < allKeys.length; i += chunkSize) {
+                    const chunk = allKeys.slice(i, i + chunkSize);
+                    const chunkItems = await Promise.all(
+                        chunk.map(key => Zotero.Items.getByLibraryAndKeyAsync(libraryID, key))
+                    );
+                    // Filter valid items for this chunk
+                    zoteroItems.push(...chunkItems.filter((item): item is Zotero.Item => !!item && syncingItemFilter(item)));
+                }
 
                 // Get clientDateModified for all items
                 const clientDateModifiedMap = await getClientDateModifiedBatch(zoteroItems);
