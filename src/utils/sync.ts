@@ -607,6 +607,22 @@ interface SyncZoteroDatabaseOptions {
 
 /**
  * Performs sync for all libraries
+ * 
+ * syncZoteroDatabase()
+ *  ├─ 1. Get local sync log. Skip sync if sync log is up to date.
+ *  ├─ 2. Get backend sync state
+ *  ├─ 3. getItemMetadataForSync()
+ *  │     (lightweight DB query, returns {itemId, version, date}[])
+ *  ├─ 4. getCollectionMetadataForSync()
+ *  └─ 5. syncItemsToBackend(metadata)
+ *     ├─ Sort metadata by version/date
+ *     ├─ Create batches from metadata
+ *     └─ For each batch:
+ *       ├─ Load full item data with all data types (including parents and children)
+ *       ├─ Apply filterFunction -> split into upsert/delete
+ *       ├─ Serialize items and attachments
+ *       └─ Send to backend
+ * 
  * @param libraryIds IDs of libraries to sync
  * @param options Optional options for the sync:
  *   @param options.filterFunction Optional function to filter which items to sync (default: syncingItemFilter)
