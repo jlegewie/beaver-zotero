@@ -382,23 +382,56 @@ export async function performConsistencyCheck(
         result.total_collections_checked = backendCollections.length;
         logger(`Beaver Consistency Check '${consistencyId}': Found ${backendCollections.length} backend collections`, 3);
 
-        // Remove processed collection keys from local set
-        backendCollections.forEach(collection => localCollectionKeys.delete(collection.zotero_key));
-
-        // Find collections to delete (exist in backend but not locally)
+        // Find collections to delete or update
         const collectionsToDelete: string[] = [];
+        const collectionsToUpdate: string[] = [];
+        
         for (const backendCollection of backendCollections) {
             try {
-                const collection = Zotero.Collections.getByLibraryAndKey(libraryID, backendCollection.zotero_key);
-                if (!collection || collection.deleted) {
+                const localCollection = localCollectionsMap.get(backendCollection.zotero_key);
+                if (!localCollection || localCollection.deleted) {
                     collectionsToDelete.push(backendCollection.zotero_key);
+                    continue;
+                }
+
+                // Remove from local set (will add back if update needed)
+                localCollectionKeys.delete(backendCollection.zotero_key);
+
+                // Check for discrepancies via direct field comparison
+                const localJSON = localCollection.toJSON();
+                const localRelations = Object.keys(localJSON.relations || {}).length > 0 ? localJSON.relations : null;
+                const hasDiscrepancy = 
+                    backendCollection.name !== localCollection.name ||
+                    backendCollection.parent_collection !== (localJSON.parentCollection || null) ||
+                    JSON.stringify(backendCollection.relations) !== JSON.stringify(localRelations);
+
+                if (hasDiscrepancy) {
+                    let localDateModified: string;
+                    try {
+                        localDateModified = await getCollectionClientDateModifiedAsISOString(localCollection.id);
+                    } catch {
+                        // Fallback to current timestamp if lookup fails - don't let this cause deletion
+                        localDateModified = new Date().toISOString();
+                    }
+                    if (shouldUpdateBackend(
+                        backendCollection.zotero_version,
+                        backendCollection.date_modified,
+                        localCollection.version,
+                        localDateModified
+                    )) {
+                        collectionsToUpdate.push(backendCollection.zotero_key);
+                        localCollectionKeys.add(backendCollection.zotero_key);
+                    }
                 }
             } catch (error: any) {
-                logger(`Beaver Consistency Check '${consistencyId}': Error checking collection ${backendCollection.zotero_key}: ${error.message}`, 2);
+                // Don't delete on unexpected errors - better to leave stale data than risk data loss
+                logger(`Beaver Consistency Check '${consistencyId}': Error checking collection ${backendCollection.zotero_key}, skipping: ${error.message}`, 2);
                 Zotero.logError(error);
-                // If collection doesn't exist locally, mark for deletion
-                collectionsToDelete.push(backendCollection.zotero_key);
             }
+        }
+
+        if (collectionsToUpdate.length > 0) {
+            logger(`Beaver Consistency Check '${consistencyId}': Found ${collectionsToUpdate.length} collection discrepancies to update`, 3);
         }
 
         // Delete collections from backend that don't exist locally
