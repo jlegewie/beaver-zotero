@@ -344,7 +344,7 @@ export async function syncItemsToBackend(
                 
                 // Load all needed data types in bulk
                 if (batchItems.length > 0) {
-                    await Zotero.Items.loadDataTypes(batchItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections"]);
+                    await Zotero.Items.loadDataTypes(batchItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
                     
                     // Load parent items for attachments (needed for isInTrash() to check parent trash status)
                     const parentIds = [...new Set(
