@@ -1264,10 +1264,19 @@ async function getItemMetadataForSync(
     const results: ItemSyncMetadata[] = [];
     await Zotero.DB.queryAsync(sql, params, {
         onRow: (row: any) => {
+            const itemId = row.getResultByIndex(0);
+            const rawDate = row.getResultByIndex(2);
+            let clientDateModified: string;
+            try {
+                clientDateModified = Zotero.Date.sqlToISO8601(rawDate);
+            } catch (e) {
+                logger(`getItemMetadataForSync: Invalid clientDateModified '${rawDate}' for item ${itemId}, using current timestamp`, 2);
+                clientDateModified = new Date().toISOString();
+            }
             results.push({
-                itemId: row.getResultByIndex(0),
+                itemId,
                 version: row.getResultByIndex(1),
-                clientDateModified: Zotero.Date.sqlToISO8601(row.getResultByIndex(2))
+                clientDateModified
             });
         }
     });
@@ -1328,11 +1337,19 @@ async function getCollectionMetadataForSync(
     await Zotero.DB.queryAsync(sql, params, {
         onRow: (row: any) => {
             const collectionId = row.getResultByIndex(0);
+            const rawDate = row.getResultByIndex(2);
             const collection = Zotero.Collections.get(collectionId);
+            let clientDateModified: string;
+            try {
+                clientDateModified = Zotero.Date.sqlToISO8601(rawDate);
+            } catch (e) {
+                logger(`getCollectionMetadataForSync: Invalid clientDateModified '${rawDate}' for collection ${collectionId}, using current timestamp`, 2);
+                clientDateModified = new Date().toISOString();
+            }
             results.push({
-                collectionId: collectionId,
+                collectionId,
                 version: row.getResultByIndex(1),
-                clientDateModified: Zotero.Date.sqlToISO8601(row.getResultByIndex(2)),
+                clientDateModified,
                 deleted: collection?.deleted ?? false
             });
         }
