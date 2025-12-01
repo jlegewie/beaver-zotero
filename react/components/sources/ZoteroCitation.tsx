@@ -385,7 +385,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 logger(`ZoteroCitation: Opening PDF in reader or switching to the correct PDF`);
 
                 // Determine the page to open
-                let pageIndex = 0;
+                let pageIndex = 1;
                 if (boundingBoxData.length > 0) {
                     pageIndex = boundingBoxData[0].page;
                 } else if (pages.length > 0) {
