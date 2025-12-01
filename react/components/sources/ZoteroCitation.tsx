@@ -15,7 +15,7 @@ import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../../src/utils/zoteroUtils';
-import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -44,7 +44,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Get citation data maps
     const citationDataMap = useAtomValue(citationDataMapAtom);
     // const citationDataMap = {};
-    const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
+    const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
+    const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
 
     // Fallback citation cache (persists across component mounts via Jotai)
     const fallbackCache = useAtomValue(fallbackCitationCacheAtom);
@@ -99,7 +100,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // For external citations, check if they map to a Zotero item
     // By subscribing to the atom directly, this will automatically re-render when mappings are added
     const mappedZoteroItem = isExternal && citationMetadata && isExternalCitation(citationMetadata)
-        ? externalReferenceMapping[citationMetadata.external_source_id!]
+        ? externalReferenceToZoteroItem[citationMetadata.external_source_id!]
         : undefined;
     
     // Get the citation format preference
@@ -532,17 +533,28 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
 
         // External citations cannot be exported as proper Zotero citations
-        if (isExternal) {
-            return (
-                <span className="citation external-citation">
-                    {displayText}
-                </span>
-            );
+        if (isExternal && !mappedZoteroItem) {
+            if (citationMetadata?.external_source_id) {
+                const externalReference = externalReferenceMap[citationMetadata.external_source_id];
+                if (externalReference && externalReference.url) {
+                    return (
+                        <span>
+                            (
+                            <a href={externalReference.url} target="_blank" rel="noopener noreferrer">{citation}</a>
+                            )
+                        </span>
+                    );
+                }
+            }
+            return (<span>{`(${citation})`}</span>);
         }
         
+        const libraryIDToUse = libraryID || mappedZoteroItem?.library_id;
+        const itemKeyToUse = itemKey || mappedZoteroItem?.zotero_key;
+
         // For Zotero citations, use proper CSL format
-        if (!libraryID || !itemKey) return null;
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+        if (!libraryIDToUse || !itemKeyToUse) return null;
+        const item = Zotero.Items.getByLibraryAndKey(libraryIDToUse, itemKeyToUse);
         if (!item) return null;
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
         const startPage = Array.isArray(pages) ? pages[0] : pages; 

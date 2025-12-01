@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { truncateText } from '../../utils/stringUtils';
 import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
 import { citationDataMapAtom } from '../../atoms/citations';
-import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import IconButton from '../ui/IconButton';
 import {
     ArrowDownIcon,
@@ -258,6 +258,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
     const citationDataMap = useAtomValue(citationDataMapAtom);
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
+    const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
 
     // UI state for collapsible note panel
     const panelStates = useAtomValue(notePanelStateAtom);
@@ -320,7 +321,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
                 title: noteTitle,
                 parentReference: parentReference || undefined,
                 targetLibraryId: targetLibraryId,
-                contextData: { citationDataMap, externalMapping }
+                contextData: { citationDataMap, externalMapping, externalReferencesMap }
             });
             
             // Handle collection addition if needed

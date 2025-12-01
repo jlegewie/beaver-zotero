@@ -171,6 +171,7 @@ export function renderToMarkdown(
 export interface RenderContextData {
     citationDataMap?: Record<string, CitationData>;
     externalMapping?: Record<string, ZoteroItemReference | null>;
+    externalReferencesMap?: Record<string, ExternalReference>;
 }
 
 /**
@@ -198,6 +199,10 @@ export function renderToHTML(
         
         if (contextData.externalMapping) {
             renderStore.set(externalReferenceItemMappingAtom, contextData.externalMapping);
+        }
+        
+        if (contextData.externalReferencesMap) {
+            renderStore.set(externalReferenceMappingAtom, contextData.externalReferencesMap);
         }
     }
 
