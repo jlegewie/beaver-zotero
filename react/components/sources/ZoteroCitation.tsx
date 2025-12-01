@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue } from 'jotai';
-import { citationDataAtom } from '../../atoms/citations';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { citationDataMapAtom, fallbackCitationCacheAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox, isExternalCitation, isZoteroCitation } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
+import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { getPageViewportInfo, applyRotationToBoundingBox } from '../../utils/pdfUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
@@ -26,6 +27,7 @@ interface ZoteroCitationProps {
     external_id?: string;  // External source ID for external reference citations
     pages?: string;        // Format: "3-6,19"
     consecutive?: boolean;
+    adjacent?: boolean;   // True when consecutive AND only whitespace between citations
     children?: React.ReactNode;
     exportRendering?: boolean;
 }
@@ -35,79 +37,128 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     cid: citationId,
     external_id,
     consecutive = false,
+    adjacent = false,
     children,
     exportRendering = false
 }) => {
-    // Get the sources from atom state
-    const citationsData = useAtomValue(citationDataAtom);
+    // Get citation data maps
+    const citationDataMap = useAtomValue(citationDataMapAtom);
+    // const citationDataMap = {};
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
 
-    // Get the citation format preference
-    const authorYearFormat = getPref("citationFormat") !== "numeric";
+    // Fallback citation cache (persists across component mounts via Jotai)
+    const fallbackCache = useAtomValue(fallbackCitationCacheAtom);
+    const setFallbackCache = useSetAtom(fallbackCitationCacheAtom);
+    
+    // Fallback citation data (when citation metadata is not available)
+    // We track the key to prevent showing stale data when reusing the component
+    const [fallbackDataState, setFallbackDataState] = useState<{
+        key: string;
+        data: {
+            formatted_citation: string;
+            citation: string;
+            url: string;
+            loading: boolean;
+        } | null;
+    }>({ key: '', data: null });
 
-    if (!citationId) return null;
-    
-    // Find the citation in the available sources
-    const citationMetadata = citationsData.find(a => a.citation_id === citationId);
-    
+    // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
+    const { libraryID, itemKey, cleanKey } = useMemo(() => {
+        if (!unique_key) return { libraryID: 1, itemKey: '', cleanKey: '' };
+        const cleanKey = unique_key.replace('user-content-', '');
+        const [libraryIDString, itemKey] = cleanKey.includes('-') 
+            ? cleanKey.split('-') 
+            : [cleanKey, cleanKey];
+        return { 
+            libraryID: parseInt(libraryIDString) || 1, 
+            itemKey, 
+            cleanKey 
+        };
+    }, [unique_key]);
+
+    // Derived fallback citation that is valid only for the current key
+    // Check atom cache first (sync) to avoid flicker on remount
+    const fallbackCitation = useMemo(() => {
+        if (fallbackDataState.key === cleanKey && fallbackDataState.data) {
+            return fallbackDataState.data;
+        }
+        // Check Jotai atom cache for instant access on remount
+        const cached = fallbackCache[cleanKey];
+        if (cached) {
+            return { ...cached, loading: false };
+        }
+        return null;
+    }, [fallbackDataState, cleanKey, fallbackCache]);
+
+    // Get attachment citation data from map
+    const citationMetadata = citationId ? citationDataMap[citationId] : undefined;
+
     // Determine if this is an external citation
     const isExternal = citationMetadata ? isExternalCitation(citationMetadata) : !!external_id;
-    
+
     // For external citations, check if they map to a Zotero item
     // By subscribing to the atom directly, this will automatically re-render when mappings are added
     const mappedZoteroItem = isExternal && citationMetadata && isExternalCitation(citationMetadata)
         ? externalReferenceMapping[citationMetadata.external_source_id!]
         : undefined;
     
-    // Parse the id to get libraryID and itemKey (for Zotero citations)
-    let libraryID: number | undefined;
-    let itemKey: string | undefined;
-    
-    if (unique_key) {
-        const cleanKey = unique_key.replace('user-content-', '');
-        const [libraryIDString, key] = cleanKey.includes('-') ? cleanKey.split('-') : [cleanKey, cleanKey];
-        libraryID = parseInt(libraryIDString) || 1;
-        itemKey = key;
-    } else if (citationMetadata && isZoteroCitation(citationMetadata)) {
-        libraryID = citationMetadata.library_id;
-        itemKey = citationMetadata.zotero_key;
-    } else if (mappedZoteroItem) {
-        // Use the mapped Zotero item for external citations
-        libraryID = mappedZoteroItem.library_id;
-        itemKey = mappedZoteroItem.zotero_key;
-    }
+    // Get the citation format preference
+    const authorYearFormat = getPref("citationFormat") !== "numeric";
 
-    // Fallback citation data (when citation metadata is not available)
-    const [fallbackCitation, setFallbackCitation] = useState<{
-        formatted_citation: string;
-        citation: string;
-        url: string;
-        loading: boolean;
-    } | null>(null);
+    // if (!citationId) return null;
+            
+    // // Parse the id to get libraryID and itemKey (for Zotero citations)
+    // let libraryID: number | undefined;
+    // let itemKey: string | undefined;
+    
+    // if (unique_key) {
+    //     const cleanKey = unique_key.replace('user-content-', '');
+    //     const [libraryIDString, key] = cleanKey.includes('-') ? cleanKey.split('-') : [cleanKey, cleanKey];
+    //     libraryID = parseInt(libraryIDString) || 1;
+    //     itemKey = key;
+    // } else if (citationMetadata && isZoteroCitation(citationMetadata)) {
+    //     libraryID = citationMetadata.library_id;
+    //     itemKey = citationMetadata.zotero_key;
+    // } else if (mappedZoteroItem) {
+    //     // Use the mapped Zotero item for external citations
+    //     libraryID = mappedZoteroItem.library_id;
+    //     itemKey = mappedZoteroItem.zotero_key;
+    // }
+
+    // // Fallback citation data (when citation metadata is not available)
+    // const [fallbackCitation, setFallbackCitation] = useState<{
+    //     formatted_citation: string;
+    //     citation: string;
+    //     url: string;
+    //     loading: boolean;
+    // } | null>(null);
 
     // Load fallback citation data when citation metadata is not available
+    const citationMetadataId = citationMetadata?.citation_id;
     useEffect(() => {
+        // Skip if we have citationMetadata or already have fallback (from atom cache or local state)
+        if (citationMetadataId || fallbackCitation || !itemKey) return;
+        
+        let cancelled = false;
+        
         const loadFallbackCitation = async () => {
-            // Skip if we have citation metadata
-            if (citationMetadata) return;
-            
-            // Skip if we already have fallback data or it's loading
-            if (fallbackCitation) return;
-            
-            // Skip if we don't have the necessary IDs
-            if (!libraryID || !itemKey) return;
-            
-            setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+            setFallbackDataState({ 
+                key: cleanKey,
+                data: { formatted_citation: '', citation: '', url: '', loading: true }
+            });
             
             try {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+                if (cancelled) return;
+                
                 if (!item) {
-                    logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
-                    setFallbackCitation(null);
+                    logger('ZoteroCitation: Failed to format citation for id: ' + cleanKey);
+                    setFallbackDataState({ key: cleanKey, data: null });
                     return;
                 }
 
                 await loadFullItemDataWithAllTypes([item]);
+                if (cancelled) return;
 
                 const parentItem = item.parentItem;
                 const itemToCite = item.isNote() ? item : parentItem || item;
@@ -116,76 +167,103 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const formatted_citation = getReferenceFromItem(itemToCite);
                 const url = createZoteroURI(item);
 
-                setFallbackCitation({
-                    formatted_citation,
-                    citation,
-                    url,
-                    loading: false
+                // Cache the result in Jotai atom for future mounts
+                setFallbackCache(prev => ({ ...prev, [cleanKey]: { formatted_citation, citation, url } }));
+
+                setFallbackDataState({
+                    key: cleanKey,
+                    data: {
+                        formatted_citation,
+                        citation,
+                        url,
+                        loading: false
+                    }
                 });
             } catch (error) {
+                if (cancelled) return;
                 logger('ZoteroCitation: Error loading fallback citation: ' + error);
-                setFallbackCitation(null);
+                setFallbackDataState({ key: cleanKey, data: null });
             }
         };
 
         loadFallbackCitation();
-    }, [citationMetadata, libraryID, itemKey, unique_key, fallbackCitation]);
 
-    // Update the citation data logic
-    let formatted_citation = '';
-    let citation = '';
-    let url = '';
-    let previewText = '';
+        // Cleanup to prevent setting state after unmount
+        return () => { cancelled = true; };
+    // Note: fallbackCitation intentionally excluded from deps
+    // because we only want to load once when it's initially null
+    }, [citationMetadataId, libraryID, itemKey, cleanKey, setFallbackCache]);
 
-    if (citationMetadata) {
-        if (isExternalCitation(citationMetadata)) {
-            // External citation - use metadata directly
-            citation = citationMetadata.author_year || '';
-            formatted_citation = citationMetadata.preview || citation;
-            previewText = citationMetadata.preview
-                ? `"${citationMetadata.preview}"`
-                : formatted_citation;
-            
-            // If mapped to Zotero item, try to get URL
-            if (mappedZoteroItem) {
-                const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                if (item) {
-                    url = createZoteroURI(item);
-                }
+    // Cleanup effect for when component unmounts or citation changes
+    useEffect(() => {
+        return () => {
+            // Cleanup temporary annotations when component unmounts
+            if (BeaverTemporaryAnnotations.getCount() > 0) {
+                logger('ZoteroCitation: cleanupTemporaryAnnotations');
+                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
             }
-        } else if (isZoteroCitation(citationMetadata)) {
-            // Zotero citation with metadata
-            formatted_citation = citationMetadata.formatted_citation || '';
-            citation = citationMetadata.citation || '';
-            url = citationMetadata.url || '';
-            previewText = citationMetadata.preview
-                ? `"${citationMetadata.preview}"`
-                : formatted_citation || '';
+        };
+    }, [citationId]);
+
+    // Memoize derived citation data to avoid recalculation on every render
+    const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
+        let formatted_citation = '';
+        let citation = '';
+        let url = '';
+        let previewText = '';
+
+        if (citationMetadata) {
+            if (isExternalCitation(citationMetadata)) {
+                // External citation - use metadata directly
+                citation = citationMetadata.author_year || '';
+                formatted_citation = citationMetadata.preview || citation;
+                previewText = citationMetadata.preview
+                    ? `"${citationMetadata.preview}"`
+                    : formatted_citation;
+                
+                // If mapped to Zotero item, try to get URL
+                if (mappedZoteroItem) {
+                    const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                    if (item) {
+                        url = createZoteroURI(item);
+                    }
+                }
+            } else if (isZoteroCitation(citationMetadata)) {
+                // Zotero citation with metadata
+                formatted_citation = citationMetadata.formatted_citation || '';
+                citation = citationMetadata.citation || '';
+                url = citationMetadata.url || '';
+                previewText = citationMetadata.preview
+                    ? `"${citationMetadata.preview}"`
+                    : formatted_citation || '';
+            }
+        } else if (fallbackCitation) {
+            if (fallbackCitation.loading) {
+                // Show loading state
+                formatted_citation = '?';
+                citation = '?';
+                url = '';
+                previewText = 'Loading citation data...';
+            } else {
+                formatted_citation = fallbackCitation.formatted_citation;
+                citation = fallbackCitation.citation;
+                url = fallbackCitation.url;
+                previewText = formatted_citation;
+            }
         }
-    } else if (fallbackCitation) {
-        if (fallbackCitation.loading) {
-            // Show loading state
-            formatted_citation = '?';
-            citation = '?';
-            url = '';
-            previewText = 'Loading citation data...';
-        } else {
-            formatted_citation = fallbackCitation.formatted_citation;
-            citation = fallbackCitation.citation;
-            url = fallbackCitation.url;
-            previewText = formatted_citation;
-        }
-    } else {
-        // No data available
-        formatted_citation = '';
-        citation = '';
-        url = '';
-    }
-    
-    // Add the URL to open the PDF/Note
-    const pages = [...new Set(getCitationPages(citationMetadata))];
-    const firstPage = pages ? pages[0] : null;
-    url = firstPage && url ? `${url}?page=${firstPage}` : url;
+        
+        const pages = [...new Set(getCitationPages(citationMetadata))];
+        const firstPage = pages.length > 0 ? pages[0] : null;
+        const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
+
+        return { formatted_citation, citation, url: finalUrl, previewText, pages };
+    }, [citationMetadata, fallbackCitation]);
+
+
+    if (!unique_key || !citationId) return null;
+
+    // Hide adjacent fallback citations (identical and immediately next to each other)
+    if (adjacent && !citationMetadata) return null;
     
         // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
@@ -330,8 +408,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         if (!currentLibraryID || !currentItemKey) return;
 
         // Get the item
+        // TODO: Use currentItemKey or itemKey???
         logger(`ZoteroCitation: Zotero Item (${currentLibraryID}, ${currentItemKey})`);
-        const item = Zotero.Items.getByLibraryAndKey(currentLibraryID, currentItemKey);
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(currentLibraryID, currentItemKey);
+        // logger(`ZoteroCitation: Zotero Item (${libraryID}, ${itemKey})`);
+        // const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+
         if (!item) {
             logger(`ZoteroCitation: Failed to get Zotero item (${currentLibraryID}, ${currentItemKey})`);
             return;
@@ -341,6 +423,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         if (item.isNote()) {
             logger(`ZoteroCitation: Note Link (${item.id})`);
             await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            return;
+        }
+
+        // Handle regular items
+        if (item.isRegularItem()) {
+            logger(`ZoteroCitation: Selecting regular item (${item.id})`);
+            await selectItemById(item.id);
             return;
         }
 
@@ -363,6 +452,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const pages = getCitationPages(citationMetadata);
         logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
+        // Handle regular items
+        if (item.isAttachment() && boundingBoxData.length == 0 && pages.length == 0) {
+            logger(`ZoteroCitation: Selecting attachment (${item.id})`);
+            await selectItemById(item.id);
+            return;
+        }
+
         try {
             let reader = await getCurrentReaderAndWaitForView();
             logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
@@ -372,7 +468,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 logger(`ZoteroCitation: Opening PDF in reader or switching to the correct PDF`);
 
                 // Determine the page to open
-                let pageIndex = 0;
+                let pageIndex = 1;
                 if (boundingBoxData.length > 0) {
                     pageIndex = boundingBoxData[0].page;
                 } else if (pages.length > 0) {
@@ -380,7 +476,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 }
 
                 // Open the PDF at page
-                logger(`ZoteroCitation: Opening PDF at page ${pageIndex}`);
+                logger(`ZoteroCitation: Opening item ${item.id} at page ${pageIndex}`);
                 reader = await Zotero.Reader.open(item.id, { pageIndex: pageIndex - 1 });
 
                 // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
@@ -419,17 +515,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             }
         }
     };
-
-    // Cleanup effect for when component unmounts or citation changes
-    useEffect(() => {
-        return () => {
-            // Cleanup temporary annotations when component unmounts
-            if (BeaverTemporaryAnnotations.getCount() > 0) {
-                logger('ZoteroCitation: cleanupTemporaryAnnotations');
-                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
-            }
-        };
-    }, [citationId]);
 
     // Format for display
     let displayText = '';
@@ -500,15 +585,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     );
 
     const citationPreview = (
-        <span className="block">
+        <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary">
-                <span className="font-color-primary text-sm">{citation}</span>
+                <span className="font-color-primary text-sm" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                    {citation}
+                </span>
                 <span className="flex-1" />
                 {pages && pages.length > 0 && pages[0] && (
                     <span className="font-color-secondary text-sm">Page {pages[0]}</span>
                 )}
             </span>
-            <span className="font-color-secondary text-sm px-3 py-15 block">
+            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
@@ -518,7 +605,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             )}
         </span>
     )
-    
+
     // Return the citation with tooltip and click handler
     return (
         <>

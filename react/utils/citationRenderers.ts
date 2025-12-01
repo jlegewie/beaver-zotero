@@ -4,7 +4,7 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationDataAtom } from '../atoms/citations';
+import { citationDataMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom } from '../atoms/externalReferences';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
@@ -130,7 +130,7 @@ export function renderToMarkdown(
 }
 
 export interface RenderContextData {
-    citations?: CitationData[];
+    citationDataMap?: Record<string, CitationData>;
     externalMapping?: Record<string, ZoteroItemReference | null>;
 }
 
@@ -153,8 +153,8 @@ export function renderToHTML(
     if (contextData) {
         renderStore = createStore();
         
-        if (contextData.citations) {
-            renderStore.set(citationDataAtom, contextData.citations);
+        if (contextData.citationDataMap) {
+            renderStore.set(citationDataMapAtom, contextData.citationDataMap);
         }
         
         if (contextData.externalMapping) {

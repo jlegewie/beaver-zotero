@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, removePopupMessagesByTyp
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { citationMetadataAtom, citationDataAtom, updateCitationDataAtom } from "./citations";
+import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
 import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
@@ -168,7 +168,7 @@ export const newThreadAtom = atom(
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
         set(threadProposedActionsAtom, []);
-        set(citationDataAtom, []);
+        set(citationDataMapAtom, {});
         set(currentMessageContentAtom, '');
         set(resetMessageUIStateAtom);
         set(isPreferencePageVisibleAtom, false);

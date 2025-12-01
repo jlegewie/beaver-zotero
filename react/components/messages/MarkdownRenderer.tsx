@@ -14,7 +14,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'external_id']
+        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id']
     }
 });
 
@@ -117,13 +117,16 @@ function parseContentIntoSegments(content: string): Segment[] {
 /**
  * Preprocess citations in markdown content
  * @param content Markdown content with citation tags
- * @param lastCitationId Reference to the last citation ID (for consecutive tracking)
+ * @param lastCitationIdRef Reference to the last citation ID (for consecutive tracking across segments)
  * @returns Preprocessed content with citations formatted
  */
 function preprocessCitations(content: string, lastCitationIdRef: { value: string }): string {
+    // Track end index locally within this segment for adjacency detection
+    let lastCitationEndIndex = -1;
+    
     return content.replace(
         /<citation\s+((?:[^>])+?)\s*\/>/g,
-        (match, attributesStr) => {
+        (match, attributesStr, offset, fullString) => {
             // Extract the ID from attributes
             const idMatch = attributesStr.match(/id="([^"]+)"/);
             const id = idMatch ? idMatch[1] : "";
@@ -131,10 +134,18 @@ function preprocessCitations(content: string, lastCitationIdRef: { value: string
             // Check if this citation has the same ID as the previous one
             const isConsecutive = id && id === lastCitationIdRef.value;
             
-            // Update the last citation ID
-            lastCitationIdRef.value = id;
+            // Check if adjacent (only whitespace between this and previous citation)
+            const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
+                fullString.substring(lastCitationEndIndex, offset).trim() === '';
             
-            // Add the consecutive attribute if needed
+            // Update tracking for next iteration
+            lastCitationIdRef.value = id;
+            lastCitationEndIndex = offset + match.length;
+            
+            // Add attributes as needed
+            if (isAdjacent) {
+                return `<citation ${attributesStr} consecutive="true" adjacent="true"></citation>`;
+            }
             if (isConsecutive) {
                 return `<citation ${attributesStr} consecutive="true"></citation>`;
             }
@@ -151,8 +162,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     messageId,
     enableNoteBlocks = true
 }) => {
-
-    // Process partial tags at the end of content (for streaming support)
+    // Process partial tags at the end of content
     const processPartialContent = (content: string): string => {
         let processed = content;
 
