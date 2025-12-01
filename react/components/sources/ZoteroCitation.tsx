@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { getCitationDataAtom } from '../../atoms/citations';
+import { citationDataMapAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
@@ -36,8 +36,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     exportRendering = false
 }) => {
     
-    // Get citation data from the citationDataMapAtom
-    const getCitationData = useAtomValue(getCitationDataAtom);
+    // Get citation data map (subscribes to updates)
+    const citationDataMap = useAtomValue(citationDataMapAtom);
     
     // Fallback citation data (when citation metadata is not available)
     // We track the key to prevent showing stale data when reusing the component
@@ -69,7 +69,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const fallbackCitation = fallbackDataState.key === cleanKey ? fallbackDataState.data : null;
 
     // Get attachment citation data via O(1) map lookup
-    const attachmentCitation = citationId ? getCitationData(citationId) : undefined;
+    const attachmentCitation = citationId ? citationDataMap[citationId] : undefined;
     
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";

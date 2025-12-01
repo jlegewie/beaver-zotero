@@ -30,15 +30,6 @@ export const citationMetadataAtom = atom<CitationMetadata[]>([]);
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 
 /**
- * Get citation data by citation_id with O(1) lookup
- */
-export const getCitationDataAtom = atom(
-    (get) => (citationId: string): CitationData | undefined => {
-        return get(citationDataMapAtom)[citationId];
-    }
-);
-
-/**
  * Get all citation data as an array (for components that need the full list)
  */
 export const citationDataListAtom = atom(
