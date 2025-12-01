@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { BrainIcon, ArrowDownIcon, Icon, AiMagicIcon } from '../../icons/icons';
+import { BrainIcon, ArrowDownIcon, Icon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { 
   selectedModelAtom,
