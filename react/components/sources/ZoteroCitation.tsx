@@ -419,20 +419,22 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     );
 
     const citationPreview = (
-        <span className="block">
+        <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary">
-                <span className="font-color-primary text-sm">{citation}</span>
+                <span className="font-color-primary text-sm" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                    {citation}
+                </span>
                 <span className="flex-1" />
                 {pages && pages.length > 0 && pages[0] && (
                     <span className="font-color-secondary text-sm">Page {pages[0]}</span>
                 )}
             </span>
-            <span className="font-color-secondary text-sm px-3 py-15 block">
+            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                 {previewText}
             </span>
         </span>
     )
-    
+
     // Return the citation with tooltip and click handler
     return (
         <>
