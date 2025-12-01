@@ -8,6 +8,8 @@ interface ZoteroIconProps {
     color?: string;
     // Optional className for additional styling
     className?: string;
+    // Optional style for additional styling
+    style?: React.CSSProperties;
 }
 
 export const ZoteroIcon: React.FC<ZoteroIconProps> = ({
@@ -15,24 +17,32 @@ export const ZoteroIcon: React.FC<ZoteroIconProps> = ({
     size = 16,
     color,
     className = '',
+    style = {}
 }) => {
+    const computedColor = color 
+        ? (color.startsWith('--') ? `var(${color})` : color) 
+        : 'currentColor';
+
     return (
-        <img
-            src={`chrome://zotero/skin/${icon}`}
+        <div
             className={className}
             style={{
                 width: `${size}px`,
                 height: `${size}px`,
-                // Only set fill/stroke if color prop is provided
-                ...(color ? {
-                    fill: `var(${color})`,
-                    stroke: `var(${color})`
-                } : {
-                    fill: 'currentColor',
-                    stroke: 'currentColor'
-                }),
-                MozContextProperties: 'fill, fill-opacity, stroke, stroke-opacity'
+                backgroundColor: computedColor,
+                maskImage: `url("chrome://zotero/skin/${icon}")`,
+                maskRepeat: 'no-repeat',
+                maskPosition: 'center',
+                maskSize: 'contain',
+                WebkitMaskImage: `url("chrome://zotero/skin/${icon}")`,
+                WebkitMaskRepeat: 'no-repeat',
+                WebkitMaskPosition: 'center',
+                WebkitMaskSize: 'contain',
+                display: 'inline-block',
+                flexShrink: 0,
+                ...style
             }}
+            role="presentation"
         />
     );
 };
