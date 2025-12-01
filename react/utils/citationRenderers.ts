@@ -5,9 +5,12 @@ import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 import { citationDataMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom } from '../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
+import { logger } from '../../src/utils/logger';
+import { ExternalReference } from '../types/externalReferences';
+import { formatExternalCitation } from '../atoms/externalReferences';
 
 // Regex for citation syntax
 const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
@@ -68,19 +71,35 @@ export function renderToMarkdown(
     text: string
 ) : string {
 
+    const externalReferenceMapping = store.get(externalReferenceMappingAtom);
+    const citationMetadataMap = store.get(citationDataMapAtom);
+
     // Array of cited items
     const citedItems: Zotero.Item[] = [];
+    const externalReferences: ExternalReference[] = [];
 
     // Preprocess note tags and clean up backticks
     text = preprocessNoteContent(text);
 
     // Format references
-    const formattedContent = text.replace(citationRegex, (match, attrString) => {
+    const formattedContent = text.replace(citationRegex, (match: string, attrString: string): string => {
         // Parse the attributes
         const attrs = parseAttributes(attrString);
-        if (!attrs.id) {
-            console.warn("Citation tag missing 'id' attribute:", match);
+        if (!attrs.id && !attrs.external_id) {
+            logger(`renderToMarkdown: Citation tag missing 'id' attribute: ${match}`);
             return '';
+        }
+
+        if (attrs.external_id && !attrs.id) {
+            const citationMetadata = citationMetadataMap[attrs.cid || ''];
+            if (!citationMetadata) {
+                logger(`renderToMarkdown: No external reference found for external_id: ${attrs.external_id}`);
+                return '';
+            }
+            if (attrs.external_id && attrs.external_id in externalReferenceMapping) {
+                externalReferences.push(externalReferenceMapping[attrs.external_id]);
+            }
+            return citationMetadata.author_year ? `(${citationMetadata.author_year})` : '';
         }
 
         // Parse the id to get libraryID and itemKey
@@ -89,7 +108,7 @@ export function renderToMarkdown(
         // Get the Zotero item
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
         if (!item) {
-            console.warn(`No Zotero item found for libraryID: ${libraryID}, itemKey: ${itemKey}`);
+            logger(`renderToMarkdown: No Zotero item found for libraryID: ${libraryID}, itemKey: ${itemKey}`);
             return '';
         }
         
@@ -121,10 +140,13 @@ export function renderToMarkdown(
     }).replace('  (', ' (');
 
     // Format the bibliography
-    const bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
+    let bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
+    if (externalReferences.length > 0) {
+        bibliography += externalReferences.map(reference => `${formatExternalCitation(reference)} (external reference)`).join('\n\n');
+    }
 
     // Return the formatted content
-    return citedItems.length > 0
+    return citedItems.length > 0 || externalReferences.length > 0
         ? `${formattedContent.trim()}\n\n## Sources\n\n${bibliography}`
         : formattedContent;
 }
