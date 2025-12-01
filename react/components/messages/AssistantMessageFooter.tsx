@@ -10,7 +10,7 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataAtom } from '../../atoms/citations';
+import { citationDataListAtom } from '../../atoms/citations';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData } from '../../types/citations';
 import { store } from '../../store';
@@ -25,7 +25,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
 }) => {
     const regenerateFromMessage = useSetAtom(regenerateFromMessageAtom);
     const contentRef = useRef<HTMLDivElement | null>(null);
-    const citations = useAtomValue(citationDataAtom);
+    const citations = useAtomValue(citationDataListAtom);
     const lastMessage = messages[messages.length - 1];
 
     // Find all messages in the current assistant turn
@@ -161,7 +161,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     }
 
     const copyCitationMetadata = async () => {
-        await copyToClipboard(JSON.stringify(store.get(citationDataAtom), null, 2));
+        await copyToClipboard(JSON.stringify(store.get(citationDataListAtom), null, 2));
     }
 
     return (
