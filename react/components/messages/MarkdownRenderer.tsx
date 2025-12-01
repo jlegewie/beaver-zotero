@@ -13,7 +13,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive']
+        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent']
     }
 });
 
@@ -32,7 +32,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     // Preprocess citation tags:
     // - transform self-closing citation tags into proper open/close tags
     // - tracks repeated citations with the same ID to add the `consecutive` attribute
+    // - tracks adjacent citations (only whitespace between them) to add `adjacent` attribute
     let lastCitationId = "";
+    let lastCitationEndIndex = -1;
     
     // Process partial tags at the end of content
     const processPartialContent = (content: string): string => {
@@ -88,7 +90,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     const preprocessedContent = processedContent
         .replace(
             /<citation\s+((?:[^>])+?)\s*\/>/g,
-            (match, attributesStr) => {
+            (match, attributesStr, offset, fullString) => {
                 // Extract the ID from attributes
                 const idMatch = attributesStr.match(/id="([^"]+)"/);
                 const id = idMatch ? idMatch[1] : "";
@@ -96,10 +98,18 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 // Check if this citation has the same ID as the previous one
                 const isConsecutive = id && id === lastCitationId;
                 
-                // Update the last citation ID
-                lastCitationId = id;
+                // Check if adjacent (only whitespace between this and previous citation)
+                const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
+                    fullString.substring(lastCitationEndIndex, offset).trim() === '';
                 
-                // Add the consecutive attribute if needed
+                // Update tracking for next iteration
+                lastCitationId = id;
+                lastCitationEndIndex = offset + match.length;
+                
+                // Add attributes as needed
+                if (isAdjacent) {
+                    return `<citation ${attributesStr} consecutive="true" adjacent="true"></citation>`;
+                }
                 if (isConsecutive) {
                     return `<citation ${attributesStr} consecutive="true"></citation>`;
                 }
