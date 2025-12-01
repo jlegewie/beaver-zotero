@@ -40,12 +40,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const getCitationData = useAtomValue(getCitationDataAtom);
     
     // Fallback citation data (when citation metadata is not available)
-    const [fallbackCitation, setFallbackCitation] = useState<{
-        formatted_citation: string;
-        citation: string;
-        url: string;
-        loading: boolean;
-    } | null>(null);
+    // We track the key to prevent showing stale data when reusing the component
+    const [fallbackDataState, setFallbackDataState] = useState<{
+        key: string;
+        data: {
+            formatted_citation: string;
+            citation: string;
+            url: string;
+            loading: boolean;
+        } | null;
+    }>({ key: '', data: null });
 
     // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
     const { libraryID, itemKey, cleanKey } = useMemo(() => {
@@ -60,6 +64,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             cleanKey 
         };
     }, [unique_key]);
+
+    // Derived fallback citation that is valid only for the current key
+    const fallbackCitation = fallbackDataState.key === cleanKey ? fallbackDataState.data : null;
 
     // Get attachment citation data via O(1) map lookup
     const attachmentCitation = citationId ? getCitationData(citationId) : undefined;
@@ -76,7 +83,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         let cancelled = false;
         
         const loadFallbackCitation = async () => {
-            setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+            setFallbackDataState({ 
+                key: cleanKey,
+                data: { formatted_citation: '', citation: '', url: '', loading: true }
+            });
             
             try {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
@@ -84,7 +94,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 
                 if (!item) {
                     logger('ZoteroCitation: Failed to format citation for id: ' + cleanKey);
-                    setFallbackCitation(null);
+                    setFallbackDataState({ key: cleanKey, data: null });
                     return;
                 }
 
@@ -98,16 +108,19 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const formatted_citation = getReferenceFromItem(itemToCite);
                 const url = createZoteroURI(item);
 
-                setFallbackCitation({
-                    formatted_citation,
-                    citation,
-                    url,
-                    loading: false
+                setFallbackDataState({
+                    key: cleanKey,
+                    data: {
+                        formatted_citation,
+                        citation,
+                        url,
+                        loading: false
+                    }
                 });
             } catch (error) {
                 if (cancelled) return;
                 logger('ZoteroCitation: Error loading fallback citation: ' + error);
-                setFallbackCitation(null);
+                setFallbackDataState({ key: cleanKey, data: null });
             }
         };
 
