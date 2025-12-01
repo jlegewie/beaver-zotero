@@ -260,7 +260,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }, [citationMetadata, fallbackCitation]);
 
 
-    if (!unique_key || !citationId) return null;
+    // Zotero citations need an id/cid; external citations intentionally omit the Zotero id
+    if ((!unique_key || !citationId) && !isExternal) return null;
 
     // Hide adjacent fallback citations (identical and immediately next to each other)
     if (adjacent && !citationMetadata) return null;
