@@ -5,6 +5,17 @@ import { logger } from '../../src/utils/logger';
 import { CitationMetadata, CitationData } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
+/**
+ * Fallback citation cache for citations not in citationDataMapAtom
+ * Keyed by "libraryID-itemKey" (cleanKey)
+ */
+export interface FallbackCitation {
+    formatted_citation: string;
+    citation: string;
+    url: string;
+}
+export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>({});
+
 
 /*
  * Citation metadata

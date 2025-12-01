@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue } from 'jotai';
-import { citationDataMapAtom } from '../../atoms/citations';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { citationDataMapAtom, fallbackCitationCacheAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
@@ -38,6 +38,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     
     // Get citation data map (subscribes to updates)
     const citationDataMap = useAtomValue(citationDataMapAtom);
+
+    // Fallback citation cache (persists across component mounts via Jotai)
+    const fallbackCache = useAtomValue(fallbackCitationCacheAtom);
+    const setFallbackCache = useSetAtom(fallbackCitationCacheAtom);
     
     // Fallback citation data (when citation metadata is not available)
     // We track the key to prevent showing stale data when reusing the component
@@ -66,7 +70,18 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }, [unique_key]);
 
     // Derived fallback citation that is valid only for the current key
-    const fallbackCitation = fallbackDataState.key === cleanKey ? fallbackDataState.data : null;
+    // Check atom cache first (sync) to avoid flicker on remount
+    const fallbackCitation = useMemo(() => {
+        if (fallbackDataState.key === cleanKey && fallbackDataState.data) {
+            return fallbackDataState.data;
+        }
+        // Check Jotai atom cache for instant access on remount
+        const cached = fallbackCache[cleanKey];
+        if (cached) {
+            return { ...cached, loading: false };
+        }
+        return null;
+    }, [fallbackDataState, cleanKey, fallbackCache]);
 
     // Get attachment citation data via O(1) map lookup
     const attachmentCitation = citationId ? citationDataMap[citationId] : undefined;
@@ -77,7 +92,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Load fallback citation data when citation metadata is not available
     const attachmentCitationId = attachmentCitation?.citation_id;
     useEffect(() => {
-        // Skip if we have attachmentCitation or already have fallback
+        // Skip if we have attachmentCitation or already have fallback (from atom cache or local state)
         if (attachmentCitationId || fallbackCitation || !itemKey) return;
         
         let cancelled = false;
@@ -108,6 +123,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 const formatted_citation = getReferenceFromItem(itemToCite);
                 const url = createZoteroURI(item);
 
+                // Cache the result in Jotai atom for future mounts
+                setFallbackCache(prev => ({ ...prev, [cleanKey]: { formatted_citation, citation, url } }));
+
                 setFallbackDataState({
                     key: cleanKey,
                     data: {
@@ -130,7 +148,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         return () => { cancelled = true; };
     // Note: fallbackCitation intentionally excluded from deps
     // because we only want to load once when it's initially null
-    }, [attachmentCitationId, libraryID, itemKey, cleanKey]);
+    }, [attachmentCitationId, libraryID, itemKey, cleanKey, setFallbackCache]);
 
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {
