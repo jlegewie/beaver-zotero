@@ -41,7 +41,7 @@ export function isCreateItemAction(action: ProposedAction): action is CreateItem
 
 export function isSearchExternalReferencesTool(functionName: string | undefined): boolean {
     if (!functionName) return false;
-    return functionName === 'search_external_references';
+    return functionName === 'search_external_references' || functionName === 'external_search';
 }
 
 export function isCreateZoteroItemTool(functionName: string | undefined): boolean {
