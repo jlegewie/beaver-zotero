@@ -8,6 +8,7 @@ import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/source
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, toZoteroRectFromBBox } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
+import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { getPageViewportInfo, applyRotationToBoundingBox } from '../../utils/pdfUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
@@ -344,6 +345,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
 
+        // Handle regular items
+        if (item.isRegularItem()) {
+            logger(`ZoteroCitation: Selecting regular item (${item.id})`);
+            await selectItemById(item.id);
+            return;
+        }
+
         // Handle file links
         if (url.startsWith('file:///')) {
             const filePath = url.replace('file:///', '');
@@ -380,7 +388,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 }
 
                 // Open the PDF at page
-                logger(`ZoteroCitation: Opening PDF at page ${pageIndex}`);
+                logger(`ZoteroCitation: Opening item ${item.id} at page ${pageIndex}`);
                 reader = await Zotero.Reader.open(item.id, { pageIndex: pageIndex - 1 });
 
                 // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
