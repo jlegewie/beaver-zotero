@@ -25,6 +25,7 @@ interface ZoteroCitationProps {
     cid: string;
     pages?: string;       // Format: "3-6,19"
     consecutive?: boolean;
+    adjacent?: boolean;   // True when consecutive AND only whitespace between citations
     children?: React.ReactNode;
     exportRendering?: boolean;
 }
@@ -33,6 +34,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     id: unique_key,
     cid: citationId,
     consecutive = false,
+    adjacent = false,
     children,
     exportRendering = false
 }) => {
@@ -200,6 +202,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
 
     if (!unique_key || !citationId) return null;
+
+    // Hide adjacent fallback citations (identical and immediately next to each other)
+    if (adjacent && !attachmentCitation) return null;
     
         // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
