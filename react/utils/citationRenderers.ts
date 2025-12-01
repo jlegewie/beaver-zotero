@@ -72,6 +72,7 @@ export function renderToMarkdown(
 ) : string {
 
     const externalReferenceMapping = store.get(externalReferenceMappingAtom);
+    const externalItemMapping = store.get(externalReferenceItemMappingAtom);
     const citationMetadataMap = store.get(citationDataMapAtom);
 
     // Array of cited items
@@ -90,7 +91,11 @@ export function renderToMarkdown(
             return '';
         }
 
-        if (attrs.external_id && !attrs.id) {
+        const isExternalReference = attrs.external_id && !attrs.id;
+        const isExternalReferenceMappedToZoteroItem = isExternalReference && !!externalItemMapping[attrs.external_id];
+
+        // External reference
+        if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
             const citationMetadata = citationMetadataMap[attrs.cid || ''];
             if (!citationMetadata) {
                 logger(`renderToMarkdown: No external reference found for external_id: ${attrs.external_id}`);
@@ -100,6 +105,16 @@ export function renderToMarkdown(
                 externalReferences.push(externalReferenceMapping[attrs.external_id]);
             }
             return citationMetadata.author_year ? `(${citationMetadata.author_year})` : '';
+        }
+
+        // External reference mapped to Zotero item
+        if (isExternalReferenceMappedToZoteroItem) {
+            const mappedZoteroItem = externalItemMapping[attrs.external_id];
+            if (!mappedZoteroItem) {
+                logger(`renderToMarkdown: No Zotero item found for external_id: ${attrs.external_id}`);
+                return '';
+            }
+            attrs.id = `${mappedZoteroItem.library_id}-${mappedZoteroItem.zotero_key}`;
         }
 
         // Parse the id to get libraryID and itemKey
