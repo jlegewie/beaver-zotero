@@ -94,7 +94,7 @@ export function renderToMarkdown(
         const isExternalReference = attrs.external_id && !attrs.id;
         const isExternalReferenceMappedToZoteroItem = isExternalReference && !!externalItemMapping[attrs.external_id];
 
-        // External reference
+        // 1. External reference ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
             const citationMetadata = citationMetadataMap[attrs.cid || ''];
             if (!citationMetadata) {
@@ -107,7 +107,7 @@ export function renderToMarkdown(
             return citationMetadata.author_year ? `(${citationMetadata.author_year})` : '';
         }
 
-        // External reference mapped to Zotero item
+        // 2. External reference mapped to Zotero item ---------------------------------------------------
         if (isExternalReferenceMappedToZoteroItem) {
             const mappedZoteroItem = externalItemMapping[attrs.external_id];
             if (!mappedZoteroItem) {
@@ -116,6 +116,8 @@ export function renderToMarkdown(
             }
             attrs.id = `${mappedZoteroItem.library_id}-${mappedZoteroItem.zotero_key}`;
         }
+
+        // 3. Zotero item ---------------------------------------------------
 
         // Parse the id to get libraryID and itemKey
         const { libraryID, itemKey } = parseId(attrs.id);
