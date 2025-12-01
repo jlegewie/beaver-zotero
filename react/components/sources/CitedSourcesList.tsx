@@ -8,7 +8,7 @@ import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
 import { CitationData, getUniqueKey, isExternalCitation } from '../../types/citations';
 import Tooltip from '../ui/Tooltip';
-import { externalReferenceMappingAtom, externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
 import ActionButtons from '../externalReferences/actionButtons';
 import { ExternalReference } from '../../types/externalReferences';
 import { ZoteroItemReference } from '../../types/zotero';
@@ -180,51 +180,6 @@ function stripUrlsFromCitation(citation: string | null | undefined): string {
         .replace(/\s+\.$/, '.')  // Clean up " ." at end
         .replace(/\s{2,}/g, ' ') // Collapse multiple spaces
         .trim();
-}
-
-/**
- * Format a bibliographic citation string for external references
- * Similar format to Zotero library items: Authors. Year. "Title." Journal/Venue.
- */
-function formatExternalCitation(ref: ExternalReference): string {
-    const parts: string[] = [];
-    
-    // Authors
-    if (ref.authors && ref.authors.length > 0) {
-        const authorStr = ref.authors.length > 2 
-            ? `${ref.authors[0]} et al.`
-            : ref.authors.join(', ');
-        parts.push(authorStr);
-    }
-    
-    // Year
-    if (ref.year) {
-        parts.push(`${ref.year}.`);
-    }
-    
-    // Title (in quotes)
-    if (ref.title) {
-        parts.push(`"${ref.title}."`);
-    }
-    
-    // Venue/Journal
-    if (ref.venue) {
-        parts.push(ref.venue + '.');
-    } else if (ref.journal?.name) {
-        let journalPart = ref.journal.name;
-        if (ref.journal.volume) {
-            journalPart += ` ${ref.journal.volume}`;
-            if (ref.journal.issue) {
-                journalPart += ` (${ref.journal.issue})`;
-            }
-        }
-        if (ref.journal.pages) {
-            journalPart += `: ${ref.journal.pages}`;
-        }
-        parts.push(journalPart + '.');
-    }
-    
-    return parts.join(' ');
 }
 
 export default CitedSourcesList;

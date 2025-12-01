@@ -357,3 +357,48 @@ export const isCheckingReferenceObjectAtom = atom(
     }
 );
 
+
+/**
+ * Format a bibliographic citation string for external references
+ * Similar format to Zotero library items: Authors. Year. "Title." Journal/Venue.
+ */
+export function formatExternalCitation(ref: ExternalReference): string {
+    const parts: string[] = [];
+    
+    // Authors
+    if (ref.authors && ref.authors.length > 0) {
+        const authorStr = ref.authors.length > 2 
+            ? `${ref.authors[0]} et al.`
+            : ref.authors.join(', ');
+        parts.push(authorStr);
+    }
+    
+    // Year
+    if (ref.year) {
+        parts.push(`${ref.year}.`);
+    }
+    
+    // Title (in quotes)
+    if (ref.title) {
+        parts.push(`"${ref.title}."`);
+    }
+    
+    // Venue/Journal
+    if (ref.venue) {
+        parts.push(ref.venue + '.');
+    } else if (ref.journal?.name) {
+        let journalPart = ref.journal.name;
+        if (ref.journal.volume) {
+            journalPart += ` ${ref.journal.volume}`;
+            if (ref.journal.issue) {
+                journalPart += ` (${ref.journal.issue})`;
+            }
+        }
+        if (ref.journal.pages) {
+            journalPart += `: ${ref.journal.pages}`;
+        }
+        parts.push(journalPart + '.');
+    }
+    
+    return parts.join(' ');
+}
