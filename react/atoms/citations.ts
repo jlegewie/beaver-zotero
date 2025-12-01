@@ -29,9 +29,13 @@ export const citationMetadataAtom = atom<CitationMetadata[]>([]);
  */
 export const citationDataAtom = atom<CitationData[]>([]);
 
+// Track the most recent async update so stale computations don't override newer data
+let citationDataUpdateVersion = 0;
+
 export const updateCitationDataAtom = atom(
     null,
     async (get, set) => {
+        const updateVersion = ++citationDataUpdateVersion;
         const metadata = get(citationMetadataAtom);
         const prev = get(citationDataAtom);
         const newCitationData: CitationData[] = [];
@@ -89,6 +93,11 @@ export const updateCitationDataAtom = atom(
                     numericCitation
                 });
             }
+        }
+
+        if (updateVersion !== citationDataUpdateVersion) {
+            logger(`updateCitationDataAtom: Skipping stale update version ${updateVersion}`, 3);
+            return;
         }
 
         logger(`updateCitationDataAtom: Setting citationDataAtom with ${newCitationData.length} citations`);
