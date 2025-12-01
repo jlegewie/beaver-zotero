@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { citationDataAtom } from '../../atoms/citations';
+import { getCitationDataAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
@@ -35,22 +35,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     children,
     exportRendering = false
 }) => {
-    // Get the sources from atom state
-    const citationsData = useAtomValue(citationDataAtom);
-
-    // Get the citation format preference
-    const authorYearFormat = getPref("citationFormat") !== "numeric";
-
-    if (!unique_key || !citationId) return null;
     
-    // Parse the id to get libraryID and itemKey
-    unique_key = unique_key.replace('user-content-', '');
-    const [libraryIDString, itemKey] = unique_key.includes('-') ? unique_key.split('-') : [unique_key, unique_key];
-    const libraryID = parseInt(libraryIDString) || 1;
-
-    // Find the attachmentCitation in the available sources
-    const attachmentCitation = citationsData.find(a => a.citation_id === citationId);
-
+    // Get citation data from the citationDataMapAtom
+    const getCitationData = useAtomValue(getCitationDataAtom);
+    
     // Fallback citation data (when citation metadata is not available)
     const [fallbackCitation, setFallbackCitation] = useState<{
         formatted_citation: string;
@@ -59,84 +47,127 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         loading: boolean;
     } | null>(null);
 
+    // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
+    const { libraryID, itemKey, cleanKey } = useMemo(() => {
+        if (!unique_key) return { libraryID: 1, itemKey: '', cleanKey: '' };
+        const cleanKey = unique_key.replace('user-content-', '');
+        const [libraryIDString, itemKey] = cleanKey.includes('-') 
+            ? cleanKey.split('-') 
+            : [cleanKey, cleanKey];
+        return { 
+            libraryID: parseInt(libraryIDString) || 1, 
+            itemKey, 
+            cleanKey 
+        };
+    }, [unique_key]);
+
+    // Get attachment citation data via O(1) map lookup
+    const attachmentCitation = citationId ? getCitationData(citationId) : undefined;
+    
+    // Get the citation format preference
+    const authorYearFormat = getPref("citationFormat") !== "numeric";
+
     // Load fallback citation data when citation metadata is not available
+    const attachmentCitationId = attachmentCitation?.citation_id;
     useEffect(() => {
+        // Skip if we have attachmentCitation or already have fallback
+        if (attachmentCitationId || fallbackCitation || !itemKey) return;
+        
+        let cancelled = false;
+        
         const loadFallbackCitation = async () => {
-            // Only load if we don't have attachmentCitation and haven't loaded fallback yet
-            if (!attachmentCitation && !fallbackCitation) {
-                setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+            setFallbackCitation({ formatted_citation: '', citation: '', url: '', loading: true });
+            
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+                if (cancelled) return;
                 
-                try {
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
-                    if (!item) {
-                        logger('ZoteroCitation: Failed to format citation for id: ' + unique_key);
-                        setFallbackCitation(null);
-                        return;
-                    }
-
-                    await loadFullItemDataWithAllTypes([item]);
-
-                    const parentItem = item.parentItem;
-                    const itemToCite = item.isNote() ? item : parentItem || item;
-                    
-                    const citation = getDisplayNameFromItem(itemToCite);
-                    const formatted_citation = getReferenceFromItem(itemToCite);
-                    const url = createZoteroURI(item);
-
-                    setFallbackCitation({
-                        formatted_citation,
-                        citation,
-                        url,
-                        loading: false
-                    });
-                } catch (error) {
-                    logger('ZoteroCitation: Error loading fallback citation: ' + error);
+                if (!item) {
+                    logger('ZoteroCitation: Failed to format citation for id: ' + cleanKey);
                     setFallbackCitation(null);
+                    return;
                 }
+
+                await loadFullItemDataWithAllTypes([item]);
+                if (cancelled) return;
+
+                const parentItem = item.parentItem;
+                const itemToCite = item.isNote() ? item : parentItem || item;
+                
+                const citation = getDisplayNameFromItem(itemToCite);
+                const formatted_citation = getReferenceFromItem(itemToCite);
+                const url = createZoteroURI(item);
+
+                setFallbackCitation({
+                    formatted_citation,
+                    citation,
+                    url,
+                    loading: false
+                });
+            } catch (error) {
+                if (cancelled) return;
+                logger('ZoteroCitation: Error loading fallback citation: ' + error);
+                setFallbackCitation(null);
             }
         };
 
         loadFallbackCitation();
-    }, [attachmentCitation, libraryID, itemKey, unique_key]);
+        
+        // Cleanup to prevent setting state after unmount
+        return () => { cancelled = true; };
+    // Note: fallbackCitation intentionally excluded from deps
+    // because we only want to load once when it's initially null
+    }, [attachmentCitationId, libraryID, itemKey, cleanKey]);
 
-    // Update the citation data logic
-    let formatted_citation = '';
-    let citation = '';
-    let url = '';
-    let previewText = '';
+    // Cleanup effect for when component unmounts or citation changes
+    useEffect(() => {
+        return () => {
+            // Cleanup temporary annotations when component unmounts
+            if (BeaverTemporaryAnnotations.getCount() > 0) {
+                logger('ZoteroCitation: cleanupTemporaryAnnotations');
+                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
+            }
+        };
+    }, [citationId]);
 
-    if (attachmentCitation) {
-        formatted_citation = attachmentCitation.formatted_citation || '';
-        citation = attachmentCitation.citation || '';
-        url = attachmentCitation.url || '';
-        previewText = attachmentCitation.preview
-            ? `"${attachmentCitation.preview}"`
-            : formatted_citation || '';
-    } else if (fallbackCitation) {
-        if (fallbackCitation.loading) {
-            // Show loading state
-            formatted_citation = '?';
-            citation = '?';
-            url = '';
-            previewText = 'Loading citation data...';
-        } else {
-            formatted_citation = fallbackCitation.formatted_citation;
-            citation = fallbackCitation.citation;
-            url = fallbackCitation.url;
-            previewText = formatted_citation;
+    // Memoize derived citation data to avoid recalculation on every render
+    const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
+        let formatted_citation = '';
+        let citation = '';
+        let url = '';
+        let previewText = '';
+
+        if (attachmentCitation) {
+            formatted_citation = attachmentCitation.formatted_citation || '';
+            citation = attachmentCitation.citation || '';
+            url = attachmentCitation.url || '';
+            previewText = attachmentCitation.preview
+                ? `"${attachmentCitation.preview}"`
+                : formatted_citation || '';
+        } else if (fallbackCitation) {
+            if (fallbackCitation.loading) {
+                // Show loading state
+                formatted_citation = '?';
+                citation = '?';
+                url = '';
+                previewText = 'Loading citation data...';
+            } else {
+                formatted_citation = fallbackCitation.formatted_citation;
+                citation = fallbackCitation.citation;
+                url = fallbackCitation.url;
+                previewText = formatted_citation;
+            }
         }
-    } else {
-        // No data available
-        formatted_citation = '';
-        citation = '';
-        url = '';
-    }
-    
-    // Add the URL to open the PDF/Note
-    const pages = getCitationPages(attachmentCitation);
+        
+        const pages = getCitationPages(attachmentCitation);
+        const firstPage = pages.length > 0 ? pages[0] : null;
+        const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
 
-    const firstPage = pages ? pages[0] : null;
-    url = firstPage ? `${url}?page=${firstPage}` : url;
+        return { formatted_citation, citation, url: finalUrl, previewText, pages };
+    }, [attachmentCitation, fallbackCitation]);
+
+
+    if (!unique_key || !citationId) return null;
     
         // Create temporary annotations for bounding boxes
     const createBoundingBoxHighlights = async (boundingBoxData: any[], item: Zotero.Item) => {
@@ -357,17 +388,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             }
         }
     };
-
-    // Cleanup effect for when component unmounts or citation changes
-    useEffect(() => {
-        return () => {
-            // Cleanup temporary annotations when component unmounts
-            if (BeaverTemporaryAnnotations.getCount() > 0) {
-                logger('ZoteroCitation: cleanupTemporaryAnnotations');
-                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
-            }
-        };
-    }, [citationId]);
 
     // Format for display
     let displayText = '';

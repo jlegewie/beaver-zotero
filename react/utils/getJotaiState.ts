@@ -1,4 +1,4 @@
-import { citationMetadataAtom, citationDataAtom } from "../atoms/citations"
+import { citationMetadataAtom, citationDataListAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom } from "../atoms/messageComposition"
@@ -17,7 +17,7 @@ export const atomRegistry = {
 
     // Citations
     citationMetadata: citationMetadataAtom,
-    citationMetadataView: citationDataAtom,
+    citationMetadataView: citationDataListAtom,
 
     // Files
     fileStatus: fileStatusAtom,
