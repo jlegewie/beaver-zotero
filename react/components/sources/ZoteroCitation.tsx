@@ -376,6 +376,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const pages = getCitationPages(attachmentCitation);
         logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
+        // Handle regular items
+        if (item.isAttachment() && boundingBoxData.length == 0 && pages.length == 0) {
+            logger(`ZoteroCitation: Selecting attachment (${item.id})`);
+            await selectItemById(item.id);
+            return;
+        }
+
         try {
             let reader = await getCurrentReaderAndWaitForView();
             logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
