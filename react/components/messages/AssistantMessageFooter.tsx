@@ -134,12 +134,12 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
             const args = typeof toolCall.function.arguments === 'string' 
                 ? JSON.parse(toolCall.function.arguments) 
                 : toolCall.function.arguments;
-            query = args.query || args.q || args.keywords || args.topic || args.search_term || "";
+            query = args.search_label || args.query || args.q || args.keywords || args.topic || args.search_term || "";
         } catch (e) {
             console.error('Error parsing tool call arguments:', e);
         }
         
-        const count = toolCall.response?.attachments?.length ?? 0;
+        const count = toolCall.response?.attachments?.length || toolCall.result?.references?.length || 0;
         
         let details = `[${label}`;
         if (query) details += `: "${query}"`;
