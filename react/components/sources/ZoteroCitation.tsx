@@ -331,7 +331,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
         // Get the item
         logger(`ZoteroCitation: Zotero Item (${libraryID}, ${itemKey})`);
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
         if (!item) {
             logger(`ZoteroCitation: Failed to get Zotero item (${libraryID}, ${itemKey})`);
             return;
