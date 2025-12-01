@@ -526,12 +526,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     } else {
         displayText = citationMetadata?.numericCitation || citation;
     }
-    if (exportRendering) {
-        displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
-    }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
+        displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
+
         // External citations cannot be exported as proper Zotero citations
         if (isExternal) {
             return (
