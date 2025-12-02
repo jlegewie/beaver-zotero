@@ -46,6 +46,7 @@ export interface ToolCall {
     result?: ToolResultUnion;
     label?: string;
     status?: 'in_progress' | 'completed' | 'error';
+    progress_message?: string;
 }
 
 export interface UsageModel {

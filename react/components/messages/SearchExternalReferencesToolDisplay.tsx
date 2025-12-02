@@ -46,6 +46,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     };
     
     const getButtonText = () => {
+        if (toolCall.status === 'in_progress' && toolCall.progress_message) return `Web Search: ${toolCall.progress_message}${''.padEnd(loadingDots, '.')}`;;
         if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
         
         if (totalCount === 0) return 'Web Search: No results';
