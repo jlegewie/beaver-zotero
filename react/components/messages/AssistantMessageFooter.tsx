@@ -132,7 +132,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         const label = toolCall.label || toolCall.function.name;
         let query = "";
         try {
-            const args = typeof toolCall.function.arguments === 'string' 
+            const args = typeof toolCall.function.arguments === 'string' && toolCall.function.arguments.startsWith('{')
                 ? JSON.parse(toolCall.function.arguments) 
                 : toolCall.function.arguments;
             query = args.search_label || args.query || args.q || args.keywords || args.topic || args.search_term || "";
