@@ -158,7 +158,9 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
         throw new Error('Either toolCall or createItemActions must be provided');
     }
     const isToolCall = !!toolCall;
-    const groupId = `${messageId}:${isToolCall ? toolCall!.id : createItemActions?.[0]?.toolcall_id ?? 'create-item'}`;
+    // Generate unique group ID: use tool call ID if available, otherwise use first action's toolcall_id or fallback
+    const toolCallId = toolCall?.id ?? createItemActions?.[0]?.toolcall_id ?? 'create-item';
+    const groupId = `${messageId}:${toolCallId}`;
     const backgroundColor = isToolCall ? 'bg-senary' : undefined;
 
     // UI state for collapsible item list
