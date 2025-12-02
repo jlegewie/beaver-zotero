@@ -30,7 +30,7 @@ const ProposedActionsDisplay: React.FC<ProposedActionsDisplayProps> = ({
     ) as CreateItemProposedAction[];
     console.log("proposedActions", proposedActions)
 
-    if (proposedActions.length === 0) {
+    if (proposedActions.length === 0 || proposedActions.every((action) => action.status === 'rejected' || action.status === 'undone')) {
         return null;
     }
 
