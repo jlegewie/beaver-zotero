@@ -405,12 +405,12 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
     // Generate button text
     const getButtonText = () => {
         if (isInProgress) {
-            return `Add Items${''.padEnd(loadingDots, '.')}`;
+            return `Import Items${''.padEnd(loadingDots, '.')}`;
         }
         if (isError) {
-            return 'Add Items: Error';
+            return 'Import Items: Error';
         }
-        return 'Add Items';
+        return 'Import Items';
     };
 
     // Determine when results can be toggled and when button should be disabled
