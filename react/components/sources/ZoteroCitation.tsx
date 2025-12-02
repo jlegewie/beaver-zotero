@@ -217,7 +217,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             if (isExternalCitation(citationMetadata)) {
                 // External citation - use metadata directly
                 citation = citationMetadata.author_year || '';
-                formatted_citation = citationMetadata.preview || citation;
+                formatted_citation = citationMetadata.formatted_citation || citation;
                 previewText = citationMetadata.preview
                     ? `"${citationMetadata.preview}"`
                     : formatted_citation;
