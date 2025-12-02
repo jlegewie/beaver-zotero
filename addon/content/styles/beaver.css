@@ -65,6 +65,10 @@
     opacity: .5;
 }
 
+[id^="beaver-pane-"] button {
+    all: revert;
+}
+
 [id^="beaver-pane-"] .sources-info {
     display: inline-flex;
     align-items: center;
@@ -1466,7 +1470,7 @@
 
 /* Webapp button styles for login forms - using existing theme colors */
 [id^="beaver-pane-"] .webapp-btn {
-    padding: 1.3em;
+    padding: 10px;
     font-size: 0.875rem;
     font-weight: 500;
     border-radius: 0.5rem;
