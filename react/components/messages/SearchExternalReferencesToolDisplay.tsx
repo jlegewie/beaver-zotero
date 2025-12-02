@@ -79,7 +79,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                         variant="ghost-secondary"
                         // icon={getIcon()}
                         className={`
-                            text-base scale-105 min-w-0 align-start text-left
+                            text-base scale-105 w-full min-w-0 align-start text-left
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                         `}
                         style={{ padding: '2px 6px', maxHeight: 'none'}}
