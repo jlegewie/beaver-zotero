@@ -1,9 +1,8 @@
 import React from 'react';
-import { useAtomValue } from 'jotai';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import AssistantMessage from './AssistantMessage';
 import AssistantMessageFooter from './AssistantMessageFooter';
-import { isChatRequestPendingAtom } from '../../atoms/threads';
+import ProposedActionsDisplay from './ProposedActionsDisplay';
 
 interface AssistantMessagesGroupProps {
     messages: ChatMessage[];
@@ -45,6 +44,10 @@ const AssistantMessagesGroup: React.FC<AssistantMessagesGroupProps> = ({
                     messages={messages}
                 />
             </div>
+        
+            {/* Proposed actions */}
+            <ProposedActionsDisplay messages={messages} />
+
         </div>
     );
 };
