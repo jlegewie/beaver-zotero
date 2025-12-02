@@ -370,7 +370,7 @@ export const createBoundingBoxHighlights = async (
     try {
         const reader = await getCurrentReaderAndWaitForView();
         if (!reader || !reader._internalReader) {
-            logger('ZoteroCitation: No active reader found for creating bounding box highlights');
+            logger('createBoundingBoxHighlights: No active reader found for creating bounding box highlights');
             return [];
         }
 
@@ -469,7 +469,7 @@ export const createBoundingBoxHighlights = async (
         
         return annotationReferences;
     } catch (error) {
-        logger('ZoteroCitation: Failed to create bounding box highlights: ' + error);
+        logger('createBoundingBoxHighlights: Failed to create bounding box highlights: ' + error);
         return [];
     }
 };
