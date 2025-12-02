@@ -91,7 +91,7 @@ export const updateCitationDataAtom = atom(
                     : undefined;
 
                 // Preview for external references
-                const preview = externalRef ? formatExternalCitation(externalRef) : undefined;
+                const externalFormattedCitation = externalRef ? formatExternalCitation(externalRef) : undefined;
 
                 // For external citations, use the metadata directly
                 newCitationDataMap[citation.citation_id] = {
@@ -101,8 +101,8 @@ export const updateCitationDataAtom = atom(
                     icon: 'webpage-gray',  // Default icon for external references
                     name: citation.author_year || null,
                     citation: citation.author_year || null,
-                    formatted_citation: preview || null,
-                    preview: preview,
+                    formatted_citation: externalFormattedCitation || null,
+                    preview: undefined,
                     url: null, 
                     numericCitation
                 };
