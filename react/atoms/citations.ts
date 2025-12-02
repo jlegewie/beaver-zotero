@@ -4,6 +4,7 @@ import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 import { CitationMetadata, CitationData, isExternalCitation, getUniqueKey } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 
 /**
  * Fallback citation cache for citations not in citationDataMapAtom
@@ -56,6 +57,7 @@ export const updateCitationDataAtom = atom(
         const updateVersion = ++citationDataUpdateVersion;
         const metadata = get(citationMetadataAtom);
         const prevMap = get(citationDataMapAtom);
+        const externalReferenceMap = get(externalReferenceMappingAtom);
         const newCitationDataMap: Record<string, CitationData> = {};
         const citationKeyToNumeric = new Map<string, string>();
         logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
@@ -83,6 +85,14 @@ export const updateCitationDataAtom = atom(
 
             // Handle external citations differently
             if (isExternalCitation(citation)) {
+                // Look up additional data from external reference mapping
+                const externalRef = citation.external_source_id 
+                    ? externalReferenceMap[citation.external_source_id] 
+                    : undefined;
+
+                // Preview for external references
+                const preview = externalRef ? formatExternalCitation(externalRef) : undefined;
+
                 // For external citations, use the metadata directly
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
@@ -91,8 +101,9 @@ export const updateCitationDataAtom = atom(
                     icon: 'webpage-gray',  // Default icon for external references
                     name: citation.author_year || null,
                     citation: citation.author_year || null,
-                    formatted_citation: citation.preview || null,
-                    url: null,  // External citations don't have Zotero URLs
+                    formatted_citation: preview || null,
+                    preview: preview,
+                    url: null, 
                     numericCitation
                 };
                 continue;
