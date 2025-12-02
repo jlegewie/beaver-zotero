@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { citationDataMapAtom, fallbackCitationCacheAtom } from '../../atoms/citations';
+import { useAtomValue } from 'jotai';
+import { citationDataMapAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
-import { getDisplayNameFromItem, getReferenceFromItem } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCitationPages, getCitationBoundingBoxes, isExternalCitation, isZoteroCitation } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
@@ -13,8 +12,8 @@ import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
-import { loadFullItemDataWithAllTypes } from '../../../src/utils/zoteroUtils';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { useFallbackCitation } from '../../hooks/useFallbackCitation';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -42,25 +41,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 }) => {
     // Get citation data maps
     const citationDataMap = useAtomValue(citationDataMapAtom);
-    // const citationDataMap = {};
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
-
-    // Fallback citation cache (persists across component mounts via Jotai)
-    const fallbackCache = useAtomValue(fallbackCitationCacheAtom);
-    const setFallbackCache = useSetAtom(fallbackCitationCacheAtom);
-    
-    // Fallback citation data (when citation metadata is not available)
-    // We track the key to prevent showing stale data when reusing the component
-    const [fallbackDataState, setFallbackDataState] = useState<{
-        key: string;
-        data: {
-            formatted_citation: string;
-            citation: string;
-            url: string;
-            loading: boolean;
-        } | null;
-    }>({ key: '', data: null });
 
     // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
     const { libraryID, itemKey, cleanKey } = useMemo(() => {
@@ -76,22 +58,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         };
     }, [unique_key]);
 
-    // Derived fallback citation that is valid only for the current key
-    // Check atom cache first (sync) to avoid flicker on remount
-    const fallbackCitation = useMemo(() => {
-        if (fallbackDataState.key === cleanKey && fallbackDataState.data) {
-            return fallbackDataState.data;
-        }
-        // Check Jotai atom cache for instant access on remount
-        const cached = fallbackCache[cleanKey];
-        if (cached) {
-            return { ...cached, loading: false };
-        }
-        return null;
-    }, [fallbackDataState, cleanKey, fallbackCache]);
-
     // Get attachment citation data from map
     const citationMetadata = citationId ? citationDataMap[citationId] : undefined;
+    
+    // Load fallback citation data when citation metadata is not available
+    const fallbackCitation = useFallbackCitation({
+        cleanKey,
+        libraryID,
+        itemKey,
+        citationMetadataId: citationMetadata?.citation_id
+    });
 
     // Determine if this is an external citation
     const isExternal = citationMetadata ? isExternalCitation(citationMetadata) : !!external_id;
@@ -104,95 +80,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
-
-    // if (!citationId) return null;
-            
-    // // Parse the id to get libraryID and itemKey (for Zotero citations)
-    // let libraryID: number | undefined;
-    // let itemKey: string | undefined;
-    
-    // if (unique_key) {
-    //     const cleanKey = unique_key.replace('user-content-', '');
-    //     const [libraryIDString, key] = cleanKey.includes('-') ? cleanKey.split('-') : [cleanKey, cleanKey];
-    //     libraryID = parseInt(libraryIDString) || 1;
-    //     itemKey = key;
-    // } else if (citationMetadata && isZoteroCitation(citationMetadata)) {
-    //     libraryID = citationMetadata.library_id;
-    //     itemKey = citationMetadata.zotero_key;
-    // } else if (mappedZoteroItem) {
-    //     // Use the mapped Zotero item for external citations
-    //     libraryID = mappedZoteroItem.library_id;
-    //     itemKey = mappedZoteroItem.zotero_key;
-    // }
-
-    // // Fallback citation data (when citation metadata is not available)
-    // const [fallbackCitation, setFallbackCitation] = useState<{
-    //     formatted_citation: string;
-    //     citation: string;
-    //     url: string;
-    //     loading: boolean;
-    // } | null>(null);
-
-    // Load fallback citation data when citation metadata is not available
-    const citationMetadataId = citationMetadata?.citation_id;
-    useEffect(() => {
-        // Skip if we have citationMetadata or already have fallback (from atom cache or local state)
-        if (citationMetadataId || fallbackCitation || !itemKey) return;
-        
-        let cancelled = false;
-        
-        const loadFallbackCitation = async () => {
-            setFallbackDataState({ 
-                key: cleanKey,
-                data: { formatted_citation: '', citation: '', url: '', loading: true }
-            });
-            
-            try {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
-                if (cancelled) return;
-                
-                if (!item) {
-                    logger('ZoteroCitation: Failed to format citation for id: ' + cleanKey);
-                    setFallbackDataState({ key: cleanKey, data: null });
-                    return;
-                }
-
-                await loadFullItemDataWithAllTypes([item]);
-                if (cancelled) return;
-
-                const parentItem = item.parentItem;
-                const itemToCite = item.isNote() ? item : parentItem || item;
-                
-                const citation = getDisplayNameFromItem(itemToCite);
-                const formatted_citation = getReferenceFromItem(itemToCite);
-                const url = createZoteroURI(item);
-
-                // Cache the result in Jotai atom for future mounts
-                setFallbackCache(prev => ({ ...prev, [cleanKey]: { formatted_citation, citation, url } }));
-
-                setFallbackDataState({
-                    key: cleanKey,
-                    data: {
-                        formatted_citation,
-                        citation,
-                        url,
-                        loading: false
-                    }
-                });
-            } catch (error) {
-                if (cancelled) return;
-                logger('ZoteroCitation: Error loading fallback citation: ' + error);
-                setFallbackDataState({ key: cleanKey, data: null });
-            }
-        };
-
-        loadFallbackCitation();
-
-        // Cleanup to prevent setting state after unmount
-        return () => { cancelled = true; };
-    // Note: fallbackCitation intentionally excluded from deps
-    // because we only want to load once when it's initially null
-    }, [citationMetadataId, libraryID, itemKey, cleanKey, setFallbackCache]);
 
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {
