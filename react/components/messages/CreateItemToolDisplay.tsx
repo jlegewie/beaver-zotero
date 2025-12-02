@@ -134,7 +134,8 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
 
 interface CreateItemToolDisplayProps {
     messageId: string;
-    toolCall: ToolCall;
+    toolCall?: ToolCall;
+    createItemActions?: CreateItemProposedAction[];
 }
 
 /**
@@ -147,8 +148,15 @@ interface CreateItemToolDisplayProps {
  * 2. applied -> Item created in or linked to Zotero library
  * 3. rejected/undone -> User declined or removed the item
  */
-const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId, toolCall }) => {
-    const groupId = `${messageId}:${toolCall.id}`;
+const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
+    messageId,
+    toolCall,
+    createItemActions,
+}) => {
+    if (!toolCall && !createItemActions) {
+        throw new Error('Either toolCall or createItemActions must be provided');
+    }
+    const groupId = `${messageId}:${toolCall?.id ?? createItemActions?.[0]?.toolcall_id ?? 'create-item'}`;
 
     // UI state for collapsible item list
     const panelStates = useAtomValue(annotationPanelStateAtom);
@@ -165,9 +173,9 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
     const autoAcknowledgedRef = useRef<Set<string>>(new Set());
 
     // Tool call state
-    const isInProgress = toolCall.status === 'in_progress';
-    const isCompleted = toolCall.status === 'completed';
-    const isError = toolCall.status === 'error';
+    const isInProgress = toolCall ? toolCall.status === 'in_progress': false;
+    const isCompleted = toolCall ? toolCall.status === 'completed': true;
+    const isError = toolCall ? toolCall.status === 'error': false;
 
     // Loading animation for in-progress tool calls
     const loadingDots = useLoadingDots(isInProgress);
@@ -181,7 +189,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
 
     // Extract create item actions from proposed actions
     const getProposedActionsByToolcall = useAtomValue(getProposedActionsByToolcallAtom);
-    const createItemActions = getProposedActionsByToolcall(toolCall.id, isCreateItemAction) as CreateItemProposedAction[];
+    createItemActions = createItemActions ?? getProposedActionsByToolcall(toolCall!.id, isCreateItemAction) as CreateItemProposedAction[];
     const totalItems = createItemActions.length;
 
     // Panel state management
@@ -423,7 +431,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({ messageId
 
     return (
         <div
-            id={`tool-${toolCall.id}`}
+            id={`tool-${groupId}`}
             className="border-popup rounded-md display-flex flex-col min-w-0"
         >
             {/* Header with button and action icons */}
