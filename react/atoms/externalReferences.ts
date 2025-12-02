@@ -359,18 +359,72 @@ export const isCheckingReferenceObjectAtom = atom(
 
 
 /**
+ * Format a single author name
+ * @param author Author name string (may be "firstName lastName" or "lastName, firstName")
+ * @param isFirst Whether this is the first author (formats as "lastName, firstName")
+ * @returns Formatted author string
+ */
+function formatAuthorName(author: string, isFirst: boolean): string {
+    const trimmed = author.trim();
+    
+    if (trimmed.includes(',')) {
+        // Already in "lastName, firstName" format
+        if (isFirst) {
+            return trimmed;
+        }
+        // Convert to "firstName lastName" for subsequent authors
+        const [lastName, firstName] = trimmed.split(',').map(s => s.trim());
+        return firstName ? `${firstName} ${lastName}` : lastName;
+    }
+    
+    // Author is in "firstName lastName" format
+    const nameParts = trimmed.split(/\s+/);
+    if (nameParts.length === 1) {
+        return trimmed; // Single name, return as is
+    }
+    
+    if (isFirst) {
+        // Convert to "lastName, firstName" for first author
+        const lastName = nameParts.pop();
+        const firstName = nameParts.join(' ');
+        return `${lastName}, ${firstName}`;
+    }
+    
+    return trimmed; // Keep as "firstName lastName" for subsequent authors
+}
+
+/**
  * Format a bibliographic citation string for external references
- * Similar format to Zotero library items: Authors. Year. "Title." Journal/Venue.
+ * Format: Authors. Year. "Title." Journal/Venue.
+ * 
+ * Author rules:
+ * - First author: lastName, firstName
+ * - Subsequent authors: firstName lastName
+ * - Separated by ", " with " and " before the last author
+ * - More than 3 authors: first author et al.
+ * 
+ * Journal format: journalName volume: pages
  */
 export function formatExternalCitation(ref: ExternalReference): string {
     const parts: string[] = [];
     
     // Authors
     if (ref.authors && ref.authors.length > 0) {
-        const authorStr = ref.authors.length > 2 
-            ? `${ref.authors[0]} et al.`
-            : ref.authors.join(', ');
-        parts.push(authorStr);
+        let authorStr: string;
+        
+        if (ref.authors.length > 3) {
+            // More than 3 authors: first author + et al.
+            authorStr = formatAuthorName(ref.authors[0], true) + ' et al.';
+        } else if (ref.authors.length === 1) {
+            authorStr = formatAuthorName(ref.authors[0], true);
+        } else {
+            // 2-3 authors: "lastName, firstName, firstName lastName and firstName lastName"
+            const formattedAuthors = ref.authors.map((a, i) => formatAuthorName(a, i === 0));
+            const lastAuthor = formattedAuthors.pop();
+            authorStr = formattedAuthors.join(', ') + ' and ' + lastAuthor;
+        }
+        
+        parts.push(authorStr + '.');
     }
     
     // Year
@@ -390,9 +444,6 @@ export function formatExternalCitation(ref: ExternalReference): string {
         let journalPart = ref.journal.name;
         if (ref.journal.volume) {
             journalPart += ` ${ref.journal.volume}`;
-            if (ref.journal.issue) {
-                journalPart += ` (${ref.journal.issue})`;
-            }
         }
         if (ref.journal.pages) {
             journalPart += `: ${ref.journal.pages}`;
