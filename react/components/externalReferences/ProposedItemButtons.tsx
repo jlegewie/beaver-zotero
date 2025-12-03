@@ -260,7 +260,7 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
             <div className="flex-1"/>
 
             {isLoading && (
-                <Spinner className="scale-13 -mr-1" />
+                <Spinner className="scale-12 -mr-1" />
             )}
 
             {/* Pending: Reject button */}
