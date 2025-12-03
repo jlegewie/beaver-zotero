@@ -560,15 +560,16 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                             ${isError ? 'font-color-warning' : ''}
                         `}
+                        style={{ padding: '2px 6px', maxHeight: 'none'}}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
                         <span className="mr-1">{getButtonText()}</span>
-
+                        
                         {/* Annotations metrics */}
                         {isCompleted && hasAnnotationsToShow && (
                             <div className="display-flex flex-row items-center gap-1">
                                 {appliedAnnotationCount > 0 &&
-                                   <div className="font-color-green text-sm">+{appliedAnnotationCount}</div>
+                                <div className="font-color-green text-sm">+{appliedAnnotationCount}</div>
                                 }
                                 {rejectedAnnotationCount > 0 &&
                                     <div className="font-color-tertiary text-sm">-{rejectedAnnotationCount}</div>
