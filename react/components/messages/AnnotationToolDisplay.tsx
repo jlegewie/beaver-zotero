@@ -8,7 +8,8 @@ import {
     ArrowRightIcon,
     Icon,
     TickIcon,
-    CancelIcon
+    CancelIcon,
+    HighlighterIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -511,9 +512,9 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
             if (totalAnnotations === 0) return AlertIcon;
-            return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+            return HighlighterIcon;
         }
-        return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+        return HighlighterIcon;
     };
 
     // Generate button text showing annotation count
@@ -543,7 +544,10 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
         >
             {/* Main button that shows annotation count and toggles visibility */}
             <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}`}
+                className={`
+                    display-flex flex-row bg-senary py-15 px-2
+                    ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}`
+                }
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
@@ -551,9 +555,6 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                     <Button
                         variant="ghost-secondary"
                         icon={getIcon()}
-                        // onClick={toggleResults}
-                        // onMouseEnter={() => setIsButtonHovered(true)}
-                        // onMouseLeave={() => setIsButtonHovered(false)}
                         className={`
                             text-base scale-105
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
