@@ -274,7 +274,7 @@
 }
 
 [id^="beaver-pane-"] .preference-input:hover {
-    background-color: var(--fill-senary);
+    background-color: var(--fill-senary) !important;
 }
 
 [id^="beaver-pane-"] .preference-input::placeholder {
