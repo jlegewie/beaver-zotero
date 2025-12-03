@@ -46,7 +46,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     };
     
     const getButtonText = () => {
-        if (toolCall.status === 'in_progress' && toolCall.progress_message) return `Web Search: ${toolCall.progress_message}${''.padEnd(loadingDots, '.')}`;;
+        // if (toolCall.status === 'in_progress' && toolCall.progress_message) return `Web Search: ${toolCall.progress_message}${''.padEnd(loadingDots, '.')}`;;
         if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
         
         if (totalCount === 0) return 'Web Search: No results';
@@ -75,7 +75,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
-                 <div className="display-flex flex-row flex-1" onClick={toggleResults}>
+                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
                     <Button
                         variant="ghost-secondary"
                         // icon={getIcon()}
@@ -110,6 +110,13 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                     <div className="flex-1"/>
                 </div>
             </div>
+
+            {/* {toolCall.status === 'in_progress' && toolCall.progress_message && ( */}
+            {toolCall.progress_message && (
+                <div className="font-color-tertiary text-xs px-3 py-1">
+                    {toolCall.progress_message}
+                </div>
+            )}
 
             {hasReferences && resultsVisible && (
                 <div className="display-flex flex-col">
