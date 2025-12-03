@@ -111,9 +111,9 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                 </div>
             </div>
 
-            {/* {toolCall.status === 'in_progress' && toolCall.progress_message && ( */}
-            {toolCall.progress_message && (
-                <div className="font-color-tertiary text-xs px-3 py-1">
+            {toolCall.status === 'in_progress' && toolCall.progress_message && (
+            // {toolCall.progress_message && (
+                <div className="font-color-tertiary text-sm px-3 ml-5">
                     {toolCall.progress_message}
                 </div>
             )}
