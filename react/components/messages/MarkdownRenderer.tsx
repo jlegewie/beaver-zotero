@@ -264,9 +264,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 
                 // Render markdown segment
                 return (
-                    <div className={className}>
+                    <div key={`markdown-${index}`} className={className}>
                         <ReactMarkdown
-                            key={`markdown-${index}`}
                             remarkPlugins={[remarkMath, remarkGfm]}
                             rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
                             components={{
