@@ -35,7 +35,7 @@ async function optimizeImageByScale(
     try {
         // Read the image file
         const imageData = await IOUtils.read(imagePath);
-        const blob = new Blob([imageData], { type: 'image/png' });
+        const blob = new Blob([imageData.buffer as ArrayBuffer], { type: 'image/png' });
         const imageUrl = URL.createObjectURL(blob);
         
         return new Promise<string>((resolve, reject) => {

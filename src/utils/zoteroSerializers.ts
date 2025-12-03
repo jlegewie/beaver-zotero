@@ -371,10 +371,10 @@ export async function serializeAttachment(
 
 /**
  * Serializes a Zotero library object
- * @param library Zotero library
+ * @param library Zotero library (Library, Group, or Feed)
  * @returns Serialized ZoteroLibrary object
  */
-export function serializeZoteroLibrary(library: Zotero.Library): ZoteroLibrary {
+export function serializeZoteroLibrary(library: _ZoteroTypes.Library.LibraryLike): ZoteroLibrary {
     return {
         library_id: library.libraryID,
         group_id: library.isGroup ? library.id : null,

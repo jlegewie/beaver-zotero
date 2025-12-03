@@ -178,10 +178,11 @@ function loadStylesheet() {
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
-	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
-		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+	if (ssService.sheetRegistered(styleSheet, sheetType)) {
+		ssService.unregisterSheet(styleSheet, sheetType);
 	}
-    ssService.loadAndRegisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+    ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
 
 
@@ -191,8 +192,9 @@ function unloadStylesheet() {
 	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
 		.getService(Ci.nsIStyleSheetService);
 	const styleSheet = Services.io.newURI(styleURI);
-	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
-		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+	if (ssService.sheetRegistered(styleSheet, sheetType)) {
+		ssService.unregisterSheet(styleSheet, sheetType);
 	}	
 }
 
@@ -204,10 +206,11 @@ function loadKatexStylesheet() {
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
-	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
-		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+	if (ssService.sheetRegistered(styleSheet, sheetType)) {
+		ssService.unregisterSheet(styleSheet, sheetType);
 	}
-    ssService.loadAndRegisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+    ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
 
 /**
@@ -218,8 +221,9 @@ function unloadKatexStylesheet() {
 	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
 		.getService(Ci.nsIStyleSheetService);
 	const styleSheet = Services.io.newURI(styleURI);
-	if (ssService.sheetRegistered(styleSheet, ssService.AUTHOR_SHEET)) {
-		ssService.unregisterSheet(styleSheet, ssService.AUTHOR_SHEET);
+	const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+	if (ssService.sheetRegistered(styleSheet, sheetType)) {
+		ssService.unregisterSheet(styleSheet, sheetType);
 	}	
 }
 

@@ -4,7 +4,7 @@
     "module": "commonjs",
     "target": "ES2016",
     "resolveJsonModule": true,
-    "skipDefaultLibCheck": true,
+    "skipLibCheck": true,
     "strict": true,
     "baseUrl": ".",
     "paths": {

@@ -389,7 +389,7 @@ export function isLibrarySynced(libraryID: number): boolean {
     }
 }
 
-export function isLibrarySkipped(library: Zotero.Library): boolean {
+export function isLibrarySkipped(library: _ZoteroTypes.Library.LibraryLike): boolean {;
     try {
         const pref = 'sync.librariesToSkip';
         const librariesToSkip = (Zotero.Prefs.get(pref) || []) as string[];
@@ -657,9 +657,9 @@ export function getActiveZoteroLibraryId(): number | null {
  * Get the current library in the library view, or the library of the currently open file
  * when in Zotero reader.
  *
- * @returns {Zotero.Library|null} The current library object, or null if no library is available
+ * @returns The current library object, or null if no library is available
  */
-export function getCurrentLibrary(): Zotero.Library | null {
+export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
 	const win = Zotero.getMainWindow();
 	if (!win) {
 		return null;

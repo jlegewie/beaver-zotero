@@ -115,14 +115,14 @@ export class EncryptedStorage {
             beaverDir.append('beaver');
 
             if (!beaverDir.exists()) {
-                beaverDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o700);
+                beaverDir.create(Ci.nsIFile.DIRECTORY_TYPE ?? 1, 0o700);
             }
 
             const storageDir = beaverDir.clone();
             storageDir.append('secure-storage');
 
             if (!storageDir.exists()) {
-                storageDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o700);
+                storageDir.create(Ci.nsIFile.DIRECTORY_TYPE ?? 1, 0o700);
             }
 
             this.storageDirectory = storageDir;

@@ -23,7 +23,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [searchQuery, setSearchQuery] = useState('');
-    const [availableLibraries, setAvailableLibraries] = useState<Zotero.Library[]>([]);
+    const [availableLibraries, setAvailableLibraries] = useState<_ZoteroTypes.Library.LibraryLike[]>([]);
     const [libraryStats, setLibraryStats] = useState<Record<number, LibraryStatistics>>({});
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const libraryStatsRef = useRef<Record<number, LibraryStatistics>>({});
