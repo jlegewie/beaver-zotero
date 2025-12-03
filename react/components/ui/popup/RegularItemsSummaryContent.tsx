@@ -1,8 +1,7 @@
 import React from 'react';
-import { CSSItemTypeIcon, CSSIcon } from '../../icons/icons';
+import { CSSItemTypeIcon, CSSIcon, Icon, TickIcon } from '../../icons/icons';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
 import { truncateText } from '../../../utils/stringUtils';
-import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 
 interface RegularItemSummary {
     item: Zotero.Item;
@@ -19,55 +18,46 @@ interface RegularItemsSummaryContentProps {
  */
 export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProps> = ({ items }) => {
     return (
-        <div className="display-flex flex-col gap-3">
+        <div className="display-flex flex-col gap-15">
             {items.map((itemSummary) => {
                 const displayName = itemSummary.item.isRegularItem()
                     ? truncateText(getDisplayNameFromItem(itemSummary.item), 50)
                     : itemSummary.item.getDisplayTitle();
                 const itemType = itemSummary.item.getItemTypeIconName();
+                const validCount = Math.max(itemSummary.totalAttachments - itemSummary.invalidAttachments, 0);
                 
                 return (
-                    <div key={itemSummary.item.key} className="display-flex flex-col gap-1">
+                    <div key={itemSummary.item.key} className="display-flex flex-col gap-2">
                         <div className="display-flex items-start gap-1">
-                            <div className="flex-shrink-0 mt-0.5">
+                            <div className="flex-shrink-0 -mt-010 scale-80">
                                 <CSSItemTypeIcon itemType={itemType} />
                             </div>
                             <div className="display-flex flex-col gap-1">
-                                <div className="truncate">
+                                <div className="font-color-secondary truncate">
                                     {displayName}
                                 </div>
                             </div>
                         </div>
-                            {/* <div className="text-xs text-gray-600 dark:text-gray-400">
-                                {itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''}
-                                {itemSummary.invalidAttachments > 0 && (
-                                    <span className="text-red-600 dark:text-red-400">
-                                        {' '}· {itemSummary.invalidAttachments} Invalid
-                                    </span>
-                                )}
-                            </div> */}
-                            {itemSummary.item.isRegularItem() && (
-                                <div className="display-flex flex-row font-color-tertiary gap-1">
-                                    <div className="display-flex items-center flex-row">
-                                        <ZoteroIcon 
-                                            icon={ZOTERO_ICONS.ATTACHMENTS} 
-                                            size={14} 
-                                            color="--fill-tertiary"
-                                            className="mr-2"
-                                        />
-                                        <span>{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''}</span>
-                                    </div>
-
-                                    {itemSummary.invalidAttachments > 0 && (
-                                        <div className="display-flex items-center flex-row">
-                                            <CSSIcon name="x-8" className="icon-16 scale-11" style={{ fill: 'var(--tag-red)' }}/>
-                                            <span>{itemSummary.invalidAttachments} unavailable</span>
-                                        </div>
+                        {itemSummary.item.isRegularItem() && (
+                            <div className="display-flex flex-row font-color-tertiary gap-2 ml-15 text-md">
+                                <div className="display-flex items-center flex-row gap-1">
+                                    {validCount > 0 && (
+                                        <Icon icon={TickIcon} size={15} className="scale-12 font-color-accent-green" />
                                     )}
+                                    {validCount === 0 && (
+                                        <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
+                                    )}
+                                    <span>{validCount} Attachment{validCount !== 1 ? 's' : ''} available</span>
                                 </div>
-                            )}
-                        
-                        
+
+                                {itemSummary.invalidAttachments > 0 && (
+                                    <div className="display-flex items-center flex-row gap-1">
+                                        <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
+                                        <span>{itemSummary.invalidAttachments} skipped</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 );
             })}

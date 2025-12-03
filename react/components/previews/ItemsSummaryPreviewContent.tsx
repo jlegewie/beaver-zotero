@@ -4,8 +4,6 @@ import { activePreviewAtom } from '../../atoms/ui';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { buildMessageItemSummary } from '../../hooks/useMessageItemSummary';
 import { RegularItemsSummaryContent } from '../ui/popup/RegularItemsSummaryContent';
-import IconButton from '../ui/IconButton';
-import { CancelIcon } from '../icons/icons';
 
 interface ItemsSummaryPreviewContentProps {
     items: Zotero.Item[];
