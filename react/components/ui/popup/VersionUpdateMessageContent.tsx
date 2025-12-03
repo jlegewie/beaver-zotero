@@ -3,6 +3,7 @@ import { TickIcon } from '../../icons/icons';
 import Icon from '../../icons/Icon';
 import { PopupMessage } from '../../../types/popupMessage';
 import Button from "../Button";
+import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface VersionUpdateMessageContentProps {
     message: PopupMessage;
@@ -42,7 +43,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                                 </span>
                                 {feature.description && (
                                     <span className="font-color-tertiary text-md">
-                                        {feature.description}
+                                        {parseTextWithLinksAndNewlines(feature.description)}
                                     </span>
                                 )}
                             </div>
