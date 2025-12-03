@@ -26,6 +26,8 @@ import { ButtonVariant } from '../ui/Button';
 import { CreateItemProposedAction } from '../../types/proposedActions/items';
 import { ZoteroItemReference } from '../../types/zotero';
 
+const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
+
 interface ProposedItemButtonsProps {
     action: CreateItemProposedAction;
     isBusy: boolean;
@@ -241,7 +243,15 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
             )}
 
             {/* Citation count */}
-            {item.citation_count !== undefined && (
+            {item.citation_count !== undefined && item.citation_count > 0 && (
+                <a
+                    onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
+                    className="text-link-muted text-sm"
+                >
+                    Cited by {item.citation_count.toLocaleString()}
+                </a>
+            )}
+            {item.citation_count !== undefined && item.citation_count === 0 && (
                 <div className="font-color-tertiary text-sm">
                     Cited by {item.citation_count.toLocaleString()}
                 </div>
