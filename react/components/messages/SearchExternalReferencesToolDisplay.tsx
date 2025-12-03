@@ -62,13 +62,13 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
         <div
             id={`tool-${toolCall.id}`}
             className={`
-                rounded-md flex flex-col min-w-0
+                rounded-md display-flex flex-col min-w-0
                 ${resultsVisible ? 'border-popup' : 'border-transparent'}
             `}
         >
             <div
                 className={`
-                    display-flex flex-row  py-15
+                    display-flex flex-row py-15
                     ${hasReferences && resultsVisible ? 'border-bottom-quinary' : ''}
                     ${resultsVisible ? 'bg-senary' : ''}
                 `}
@@ -93,12 +93,6 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                             
                             <div>
                                 {getButtonText()}
-                                {/* <span className={`font-semibold ${resultsVisible ? 'font-color-primary' : ''}`}>
-                                    Web Search
-                                    <span className="font-color-tertiary ml-2 font-medium">
-                                        {'"' + (toolCall?.result?.params?.topic_query ?? '') + '"'}
-                                    </span>
-                                </span> */}
                             </div>
                             
                         </div>
