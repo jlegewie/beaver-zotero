@@ -56,7 +56,7 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ messageId, thinkingCo
                         style={{ padding: '2px 6px', maxHeight: 'none'}}
                     >
                         <div className="display-flex flex-row px-3 gap-2">
-                            <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                            <div className={`flex-1 display-flex mt-010 ${resultsVisible ? 'font-color-primary' : ''}`}>
                                 <Icon icon={getIcon()} />
                             </div>
                             

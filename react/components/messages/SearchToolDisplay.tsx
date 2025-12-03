@@ -111,7 +111,7 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
                     disabled={isButtonDisabled && !canToggleResults}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
-                        <div className={`flex-1 display-flex mt-020 ${resultsVisible ? 'font-color-primary' : ''}`}>
+                        <div className={`flex-1 display-flex mt-010 ${resultsVisible ? 'font-color-primary' : ''}`}>
                             <Icon icon={getIcon()} />
                         </div>
                         
