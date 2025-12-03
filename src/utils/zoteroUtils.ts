@@ -326,10 +326,10 @@ export const getRecentAsync = async function (
 
 
 export function getZoteroUserIdentifier(): { userID: string | undefined, localUserKey: string } {
-    // First try to get the Zotero account user ID
+    // First try to get the Zotero account user ID (only exists if user has Zotero sync enabled)
     const userID = Zotero.Users.getCurrentUserID();
     
-    // Fallback to local user key
+    // Get local user key - this always exists
     const localUserKey = Zotero.Users.getLocalUserKey();
 
     return {
