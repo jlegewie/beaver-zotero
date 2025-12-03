@@ -137,7 +137,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     
     // Check cache and validate on mount
     useEffect(() => {
-        const refId = item.id;
+        const refId = item.source_id;
         if (!refId) return;
         
         const cached = getCachedReference(item);
