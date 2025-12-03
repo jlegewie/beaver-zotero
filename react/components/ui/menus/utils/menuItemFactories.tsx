@@ -107,13 +107,13 @@ export async function createSourceMenuItem(
  * Create a menu item from a Zotero library (for libraries mode)
  */
 export function createLibraryMenuItem(
-    library: Zotero.Library,
+    library: _ZoteroTypes.Library.LibraryLike,
     context: LibraryMenuItemContext
 ): SearchMenuItem {
     const { currentLibraryIds, onSelect } = context;
     const isSelected = currentLibraryIds.includes(library.libraryID);
 
-    const getIconElement = (library: Zotero.Library) => {
+    const getIconElement = (library: _ZoteroTypes.Library.LibraryLike) => {
         return (
             <span className="scale-90">
                 <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
