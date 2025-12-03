@@ -161,7 +161,6 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
     // Generate unique group ID: use tool call ID if available, otherwise use first action's toolcall_id or fallback
     const toolCallId = toolCall?.id ?? createItemActions?.[0]?.toolcall_id ?? 'create-item';
     const groupId = `${messageId}:${toolCallId}`;
-    const backgroundColor = isToolCall ? 'bg-senary' : undefined;
 
     // UI state for collapsible item list
     const panelStates = useAtomValue(annotationPanelStateAtom);
@@ -209,6 +208,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
     const someErrors = createItemActions.some((action) => action.status === 'error');
     const appliedCount = createItemActions.filter((action) => action.status === 'applied').length;
     const rejectedCount = createItemActions.filter((action) => action.status === 'rejected' || action.status === 'undone').length;
+    const pendingCount = createItemActions.filter((action) => action.status === 'pending').length;
     const allErrors = createItemActions.every((action) => action.status === 'error');
 
     // Toggle visibility of item list
@@ -425,7 +425,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
         if (isError) {
             return 'Import Items: Error';
         }
-        return 'Import Items';
+        return `Import ${pendingCount} Item${pendingCount === 1 ? '' : 's'}`;
     };
 
     // Determine when results can be toggled and when button should be disabled
@@ -435,6 +435,9 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
 
     // Determine when to show apply button
     const showApplyButton = isCompleted && (somePending || someErrors) && !isApplying;
+
+    // Determine background color
+    const backgroundColor = isToolCall || resultsVisible ? 'bg-senary' : undefined;
 
     return (
         <div
@@ -461,7 +464,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
                         <span className="mr-1">{getButtonText()}</span>
 
                         {/* Item metrics */}
-                        {isCompleted && hasItemsToShow && (
+                        {isToolCall && isCompleted && hasItemsToShow && (
                             <div className="display-flex flex-row items-center gap-1">
                                 {appliedCount > 0 && (
                                     <div className="font-color-green text-sm">+{appliedCount}</div>
