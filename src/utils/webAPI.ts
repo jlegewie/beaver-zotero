@@ -230,7 +230,7 @@ export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDo
 		: `${base}users/${userID}/items/${item.key}/file`;
 
 	return await new Promise((resolve) => {
-		let xhr = new XMLHttpRequest();
+		const xhr = new XMLHttpRequest();
 		xhr.mozBackgroundRequest = true;
 		xhr.open('GET', apiUrl, true);
 		xhr.setRequestHeader('Zotero-API-Key', apiKey);

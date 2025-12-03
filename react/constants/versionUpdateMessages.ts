@@ -94,6 +94,12 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             }
         ]
     },
+    {
+        version: "0.7.9",
+        title: "Beaver Version 0.7.9",
+        text: "Fixed appearance issues: Beaver now looks and behaves consistently across all systems and configurations.",
+        featureList: []
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

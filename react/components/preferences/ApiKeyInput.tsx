@@ -177,7 +177,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         value={currentValue}
                         onChange={handleChange}
                         placeholder={placeholder}
-                        className={`flex-1 p-1 m-0 border text-sm rounded-sm ${inputBorderColor} bg-senary focus:border-tertiary outline-none`}
+                        className={`flex-1 p-1 m-0 preference-input text-sm ${inputBorderColor}`}
                         aria-invalid={verificationStatus === 'error'}
                     />
                     <Button

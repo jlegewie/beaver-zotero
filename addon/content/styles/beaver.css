@@ -65,6 +65,12 @@
     opacity: .5;
 }
 
+[id^="beaver-pane-"] button,
+[id^="beaver-pane-"] textarea,
+[id^="beaver-pane-"] input {
+    all: revert;
+}
+
 [id^="beaver-pane-"] .sources-info {
     display: inline-flex;
     align-items: center;
@@ -213,6 +219,7 @@
 }
 
 [id^="beaver-pane-"] .chat-input {
+    font-family: system-ui, -apple-system, sans-serif;
     width: 100%;
     font-size: 13px;
     /* color: var(--fill-secondary); */
@@ -234,11 +241,46 @@
 [id^="beaver-pane-"] .chat-input:focus {
     border-color: var(--fill-quarternary);
     box-shadow: 0 0 0 0px transparent;
+    background-color: transparent !important;
+    border: 0px solid transparent !important;
+    border-bottom-color: transparent !important;
+    background-image: none !important;
+}
+
+[id^="beaver-pane-"] .chat-input:hover {
+    background-color: transparent !important;
 }
 
 [id^="beaver-pane-"] .chat-input::placeholder {
     color: var(--fill-tertiary);
 }
+
+
+[id^="beaver-pane-"] .preference-input {
+    font-family: system-ui, -apple-system, sans-serif;
+    border-radius: 0.125rem;
+    border: 1px solid var(--fill-quinary);
+    background-color: var(--fill-senary);
+    outline: none;
+}
+
+[id^="beaver-pane-"] .preference-input:focus {
+    border-radius: 0.125rem;
+    border: 1px solid var(--fill-quinary);
+    background-color: var(--fill-senary);
+    outline: none;
+    /* border-bottom-color: transparent !important; */
+    background-image: none !important;
+}
+
+[id^="beaver-pane-"] .preference-input:hover {
+    background-color: var(--fill-senary) !important;
+}
+
+[id^="beaver-pane-"] .preference-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
 
 /* Layout Utilities */
 [id^="beaver-pane-"], [id^="beaver-pane-"] .display-flex { display: flex; }
@@ -1470,7 +1512,7 @@
 
 /* Webapp button styles for login forms - using existing theme colors */
 [id^="beaver-pane-"] .webapp-btn {
-    padding: 1.3em;
+    padding: 10px;
     font-size: 0.875rem;
     font-weight: 500;
     border-radius: 0.5rem;

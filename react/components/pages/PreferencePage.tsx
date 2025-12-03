@@ -471,7 +471,7 @@ const PreferencePage: React.FC = () => {
                 onChange={handleCustomInstructionsChange}
                 placeholder="Enter custom instructions here..."
                 rows={5}
-                className="p-2 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
+                className="p-2 border preference-input resize-y text-sm"
                 maxLength={1500}
             />
             {/* TODO: Add word/char counter */}
