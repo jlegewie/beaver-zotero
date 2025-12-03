@@ -335,6 +335,32 @@
     white-space: nowrap;
 }
 
+/* Shimmer text */
+.shimmer-text {
+    background: linear-gradient(90deg,
+            var(--fill-tertiary) 30%,
+            /* var(--fill-secondary) 40%, */
+            var(--fill-primary) 50%,
+            /* var(--fill-secondary) 60%, */
+            var(--fill-tertiary) 70%
+        );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+    from {
+        background-position: 100% 0;
+    }
+
+    to {
+        background-position: -100% 0;
+    }
+}
+
 
 /* Spacing */
 [id^="beaver-pane-"] .gap-05 { column-gap: 0.125rem; row-gap: 0.125rem; }
