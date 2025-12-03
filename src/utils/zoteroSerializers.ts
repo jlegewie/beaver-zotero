@@ -385,3 +385,86 @@ export function serializeZoteroLibrary(library: Zotero.Library): ZoteroLibrary {
         read_only: !library.editable || !library.filesEditable,
     } as ZoteroLibrary;
 }
+
+/**
+ * Result of serializing an item with its attachments
+ */
+export interface SerializedItemWithAttachments {
+    item_data?: ItemData;
+    attachment_data: AttachmentDataWithMimeType[];
+}
+
+/**
+ * Serializes a Zotero item along with all its PDF attachments.
+ * Used for immediate sync of newly imported items.
+ * 
+ * @param libraryId Library ID
+ * @param zoteroKey Zotero key of the item
+ * @returns Promise resolving to serialized item and attachment data
+ */
+export async function serializeItemWithAttachments(
+    libraryId: number,
+    zoteroKey: string
+): Promise<SerializedItemWithAttachments> {
+    const result: SerializedItemWithAttachments = {
+        attachment_data: []
+    };
+    
+    // Get the Zotero item
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+    if (!item) {
+        logger(`serializeItemWithAttachments: Item ${libraryId}-${zoteroKey} not found`, 2);
+        return result;
+    }
+    
+    // Ensure item data is loaded
+    try {
+        await item.loadAllData();
+    } catch (e) {
+        // Ignore benign "already loaded" errors
+    }
+    
+    // Serialize the main item (if it's a regular item)
+    if (item.isRegularItem()) {
+        try {
+            result.item_data = await serializeItem(item, undefined);
+        } catch (e: any) {
+            logger(`serializeItemWithAttachments: Failed to serialize item ${zoteroKey}: ${e.message}`, 1);
+        }
+        
+        // Get and serialize all PDF attachments
+        const attachmentIds = await item.getAttachments();
+        for (const attachmentId of attachmentIds) {
+            try {
+                const attachment = await Zotero.Items.getAsync(attachmentId);
+                if (attachment && attachment.isPDFAttachment() && !attachment.deleted) {
+                    // Ensure attachment data is loaded
+                    try {
+                        await attachment.loadAllData();
+                    } catch (e) {
+                        // Ignore benign "already loaded" errors
+                    }
+                    
+                    const attachmentData = await serializeAttachment(attachment, undefined);
+                    if (attachmentData) {
+                        result.attachment_data.push(attachmentData);
+                    }
+                }
+            } catch (e: any) {
+                logger(`serializeItemWithAttachments: Failed to serialize attachment ${attachmentId}: ${e.message}`, 2);
+            }
+        }
+    } else if (item.isAttachment() && item.isPDFAttachment()) {
+        // Item is itself an attachment
+        try {
+            const attachmentData = await serializeAttachment(item, undefined);
+            if (attachmentData) {
+                result.attachment_data.push(attachmentData);
+            }
+        } catch (e: any) {
+            logger(`serializeItemWithAttachments: Failed to serialize attachment ${zoteroKey}: ${e.message}`, 1);
+        }
+    }
+    
+    return result;
+}

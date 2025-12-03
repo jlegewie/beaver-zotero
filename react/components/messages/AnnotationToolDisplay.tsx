@@ -7,9 +7,9 @@ import {
     ArrowDownIcon,
     ArrowRightIcon,
     Icon,
-    DeleteIcon,
-    PlayIcon,
-    TickIcon
+    TickIcon,
+    CancelIcon,
+    HighlighterIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -20,13 +20,13 @@ import {
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { isLibraryEditable, shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { getProposedActionsByToolcallAtom, setProposedActionsToErrorAtom, rejectProposedActionStateAtom, ackProposedActionsAtom, undoProposedActionAtom } from '../../atoms/proposedActions';
 import { AnnotationProposedAction, isAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../../types/proposedActions/base';
 import { AckLink } from '../../../src/services/proposedActionsService';
+import Tooltip from '../ui/Tooltip';
 import {
     annotationAttachmentTitlesAtom,
     annotationBusyAtom,
@@ -80,6 +80,24 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         [annotation, isBusy, onDelete, onReAdd]
     );
 
+    const handleReject = useCallback(
+        (event: React.SyntheticEvent) => {
+            event.stopPropagation();
+            if (isBusy) return;
+            onDelete(annotation);
+        },
+        [annotation, isBusy, onDelete]
+    );
+
+    const handleReAdd = useCallback(
+        (event: React.SyntheticEvent) => {
+            event.stopPropagation();
+            if (isBusy) return;
+            onReAdd(annotation);
+        },
+        [annotation, isBusy, onReAdd]
+    );
+
     const icon = isNoteAnnotationAction(annotation)
         ? ZOTERO_ICONS.ANNOTATE_NOTE
         : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
@@ -95,7 +113,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     iconColor = annotation.status === 'error' ? 'font-color-secondary' : iconColor;
 
     const baseClasses = [
-        'px-3',
+        'px-25',
         'py-15',
         'display-flex',
         'flex-col',
@@ -143,9 +161,9 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                 <div className="flex-1 min-w-0">
                     <div className={getTextClasses()}>
                         {annotation.proposed_data.title || 'Annotation'}
-                        {annotation.status === 'applied' &&
+                        {/* {annotation.status === 'applied' &&
                             <Icon icon={TickIcon} className="-mb-015 ml-2 font-color-secondary scale-12" />
-                        }
+                        } */}
                     </div>
                 </div>
                 {(annotation.status === 'applied') && (
@@ -153,22 +171,43 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
                         <IconButton
                             variant="ghost-secondary"
                             // onClick={annotation.status === 'applied' ? handleDelete : handleApplyAnnotation}
-                            onClick={handleAction}
+                            onClick={handleReject}
                             className="p-1"
                             title='Delete annotation'
-                            icon={DeleteIcon}
+                            icon={CancelIcon}
                             loading={isBusy}
                         />
                     </div>
                 )}
-                {(annotation.status === 'rejected' || annotation.status === 'pending' || annotation.status === 'undone') && (
-                    <div className={`display-flex flex-row items-center gap-2 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                
+                {(annotation.status === 'rejected' || annotation.status === 'undone') && (
+                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
                         <IconButton
                             variant="ghost-secondary"
-                            onClick={handleAction}
+                            onClick={handleReAdd}
+                            className="p-1 scale-13"
+                            title='Add annotation'
+                            icon={TickIcon}
+                            loading={isBusy}
+                        />
+                    </div>
+                )}
+                {(annotation.status === 'pending') && (
+                    <div className={`display-flex flex-row items-center -mr-015 ${isHovered ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
+                        <IconButton
+                            variant="ghost-tertiary"
+                            onClick={handleReject}
                             className="p-1"
-                            title='Apply annotation'
-                            icon={PlayIcon}
+                            title='Reject annotation'
+                            icon={CancelIcon}
+                            loading={isBusy}
+                        />
+                        <IconButton
+                            variant="ghost-tertiary"
+                            onClick={handleReAdd}
+                            className="p-1 scale-13"
+                            title='Add annotation'
+                            icon={TickIcon}
                             loading={isBusy}
                         />
                     </div>
@@ -219,8 +258,6 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
         getAttachmentIdFromToolCall(toolCall) && !isLibraryEditable(Number(getAttachmentIdFromToolCall(toolCall)?.split('-')[0]))
     );
     
-    // Loading animation for in-progress tool calls
-    const loadingDots = useLoadingDots(isInProgress);
     
     // Global state updater for annotation status changes
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
@@ -240,6 +277,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     const somePending = annotations.some((annotation) => annotation.status === 'pending');
     const someErrors = annotations.some((annotation) => annotation.status === 'error');
     const appliedAnnotationCount = annotations.filter((annotation) => annotation.status === 'applied').length;
+    const rejectedAnnotationCount = annotations.filter((annotation) => annotation.status === 'rejected' || annotation.status === 'undone').length;
     const allErrors = annotations.every((annotation) => annotation.status === 'error');
 
     const toggleAnnotationPanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
@@ -451,6 +489,18 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
         [handleAnnotationClick]
     );
 
+    /**
+     * Reject all pending annotations (those not yet applied)
+     */
+    const handleRejectAll = useCallback(() => {
+        const pendingAnnotations = annotations.filter(
+            (annotation) => annotation.status === 'pending' || annotation.status === 'error'
+        );
+        pendingAnnotations.forEach((annotation) => {
+            rejectProposedAction(annotation.id);
+        });
+    }, [annotations, rejectProposedAction]);
+
     // Determine which icon to show based on tool call and UI state
     const getIcon = () => {
         if (isInProgress || isApplyingAnnotations) return Spinner;
@@ -459,19 +509,20 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
             if (resultsVisible) return ArrowDownIcon;
             if (isButtonHovered && totalAnnotations > 0) return ArrowRightIcon;
             if (totalAnnotations === 0) return AlertIcon;
-            return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+            return HighlighterIcon;
         }
-        return <ZoteroIcon icon={ZOTERO_ICONS.ANNOTATION} size={12} className="flex-shrink-0" />;
+        return HighlighterIcon;
     };
 
     // Generate button text showing annotation count
     const getButtonText = () => {
         if (isInProgress) {
-            return `Annotations${''.padEnd(loadingDots, '.')}`;
+            return 'Annotations';
         }
         if (isError) {
             return 'Annotations: Error';
         }
+        
         return 'Annotations';
     };
 
@@ -486,11 +537,14 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     return (
         <div
             id={`tool-${toolCalls[0].id}`}
-            className={`${resultsVisible && hasAnnotationsToShow ? 'border-popup' : 'border-quinary'} rounded-md display-flex flex-col min-w-0`}
+            className="border-popup rounded-md display-flex flex-col min-w-0"
         >
             {/* Main button that shows annotation count and toggles visibility */}
             <div
-                className={`display-flex flex-row bg-senary py-15 px-2 ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}`}
+                className={`
+                    display-flex flex-row bg-senary py-15 px-2
+                    ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}`
+                }
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
@@ -498,23 +552,30 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                     <Button
                         variant="ghost-secondary"
                         icon={getIcon()}
-                        // onClick={toggleResults}
-                        // onMouseEnter={() => setIsButtonHovered(true)}
-                        // onMouseLeave={() => setIsButtonHovered(false)}
                         className={`
                             text-base scale-105
                             ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
                             ${isError ? 'font-color-warning' : ''}
                         `}
+                        style={{ padding: '2px 6px', maxHeight: 'none'}}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        <span>{getButtonText()}</span>
-                        {isCompleted && appliedAnnotationCount > 0 && hasAnnotationsToShow &&
-                            <span className="ml-05 mt-015 font-color-green text-xs">+{appliedAnnotationCount}</span>
-                        }
-                        {isCompleted && appliedAnnotationCount === 0 && hasAnnotationsToShow &&
-                            <span className="ml-05 mt-015 font-color-tertiary text-xs">{totalAnnotations}x</span>
-                        }
+                        <span className={`mr-1 ${isInProgress ? 'shimmer-text' : ''}`}>{getButtonText()}</span>
+                        
+                        {/* Annotations metrics */}
+                        {isCompleted && hasAnnotationsToShow && (
+                            <div className="display-flex flex-row items-center gap-1">
+                                {appliedAnnotationCount > 0 &&
+                                <div className="font-color-green text-sm">+{appliedAnnotationCount}</div>
+                                }
+                                {rejectedAnnotationCount > 0 &&
+                                    <div className="font-color-tertiary text-sm">-{rejectedAnnotationCount}</div>
+                                }
+                                {rejectedAnnotationCount == 0 && appliedAnnotationCount === 0 &&
+                                    <div className="font-color-tertiary text-sm">({totalAnnotations})</div>
+                                }
+                            </div>
+                        )}
                     </Button>
                     <div className="flex-1"/>
                 </div>
@@ -524,19 +585,43 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                     </div>
                 )}
                 {showApplyButton && !readOnlyLibrary && (
-                    <Button
-                        icon={PlayIcon}
-                        iconClassName="-mr-015"
-                        variant="ghost-tertiary"
-                        onClick={() => handleApplyAnnotations()}
-                    >
-                        <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
-                            {!isAttachmentOpen && attachmentTitle ? `Apply to ${attachmentTitle}` : 'Apply'}
-                        </span>
-                    </Button>
+                    <div className="display-flex flex-row items-center gap-3 mr-015">
+                        <Tooltip content={attachmentTitle} showArrow singleLine>
+                            <div className="text-sm truncate font-color-tertiary" style={{ maxWidth: '135px' }}>
+                                {attachmentTitle}
+                            </div>
+                        </Tooltip>
+                        <Tooltip content="Reject all" showArrow singleLine>
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-red"
+                                onClick={handleRejectAll}
+                            />
+                        </Tooltip>
+                        <Tooltip content="Add annotations" showArrow singleLine>
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-green scale-14"
+                                onClick={() => handleApplyAnnotations()}
+                            />
+                        </Tooltip>
+                    </div>
+                    
+                    // <Button
+                    //     icon={TickIcon}
+                    //     iconClassName="-mr-015"
+                    //     variant="ghost-tertiary"
+                    //     onClick={() => handleApplyAnnotations()}
+                    // >
+                    //     <span className="text-sm truncate" style={{ maxWidth: '125px' }}>
+                    //         {!isAttachmentOpen && attachmentTitle ? `Add to ${attachmentTitle}` : 'Add'}
+                    //     </span>
+                    // </Button>
                 )}
                 {!showApplyButton && !readOnlyLibrary && (
-                    <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '125px' }}>
+                    <div className="text-sm truncate font-color-tertiary mt-015" style={{ maxWidth: '155px' }}>
                         {attachmentTitle}
                     </div>
                 )}

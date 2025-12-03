@@ -14,7 +14,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent']
+        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id']
     }
 });
 

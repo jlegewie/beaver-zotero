@@ -1,5 +1,133 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
+import { ZoteroItemReference } from "../../react/types/zotero";
 import { logger } from "./logger";
+
+/**
+ * Context for determining where to create or insert a new Zotero item
+ */
+export interface ZoteroTargetContext {
+    targetLibraryId: number | undefined;
+    parentReference: ZoteroItemReference | null;
+    collectionToAddTo: Zotero.Collection | null;
+}
+
+/**
+ * Determines the target location for creating a new item based on current Zotero context.
+ * Handles both reader view (uses current document's library/parent) and library view (uses selected item or collection).
+ * @returns Target library ID, parent reference, and optional collection
+ */
+export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
+    const win = Zotero.getMainWindow();
+    const zp = Zotero.getActiveZoteroPane();
+    
+    let targetLibraryId: number | undefined = undefined;
+    let parentReference: ZoteroItemReference | null = null;
+    let collectionToAddTo: Zotero.Collection | null = null;
+
+    // Reader view - check if we're in a reader tab
+    const selectedTabType = win.Zotero_Tabs?.selectedType;
+    if (selectedTabType === 'reader') {
+        const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+        if (reader?.itemID) {
+            const readerItem = await Zotero.Items.getAsync(reader.itemID);
+            if (readerItem) {
+                targetLibraryId = readerItem.libraryID;
+                parentReference = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    : null;
+                return { targetLibraryId, parentReference, collectionToAddTo };
+            }
+        }
+    }
+
+    // Library view
+    const selectedItems = zp.getSelectedItems();
+    
+    // If items are selected, use the first one
+    if (selectedItems.length >= 1) {
+        const firstItem = selectedItems[0];
+        const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+        targetLibraryId = item.libraryID;
+        
+        if (item.isRegularItem()) {
+            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+        } else if (item.isNote() || item.isAttachment()) {
+            // Add to parent (sibling)
+            parentReference = item.parentKey
+                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                : null;
+        }
+    // No selection - add to current library/collection
+    } else {
+        targetLibraryId = zp.getSelectedLibraryID();
+        const collection = zp.getSelectedCollection();
+        if (collection) {
+            collectionToAddTo = collection;
+        }
+        parentReference = null;
+    }
+
+    return { targetLibraryId, parentReference, collectionToAddTo };
+}
+
+/**
+ * Synchronous version of getZoteroTargetContext for UI state determination.
+ * Uses sync Zotero.Items.get() which works because items are loaded when open in reader.
+ * @returns Target library ID, parent reference, and optional collection
+ */
+export function getZoteroTargetContextSync(): ZoteroTargetContext {
+    const win = Zotero.getMainWindow();
+    const zp = Zotero.getActiveZoteroPane();
+    
+    let targetLibraryId: number | undefined = undefined;
+    let parentReference: ZoteroItemReference | null = null;
+    let collectionToAddTo: Zotero.Collection | null = null;
+
+    // Reader view - check if we're in a reader tab
+    const selectedTabType = win.Zotero_Tabs?.selectedType;
+    if (selectedTabType === 'reader') {
+        const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+        if (reader?.itemID) {
+            const readerItem = Zotero.Items.get(reader.itemID);
+            if (readerItem) {
+                targetLibraryId = readerItem.libraryID;
+                parentReference = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    : null;
+                return { targetLibraryId, parentReference, collectionToAddTo };
+            }
+        }
+    }
+
+    // Library view
+    const selectedItems = zp.getSelectedItems();
+    
+    // If items are selected, use the first one
+    if (selectedItems.length >= 1) {
+        const firstItem = selectedItems[0];
+        const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+        targetLibraryId = item.libraryID;
+        
+        if (item.isRegularItem()) {
+            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+        } else if (item.isNote() || item.isAttachment()) {
+            // Add to parent (sibling)
+            parentReference = item.parentKey
+                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                : null;
+        }
+    // No selection - add to current library/collection
+    } else {
+        targetLibraryId = zp.getSelectedLibraryID();
+        const collection = zp.getSelectedCollection();
+        if (collection) {
+            collectionToAddTo = collection;
+        }
+        parentReference = null;
+    }
+
+    return { targetLibraryId, parentReference, collectionToAddTo };
+}
 
 
 /**

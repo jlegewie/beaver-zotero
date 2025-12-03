@@ -1,22 +1,24 @@
-import { renderToHTML } from './citationRenderers';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from "../types/zotero";
+import { renderToHTML, RenderContextData } from "./citationRenderers";
 
 export interface SaveStreamingNoteOptions {
     markdownContent: string;
-    title?: string;
-    parentReference?: ZoteroItemReference | null;
+    title: string;
+    parentReference?: ZoteroItemReference;
     targetLibraryId?: number;
+    contextData?: RenderContextData;
 }
 
 export interface SavedNoteReference {
-    library_id: number;
+
     zotero_key: string;
     parent_key?: string;
+    library_id: number;
 }
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
-    const { markdownContent, parentReference, targetLibraryId } = options;
-    const htmlContent = renderToHTML(markdownContent.trim());
+    const { markdownContent, parentReference, targetLibraryId, contextData } = options;
+    const htmlContent = renderToHTML(markdownContent.trim(), "markdown", contextData);
 
     const zoteroNote = new Zotero.Item('note');
 

@@ -1,6 +1,9 @@
 import { logger } from "../../src/utils/logger";
 import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
+import { getPageViewportInfo, applyRotationToBoundingBox } from './pdfUtils';
+import { toZoteroRectFromBBox } from '../types/citations';
+import { getCurrentReaderAndWaitForView } from './readerUtils';
 
 /**
 * Types for the Zotero Reader API
@@ -349,3 +352,124 @@ export const BeaverTemporaryAnnotations = {
  * 
  * await ZoteroImageAnnotations.scrollToAnnotation(annotation.id);
  */
+
+
+/**
+ * Create temporary annotations for bounding boxes
+ * @param boundingBoxData Array of bounding box data
+ * @param item The Zotero item to create the annotations for
+ * @returns Array of annotation references
+ */
+export const createBoundingBoxHighlights = async (
+    boundingBoxData: any[],
+    previewText: string,
+    annotationText: string
+): Promise<ZoteroItemReference[]> => {
+    if (boundingBoxData.length === 0) return [];
+    
+    try {
+        const reader = await getCurrentReaderAndWaitForView();
+        if (!reader || !reader._internalReader) {
+            logger('createBoundingBoxHighlights: No active reader found for creating bounding box highlights');
+            return [];
+        }
+
+        const tempAnnotations: any[] = [];
+        const annotationReferences: ZoteroItemReference[] = [];
+        
+        // Group bounding boxes by page
+        const pageGroups = new Map<number, any[][]>();
+        for (const { page, bboxes } of boundingBoxData) {
+            if (!pageGroups.has(page)) {
+                pageGroups.set(page, []);
+            }
+            pageGroups.get(page)!.push(bboxes);
+        }
+        
+        // Create one annotation per page with combined rects
+        for (const [page, allBboxesOnPage] of pageGroups) {
+            const pageIndex = page - 1; // Convert to 0-based index
+
+            // Get viewport info directly from PDF document (no need for rendered page)
+            const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
+            const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
+            
+            // Combine all bboxes on this page and apply rotation transformation only if rotated
+            const combinedBboxes = allBboxesOnPage.flat();
+            const rects = rotation !== 0
+                ? combinedBboxes
+                    .map(b => applyRotationToBoundingBox(b, rotation, width, height))
+                    .map(b => toZoteroRectFromBBox(b, viewBoxLL))
+                : combinedBboxes.map(b => toZoteroRectFromBBox(b, viewBoxLL));
+            
+            // Create unique IDs for the temporary annotation
+            const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const tempKey = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Create properly structured annotation object matching Zotero.Annotations.toJSON() output
+            const tempAnnotation = {
+                // Core identification
+                id: tempId,
+                key: tempKey,
+                libraryID: reader._item.libraryID,
+                
+                // Required annotation properties
+                type: 'highlight',
+                color: '#00bbff', // Blue highlight
+                sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
+                position: {
+                    pageIndex: pageIndex,
+                    rects: rects
+                },
+                
+                // Critical properties to prevent crashes - MUST be present
+                tags: [],
+                comment: '',
+                text: previewText,
+                authorName: 'Beaver',
+                pageLabel: page.toString(),
+                isExternal: false,
+                readOnly: false,
+                lastModifiedByUser: '',
+                dateModified: new Date().toISOString(),
+                
+                // Backup annotation properties
+                annotationType: 'highlight',
+                annotationAuthorName: 'Beaver',
+                annotationText: annotationText,
+                annotationComment: '',
+                annotationColor: '#00bbff',
+                annotationPageLabel: '',
+                annotationSortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
+                annotationPosition: JSON.stringify({
+                    pageIndex: pageIndex,
+                    rects: rects
+                }),
+                annotationIsExternal: false,
+                
+                // Mark as temporary so it doesn't get saved to database
+                isTemporary: true
+            };
+            
+            tempAnnotations.push(tempAnnotation);
+            
+            // Create reference for tracking
+            annotationReferences.push({
+                zotero_key: tempId,
+                library_id: reader._item.libraryID
+            });
+        }
+        
+        // Add temporary annotations directly to reader display (no database save)
+        if (tempAnnotations.length > 0) {
+            reader._internalReader.setAnnotations(
+                Components.utils.cloneInto(tempAnnotations, reader._iframeWindow)
+            );
+        }
+        
+        return annotationReferences;
+    } catch (error) {
+        logger('createBoundingBoxHighlights: Failed to create bounding box highlights: ' + error);
+        return [];
+    }
+};

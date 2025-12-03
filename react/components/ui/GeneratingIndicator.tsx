@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import Button from './Button';
 import { Icon, Spinner, BrainIcon } from '../icons/icons';
 import { MessageStatus } from '../../types/chat/uiTypes';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 
 interface GeneratingIndicatorProps {
     status: MessageStatus;
@@ -10,8 +9,6 @@ interface GeneratingIndicatorProps {
 }
 
 const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previousMessageHasToolCalls }) => {
-    const loadingDots = useLoadingDots(true); // Always animating since this component is only shown when generating
-    
     return (
         // Matching style of AssistantMessageTools
         <div className={`
@@ -28,12 +25,12 @@ const GeneratingIndicator: React.FC<GeneratingIndicatorProps> = ({ status, previ
                 disabled={true}
             >
                 <div className="display-flex flex-row px-3 gap-2">
-                    <div className="flex-1 display-flex mt-020">
+                    <div className="flex-1 display-flex mt-010">
                         <Icon icon={status === "thinking" ? BrainIcon : Spinner} />
                     </div>
                     
-                    <div className="display-flex">
-                        {'Generating' + '.'.repeat(loadingDots)}
+                    <div className="display-flex shimmer-text">
+                        Generating
                     </div>
                     
                 </div>
