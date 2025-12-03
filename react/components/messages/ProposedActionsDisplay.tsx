@@ -2,7 +2,6 @@ import React from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import { useAtomValue } from 'jotai';
 import { getProposedActionsByMessageAtom } from '../../atoms/proposedActions';
-import { isChatRequestPendingAtom } from '../../atoms/threads';
 import CreateItemToolDisplay from './CreateItemToolDisplay';
 import { isCreateItemAction } from '../../types/proposedActions/base';
 import { CreateItemProposedAction } from '../../types/proposedActions/items';
@@ -16,7 +15,6 @@ const ProposedActionsDisplay: React.FC<ProposedActionsDisplayProps> = ({
     messages
 }) => {
     // All hooks must be called before any conditional returns
-    const isChatRequestPending = useAtomValue(isChatRequestPendingAtom);
     const getProposedActionsByMessageId = useAtomValue(getProposedActionsByMessageAtom);
 
     const lastMessage = messages[messages.length - 1];
@@ -28,7 +26,7 @@ const ProposedActionsDisplay: React.FC<ProposedActionsDisplayProps> = ({
     ) as CreateItemProposedAction[];
 
     // If the chat request is pending or the last message is in progress, don't show the proposed actions
-    if (isChatRequestPending || lastMessage.status === 'in_progress') {
+    if (lastMessage.status === 'in_progress') {
         return null;
     }
 
