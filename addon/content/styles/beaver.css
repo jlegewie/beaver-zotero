@@ -219,6 +219,7 @@
 }
 
 [id^="beaver-pane-"] .chat-input {
+    font-family: system-ui, -apple-system, sans-serif;
     width: 100%;
     font-size: 13px;
     /* color: var(--fill-secondary); */
@@ -256,6 +257,7 @@
 
 
 [id^="beaver-pane-"] .preference-input {
+    font-family: system-ui, -apple-system, sans-serif;
     border-radius: 0.125rem;
     border: 1px solid var(--fill-quinary);
     background-color: var(--fill-senary);
@@ -267,12 +269,12 @@
     border: 1px solid var(--fill-quinary);
     background-color: var(--fill-senary);
     outline: none;
-    border-bottom-color: transparent !important;
+    /* border-bottom-color: transparent !important; */
     background-image: none !important;
 }
 
 [id^="beaver-pane-"] .preference-input:hover {
-    background-color: transparent !important;
+    background-color: var(--fill-senary);
 }
 
 [id^="beaver-pane-"] .preference-input::placeholder {

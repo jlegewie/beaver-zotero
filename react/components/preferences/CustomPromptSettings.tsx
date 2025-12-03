@@ -73,7 +73,7 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prom
                     value={title}
                     onChange={handleTitleChange}
                     placeholder={`Enter title for ⌘${index + 1}...`}
-                    className="flex-1 p-1 m-0 border text-sm rounded-sm border-quinary bg-senary focus:border-tertiary outline-none"
+                    className="flex-1 p-1 m-0 preference-input"
                 />
             </div>
             <textarea
@@ -81,7 +81,8 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prom
                 onChange={handleTextChange}
                 placeholder={`Enter prompt text for ⌘${index + 1}...`}
                 rows={2}
-                className="flex-1 p-1 border rounded-sm border-quinary bg-senary focus:border-tertiary outline-none resize-y text-sm"
+                className="flex-1 p-1 preference-input resize-y text-sm"
+                style={{ minHeight: '50px' }}
             />
             <div className="display-flex flex-row gap-4 items-center">
                 <label className={`display-flex items-center gap-05 text-sm ${prompt.requiresAttachment ? 'font-primary' : 'font-color-secondary'} cursor-pointer`}>
