@@ -15,19 +15,22 @@ interface ProposedActionsDisplayProps {
 const ProposedActionsDisplay: React.FC<ProposedActionsDisplayProps> = ({
     messages
 }) => {
-    // If the chat request is pending or the last message is in progress, don't show the proposed actions
+    // All hooks must be called before any conditional returns
     const isChatRequestPending = useAtomValue(isChatRequestPendingAtom);
+    const getProposedActionsByMessageId = useAtomValue(getProposedActionsByMessageAtom);
+
     const lastMessage = messages[messages.length - 1];
-    if (isChatRequestPending || lastMessage.status === 'in_progress') {
-        return null;
-    }
 
     // Get proposed actions: create item actions from citations
-    const getProposedActionsByMessageId = useAtomValue(getProposedActionsByMessageAtom);
     const proposedActions = getProposedActionsByMessageId(
         lastMessage.id,
         (action) => isCreateItemAction(action) && action.toolcall_id == 'citations'
     ) as CreateItemProposedAction[];
+
+    // If the chat request is pending or the last message is in progress, don't show the proposed actions
+    if (isChatRequestPending || lastMessage.status === 'in_progress') {
+        return null;
+    }
 
     if (
         proposedActions.length === 0 ||
