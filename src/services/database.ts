@@ -65,7 +65,7 @@ export interface SyncLogsRecord {
     sync_type: SyncType;
     method: SyncMethod;
     zotero_local_id: string;
-    zotero_user_id?: string;
+    zotero_user_id?: string | null;
     library_id: number;
     total_upserts: number;
     total_deletions: number;
@@ -673,7 +673,7 @@ export class BeaverDB {
                 syncLog.sync_type,
                 syncLog.method,
                 syncLog.zotero_local_id,
-                syncLog.zotero_user_id,
+                syncLog.zotero_user_id ?? null,
                 syncLog.library_id,
                 syncLog.total_upserts,
                 syncLog.total_deletions,

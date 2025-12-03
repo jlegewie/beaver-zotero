@@ -510,7 +510,7 @@ export async function syncItemsToBackend(
                         sync_type: syncType,
                         method: syncMethod,
                         zotero_local_id: localUserKey,
-                        zotero_user_id: zoteroUserId ?? undefined,
+                        zotero_user_id: zoteroUserId ?? null,
                         library_id: libraryID,
                         total_upserts: batchResult.total_upserts ?? 0,
                         total_deletions: batchResult.total_deletions ?? 0,
@@ -874,14 +874,14 @@ export async function syncZoteroDatabase(
                     sync_type: derivedSyncType,
                     method: syncMethod,
                     zotero_local_id: localUserKey,
-                    zotero_user_id: zoteroUserId ?? undefined,
+                    zotero_user_id: zoteroUserId ?? null,
                     library_id: libraryID,
                     total_upserts: 0,
                     total_deletions: 0,
                     library_version: lastSyncVersion ?? library.libraryVersion,
                     library_date_modified: lastSyncDate ?? new Date().toISOString(),
                     user_id: userId,
-                });
+                } as SyncLogsRecord);
                 
                 updateSyncStatus(libraryID, { ...libraryInitialStatus, status: 'completed' });
                 continue;
@@ -1060,7 +1060,7 @@ export async function syncCollectionsOnly(libraryIds: number[]): Promise<void> {
                 sync_type: 'consistency',
                 method: syncMethod,
                 zotero_local_id: localUserKey,
-                zotero_user_id: zoteroUserId ?? undefined,
+                zotero_user_id: zoteroUserId ?? null,
                 library_id: libraryID,
                 total_upserts: batchResult.total_upserts ?? 0,
                 total_deletions: batchResult.total_deletions ?? 0,
