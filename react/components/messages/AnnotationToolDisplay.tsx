@@ -20,7 +20,6 @@ import {
 import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage} from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { logger } from '../../../src/utils/logger';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { ZoteroReader } from '../../utils/annotationUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { isLibraryEditable, shortItemTitle } from '../../../src/utils/zoteroUtils';
@@ -259,8 +258,6 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
         getAttachmentIdFromToolCall(toolCall) && !isLibraryEditable(Number(getAttachmentIdFromToolCall(toolCall)?.split('-')[0]))
     );
     
-    // Loading animation for in-progress tool calls
-    const loadingDots = useLoadingDots(isInProgress);
     
     // Global state updater for annotation status changes
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
@@ -520,7 +517,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
     // Generate button text showing annotation count
     const getButtonText = () => {
         if (isInProgress) {
-            return `Annotations${''.padEnd(loadingDots, '.')}`;
+            return 'Annotations';
         }
         if (isError) {
             return 'Annotations: Error';
@@ -563,7 +560,7 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                         style={{ padding: '2px 6px', maxHeight: 'none'}}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        <span className="mr-1">{getButtonText()}</span>
+                        <span className={`mr-1 ${isInProgress ? 'shimmer-text' : ''}`}>{getButtonText()}</span>
                         
                         {/* Annotations metrics */}
                         {isCompleted && hasAnnotationsToShow && (

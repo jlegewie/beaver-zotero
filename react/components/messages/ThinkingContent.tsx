@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icons/icons';
 import Button from '../ui/Button';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { thinkingVisibilityAtom, toggleThinkingVisibilityAtom } from '../../atoms/messageUIState';
 
 interface ThinkingContentProps {
@@ -18,7 +17,6 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ messageId, thinkingCo
     const thinkingVisibilityMap = useAtomValue(thinkingVisibilityAtom);
     const toggleVisibility = useSetAtom(toggleThinkingVisibilityAtom);
     const resultsVisible = thinkingVisibilityMap[messageId] ?? false;
-    const loadingDots = useLoadingDots(isThinking);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
 
     const toggleResults = () => {
@@ -60,8 +58,8 @@ const ThinkingContent: React.FC<ThinkingContentProps> = ({ messageId, thinkingCo
                                 <Icon icon={getIcon()} />
                             </div>
                             
-                            <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
-                                {'Thinking' + '.'.repeat(isThinking ? loadingDots : 0)}
+                            <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''} ${isThinking ? 'shimmer-text' : ''}`}>
+                                Thinking
                             </div>
                         </div>
                     </Button>

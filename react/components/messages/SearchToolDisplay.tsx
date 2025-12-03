@@ -13,7 +13,6 @@ import {
 } from '../icons/icons';
 import Button from '../ui/Button';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 
@@ -29,7 +28,7 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
     const visibilityKey = `${messageId}:${toolCall.id}`;
     const resultsVisible = searchVisibility[visibilityKey] ?? false;
     const [isButtonHovered, setIsButtonHovered] = useState(false);
-    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
+    const isInProgress = toolCall.status === 'in_progress';
 
     const numResults = toolCall.response?.attachments?.length ?? 0;
 
@@ -64,7 +63,7 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
             return `${label}: Error`;
         }
         if (toolCall.status === 'in_progress') {
-            return `${label}${''.padEnd(loadingDots, '.')}`;
+            return label;
         }
         if (toolCall.status === 'completed') {
             if (numResults === 0 && !toolCall.response?.content) return `${label}: No results`;
@@ -115,7 +114,7 @@ export const SearchToolDisplay: React.FC<SearchToolDisplayProps> = ({ messageId,
                             <Icon icon={getIcon()} />
                         </div>
                         
-                        <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''}`}>
+                        <div className={`display-flex ${resultsVisible ? 'font-color-primary' : ''} ${isInProgress ? 'shimmer-text' : ''}`}>
                             {getButtonText()}
                         </div>
                         

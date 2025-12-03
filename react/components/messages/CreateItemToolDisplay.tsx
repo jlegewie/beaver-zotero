@@ -19,7 +19,6 @@ import {
 } from '../../utils/addItemActions';
 import { ensureItemSynced, ensureItemsSynced } from '../../../src/utils/sync';
 import { logger } from '../../../src/utils/logger';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import { 
     getProposedActionsByToolcallAtom, 
     setProposedActionsToErrorAtom, 
@@ -182,8 +181,6 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
     const isCompleted = isToolCall ? toolCall.status === 'completed': true;
     const isError = isToolCall ? toolCall.status === 'error': false;
 
-    // Loading animation for in-progress tool calls
-    const loadingDots = useLoadingDots(isInProgress);
 
     // Proposed actions state management
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
@@ -421,7 +418,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
     // Generate button text
     const getButtonText = () => {
         if (isInProgress) {
-            return `Import Items${''.padEnd(loadingDots, '.')}`;
+            return 'Import Items';
         }
         if (isError) {
             return 'Import Items: Error';
@@ -465,7 +462,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
                         `}
                         disabled={isButtonDisabled && !canToggleResults}
                     >
-                        <span className="mr-1">{getButtonText()}</span>
+                        <span className={`mr-1 ${isInProgress ? 'shimmer-text' : ''}`}>{getButtonText()}</span>
 
                         {/* Item metrics */}
                         {isToolCall && isCompleted && hasItemsToShow && (

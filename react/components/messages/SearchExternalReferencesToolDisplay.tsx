@@ -10,7 +10,6 @@ import {
 } from '../icons/icons';
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
-import { useLoadingDots } from '../../hooks/useLoadingDots';
 import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
 
 interface SearchExternalReferencesToolDisplayProps {
@@ -23,7 +22,6 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     const [resultsVisible, setResultsVisible] = useState(false);
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
-    const loadingDots = useLoadingDots(toolCall.status === 'in_progress');
 
     const references = toolCall?.result?.references ?? [];
     const totalCount = toolCall?.result?.returned_count ?? references.length;
