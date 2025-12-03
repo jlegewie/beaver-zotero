@@ -1584,7 +1584,7 @@
 
 /* Webapp button styles for login forms - using existing theme colors */
 [id^="beaver-pane-"] .webapp-btn {
-    padding: 10px;
+    padding: 12px;
     font-size: 0.875rem;
     font-weight: 500;
     border-radius: 0.5rem;
@@ -1732,8 +1732,8 @@
 
 /* Spinner for loading states */
 [id^="beaver-pane-"] .webapp-spinner {
-    width: 1rem;
-    height: 1rem;
+    width: 11px;
+    height: 11px;
     border: 2px solid transparent;
     border-top: 2px solid currentColor;
     border-radius: 50%;
