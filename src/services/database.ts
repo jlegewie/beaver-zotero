@@ -652,6 +652,14 @@ export class BeaverDB {
      * @returns The complete SyncLogsRecord with generated id
      */
     public async insertSyncLog(syncLog: Omit<SyncLogsRecord, 'id' | 'timestamp'>): Promise<SyncLogsRecord> {
+        // Validate required fields
+        const requiredFields = ['session_id', 'user_id', 'sync_type', 'method', 'zotero_local_id', 'library_id', 'library_version', 'library_date_modified'] as const;
+        for (const field of requiredFields) {
+            if (syncLog[field] === undefined || syncLog[field] === null) {
+                throw new Error(`insertSyncLog: Required field '${field}' is ${syncLog[field]}. Full syncLog: ${JSON.stringify(syncLog)}`);
+            }
+        }
+        
         const id = uuidv4();
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         

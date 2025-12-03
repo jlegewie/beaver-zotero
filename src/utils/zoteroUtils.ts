@@ -201,8 +201,13 @@ export function getZoteroUserIdentifier(): { userID: string | undefined, localUs
     // First try to get the Zotero account user ID
     const userID = Zotero.Users.getCurrentUserID();
     
-    // Fallback to local user key
+    // Get local user key - this should always exist
     const localUserKey = Zotero.Users.getLocalUserKey();
+    
+    // Validate localUserKey - it should never be undefined/null
+    // if (!localUserKey) {
+    //     throw new Error(`Zotero.Users.getLocalUserKey() returned invalid value: ${localUserKey}. Zotero may not be fully initialized.`);
+    // }
 
     return {
         userID: userID ? `${userID}` : undefined,
