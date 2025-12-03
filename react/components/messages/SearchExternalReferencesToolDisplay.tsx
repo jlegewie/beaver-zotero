@@ -46,8 +46,8 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     };
     
     const getButtonText = () => {
-        // if (toolCall.status === 'in_progress' && toolCall.progress_message) return `Web Search: ${toolCall.progress_message}${''.padEnd(loadingDots, '.')}`;;
-        if (toolCall.status === 'in_progress') return `Web Search${''.padEnd(loadingDots, '.')}`;
+        if (toolCall.status === 'in_progress' && toolCall.progress_message) return `Web Search: ${toolCall.progress_message}`;;
+        if (toolCall.status === 'in_progress') return `Web Search`;
         
         if (totalCount === 0) return 'Web Search: No results';
         if (toolCall.label) return toolCall.label;
@@ -91,7 +91,7 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                                 <Icon icon={getIcon()} />
                             </div>
                             
-                            <div>
+                            <div className={`${toolCall.status === 'in_progress' ? 'shimmer-text' : ''}`}>
                                 {getButtonText()}
                             </div>
                             
@@ -104,13 +104,6 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
                     <div className="flex-1"/>
                 </div>
             </div>
-
-            {toolCall.status === 'in_progress' && toolCall.progress_message && (
-            // {toolCall.progress_message && (
-                <div className="font-color-tertiary text-sm px-3 ml-5">
-                    {toolCall.progress_message}
-                </div>
-            )}
 
             {hasReferences && resultsVisible && (
                 <div className="display-flex flex-col">
