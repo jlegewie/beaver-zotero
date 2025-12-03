@@ -259,8 +259,12 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
 
             <div className="flex-1"/>
 
+            {isLoading && (
+                <Spinner className="scale-13 -mr-1" />
+            )}
+
             {/* Pending: Reject button */}
-            {showRejectButton && (
+            {showRejectButton && !isLoading && (
                 <Tooltip content="Reject Item" singleLine>
                     <IconButton
                         variant={buttonVariant}
@@ -276,11 +280,11 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
             )}
 
             {/* Add button: shown for pending (no match), rejected, or undone */}
-            {showAddButton && (
+            {showAddButton && !isLoading && (
                 <Tooltip content="Add to library" singleLine>
                     <IconButton
                         variant={buttonVariant}
-                        icon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : TickIcon}
+                        icon={TickIcon}
                         iconClassName="scale-12"
                         className={`font-color-secondary ${className}`}
                         style={{ padding: '2px' }}
@@ -292,11 +296,11 @@ const ProposedItemButtons: React.FC<ProposedItemButtonsProps> = ({
             )}
 
             {/* Pending with existing match OR Applied: Reveal button */}
-            {showRevealButton && (
+            {showRevealButton && !isLoading && (
                 <Tooltip content={action.status === 'pending' ? 'Already in library - click to reveal' : 'Reveal in Zotero'} singleLine>
                     <Button
                         variant={buttonVariant}
-                        rightIcon={isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
+                        rightIcon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />}
                         className={`font-color-secondary ${className}`}
                         style={{ padding: '1px 4px' }}
                         onClick={handleReveal}

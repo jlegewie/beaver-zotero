@@ -168,6 +168,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
     const { resultsVisible, isApplying } = panelState;
     const busyStateMap = useAtomValue(annotationBusyAtom);
     const busyState = busyStateMap[groupId] ?? {};
+    const anyBusy = Object.values(busyState).some((isBusy) => isBusy);
 
     // Track hover states for UI interactions
     const [isButtonHovered, setIsButtonHovered] = useState(false);
@@ -406,7 +407,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
 
     // Determine which icon to show
     const getIcon = () => {
-        if (isInProgress || isApplying) return Spinner;
+        if (isInProgress || isApplying || anyBusy) return Spinner;
         if (isError || allErrors) return AlertIcon;
         if (isCompleted) {
             if (resultsVisible) return ArrowDownIcon;
