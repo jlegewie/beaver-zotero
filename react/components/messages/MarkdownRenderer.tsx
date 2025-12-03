@@ -264,20 +264,21 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 
                 // Render markdown segment
                 return (
-                    <ReactMarkdown
-                        key={`markdown-${index}`}
-                        className={className}
-                        remarkPlugins={[remarkMath, remarkGfm]}
-                        rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
-                        components={{
-                            // @ts-expect-error - Custom component not in ReactMarkdown types
-                            citation: ({node, ...props}: any) => {
-                                return <ZoteroCitation {...props} exportRendering={exportRendering} />;
-                            }
-                        }}
-                    >
-                        {segment.content}
-                    </ReactMarkdown>
+                    <div className={className}>
+                        <ReactMarkdown
+                            key={`markdown-${index}`}
+                            remarkPlugins={[remarkMath, remarkGfm]}
+                            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
+                            components={{
+                                // @ts-expect-error - Custom component not in ReactMarkdown types
+                                citation: ({node, ...props}: any) => {
+                                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
+                                }
+                            }}
+                        >
+                            {segment.content}
+                        </ReactMarkdown>
+                    </div>
                 );
             })}
         </div>
