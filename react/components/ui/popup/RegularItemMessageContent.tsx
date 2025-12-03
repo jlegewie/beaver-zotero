@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { truncateText } from '../../../utils/stringUtils';
-import { CSSIcon, CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon } from '../../icons/icons';
+import { CSSIcon, CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon, TickIcon, Icon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import Button from '../Button';
 import { MessageItemSummary, useMessageItemSummary } from '../../../hooks/useMessageItemSummary';
@@ -48,7 +48,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
     };
 
     return (
-        <div className="display-flex flex-col gap-3 -ml-1">
+        <div className="display-flex flex-col gap-15 -ml-1">
             <div className="display-flex flex-row items-center gap-2 ml-15">
                 <div className="font-color-secondary text-md">{truncateText(item.getDisplayTitle(), 200)}</div>
             </div>
@@ -61,12 +61,12 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                     iconClassName="scale-12 -ml-1"
                     disabled={validAttachmentsCount === 0}
                 >
-                    <ZoteroIcon 
-                        icon={ZOTERO_ICONS.ATTACHMENTS} 
-                        size={15} 
-                        color="--accent-green"
-                        className="mr-1"
-                    />
+                    {validAttachmentsCount > 0 && (
+                        <Icon icon={TickIcon} size={15} className="scale-12 ml-1 font-color-accent-green" />
+                    )}
+                    {validAttachmentsCount === 0 && (
+                        <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
+                    )}
                     <span className="font-color-secondary">{validAttachmentsCount} Attachment{validAttachmentsCount !== 1 ? 's' : ''} available</span>
                 </Button>
                 {validAttachmentsVisible && (
@@ -75,7 +75,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             const displayName = getDisplayName(attachment);
                             
                             return (
-                                <div key={attachment.key || index} className="display-flex flex-col gap-1 ml-4">
+                                <div key={attachment.key || index} className="display-flex flex-col gap-1 ml-5">
                                     <div className="display-flex flex-row items-start gap-1">
                                         <div className="flex-shrink-0 -mt-010 scale-80">
                                             <CSSItemTypeIcon itemType={attachment.getItemTypeIconName()} />
@@ -99,7 +99,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             rightIcon={invalidAttachmentsVisible ? ArrowDownIcon : ArrowRightIcon}
                             iconClassName="scale-12 -ml-1"
                         >
-                            <CSSIcon name="x-8" className="icon-16 font-color-error scale-11 mr-1" style={{ fill: 'red' }}/>
+                            <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
                             <span>{invalidAttachments.length} Attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
                         </Button>
                         {invalidAttachmentsVisible && (
@@ -108,7 +108,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                                     const displayName = getDisplayName(item);
                                     
                                     return (
-                                        <div key={item.key || index} className="display-flex flex-col gap-1 ml-4">
+                                        <div key={item.key || index} className="display-flex flex-col gap-1 ml-5">
                                             <div className="display-flex flex-row items-start gap-1">
                                                 <div className="flex-shrink-0 -mt-010 scale-80">
                                                     <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
