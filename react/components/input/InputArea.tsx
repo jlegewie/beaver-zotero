@@ -202,7 +202,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             rightIcon={isStreaming ? StopIcon : undefined}
                             type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
                             variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
-                            style={{ padding: '1px 5px' }}
+                            style={{ padding: '2px 5px' }}
                             onClick={isStreaming ? handleStop : handleSubmit}
                             disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable) || !selectedModel}
                         >
