@@ -258,7 +258,7 @@ export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDo
 				oldChannel.cancel(Cr.NS_BINDING_ABORTED);
 				callback.onRedirectVerifyCallback(Cr.NS_BINDING_ABORTED);
 			}
-		};
+		} as nsIInterfaceRequestor & nsIChannelEventSink;
 
 		xhr.onloadend = () => resolve(info);
 		xhr.onerror = () => resolve(null);
