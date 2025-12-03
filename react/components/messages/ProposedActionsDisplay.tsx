@@ -28,7 +28,6 @@ const ProposedActionsDisplay: React.FC<ProposedActionsDisplayProps> = ({
         lastMessage.id,
         (action) => isCreateItemAction(action) && action.toolcall_id == 'citations'
     ) as CreateItemProposedAction[];
-    console.log("proposedActions", proposedActions)
 
     if (
         proposedActions.length === 0 ||
