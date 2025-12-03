@@ -54,7 +54,7 @@
         "remark-gfm": "^4.0.1",
         "remark-math": "^6.0.0",
         "uuid": "^11.0.5",
-        "zotero-plugin-toolkit": "^4.1.2"
+        "zotero-plugin-toolkit": "^5.0.1"
     },
     "devDependencies": {
         "@babel/core": "^7.26.9",
@@ -69,7 +69,7 @@
         "@types/react-dom": "^18.3.6",
         "babel-loader": "^9.2.1",
         "concurrently": "^9.1.2",
-        "dotenv": "^16.5.0",
+        "dotenv": "^17.2.3",
         "eslint": "^9.19.0",
         "eslint-scope": "^8.3.0",
         "prettier": "^3.4.2",
@@ -78,7 +78,7 @@
         "webpack": "^5.98.0",
         "webpack-cli": "^6.0.1",
         "zotero-plugin-scaffold": "^0.8.2",
-        "zotero-types": "^3.1.9"
+        "zotero-types": "^4.0.5"
     },
     "prettier": {
         "printWidth": 80,
