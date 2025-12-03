@@ -9,6 +9,7 @@ export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
 export { default as PdfIcon } from './PdfIcon';
+export { default as HighlighterIcon } from './HighlighterIcon';
 export { default as PinIcon } from './PinIcon';
 export { default as DocumentValidationIcon } from './DocumentValidationIcon';
 export { default as DownloadIcon } from './DownloadIcon';
