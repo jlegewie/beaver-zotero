@@ -425,7 +425,10 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
         if (isError) {
             return 'Import Items: Error';
         }
-        return `Import ${pendingCount} Item${pendingCount === 1 ? '' : 's'}`;
+        if (pendingCount > 0) {
+            return `Import ${pendingCount} Item${pendingCount === 1 ? '' : 's'}`;
+        }
+        return `Imported ${appliedCount} Item${appliedCount === 1 ? '' : 's'}`;
     };
 
     // Determine when results can be toggled and when button should be disabled
