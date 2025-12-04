@@ -20,6 +20,7 @@ import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessa
 import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
+import { PlanFeatures } from '../../react/types/profile';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -56,6 +57,20 @@ export class FileUploader {
 
     private getRefillThreshold(): number {
         return Math.min(this.BATCH_SIZE, this.MAX_CONCURRENT + this.REFILL_BUFFER);
+    }
+
+    /**
+     * Check if file size exceeds plan limit
+     * @returns Error message if exceeded, null if within limit
+     */
+    private checkFileSizeLimit(fileSize: number, planFeatures: PlanFeatures): string | null {
+        const fileSizeInMB = fileSize / 1024 / 1024;
+        const sizeLimit = planFeatures.uploadFileSizeLimit;
+        logger(`File Uploader: File size of ${fileSizeInMB.toFixed(2)}MB and limit of ${sizeLimit}MB`, 4);
+        if (fileSizeInMB > sizeLimit) {
+            return `File size of ${fileSizeInMB.toFixed(2)}MB exceeds ${sizeLimit}MB`;
+        }
+        return null;
     }
 
     /**
@@ -449,6 +464,7 @@ export class FileUploader {
             let mimeType: string = '';
             let pageCount: number | null = null;
             let fileSize: number | null = null;
+            const planFeatures = store.get(planFeaturesAtom);
 
             // File exists locally
             if (useLocalFile) {
@@ -470,13 +486,23 @@ export class FileUploader {
                     return;
                 }
 
-                // File metadata
+                // Early size check before expensive reads/parsing
+                fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+                context.fileSize = fileSize;
+                if (fileSize) {
+                    const sizeError = this.checkFileSizeLimit(fileSize, planFeatures);
+                    if (sizeError) {
+                        logger(`File Uploader: ${sizeError}`, 1);
+                        await this.handleUploadFailure(item, 'plan_limit', 'plan_limit_file_size', sizeError);
+                        return;
+                    }
+                }
+
+                // File metadata (after size guard)
                 mimeType = await getMimeType(attachment, filePath);
                 context.mimeType = mimeType;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
                 context.pageCount = pageCount;
-                fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-                context.fileSize = fileSize;
 
                 // Read file content
                 try {
@@ -535,11 +561,21 @@ export class FileUploader {
                     return;
                 }
                 
+                // File size (early exit before PDF parsing)
+                fileSize = fileArrayBuffer.length;
+                context.fileSize = fileSize;
+                if (fileSize) {
+                    const sizeError = this.checkFileSizeLimit(fileSize, planFeatures);
+                    if (sizeError) {
+                        logger(`File Uploader: ${sizeError}`, 1);
+                        await this.handleUploadFailure(item, 'plan_limit', 'plan_limit_file_size', sizeError);
+                        return;
+                    }
+                }
+
                 // File metadata
                 mimeType = getMimeTypeFromData(attachment, fileArrayBuffer);
                 context.mimeType = mimeType;
-                fileSize = fileArrayBuffer.length;
-                context.fileSize = fileSize;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCountFromData(fileArrayBuffer) : null;
                 context.pageCount = pageCount;
 
@@ -560,25 +596,6 @@ export class FileUploader {
                 );
                 if (useServerFile) store.set(zoteroServerDownloadErrorAtom, true);
                 return;
-            }
-
-            // Enforce file size limit
-            if (fileSize) {
-                const fileSizeInMB = fileSize / 1024 / 1024; // convert to MB
-                const planFeatures = store.get(planFeaturesAtom);
-                const sizeLimit = planFeatures.uploadFileSizeLimit;
-                logger(`File Uploader: File size of ${fileSizeInMB}MB and limit of ${sizeLimit}MB`, 1);
-                if (fileSizeInMB > sizeLimit) {
-                    const message = `File size of ${fileSizeInMB}MB exceeds ${sizeLimit}MB`;
-                    logger(`File Uploader: ${message}`, 1);
-                    await this.handleUploadFailure(
-                        item,
-                        'plan_limit', // file exceeds size limit
-                        'plan_limit_file_size',
-                        message
-                    );
-                    return;
-                }
             }
 
             // Create a blob from the file array buffer with the mime type
