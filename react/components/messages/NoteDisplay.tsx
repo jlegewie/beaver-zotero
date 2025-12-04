@@ -132,10 +132,6 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
         return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} />;
     }, [isSaving, status, isComplete, isTitleHovered, contentVisible, SpinnerWrapper]);
 
-    const headerText = useMemo(() => {
-        return truncateText(noteTitle, 40);
-    }, [noteTitle]);
-
     const isSaveDisabled = isSaving || !isComplete || isLibraryReadOnly;
     const saveTooltip = isLibraryReadOnly 
             ? "Library is read-only" 
@@ -168,7 +164,7 @@ const NoteHeader = React.memo(function NoteHeader(props: NoteHeaderProps) {
                     `}
                     title={noteTitle}
                 >
-                    <span>{headerText}</span>
+                    {noteTitle}
                 </div>
                 <div className="flex-1" />
             </div>
