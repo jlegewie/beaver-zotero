@@ -29,15 +29,15 @@ export class FileUploader {
     private uploadQueue!: PQueue; // Will be initialized on start
 
     // upload concurrency
-    private readonly MAX_CONCURRENT: number = 3;
+    private readonly MAX_CONCURRENT: number = 5;
 
     // Queue refill buffer: Maintain a small backlog beyond active uploads to ensure
-    // continuous throughput. With MAX_CONCURRENT=3 and REFILL_BUFFER=3, we refill when
-    // the queue drops below 6 items (min of BATCH_SIZE and MAX_CONCURRENT + REFILL_BUFFER)
-    private readonly REFILL_BUFFER: number = 3;
+    // continuous throughput. With MAX_CONCURRENT=5 and REFILL_BUFFER=5, we refill when
+    // the queue drops below 10 items
+    private readonly REFILL_BUFFER: number = 5;
 
     // queue reads
-    private readonly BATCH_SIZE: number = 20;
+    private readonly BATCH_SIZE: number = 25;
     private readonly VISIBILITY_TIMEOUT_SECONDS: number = 300; // 5 minutes timeout for backend queue reads
     private readonly EMPTY_QUEUE_POLL_DELAY: number = 1000;    // 1 second delay when backend queue is empty
 
@@ -61,22 +61,31 @@ export class FileUploader {
     /**
      * Waits for queue capacity to drop below the specified limit
      * @param limit Maximum queue load (size + pending) threshold
-     * @param timeoutMs Timeout in milliseconds (default: 30000)
+     * @param timeoutMs Timeout in milliseconds (default: 120000)
      */
-    private async waitForQueueCapacity(limit: number, timeoutMs: number = 30000): Promise<void> {
+    private async waitForQueueCapacity(limit: number, timeoutMs: number = 120000): Promise<void> {
         if (!this.uploadQueue || !this.isRunning) {
             return;
         }
 
-        if (this.getQueueLoad() < limit) {
+        const currentLoad = this.getQueueLoad();
+        if (currentLoad < limit) {
             return;
         }
+
+        logger(`File Uploader Queue: Waiting for capacity (current: ${currentLoad}, limit: ${limit})`, 4);
+        const startTime = Date.now();
 
         await new Promise<void>((resolve) => {
             let timeoutHandle: NodeJS.Timeout | null = null;
 
             const checkCapacity = () => {
-                if (!this.isRunning || this.getQueueLoad() < limit) {
+                const load = this.getQueueLoad();
+                // Only log capacity checks if verbose logging is desired
+                // logger(`File Uploader Queue: checking capacity (load: ${load}, limit: ${limit})`, 4);
+                
+                if (!this.isRunning || load < limit) {
+                    logger(`File Uploader Queue: Capacity available after ${Date.now() - startTime}ms`, 4);
                     cleanup();
                     resolve();
                 }
@@ -375,7 +384,10 @@ export class FileUploader {
         context.library_id = item.library_id;
         context.zotero_key = item.zotero_key;
         context.file_hash = item.file_hash;
+        const uploadStartTime = Date.now();
+
         try {
+            logger(`File Uploader uploadFile ${item.zotero_key}: Starting upload process`, 4);
             logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
 
             // Get the user ID from the store
@@ -468,7 +480,9 @@ export class FileUploader {
 
                 // Read file content
                 try {
+                    const readStart = Date.now();
                     fileArrayBuffer = await IOUtils.read(filePath);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: File read completed in ${Date.now() - readStart}ms`, 4);
                 } catch (readError: any) {
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
@@ -499,7 +513,9 @@ export class FileUploader {
 
                 // Download the file data to memory
                 try {
+                    const downloadStart = Date.now();
                     fileArrayBuffer = await getAttachmentDataInMemory(attachment);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Server download completed in ${Date.now() - downloadStart}ms`, 4);
                 } catch (downloadError: any) {
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
@@ -580,16 +596,19 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${item.storage_path} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
                     // const storagePath = `${userId}/attachments/${item.file_hash}/original`;
                     // await this.uploadFileToSupabase(storagePath, blob);
+                    
+                    const gcsUploadStart = Date.now();
                     await this.uploadFileToGCS(item.signed_upload_url, blob, item.mime_type, {
                         userid: userId,
                         filehash: item.file_hash,
                         libraryid: item.library_id.toString(),
                         zoterokey: item.zotero_key
                     });
+                    logger(`File Uploader uploadFile ${item.zotero_key}: GCS upload completed in ${Date.now() - gcsUploadStart}ms`, 4);
                     
                     
                     uploadSuccess = true;
-                    logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}`, 3);
+                    logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}. Total time: ${Date.now() - uploadStartTime}ms`, 3);
 
                 } catch (uploadError: any) {
                     if (uploadError instanceof TypeError) {
