@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { truncateText } from '../../utils/stringUtils';
 import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
 import { citationDataMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
