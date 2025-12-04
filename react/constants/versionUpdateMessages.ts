@@ -107,19 +107,19 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Search 250 million scholarly works",
-                description: "A sub-agent searches by topic, author, or journal, and follows citation chains to surface new references and extend your Zotero library.",
+                description: "A sub-agent searches by topic, author, or journal, and follows citation chains to surface new references and extend your Zotero library. <a href='https://www.beaverapp.ai/docs/web-search'>Learn more</a>",
             },
             {
                 title: "Generate notes in a dedicated panel",
-                description: "Beaver now writes notes in a separate panel that you can save as Zotero Notes or copy elsewhere.",
+                description: "Beaver now writes notes in a separate panel that you can save as Zotero Notes or copy elsewhere. <a href='https://www.beaverapp.ai/docs/notes'>Learn more</a>",
             },
             {
                 title: "New documentation site",
-                description: "Beaver finally has a better documentation <a href='https://www.beaverapp.ai/docs'>here</a>.",
+                description: "Beaver finally has <a href='https://www.beaverapp.ai/docs'>better documentation</a>.",
             }
         ],
-        learnMoreUrl: "https://www.beaverapp.ai/changelog/v0.8",
-        learnMoreLabel: "Learn more",
+        // learnMoreUrl: "https://www.beaverapp.ai/changelog/v0.8",
+        // learnMoreLabel: "Learn more",
     },
 ];
 
