@@ -25,7 +25,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
     return (
         <div className="display-flex flex-col gap-5 w-full">
             {text && (
-                <div className="font-color-tertiary text-base" style={{ whiteSpace: 'pre-line' }}>
+                <div className="font-color-secondary text-base" style={{ whiteSpace: 'pre-line' }}>
                     {text}
                 </div>
             )}
