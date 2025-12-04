@@ -72,11 +72,11 @@ const DeviceAuthorizationPage: React.FC = () => {
                         <p className="text-base font-color-secondary mb-4">
                             You're signing in to Beaver from a new device. To continue, you'll need to authorize this device to sync with your Beaver account.
                             {' '}<a 
-                                href="https://www.beaverapp.ai/docs/multiple-devices" 
+                                href={process.env.WEBAPP_BASE_URL + '/docs/multiple-devices'}
                                 className="link"
                                 onClick={(e) => {
                                     e.preventDefault();
-                                    Zotero.launchURL('https://www.beaverapp.ai/docs/multiple-devices');
+                                    Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices');
                                 }}
                             >Learn more</a>
                         </p>
@@ -84,11 +84,11 @@ const DeviceAuthorizationPage: React.FC = () => {
                         <p className="text-base font-color-secondary mb-4">
                             To use Beaver from a different device, please sync your library with Zotero and enable the Preference "Sync with Zotero" in the Beaver Preferences of your existing device.
                             {' '}<a 
-                                href="https://www.beaverapp.ai/docs/multiple-devices" 
+                                href={process.env.WEBAPP_BASE_URL + '/docs/multiple-devices'}
                                 className="link"
                                 onClick={(e) => {
                                     e.preventDefault();
-                                    Zotero.launchURL('https://www.beaverapp.ai/docs/multiple-devices');
+                                    Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices');
                                 }}
                             >Learn more</a>
                         </p>

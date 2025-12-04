@@ -26,6 +26,8 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   const [step, setStep] = useState<LoginStep>('method-selection')
   const [resendCountdown, setResendCountdown] = useState(0)
   const [isWaitingForProfile, setIsWaitingForProfile] = useState(false)
+  // Store the associated email at mount time for error messages
+  const [associatedEmail] = useState<string | undefined>(() => getPref("userEmail"))
   const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
   const isProfileInvalid = useAtomValue(isProfileInvalidAtom)
 
@@ -33,13 +35,12 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
   // Handle initial focus and email prefill
   useEffect(() => {
-    const storedUserEmail = getPref("userEmail");
-    if (storedUserEmail) {
-      setEmail(storedUserEmail);
+    if (associatedEmail) {
+      setEmail(associatedEmail);
     } else {
       emailInputRef?.current?.focus();
     }
-  }, [emailInputRef]);
+  }, [emailInputRef, associatedEmail]);
 
   // Add timeout for profile loading
   useEffect(() => {
@@ -74,8 +75,13 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       setErrorMsg(errorMessage);
       setIsWaitingForProfile(false);
       setIsLoading(false);
+      // Return to email page if on OTP page
+      if (step === 'otp') {
+        setAuthMethod('initial');
+        setStep('method-selection');
+      }
     }
-  }, [isProfileInvalid, setErrorMsg]);
+  }, [isProfileInvalid, setErrorMsg, step]);
 
   // Countdown timer for resend OTP
   useEffect(() => {
@@ -91,6 +97,15 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       setError('Please enter your email address')
       return
     }
+
+    // Check if Zotero instance is already associated with another account
+    const storedUserEmail = getPref("userEmail");
+    if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
+      const errorMessage = `This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`;
+      setError(errorMessage);
+      setErrorMsg(errorMessage);
+      return;
+    }
     
     setIsLoading(true)
     setError(null)
@@ -105,10 +120,22 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     } finally {
       setIsLoading(false)
     }
-  }, [email])
+  }, [email, setErrorMsg])
 
   // Handle OTP verification
   const handleVerifyOTP = useCallback(async (otpCode: string) => {
+    // Check if Zotero instance is already associated with another account
+    const storedUserEmail = getPref("userEmail");
+    if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
+      const errorMessage = `This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`;
+      setError(errorMessage);
+      setErrorMsg(errorMessage);
+      // Return to email page
+      setAuthMethod('initial');
+      setStep('method-selection');
+      return; // Early return - error is already handled locally
+    }
+
     setIsLoading(true)
     setError(null)
     setErrorMsg(null)
@@ -231,18 +258,9 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
           handleSendEmailCode()
         }} className="webapp-space-y-6">
           <div>
-            <div className="display-flex flex-row items-center justify-between mb-2">
-              <label htmlFor="email" className="block text-sm font-medium font-color-primary">
-                Email address
-              </label>
-              {error && (
-                <span className='text-xs font-color-red'>
-                  {error == 'Signups not allowed for otp'
-                    ? <span>Invalid email address. Signup <a className="text-link-red" href={process.env.WEBAPP_BASE_URL + '/join'}>here</a>.</span>
-                    : error}
-                </span>
-              )}
-            </div>
+            <label htmlFor="email" className="block text-sm font-medium font-color-primary mb-2">
+              Email address
+            </label>
             <input
               id="email"
               type="email"
@@ -257,6 +275,17 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
               placeholder="Enter your email"
               ref={emailInputRef}
             />
+            {error && (
+              <p className='text-xs font-color-red mt-2'>
+                {error == 'Signups not allowed for otp'
+                  ? <span>Invalid email address. Signup <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}>here</span>.</span>
+                  : error.includes('not linked to your account')
+                  ? <span>This Zotero instance is not linked to your Beaver account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
+                  : error.includes('already associated with another Beaver account')
+                  ? <span>This Zotero instance is already associated with {associatedEmail ? <strong>{associatedEmail}</strong> : 'another account'}. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-already-associated-with-another-beaver-account')}>Learn more</span>.</span>
+                  : error}
+              </p>
+            )}
           </div>
 
           <div className="webapp-space-y-3 display-flex flex-col items-center">
@@ -291,16 +320,9 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       {authMethod === 'password' && (
         <div className="webapp-space-y-5">
           <div>
-            <div className="display-flex flex-row items-center justify-between mb-2">
-              <label htmlFor="email-password" className="block text-sm font-medium font-color-primary">
-                Email address
-              </label>
-              {error && (
-                <span className='text-xs font-color-red'>
-                  {error}
-                </span>
-              )}
-            </div>
+            <label htmlFor="email-password" className="block text-sm font-medium font-color-primary mb-2">
+              Email address
+            </label>
             <input
               id="email-password"
               type="email"
@@ -314,6 +336,15 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
               className="webapp-input"
               placeholder="Enter your email"
             />
+            {error && (
+              <p className='text-xs font-color-red mt-2'>
+                {error.includes('not linked to your account')
+                  ? <span>This Zotero instance is not linked to your account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
+                  : error.includes('already associated with another Beaver account')
+                  ? <span>This Zotero instance is already associated with {associatedEmail ? <strong>{associatedEmail}</strong> : 'another account'}. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-already-associated-with-another-beaver-account')}>Learn more</span>.</span>
+                  : error}
+              </p>
+            )}
           </div>
 
           <form onSubmit={handlePasswordSubmit} className="webapp-space-y-6">
