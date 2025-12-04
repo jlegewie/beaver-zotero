@@ -360,7 +360,7 @@ const CreateItemToolDisplay: React.FC<CreateItemToolDisplayProps> = ({
             }
 
             // Show the results panel
-            setPanelState({ key: groupId, updates: { resultsVisible: true, isApplying: false } });
+            setPanelState({ key: groupId, updates: { isApplying: false } });
 
         } catch (error) {
             logger(`handleApplyAll: unexpected error: ${error}`, 1);
