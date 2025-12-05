@@ -286,6 +286,23 @@ var MuPDFLoader = {
     },
 
     /**
+     * Get the page count of a PDF file
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {string} [rootURI] - Root URI for the addon (uses cached init if already initialized)
+     * @returns {Promise<number>} - The number of pages
+     */
+    async getPageCount(pdfData, rootURI = "chrome://beaver/content/") {
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            return doc.countPages();
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
      * Extract text from a PDF file
      * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
      * @param {string} [rootURI] - Root URI for the addon (uses cached init if already initialized)
