@@ -632,7 +632,7 @@ var MuPDFLoader = {
     /**
      * Extract text from specific pages of a PDF
      * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
-     * @param {number[]} pageIndices - Array of page indices (0-based) to extract
+     * @param {number[]} [pageIndices] - Array of page indices (0-based) to extract. If not provided, extracts all pages.
      * @param {string} [rootURI] - Root URI for the addon
      * @returns {Promise<Object[]>} - Array of page data objects
      */
@@ -644,7 +644,10 @@ var MuPDFLoader = {
             const pageCount = doc.countPages();
             const results = [];
 
-            for (const idx of pageIndices) {
+            // If no pageIndices provided, extract all pages
+            const indicesToExtract = pageIndices ?? Array.from({ length: pageCount }, (_, i) => i);
+
+            for (const idx of indicesToExtract) {
                 if (idx < 0 || idx >= pageCount) {
                     results.push({
                         idx,
