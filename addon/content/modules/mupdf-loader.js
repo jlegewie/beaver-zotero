@@ -60,6 +60,17 @@ var MuPDFLoader = {
             Module.onAbort = (err) => reject(err || new Error("MuPDF abort"));
             try {
                 moduleFunc(Module);
+
+                // MuPDF ESM build exports an async init function as default.
+                if (typeof Module.default === "function") {
+                    const result = Module.default(Module);
+                    if (result && typeof result.then === "function") {
+                        result.then((mod) => resolve(mod || Module)).catch(reject);
+                    } else {
+                        resolve(result || Module);
+                    }
+                    return;
+                }
             } catch (err) {
                 reject(err);
             }
