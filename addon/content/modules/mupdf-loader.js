@@ -229,10 +229,38 @@ var MuPDFLoader = {
             }
         }
 
+        // Helper to read a Rect from WASM memory (4 floats)
+        const fromRect = (ptr) => {
+            ptr = ptr >> 2;
+            return [
+                libmupdf.HEAPF32[ptr + 0],
+                libmupdf.HEAPF32[ptr + 1],
+                libmupdf.HEAPF32[ptr + 2],
+                libmupdf.HEAPF32[ptr + 3],
+            ];
+        };
+
         // Page class wrapper
         class Page {
             constructor(pointer) {
                 this.pointer = pointer;
+            }
+
+            /**
+             * Get page bounds [x0, y0, x1, y1]
+             * @param {string} [box="CropBox"] - Page box type (MediaBox, CropBox, BleedBox, TrimBox, ArtBox)
+             * @returns {number[]} - Bounding rectangle [x0, y0, x1, y1]
+             */
+            getBounds(box = "CropBox") {
+                const boxTypes = {
+                    MediaBox: 0,
+                    CropBox: 1,
+                    BleedBox: 2,
+                    TrimBox: 3,
+                    ArtBox: 4,
+                };
+                const boxIdx = boxTypes[box] ?? 1;
+                return fromRect(libmupdf._wasm_bound_page(this.pointer, boxIdx));
             }
 
             toStructuredText(options = "") {
@@ -376,6 +404,279 @@ var MuPDFLoader = {
             }
 
             return pages;
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Check if a PDF document lacks a text layer (likely needs OCR).
+     * Samples pages to find the percentage that look like scans (minimal text + images).
+     *
+     * Strategy:
+     * - Start with initial sample (default 6 pages)
+     * - If 80%+ appear to be scans, expand sample to 20 pages for confirmation
+     * - Return true if 90%+ of final sample are scans
+     *
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {Object} [options] - Configuration options
+     * @param {number} [options.minTextPerPage=100] - Minimum text length expected on a page with a text layer
+     * @param {number} [options.sampleLimit=6] - Initial number of pages to sample
+     * @param {number} [options.expandSampleLimit=20] - Number of pages to expand the sample to if 80%+ of the initial sample are scans
+     * @param {number} [options.scanThreshold=0.8] - Threshold to trigger expanded sampling
+     * @param {number} [options.confirmationThreshold=0.9] - Final threshold to confirm document needs OCR
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<boolean>} - True if document likely needs OCR, false otherwise
+     */
+    async hasNoTextLayer(pdfData, options = {}, rootURI = "chrome://beaver/content/") {
+        const {
+            minTextPerPage = 100,
+            sampleLimit = 6,
+            expandSampleLimit = 20,
+            scanThreshold = 0.8,
+            confirmationThreshold = 0.9,
+        } = options;
+
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            const pageCount = doc.countPages();
+
+            // Skip first page if document is long enough (often has publisher text)
+            const startPage = pageCount > 3 ? 1 : 0;
+
+            /**
+             * Check if a page looks like a scan (minimal text + has images)
+             */
+            const isScanLikePage = (pageIdx) => {
+                const page = doc.loadPage(pageIdx);
+                try {
+                    const stext = page.toStructuredText("preserve-whitespace");
+                    try {
+                        const json = JSON.parse(stext.asJSON());
+                        const blocks = json.blocks || [];
+
+                        // Count text length and check for images
+                        let textLength = 0;
+                        let hasImages = false;
+
+                        for (const block of blocks) {
+                            if (block.type === "text") {
+                                for (const line of block.lines || []) {
+                                    textLength += (line.text || "").length;
+                                }
+                            } else if (block.type === "image") {
+                                hasImages = true;
+                            }
+                        }
+
+                        // Page is scan-like if it has minimal text and contains images
+                        return textLength < minTextPerPage && hasImages;
+                    } finally {
+                        stext.destroy();
+                    }
+                } finally {
+                    page.destroy();
+                }
+            };
+
+            // Initial sample
+            const initialSampleSize = Math.min(pageCount - startPage, sampleLimit);
+            let scanLikeCount = 0;
+
+            for (let i = startPage; i < startPage + initialSampleSize; i++) {
+                if (isScanLikePage(i)) {
+                    scanLikeCount++;
+                }
+            }
+
+            // Calculate percentage for initial sample
+            let scanPercentage = initialSampleSize > 0 ? scanLikeCount / initialSampleSize : 0;
+            let totalChecked = initialSampleSize;
+
+            // If 80%+ appear to be scans, expand sample for confirmation
+            if (scanPercentage >= scanThreshold && pageCount > initialSampleSize) {
+                const expandedSampleSize = Math.min(pageCount - startPage, expandSampleLimit);
+
+                if (expandedSampleSize > initialSampleSize) {
+                    // Check additional pages beyond initial sample
+                    for (let i = startPage + initialSampleSize; i < startPage + expandedSampleSize; i++) {
+                        if (isScanLikePage(i)) {
+                            scanLikeCount++;
+                        }
+                    }
+
+                    totalChecked = expandedSampleSize;
+                    scanPercentage = scanLikeCount / totalChecked;
+                }
+            }
+
+            // Return true if 90%+ of sampled pages are scan-like
+            return scanPercentage >= confirmationThreshold;
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Convert a PDF to structured document format.
+     * Similar to the Python pdf_convert function.
+     *
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {Object} [options] - Configuration options
+     * @param {boolean} [options.checkTextLayer=true] - Whether to check for text layer before processing
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<Object>} - Structured document with pages
+     * @throws {Error} - If document is encrypted or has no text layer
+     */
+    async convertPdf(pdfData, options = {}, rootURI = "chrome://beaver/content/") {
+        const { checkTextLayer = true } = options;
+
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            // Check for text layer if requested
+            if (checkTextLayer) {
+                const needsOCR = await this.hasNoTextLayer(pdfData, {}, rootURI);
+                if (needsOCR) {
+                    throw new Error("Document has no text layer");
+                }
+            }
+
+            const pageCount = doc.countPages();
+            const pages = [];
+
+            for (let i = 0; i < pageCount; i++) {
+                const pageData = this._convertPage(doc, i);
+                pages.push(pageData);
+            }
+
+            return {
+                pages,
+                pageCount,
+                version: "1.0",
+            };
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Convert a single page to structured format.
+     * @param {Object} doc - MuPDF document instance
+     * @param {number} pageIdx - Page index (0-based)
+     * @returns {Object} - Page data with content and metadata
+     */
+    _convertPage(doc, pageIdx) {
+        const page = doc.loadPage(pageIdx);
+
+        try {
+            // Get page bounds
+            const bounds = page.getBounds();
+            const pageWidth = bounds[2] - bounds[0];
+            const pageHeight = bounds[3] - bounds[1];
+
+            // Extract structured text
+            const stext = page.toStructuredText("preserve-whitespace");
+            try {
+                const json = JSON.parse(stext.asJSON());
+                const blocks = json.blocks || [];
+
+                // Build page content by iterating through text blocks
+                let pageContent = "";
+                const textBlocks = [];
+
+                for (const block of blocks) {
+                    if (block.type === "text") {
+                        let blockText = "";
+                        const blockLines = [];
+
+                        for (const line of block.lines || []) {
+                            const lineText = line.text || "";
+                            blockText += lineText + " ";
+                            blockLines.push({
+                                text: lineText,
+                                bbox: line.bbox,
+                                font: line.font,
+                            });
+                        }
+
+                        textBlocks.push({
+                            type: "text",
+                            bbox: block.bbox,
+                            lines: blockLines,
+                            text: blockText.trim(),
+                        });
+
+                        pageContent += blockText.trim() + "\n\n";
+                    }
+                }
+
+                return {
+                    idx: pageIdx,
+                    content: pageContent.trim(),
+                    blocks: textBlocks,
+                    pageWidth,
+                    pageHeight,
+                };
+            } finally {
+                stext.destroy();
+            }
+        } finally {
+            page.destroy();
+        }
+    },
+
+    /**
+     * Extract text from specific pages of a PDF
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {number[]} pageIndices - Array of page indices (0-based) to extract
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<Object[]>} - Array of page data objects
+     */
+    async extractPages(pdfData, pageIndices, rootURI = "chrome://beaver/content/") {
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            const pageCount = doc.countPages();
+            const results = [];
+
+            for (const idx of pageIndices) {
+                if (idx < 0 || idx >= pageCount) {
+                    results.push({
+                        idx,
+                        error: `Page index ${idx} out of range (0-${pageCount - 1})`,
+                    });
+                    continue;
+                }
+
+                const pageData = this._convertPage(doc, idx);
+                results.push(pageData);
+            }
+
+            return results;
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Get document metadata
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<Object>} - Document metadata
+     */
+    async getMetadata(pdfData, rootURI = "chrome://beaver/content/") {
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            return {
+                pageCount: doc.countPages(),
+            };
         } finally {
             doc.destroy();
         }
