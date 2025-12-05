@@ -20,7 +20,7 @@
 // Artifex Software, Inc., 39 Mesa Street, Suite 108A, San Francisco,
 // CA 94129, USA, for further information.
 "use strict";
-import libmupdf_wasm from "./mupdf-wasm.js";
+import libmupdf_wasm from "./mupdf-wasm.mjs";
 var node_fs = null;
 if (typeof process !== "undefined" && process.versions && process.versions.node)
 	node_fs = await import("node:fs");
