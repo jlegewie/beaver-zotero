@@ -1,13 +1,14 @@
 # ![](/addon/content/icons/beaver_nomargin.png) Beaver
 
 [![Create Beaver Account](https://img.shields.io/badge/Beaver_%F0%9F%A6%AB-Create_Account-red)](https://www.beaverapp.ai)
+[![Beaver Documentation](https://img.shields.io/badge/Documentation-blue)](https://www.beaverapp.ai/docs)
 
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
 Welcome to Beaver, a research agent with native Zotero integration. Beaver combines two parts:
 
-1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis from your library. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, and your broader library to generate answers with sentence‑level citations.
+1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis from your library. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, your broader library and searches the web to generate answers with sentence‑level citations.
 
 2. **Native Zotero Integration**: Beaver runs inside Zotero, using your curated library and reading context. When you're viewing a PDF, Beaver knows which page you're on and relates it to the rest of your library without disrupting your workflow.
 
@@ -19,17 +20,23 @@ We welcome feedback on GitHub. Access to the preview release may be limited base
 
 ## Key Features
 
-1. **Research Agent**: Beaver uses multi-tool agentic search. It combines metadata, semantic, and full-document search (keyword + semantic), adapting its strategy to your task to locate specific passages across thousands of papers and synthesize findings.
+1. **Chat with your Entire Library**: Ask questions about your research and get answers drawn from your entire library. Beaver searches across metadata, topics, and the full content of your PDFs to give grounded answers. [Learn more]https://www.beaverapp.ai/docs/searching)
 
-2. **Seamless Zotero integration**: Beaver is a Zotero plugin. Ask about the paper you're reading, compare with other items in your library, or survey how concepts are treated across articles.
+2. **Discover New Research**: Search over 250 million scholarly works outside your Zotero library. Understand citation patterns and find papers to expand your collection. [Learn more](https://www.beaverapp.ai/docs/web-search)
 
-3. **Your Library as Knowledge Base**: Results come from your Zotero library (no generic web results) ensuring traceability to sources you trust.
+3. **Seamless Zotero integration**: Lives directly in Zotero as a side panel. Ask questions about the paper you're reading, and Beaver knows exactly which page you're on.
 
-4. **Precise, sentence-level Citations**: Every claim includes exact citations with direct links to specific sentences in your PDFs. Hover over a citation to see the text or click on it to reveal the exact passage in the document.
+4. **Your Library as Knowledge Base**: Beaver prioritizes your curated Zotero library and sources you trust, not generic web results.
 
-5. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
+5. **Precise, Sentence-Level Citations**: Answers include direct sentence-level citations that link back to your source PDFs, ensuring transparency and verifiability.
 
-6. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 125,000 pages (~4,000 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+6. **Annotate Your PDFs**: Beaver can highlight and add notes to your PDFs when you ask. [Learn more](https://www.beaverapp.ai/docs/annotations)
+
+7. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
+
+8. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 125,000 pages (~4,000 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+
+Under the hood, Beaver is an AI agent with agentic search and other tools to help you in the research process. It combines metadata, semantic, and full-document search (keyword + semantic), adapting its strategy to your task to locate specific passages across thousands of papers and synthesize findings.
 
 ## Evaluations
 
@@ -37,9 +44,9 @@ We regularly run evaluations to track progress and guide development. One recent
 
 ![Figure: Performance comparison for Beaver Preview](/docs/litqa2-accuracy-preview.png)
 
-On this task, Beaver’s retrieval from a pre-defined document set performed strongly. For context, we also compared the results to large models with general internet search tools. These are not directly comparable but the contrast gives a sense of how retrieval on a pre-defined library (such as your Zotero library) performs compared to general internet search.
+On this task, Beaver’s retrieval from a pre-defined document set performed strongly. For context, we also compared the results to large models with general internet search tools. These are _not directly comparable_ but the contrast gives a sense of how retrieval on a pre-defined library (such as your Zotero library) performs compared to general internet search.
 
-This is only one dimension of evaluation. We also started to track other areas such as citation accuracy, handling of long documents, and integration into Zotero. More benchmarks and updates will follow as Beaver continues to develop.
+This is only one dimension of evaluation (and not the hardest). We also track other areas such as citation accuracy, handling of long documents, and integration into Zotero. More benchmarks and updates will follow as Beaver continues to develop.
 
 ## Getting started
 
@@ -48,31 +55,17 @@ This is only one dimension of evaluation. We also started to track other areas s
 3. Select the downloaded `.xpi` file.
 4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + L.
 
+More details are available in the [documentation](https://www.beaverapp.ai/docs/getting-started).
+
 ## How does Beaver work?
 
-Beaver is a research agent with native Zotero integration that autonomously selects and combines search strategies to find relevant information. It syncs your library to our servers, prepares metadata and related‑item search, and processes your files for full‑text search. See our [privacy policy](https://www.beaverapp.ai/privacy-policy). We're also building features to keep more data local. Prefer a local‑only approach? Consider Zotero plugins like [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
+Beaver is a research agent with native Zotero integration that autonomously selects and combines search strategies to find relevant information. It syncs your library to our servers, prepares metadata and related item search, and processes your files for full‑text search. See our [privacy policy](https://www.beaverapp.ai/privacy-policy). We're also building features to keep more data local. Prefer a local‑only approach? Consider Zotero plugins like [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
 
-## How does library search work?
+## How does library and web search work?
 
-Beaver uses agentic search: the AI can choose among different search tools, filter based on metadata and iterate to explore your Zotero library. Currently, Beaver supports three search tools:
+You can find a detailed discussion of how Beaver searches your library [here](https://www.beaverapp.ai/docs/searching). Discover new research with web search is discussed [here](https://www.beaverapp.ai/docs/web-search).
 
-#### 1. Metadata Search
-
-Find items by metadata (author, year, title). Ideal for locating specific references explicitly mentioned or inferred by context.
-
-#### 2. Related Reference Search (Semantic)
-
-Find conceptually related references even without keyword overlap (e.g., "crime" may surface work on incarceration, policing, or violence).
-
-#### 3. Full-document Search (keyword and semantic)
-
-Beaver uses hybrid search with reranking to search the content of your documents and retrieve relevant passages. Hybrid search combines keyword and semantic search based on embeddings to find relevant passages even without exact terms.
-
-<!-- During the preview, the implementation of full-text search will change repeatedly as we continue to improve Beaver. -->
-
-During the preview, full-document search is free for up to 125,000 pages (~4,000 articles).
-
-Together these tools allow the agent explore your library to find relevant references, documents, and specific paragraphs/pages.
+Beaver always prioritzies your library and is only encouraged to search for external references when your library contains limited information or when you ask for it.
 
 ## Responsible Use of Generative AI in Academic Research
 
@@ -103,21 +96,13 @@ Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/
 
 ### Which models do you recommand?
 
-Beaver support models from OpenAI, Google and Anthropic. Advanced users can also use models from Openrouter (see details below). We recommend frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4.5 for optimal performance. Haiku 4.5 is a great alternative at lower costs. Gemini 2.5 Flash also works well at a very low price-point for simpler requets that do not require multiple step reasoning or searches.
+Beaver support models from OpenAI, Google and Anthropic. Advanced users can also use models from Openrouter (see details [here](https://www.beaverapp.ai/docs/custom-models)). We recommend frontier models such as GPT-5, Gemini 2.5 Pro, or Claude Sonnet 4.5 for optimal performance. Haiku 4.5 is a great alternative at lower costs! Gemini 2.5 Flash also works well at a very low price-point for simpler requets that do not require multiple step reasoning or searches.
 
 Do keep in mind that Beaver often makes multiple model calls for a single query. When processing large amounts of context (e.g., several research papers), the cost of a single request can increase.
 
-### How do chat credits work?
+### How do page and chat credits work?
 
-Chat credits apply to both your messages and any related tool calls (e.g., metadata or full‑text searches). Each user message costs one credit. If the model invokes a tool, the server executes it and makes a second model call with the results, which costs another credit. A single question may involve multiple tool calls.
-
-You can switch to your own API key at any time. When using your key, tool calls no longer consume chat credits. You only pay your provider directly per token usage.
-
-### How do page limits work?
-
-Page limits control how many pages are indexed for full-document search. If your library exceeds the limit, additional files aren't indexed for full‑text search. You can view files over the limit under "File Status" when starting a new thread.
-
-Importantly, the page limit only affects full‑text search. Metadata and related‑reference search are unlimited. You can also manually add over‑limit documents to any chat. They're just excluded from full‑text search.
+See a detailed discussion of page and chat credits [here](https://www.beaverapp.ai/docs/credits).
 
 ### What attachment types are supported?
 
@@ -145,40 +130,7 @@ The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The ba
 
 ### Does Beaver support other model providers?
 
-Beaver includes an advanced setting to define custom models. These models are untested and not all features are be supported. Working with custom models can lead to unexpected errors and unexpected behavior. This might include certain functionality that simply doesn't work, errors without helpful messages or even wrong and misleading error messages, or model output that is undesirable (e.g. gpt-oss tends to include sentence ids such as '<s29‐s33>' in model responses). If you run into unexpected errors or problems, ALWAYS try the same with one of the fully supported models to see whether the issue is specific to your custom model. One important limitation is that custom models currently do not support image input. That means the model does not 'see' any page that is open in the Zotero file reader and "Area" annotations to a thread will likely fail.
-
-You can add custom models under Zotero -> Preferences -> Advanced -> Config Editor → Search for "beaver.customChatModels". The field must be a valid JSON array where each object contains the following fields:
-
-- `provider`: Model provider. Currently only is supported provider is 'openrouter'
-- `api_key`: API kep for the provider
-- `name`: The model name as it appears in the model selector
-- `snapshot`: The model snapshot such as 'openai/gpt-oss-120b' or 'z-ai/glm-4.6'
-- `context_window`: (Optional) The context window of the model (defaults to 128,000). This is used to compress the context when the input tokens exceed a certain threshold. You can also intentionally set this lower to encourage context compression, which reduces API costs and can avoid running into rate limit errors. Anything below 128k is pretty untested though.
-
-To ensure the JSON is correctly formatted, you can use a json validator such as this [one](https://jsonlint.com/) (do not pass your actual API key to the validator and make sure you use the correct one for "beaver.customChatModels").
-
-Important: After changing the "beaver.customChatModels" config, always open and close Beaver settings. This is required to update the list of models in the model selector.
-
-Example setting to add GLM 4.6 and gpt-oss-120b:
-
-```json
-[
-  {
-    "provider": "openrouter",
-    "api_key": "XXX",
-    "name": "GLM 4.6",
-    "snapshot": "z-ai/glm-4.6",
-    "context_window": 200000
-  },
-  {
-    "provider": "openrouter",
-    "api_key": "XXX",
-    "name": "GLM 4.6",
-    "snapshot": "openai/gpt-oss-120b",
-    "context_window": 128000
-  }
-]
-```
+Beaver includes an advanced setting to define custom models. These models are untested and not all features are be supported. You can learn more [here](https://www.beaverapp.ai/docs/custom-models)
 
 ## System Requirements
 
