@@ -37,6 +37,11 @@ var MuPDFLoader = {
 
         // Replace import.meta.url so the script parses in non-module context
         jsText = jsText.replace(/import\.meta\.url/g, JSON.stringify(jsURL));
+        // Replace ESM export so it works in this Function wrapper
+        jsText = jsText.replace(
+            /export\s+default\s+([A-Za-z0-9_$]+)\s*;/,
+            "Module.default = $1;"
+        );
 
         const Module = {
             wasmBinary,
