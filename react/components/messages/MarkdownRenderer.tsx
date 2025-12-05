@@ -7,35 +7,161 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import ZoteroCitation from '../sources/ZoteroCitation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
+import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
 
 // Create a custom schema that extends GitHub's defaults but allows citation tags
 const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent']
+        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id']
     }
 });
+
+type Segment = 
+    | { type: 'markdown', content: string }
+    | { type: 'note', data: StreamingNoteBlock };
 
 type MarkdownRendererProps = {
     content: string;
     className?: string;
     exportRendering?: boolean;
+    messageId?: string;
+    enableNoteBlocks?: boolean;
 };
+
+/**
+ * Parse content into alternating segments of markdown and note blocks
+ * @param content The raw content string containing markdown and note tags
+ * @returns Array of segments in order of appearance
+ */
+function parseContentIntoSegments(content: string): Segment[] {
+    const segments: Segment[] = [];
+    
+    // Regex to find opening note tags with attributes
+    const noteOpeningTagRegex = /<note\s+([^>]*?)>/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    
+    while ((match = noteOpeningTagRegex.exec(content)) !== null) {
+        const openTagStart = match.index;
+        const openTagEnd = openTagStart + match[0].length;
+        const attributesStr = match[1];
+        
+        // Add markdown segment before this note (if any)
+        if (openTagStart > lastIndex) {
+            const markdownContent = content.substring(lastIndex, openTagStart);
+            if (markdownContent.trim().length > 0) {
+                segments.push({ type: 'markdown', content: markdownContent });
+            }
+        }
+        
+        // Extract attributes from the opening tag
+        const attributes: Record<string, string> = {};
+        const attrRegex = /(\w+)="([^"]*)"/g;
+        let attrMatch: RegExpExecArray | null;
+        while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
+            attributes[attrMatch[1]] = attrMatch[2];
+        }
+        
+        // Look for closing tag
+        const closingTagPattern = '</note>';
+        const closingTagIndex = content.indexOf(closingTagPattern, openTagEnd);
+        
+        let noteContent: string;
+        let isComplete: boolean;
+        let nextIndex: number;
+        
+        if (closingTagIndex !== -1) {
+            // Found closing tag
+            noteContent = content.substring(openTagEnd, closingTagIndex);
+            isComplete = true;
+            nextIndex = closingTagIndex + closingTagPattern.length;
+        } else {
+            // No closing tag - treat rest of content as note content
+            noteContent = content.substring(openTagEnd);
+            isComplete = false;
+            nextIndex = content.length;
+        }
+        
+        // Create note block
+        const noteBlock: StreamingNoteBlock = {
+            id: attributes.id || '',
+            title: attributes.title,
+            itemId: attributes.item_id || null,
+            attributes,
+            content: noteContent,
+            isComplete
+        };
+        
+        segments.push({ type: 'note', data: noteBlock });
+        lastIndex = nextIndex;
+    }
+    
+    // Add any remaining markdown content after the last note
+    if (lastIndex < content.length) {
+        const markdownContent = content.substring(lastIndex);
+        if (markdownContent.trim().length > 0) {
+            segments.push({ type: 'markdown', content: markdownContent });
+        }
+    }
+    
+    // If no notes were found, return single markdown segment
+    if (segments.length === 0 && content.trim().length > 0) {
+        segments.push({ type: 'markdown', content });
+    }
+    
+    return segments;
+}
+
+/**
+ * Preprocess citations in markdown content
+ * @param content Markdown content with citation tags
+ * @param lastCitationIdRef Reference to the last citation ID (for consecutive tracking across segments)
+ * @returns Preprocessed content with citations formatted
+ */
+function preprocessCitations(content: string, lastCitationIdRef: { value: string }): string {
+    // Track end index locally within this segment for adjacency detection
+    let lastCitationEndIndex = -1;
+    
+    return content.replace(
+        /<citation\s+((?:[^>])+?)\s*\/>/g,
+        (match, attributesStr, offset, fullString) => {
+            // Extract the ID from attributes
+            const idMatch = attributesStr.match(/id="([^"]+)"/);
+            const id = idMatch ? idMatch[1] : "";
+            
+            // Check if this citation has the same ID as the previous one
+            const isConsecutive = id && id === lastCitationIdRef.value;
+            
+            // Check if adjacent (only whitespace between this and previous citation)
+            const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
+                fullString.substring(lastCitationEndIndex, offset).trim() === '';
+            
+            // Update tracking for next iteration
+            lastCitationIdRef.value = id;
+            lastCitationEndIndex = offset + match.length;
+            
+            // Add attributes as needed
+            if (isAdjacent) {
+                return `<citation ${attributesStr} consecutive="true" adjacent="true"></citation>`;
+            }
+            if (isConsecutive) {
+                return `<citation ${attributesStr} consecutive="true"></citation>`;
+            }
+            
+            return `<citation ${attributesStr}></citation>`;
+        }
+    );
+}
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
     className = 'markdown', 
-    exportRendering = false
+    exportRendering = false,
+    messageId,
+    enableNoteBlocks = true
 }) => {
-
-    // Preprocess citation tags:
-    // - transform self-closing citation tags into proper open/close tags
-    // - tracks repeated citations with the same ID to add the `consecutive` attribute
-    // - tracks adjacent citations (only whitespace between them) to add `adjacent` attribute
-    let lastCitationId = "";
-    let lastCitationEndIndex = -1;
-    
     // Process partial tags at the end of content
     const processPartialContent = (content: string): string => {
         let processed = content;
@@ -68,6 +194,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         // Filter out other partial tags
         const partialTagPatterns = [
             /<citation[^>]*$/,                // Partial citation tag
+            /<note[^>]*$/,                    // Partial note opening tag
+            /<\/note$/,                       // Partial note closing tag
             /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i, // Any partial HTML tag
             /\$\$[^$]*$/                      // Unclosed math equation
         ];
@@ -87,59 +215,72 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     
     const processedContent = processPartialContent(content);
     
-    const preprocessedContent = processedContent
-        .replace(
-            /<citation\s+((?:[^>])+?)\s*\/>/g,
-            (match, attributesStr, offset, fullString) => {
-                // Extract the ID from attributes
-                const idMatch = attributesStr.match(/id="([^"]+)"/);
-                const id = idMatch ? idMatch[1] : "";
-                
-                // Check if this citation has the same ID as the previous one
-                const isConsecutive = id && id === lastCitationId;
-                
-                // Check if adjacent (only whitespace between this and previous citation)
-                const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
-                    fullString.substring(lastCitationEndIndex, offset).trim() === '';
-                
-                // Update tracking for next iteration
-                lastCitationId = id;
-                lastCitationEndIndex = offset + match.length;
-                
-                // Add attributes as needed
-                if (isAdjacent) {
-                    return `<citation ${attributesStr} consecutive="true" adjacent="true"></citation>`;
-                }
-                if (isConsecutive) {
-                    return `<citation ${attributesStr} consecutive="true"></citation>`;
-                }
-                
-                return `<citation ${attributesStr}></citation>`;
-            }
-        )
-        // Fix common formatting issues
-        .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
-        .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`)
-        // Inline and display math
-        .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
-        .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`);
+    // Parse into segments if note blocks are enabled
+    const segments = enableNoteBlocks 
+        ? parseContentIntoSegments(processedContent)
+        : [{ type: 'markdown' as const, content: processedContent }];
+    
+    // Track last citation ID across all markdown segments for consecutive detection
+    const lastCitationIdRef = { value: "" };
+    
+    // Process each segment
+    const processedSegments = segments.map((segment, index) => {
+        if (segment.type === 'note') {
+            return segment;
+        }
+        
+        // Apply citation preprocessing to markdown segments
+        let markdownContent = segment.content;
+        
+        // Preprocess citations
+        markdownContent = preprocessCitations(markdownContent, lastCitationIdRef);
+        
+        // Apply other markdown preprocessing
+        markdownContent = markdownContent
+            // Fix common formatting issues
+            .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
+            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`)
+            // Inline and display math
+            .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
+            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`);
+        
+        return { type: 'markdown' as const, content: markdownContent };
+    });
 
+    // Render segments
     return (
-        <ReactMarkdown
-            // "markdown-body"
-            className={className}
-            remarkPlugins={[remarkMath,remarkGfm]}
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
-            // rehypePlugins={[rehypeKatex]}
-            components={{
-                // @ts-expect-error - Custom component not in ReactMarkdown types
-                citation: ({node, ...props}: any) => {
-                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
+        <div className="display-flex flex-col gap-3">
+            {processedSegments.map((segment, index) => {
+                if (segment.type === 'note') {
+                    return (
+                        <NoteDisplay
+                            key={`note-${segment.data.id}-${index}`}
+                            note={segment.data}
+                            messageId={messageId}
+                            exportRendering={exportRendering}
+                        />
+                    );
                 }
-            }}
-        >
-            {preprocessedContent}
-        </ReactMarkdown>
+                
+                // Render markdown segment
+                return (
+                    <div key={`markdown-${index}`} className={className}>
+                        <ReactMarkdown
+                            remarkPlugins={[remarkMath, remarkGfm]}
+                            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
+                            components={{
+                                // @ts-expect-error - Custom component not in ReactMarkdown types
+                                citation: ({node, ...props}: any) => {
+                                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
+                                }
+                            }}
+                        >
+                            {segment.content}
+                        </ReactMarkdown>
+                    </div>
+                );
+            })}
+        </div>
     );
 };
 

@@ -20,7 +20,7 @@ export const useLibrariesMenu = ({
     libraryMenuItemContext
 }: UseLibrariesMenuOptions): UseLibrariesMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
-    const [libraries, setLibraries] = useState<Zotero.Library[]>([]);
+    const [libraries, setLibraries] = useState<_ZoteroTypes.Library.LibraryLike[]>([]);
 
     useEffect(() => {
         if (!isActive) {

@@ -1,5 +1,133 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
+import { ZoteroItemReference } from "../../react/types/zotero";
 import { logger } from "./logger";
+
+/**
+ * Context for determining where to create or insert a new Zotero item
+ */
+export interface ZoteroTargetContext {
+    targetLibraryId: number | undefined;
+    parentReference: ZoteroItemReference | null;
+    collectionToAddTo: Zotero.Collection | null;
+}
+
+/**
+ * Determines the target location for creating a new item based on current Zotero context.
+ * Handles both reader view (uses current document's library/parent) and library view (uses selected item or collection).
+ * @returns Target library ID, parent reference, and optional collection
+ */
+export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
+    const win = Zotero.getMainWindow();
+    const zp = Zotero.getActiveZoteroPane();
+    
+    let targetLibraryId: number | undefined = undefined;
+    let parentReference: ZoteroItemReference | null = null;
+    let collectionToAddTo: Zotero.Collection | null = null;
+
+    // Reader view - check if we're in a reader tab
+    const selectedTabType = win.Zotero_Tabs?.selectedType;
+    if (selectedTabType === 'reader') {
+        const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+        if (reader?.itemID) {
+            const readerItem = await Zotero.Items.getAsync(reader.itemID);
+            if (readerItem) {
+                targetLibraryId = readerItem.libraryID;
+                parentReference = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    : null;
+                return { targetLibraryId, parentReference, collectionToAddTo };
+            }
+        }
+    }
+
+    // Library view
+    const selectedItems = zp.getSelectedItems();
+    
+    // If items are selected, use the first one
+    if (selectedItems.length >= 1) {
+        const firstItem = selectedItems[0];
+        const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+        targetLibraryId = item.libraryID;
+        
+        if (item.isRegularItem()) {
+            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+        } else if (item.isNote() || item.isAttachment()) {
+            // Add to parent (sibling)
+            parentReference = item.parentKey
+                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                : null;
+        }
+    // No selection - add to current library/collection
+    } else {
+        targetLibraryId = zp.getSelectedLibraryID();
+        const collection = zp.getSelectedCollection();
+        if (collection) {
+            collectionToAddTo = collection;
+        }
+        parentReference = null;
+    }
+
+    return { targetLibraryId, parentReference, collectionToAddTo };
+}
+
+/**
+ * Synchronous version of getZoteroTargetContext for UI state determination.
+ * Uses sync Zotero.Items.get() which works because items are loaded when open in reader.
+ * @returns Target library ID, parent reference, and optional collection
+ */
+export function getZoteroTargetContextSync(): ZoteroTargetContext {
+    const win = Zotero.getMainWindow();
+    const zp = Zotero.getActiveZoteroPane();
+    
+    let targetLibraryId: number | undefined = undefined;
+    let parentReference: ZoteroItemReference | null = null;
+    let collectionToAddTo: Zotero.Collection | null = null;
+
+    // Reader view - check if we're in a reader tab
+    const selectedTabType = win.Zotero_Tabs?.selectedType;
+    if (selectedTabType === 'reader') {
+        const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+        if (reader?.itemID) {
+            const readerItem = Zotero.Items.get(reader.itemID);
+            if (readerItem) {
+                targetLibraryId = readerItem.libraryID;
+                parentReference = readerItem.parentKey
+                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    : null;
+                return { targetLibraryId, parentReference, collectionToAddTo };
+            }
+        }
+    }
+
+    // Library view
+    const selectedItems = zp.getSelectedItems();
+    
+    // If items are selected, use the first one
+    if (selectedItems.length >= 1) {
+        const firstItem = selectedItems[0];
+        const item = firstItem.isAnnotation() && firstItem.parentItem ? firstItem.parentItem : firstItem;
+        targetLibraryId = item.libraryID;
+        
+        if (item.isRegularItem()) {
+            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+        } else if (item.isNote() || item.isAttachment()) {
+            // Add to parent (sibling)
+            parentReference = item.parentKey
+                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                : null;
+        }
+    // No selection - add to current library/collection
+    } else {
+        targetLibraryId = zp.getSelectedLibraryID();
+        const collection = zp.getSelectedCollection();
+        if (collection) {
+            collectionToAddTo = collection;
+        }
+        parentReference = null;
+    }
+
+    return { targetLibraryId, parentReference, collectionToAddTo };
+}
 
 
 /**
@@ -261,7 +389,7 @@ export function isLibrarySynced(libraryID: number): boolean {
     }
 }
 
-export function isLibrarySkipped(library: Zotero.Library): boolean {
+export function isLibrarySkipped(library: _ZoteroTypes.Library.LibraryLike): boolean {;
     try {
         const pref = 'sync.librariesToSkip';
         const librariesToSkip = (Zotero.Prefs.get(pref) || []) as string[];
@@ -524,3 +652,112 @@ export function getActiveZoteroLibraryId(): number | null {
 
     return null;
 };
+
+/**
+ * Get the current library in the library view, or the library of the currently open file
+ * when in Zotero reader.
+ *
+ * @returns The current library object, or null if no library is available
+ */
+export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
+	const win = Zotero.getMainWindow();
+	if (!win) {
+		return null;
+	}
+	
+	// Check if we're in a reader tab
+	if (win.Zotero_Tabs && win.Zotero_Tabs.selectedType === 'reader') {
+		const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+		if (reader && reader.itemID) {
+			const item = Zotero.Items.get(reader.itemID);
+			if (item && item.libraryID) {
+				return Zotero.Libraries.get(item.libraryID) || null;
+			}
+		}
+		return null;
+	}
+	
+	// Otherwise, get library from library view
+	const zp = win.ZoteroPane;
+	if (zp && zp.collectionsView) {
+		const libraryID = zp.getSelectedLibraryID();
+		if (libraryID) {
+			return Zotero.Libraries.get(libraryID) || null;
+		}
+	}
+	
+	return null;
+}
+
+/**
+ * Creates a citation HTML string for a Zotero item
+ * @param {Zotero.Item|Number|String} itemOrID - Zotero item object or item ID
+ * @param {String} [page] - Optional page number or locator (e.g., "123", "123-145")
+ * @returns {String} HTML string with citation markup
+ */
+export function createCitationHTML(itemOrID: Zotero.Item | number | string, page?: string): string {
+    // Get the item if an ID was passed
+    const item = typeof itemOrID === 'object' ? itemOrID : Zotero.Items.get(itemOrID);
+    
+    if (!item) {
+        throw new Error('Item not found');
+    }
+    
+    // Handle attachments: cite the parent item if it exists
+    let itemToCite = item;
+    if (item.isAttachment()) {
+        if (item.parentID) {
+            itemToCite = Zotero.Items.get(item.parentID);
+            if (!itemToCite || !itemToCite.isRegularItem()) {
+                throw new Error('Attachment parent is not a regular item');
+            }
+        } else {
+            throw new Error('Cannot cite standalone attachments - they must have a parent item');
+        }
+    }
+    
+    if (!itemToCite.isRegularItem()) {
+        throw new Error('Item is not a regular item and cannot be cited');
+    }
+    
+    // Convert item to CSL JSON format
+    const itemData = Zotero.Utilities.Item.itemToCSLJSON(itemToCite);
+    
+    // Get the item URI
+    const uri = Zotero.URI.getItemURI(itemToCite);
+    
+    // Create citation item with optional page locator
+    const citationItem: any = {
+        uris: [uri],
+        itemData: itemData
+    };
+    
+    // Add page locator if provided
+    if (page) {
+        citationItem.locator = page;
+        citationItem.label = "page";
+    }
+    
+    // Create citation object
+    const citation = {
+        citationItems: [citationItem],
+        properties: {}
+    };
+    
+    // Format the citation text (e.g., "(Author, Year)" or "(Author, Year, p. 123)")
+    const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+    
+    // Create the HTML span element
+    const citationHTML = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citation))}">${formatted}</span>`;
+    
+    return citationHTML;
+}
+
+// Citation without page
+// const citation1 = createCitationHTML(item);
+
+// Citation with page number
+// const citation2 = createCitationHTML(item, "123");
+
+// Citation with page range
+// const citation3 = createCitationHTML(item, "123-145");

@@ -26,7 +26,7 @@ import { addProposedActionsAtom, threadProposedActionsAtom } from './proposedAct
 import { currentMessageItemsAtom, currentMessageContentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, MessageFiltersState, currentReaderAttachmentKeyAtom } from './messageComposition';
 import { currentReaderAttachmentAtom } from './messageComposition';
 import { getCurrentPage } from '../utils/readerUtils';
-import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters } from '../../src/services/chatService';
+import { chatService, ChatCompletionRequestBody, DeltaType, MessageSearchFilters, search_external_references_request } from '../../src/services/chatService';
 import { MessageData } from '../types/chat/apiTypes';
 import { FullModelConfig, selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -37,14 +37,16 @@ import { logger } from '../../src/utils/logger';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { citationMetadataAtom, updateCitationDataAtom } from './citations';
 import { getUniqueKey, MessageAttachmentWithId } from '../types/attachments/uiTypes';
-import { CitationMetadata } from '../types/citations';
+import { CitationMetadata, isExternalCitation } from '../types/citations';
 import { userIdAtom } from './auth';
 import { toProposedAction, ProposedAction, isAnnotationAction, AnnotationProposedAction } from '../types/proposedActions/base';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { removePopupMessagesByTypeAtom } from './ui';
+import { removePopupMessagesByTypeAtom, isWebSearchEnabledAtom } from './ui';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { toolAnnotationApplyBatcher } from '../utils/toolAnnotationApplyBatcher';
-
+import { checkExternalReferencesAtom, addExternalReferencesToMappingAtom } from './externalReferences';
+import { isSearchExternalReferencesTool, isCreateItemAction, CreateItemProposedAction } from '../types/proposedActions/items';
+import { ExternalReference } from '../types/externalReferences';
 
 export function getCurrentReaderState(): ReaderState | null {
     // Get current reader attachment
@@ -326,9 +328,10 @@ export const regenerateFromMessageAtom = atom(
         );
 
         // Update citation metadata
-        // set(citationMetadataAtom, (prev: CitationMetadata[]) => {
-        //     return prev.filter(a => a.messageId && messageIds.includes(a.messageId));
-        // });
+        set(citationMetadataAtom, (prev: CitationMetadata[]) => {
+            return prev.filter(a => a.message_id && messageIds.includes(a.message_id));
+        });
+        set(updateCitationDataAtom);
         
         // Execute chat completion
         set(isChatRequestPendingAtom, true);
@@ -452,6 +455,7 @@ async function _processChatCompletionViaBackend(
     } as MessageSearchFilters;
 
     // User message
+    const isWebSearchEnabled = get(isWebSearchEnabledAtom);
     const userMessage = {
         id: userMessageId,
         role: "user",
@@ -459,7 +463,7 @@ async function _processChatCompletionViaBackend(
         attachments: attachments,
         reader_state: readerState,
         filters: filtersPayload,
-        tool_request: null,
+        tool_request: isWebSearchEnabled ? search_external_references_request : null,
         status: "completed"
     } as MessageData;
 
@@ -566,6 +570,17 @@ async function _processChatCompletionViaBackend(
             onToolcall: async (messageId: string, toolcallId: string, toolcall: ToolCall) => {
                 logger(`event 'onToolcall': messageId: ${messageId}, toolcallId: ${toolcallId}, toolcall: ${JSON.stringify(toolcall)}`, 1);
 
+                // Check for external references and populate cache
+                if (isSearchExternalReferencesTool(toolcall.function?.name)) {
+                    logger(`onToolcall: Checking external references for caching`, 1);
+                    if (toolcall.result?.references) {
+                        // Add to external reference mapping for UI display
+                        set(addExternalReferencesToMappingAtom, toolcall.result?.references as ExternalReference[]);
+                        // Check if references exist in Zotero
+                        set(checkExternalReferencesAtom, toolcall.result?.references);
+                    }
+                }
+
                 // Load item data
                 const toolcallAttachments = getResultAttachmentsFromToolcall(toolcall) || [];
                 const attachmentPromises = toolcallAttachments.map(att => Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key));
@@ -583,10 +598,7 @@ async function _processChatCompletionViaBackend(
                 rawAction: Record<string, any> | Record<string, any>[]
             ) => {
                 const asArray = Array.isArray(rawAction) ? rawAction : [rawAction];
-                logger(
-                    `event 'onProposedAction': messageId: ${messageId}, toolcallId: ${toolcallId}, actionsCount: ${asArray.length}`,
-                    1
-                );
+                logger(`event 'onProposedAction': messageId: ${messageId}, toolcallId: ${toolcallId}, actionsCount: ${asArray.length}`, 1);
                 async function processActions(rawActions: Record<string, any>[]) {
                     try {
                         // Convert raw actions to ProposedAction
@@ -608,6 +620,16 @@ async function _processChatCompletionViaBackend(
 
                         // Add proposed actions to the thread proposed actions
                         set(addProposedActionsAtom, actions);
+
+                        const createItemActions = actions.filter(isCreateItemAction) as CreateItemProposedAction[];
+                        if (createItemActions.length > 0) {
+                            logger(`onProposedAction: Checking external references for caching`, 1);
+                            const references = createItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                            // Add to external reference mapping for UI display
+                            set(addExternalReferencesToMappingAtom, references);
+                            // Check if references exist in Zotero
+                            set(checkExternalReferencesAtom, references);
+                        }
 
                         // Separate annotation actions from other actions
                         const annotationActions = actions.filter(isAnnotationAction) as AnnotationProposedAction[];
@@ -674,10 +696,18 @@ async function _processChatCompletionViaBackend(
             },
             onCitationMetadata: async (messageId: string, citationMetadata: CitationMetadata) => {
                 logger(`event 'onCitationMetadata': messageId: ${messageId}, citationMetadata: ${JSON.stringify(citationMetadata)}`, 1);
-                // Load item data
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(citationMetadata.library_id, citationMetadata.zotero_key);
-                if (item) {
-                    await loadFullItemDataWithAllTypes([item]);
+                
+                // Only load item data for Zotero citations (not external citations)
+                if (!isExternalCitation(citationMetadata)) {
+                    if (citationMetadata.library_id && citationMetadata.zotero_key) {
+                        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                            citationMetadata.library_id, 
+                            citationMetadata.zotero_key
+                        );
+                        if (item) {
+                            await loadFullItemDataWithAllTypes([item]);
+                        }
+                    }
                 }
 
                 // Update state

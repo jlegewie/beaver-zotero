@@ -1,9 +1,8 @@
 import React from 'react';
-import { useAtomValue } from 'jotai';
 import { ChatMessage } from '../../types/chat/uiTypes';
 import AssistantMessage from './AssistantMessage';
 import AssistantMessageFooter from './AssistantMessageFooter';
-import { isChatRequestPendingAtom } from '../../atoms/threads';
+import ProposedActionsDisplay from './ProposedActionsDisplay';
 
 interface AssistantMessagesGroupProps {
     messages: ChatMessage[];
@@ -18,7 +17,7 @@ const AssistantMessagesGroup: React.FC<AssistantMessagesGroupProps> = ({
 }) => {
 
     return (
-        <div className="assistant-messages-group display-flex flex-col gap-3">
+        <div className="assistant-messages-group display-flex flex-col gap-3 px-4">
             {messages.map((message, index) => {
                 const isFirstMessageInGroup = index === 0;
                 const isLastMessageInGroup = index === messages.length - 1;
@@ -40,11 +39,15 @@ const AssistantMessagesGroup: React.FC<AssistantMessagesGroupProps> = ({
             })}
             
             {/* Footer with sources and buttons */}
-            <div className="message-footer px-4">
+            <div className="message-footer">
                 <AssistantMessageFooter
                     messages={messages}
                 />
             </div>
+        
+            {/* Proposed actions */}
+            <ProposedActionsDisplay messages={messages} />
+
         </div>
     );
 };

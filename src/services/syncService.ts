@@ -159,6 +159,22 @@ export interface GetCollectionsResponse {
     collections: ZoteroCollection[];
 }
 
+// Immediate upsert request - syncs items without advancing the sync cursor
+// Used when items need to be immediately available (e.g., after user adds items via AI)
+export interface ImmediateUpsertRequest {
+    library_id: number;
+    items: ItemData[];
+    attachments: AttachmentDataWithMimeType[];
+    collections: ZoteroCollection[];
+}
+
+export interface ImmediateUpsertResponse {
+    synced_items: number;
+    synced_attachments: number;
+    synced_collections: number;
+    pending_uploads: number;
+}
+
 /**
  * Sync-specific API service that extends the base API service
  */
@@ -309,6 +325,37 @@ export class SyncService extends ApiService {
             library_id: libraryId,
         };
         return this.post<SyncCollectionMappingsResponse>('/api/v1/sync/collections/sync-mappings', payload);
+    }
+
+    /**
+     * Immediately upserts items, attachments, and collections without advancing the sync cursor.
+     * Used when items need to be available immediately for AI queries (e.g., after user adds items).
+     * 
+     * Unlike processItemsBatch, this does NOT:
+     * - Advance the sync cursor (no sync_logs entry)
+     * - Require session/sync metadata
+     * 
+     * The regular sync will later see these items are already up-to-date via hash comparison.
+     * 
+     * @param libraryId The Zotero library ID
+     * @param items Array of items to upsert
+     * @param attachments Array of attachments to upsert
+     * @param collections Array of collections to upsert (optional, defaults to empty)
+     * @returns Promise with upsert response
+     */
+    async upsertItemsImmediate(
+        libraryId: number,
+        items: ItemData[],
+        attachments: AttachmentDataWithMimeType[],
+        collections: ZoteroCollection[] = []
+    ): Promise<ImmediateUpsertResponse> {
+        const payload: ImmediateUpsertRequest = {
+            library_id: libraryId,
+            items,
+            attachments,
+            collections,
+        };
+        return this.post<ImmediateUpsertResponse>('/api/v1/sync/upsert', payload);
     }
 
 }

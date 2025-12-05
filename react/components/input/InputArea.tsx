@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StopIcon } from '../icons/icons';
+import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
@@ -10,8 +10,10 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { getCustomPromptsFromPreferences } from '../../types/settings';
 import { logger } from '../../../src/utils/logger';
-import { isLibraryTabAtom } from '../../atoms/ui';
+import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
+import IconButton from '../ui/IconButton';
+import Tooltip from '../ui/Tooltip';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -32,6 +34,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
     const setIsCancelling = useSetAtom(isCancellingAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
+    const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -185,12 +188,21 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <div className="display-flex flex-row items-center pt-2">
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} />
                     <div className="flex-1" />
-                    <div className="display-flex gap-2">
+                    <div className="display-flex flex-row items-center gap-4">
+                        <Tooltip content={isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>
+                            <IconButton
+                                icon={GlobalSearchIcon}
+                                variant="ghost-secondary"
+                                className="scale-12 mt-015"
+                                iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
+                                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                            />
+                        </Tooltip>
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
                             type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
                             variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
-                            className="mr-1"
+                            style={{ padding: '2px 5px' }}
                             onClick={isStreaming ? handleStop : handleSubmit}
                             disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable) || !selectedModel}
                         >

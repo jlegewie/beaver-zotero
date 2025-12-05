@@ -1,13 +1,13 @@
 import React from 'react';
 import { Icon, Spinner } from '../icons/icons';
+import { ButtonVariant } from './Button';
 
-type IconButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'ghost-secondary';
 
 interface IconButtonProps {
     /** Icon to display */
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     /** Button variant */
-    variant?: IconButtonVariant;
+    variant?: ButtonVariant;
     /** Click handler */
     onClick: (e: React.MouseEvent) => void;
     /** Additional class names for the button */
@@ -18,6 +18,8 @@ interface IconButtonProps {
     ariaLabel?: string;
     /** Whether the button is disabled */
     disabled?: boolean;
+    /** Additional style for the button */
+    style?: React.CSSProperties;
     /** Loading state */
     loading?: boolean;
     /** Optional title attribute for tooltips */
@@ -39,6 +41,7 @@ const IconButton: React.FC<IconButtonProps> = ({
     iconClassName = '',
     ariaLabel,
     disabled = false,
+    style,
     loading = false,
     title,
     onMouseEnter,
@@ -59,6 +62,7 @@ const IconButton: React.FC<IconButtonProps> = ({
             disabled={disabled || loading}
             title={title}
             type="button"
+            style={style}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >

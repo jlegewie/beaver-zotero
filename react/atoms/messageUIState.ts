@@ -18,8 +18,20 @@ type AnnotationBusyStateMap = Record<string, Record<string, boolean>>;
 type AnnotationAttachmentTitleMap = Record<string, string | null>;
 
 export const defaultAnnotationPanelState: AnnotationPanelState = {
-    resultsVisible: true,
+    resultsVisible: false,
     isApplying: false
+};
+
+type NotePanelState = {
+    contentVisible: boolean;
+    isSaving: boolean;
+};
+
+type NotePanelStateMap = Record<string, NotePanelState>;
+
+export const defaultNotePanelState: NotePanelState = {
+    contentVisible: true,
+    isSaving: false
 };
 
 /**
@@ -143,6 +155,15 @@ export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
  */
 export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>({});
 
+// ---------------------------------------------------------------------------
+// Note panels (button + visibility)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility and saving state of note panels by noteId
+ */
+export const notePanelStateAtom = atom<NotePanelStateMap>({});
+
 /**
  * Update annotation panel state (visibility, isApplying)
  */
@@ -187,6 +208,30 @@ export const setAnnotationAttachmentTitleAtom = atom(
     }
 );
 
+/**
+ * Update note panel state (visibility, isSaving)
+ */
+export const setNotePanelStateAtom = atom(
+    null,
+    (get, set, { key, updates }: { key: string; updates: Partial<NotePanelState> }) => {
+        const current = get(notePanelStateAtom);
+        const existing = current[key] ?? defaultNotePanelState;
+        set(notePanelStateAtom, { ...current, [key]: { ...existing, ...updates } });
+    }
+);
+
+/**
+ * Toggle visibility of a note panel's content
+ */
+export const toggleNotePanelVisibilityAtom = atom(
+    null,
+    (get, set, key: string) => {
+        const current = get(notePanelStateAtom);
+        const existing = current[key] ?? defaultNotePanelState;
+        set(notePanelStateAtom, { ...current, [key]: { ...existing, contentVisible: !existing.contentVisible } });
+    }
+);
+
 // ---------------------------------------------------------------------------
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
@@ -203,6 +248,7 @@ export const resetMessageUIStateAtom = atom(
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
+        set(notePanelStateAtom, {});
     }
 );
 
@@ -217,6 +263,7 @@ export const clearMessageUIStateAtom = atom(
         set(annotationPanelStateAtom, removeEntriesWithPrefix(get(annotationPanelStateAtom), prefix));
         set(annotationBusyAtom, removeEntriesWithPrefix(get(annotationBusyAtom), prefix));
         set(annotationAttachmentTitlesAtom, removeEntriesWithPrefix(get(annotationAttachmentTitlesAtom), prefix));
+        set(notePanelStateAtom, removeEntriesWithPrefix(get(notePanelStateAtom), prefix));
         set(messageSourcesVisibilityAtom, removeEntry(get(messageSourcesVisibilityAtom), messageId));
         set(thinkingVisibilityAtom, removeEntry(get(thinkingVisibilityAtom), messageId));
     }

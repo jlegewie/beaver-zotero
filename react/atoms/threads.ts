@@ -6,6 +6,7 @@ import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom } from "./citations";
+import { isExternalCitation } from "../types/citations";
 import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { threadService } from "../../src/services/threadService";
@@ -14,6 +15,9 @@ import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { validateAppliedAction } from "../utils/proposedActions";
 import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
+import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
+import { ExternalReference } from "../types/externalReferences";
+import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -168,6 +172,7 @@ export const newThreadAtom = atom(
         set(currentMessageContentAtom, '');
         set(resetMessageUIStateAtom);
         set(isPreferencePageVisibleAtom, false);
+        set(clearExternalReferenceCacheAtom);
         // Update message items from Zotero selection or reader
         const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
         if (isLibraryTab && addSelectedItemsOnNewThread) {
@@ -192,14 +197,40 @@ export const loadThreadAtom = atom(
             // Set the current thread ID
             set(currentThreadIdAtom, threadId);
             set(isPreferencePageVisibleAtom, false);
+            set(clearExternalReferenceCacheAtom);
             
             // Use remote API
             const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
             
             if (messages.length > 0) {
+                // Extract external references from tool calls and populate cache
+                const externalReferences: ExternalReference[] = [];
+                for (const message of messages) {
+                    if (message.tool_calls) {
+                        for (const toolCall of message.tool_calls) {
+                            if (isSearchExternalReferencesTool(toolCall.function?.name)) {
+                                externalReferences.push(...(toolCall.result?.references || [] as ExternalReference[]));
+                            }
+                        }
+                    }
+                }
+                
+                if (externalReferences.length > 0) {
+                    logger(`loadThreadAtom: Adding ${externalReferences.length} external references to mapping`, 1);
+                    // Add to external reference mapping for UI display
+                    set(addExternalReferencesToMappingAtom, externalReferences);
+                    // Check if references exist in Zotero
+                    set(checkExternalReferencesAtom, externalReferences);
+                }
+                
                 // Load item data
                 const allItemReferences = new Set<string>();
-                [...userAttachments, ...citationMetadata, ...toolAttachments]
+                
+                // Filter out external citations before trying to load item data
+                const zoteroCitations = citationMetadata.filter(citation => !isExternalCitation(citation));
+                
+                [...userAttachments, ...zoteroCitations, ...toolAttachments]
+                    .filter(att => att.library_id && att.zotero_key) // Extra safety check
                     .map(att => `${att.library_id}-${att.zotero_key}`)
                     .forEach(ref => allItemReferences.add(ref));
 
@@ -237,6 +268,17 @@ export const loadThreadAtom = atom(
                     }
                     return isValid;
                 }));
+
+                // Check for external references and populate cache
+                const createItemActions = proposedActions.filter(isCreateItemAction) as CreateItemProposedAction[];
+                if (createItemActions.length > 0) {
+                    logger(`loadThreadAtom: Adding external references from proposed actions to mapping`, 1);
+                    const references = createItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
+                    // Add to external reference mapping for UI display
+                    set(addExternalReferencesToMappingAtom, references);
+                    // Check if references exist in Zotero
+                    set(checkExternalReferencesAtom, references);
+                }
                 
             }
         } catch (error) {
@@ -344,6 +386,10 @@ export const removeMessageAtom = atom(
     null,
     (get, set, { id }: { id: string }) => {
         set(threadMessagesAtom, get(threadMessagesAtom).filter(message => message.id !== id));
+        set(citationMetadataAtom, (prev) => 
+            prev.filter(a => a.message_id !== id)
+        );
+        set(updateCitationDataAtom);
         set(clearMessageUIStateAtom, id);
     }
 );

@@ -35,7 +35,7 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
     return (
         <div
             id={`message-${message.id}`}
-            className="px-4 hover-trigger user-select-text"
+            className="hover-trigger user-select-text"
             ref={contentRef}
             onContextMenu={handleContextMenu}
         >
@@ -57,7 +57,11 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({
                 
                 {/* Content */}
                 {message.content && message.content.trim() !== '' && (
-                    <MarkdownRenderer className="markdown" content={message.content} />
+                    <MarkdownRenderer 
+                        className="markdown" 
+                        content={message.content}
+                        messageId={message.id}
+                    />
                 )}
 
                 {/* Toolcalls */}

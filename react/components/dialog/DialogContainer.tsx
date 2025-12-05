@@ -6,14 +6,18 @@ import {
     isSkippedFilesDialogVisibleAtom,
     errorReportTextAtom,
     isErrorReportSendingAtom,
+    isExternalReferenceDetailsDialogVisibleAtom,
+    selectedExternalReferenceAtom,
     DialogType,
 } from '../../atoms/ui';
 import ErrorReportDialog from './ErrorReportDialog';
 import SkippedFilesDialog from './SkippedFilesDialog';
+import ExternalReferenceDetailsDialog from './ExternalReferenceDetailsDialog';
 
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
     skippedFiles: SkippedFilesDialog,
+    externalReferenceDetails: ExternalReferenceDetailsDialog,
 };
 
 const DialogContainer: React.FC = () => {
@@ -22,6 +26,8 @@ const DialogContainer: React.FC = () => {
     const setIsErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const setErrorReportText = useSetAtom(errorReportTextAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
+    const setIsExternalReferenceDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
+    const setSelectedExternalReference = useSetAtom(selectedExternalReferenceAtom);
 
     const handleClose = () => {
         if (activeDialog === 'errorReport') {
@@ -30,6 +36,9 @@ const DialogContainer: React.FC = () => {
             setErrorReportText('');
         } else if (activeDialog === 'skippedFiles') {
             setIsSkippedFilesDialogVisible(false);
+        } else if (activeDialog === 'externalReferenceDetails') {
+            setIsExternalReferenceDetailsVisible(false);
+            setSelectedExternalReference(null);
         }
     };
 

@@ -100,6 +100,27 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         text: "Fixed appearance issues: Beaver now looks and behaves consistently across all systems and configurations.",
         featureList: []
     },
+    {
+        version: "0.8.0",
+        title: "Beaver Version 0.8.0",
+        text: "Search 250M+ scholarly works. Generate & save Zotero notes. And more...",
+        featureList: [
+            {
+                title: "Search 250 million scholarly works",
+                description: "A sub-agent searches by topic, author, or journal, and follows citation chains to surface new references and extend your Zotero library. <a href='https://www.beaverapp.ai/docs/web-search'>Learn more</a>",
+            },
+            {
+                title: "Generate notes in a dedicated panel",
+                description: "Beaver now writes notes in a separate panel that you can save as Zotero Notes or copy elsewhere. <a href='https://www.beaverapp.ai/docs/notes'>Learn more</a>",
+            },
+            {
+                title: "New documentation site",
+                description: "Beaver finally has <a href='https://www.beaverapp.ai/docs'>better documentation</a>.",
+            }
+        ],
+        // learnMoreUrl: "https://www.beaverapp.ai/changelog/v0.8",
+        // learnMoreLabel: "Learn more",
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

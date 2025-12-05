@@ -1,10 +1,12 @@
 import React from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { ToolCall } from '../../types/chat/apiTypes';
+import { SearchExternalReferencesResult, ToolCall } from '../../types/chat/apiTypes';
 import { isAnnotationTool } from '../../types/proposedActions/base';
+import { isCreateZoteroItemTool, isSearchExternalReferencesTool } from '../../types/proposedActions/items';
 import AnnotationToolDisplay from './AnnotationToolDisplay';
+import CreateItemToolDisplay from './CreateItemToolDisplay';
 import { SearchToolDisplay } from './SearchToolDisplay';
-
+import SearchExternalReferencesToolDisplay from './SearchExternalReferencesToolDisplay';
 
 interface AssistantMessageToolsProps {
     message: ChatMessage;
@@ -17,7 +19,7 @@ interface AssistantMessageToolsProps {
  * @param toolCall - The tool call to extract attachment_id from
  * @returns The attachment_id if found, null otherwise
  */
-function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
+export function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
     try {
         if (!toolCall.function?.arguments) return null;
         const args = typeof toolCall.function.arguments === 'string'
@@ -34,6 +36,7 @@ function getAttachmentIdFromToolCall(toolCall: ToolCall): string | null {
  * Groups tool calls for display
  * - Non-annotation tools: individual groups (lists of 1)
  * - Annotation tools: grouped by attachment_id
+ * - Add item tools: grouped together
  * @param toolCalls - Array of tool calls to group
  * @returns Array of tool call groups
  */
@@ -105,25 +108,39 @@ export const AssistantMessageTools: React.FC<AssistantMessageToolsProps> = ({
             }
         >
             {toolCallGroups.map((group, groupIndex) => {
-                // TODO: Split by proposed actions and searchtoolcall
-                // For groups with single tool call
-                if (group.toolCalls.length === 1) {
-                    const toolCall = group.toolCalls[0];
-                    // Annotation tool calls are handled by AnnotationToolDisplay
-                    if (isAnnotationTool(toolCall.function?.name)) {
-                        return <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={[toolCall]} />;
-                    }
-                    // Search tool calls are handled by SearchToolDisplay
-                    return <SearchToolDisplay key={toolCall.id} messageId={message.id} toolCall={toolCall} />;
+                const firstTool = group.toolCalls[0];
+
+                // Annotation tool calls
+                if (isAnnotationTool(firstTool.function?.name)) {
+                     return (
+                        <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
+                            <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
+                        </div>
+                    );
+
+                // Create Zotero item tool calls are handled by CreateItemToolDisplay
+                } else if (isCreateZoteroItemTool(firstTool.function?.name)) {
+                    return (
+                        <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
+                            <CreateItemToolDisplay key={group.id} messageId={message.id} toolCall={firstTool} />
+                        </div>
+                    );
                 }
-                
-                // For groups with multiple tool calls (annotation tools grouped by attachment_id)
-                // All should be annotation tools at this point, so use AnnotationToolDisplay for each
-                return (
-                    <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
-                        <AnnotationToolDisplay key={group.id} messageId={message.id} groupId={group.id} toolCalls={group.toolCalls} />
-                    </div>
-                );
+
+                // External references tool calls
+                if (isSearchExternalReferencesTool(firstTool.function?.name)) {
+                    return (
+                        <div key={`group-${groupIndex}`} className="display-flex flex-col gap-2">
+                            <SearchExternalReferencesToolDisplay
+                                key={group.id}
+                                toolCall={firstTool}
+                            />
+                        </div>
+                    );
+                }
+
+                // Search external references tool calls
+                return <SearchToolDisplay key={firstTool.id} messageId={message.id} toolCall={firstTool} />;
             })}
         </div>
     );

@@ -4,6 +4,7 @@ import { isValidAnnotationType, SourceAttachment } from '../types/attachments/ap
 import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
+import { ZoteroItemReference } from '../types/zotero';
 import { syncLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
@@ -57,6 +58,7 @@ export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment
     try {
         let libId: number;
         let itemKeyValue: string;
+        if (!source.library_id || !source.zotero_key) return null;
 
         if ('library_id' in source && 'zotero_key' in source) {
             libId = source.library_id;
@@ -238,7 +240,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     return {valid: false, error: "Invalid item type"};
 }
 
-export function revealSource(source: SourceAttachment | CitationData) {
+export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData) {
+    if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
         selectItemById(itemID);

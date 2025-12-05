@@ -1212,6 +1212,101 @@ async function getRegularAndAttachmentIDs(libraryID: number, includeDeleted = fa
     return await Zotero.DB.columnQueryAsync(sql, params);
 };
 
+/** Result of immediate upsert operation */
+export interface ImmediateUpsertResult {
+    synced_items: number;
+    synced_attachments: number;
+    synced_collections: number;
+    pending_uploads: number;
+}
+
+/**
+ * Ensures a single Zotero item is synced to the backend immediately.
+ * This is a convenience wrapper around ensureItemsSynced for single items.
+ * 
+ * Use this after creating/modifying items that need to be immediately available
+ * for AI queries (e.g., items added via external reference import).
+ * 
+ * @param libraryId Library ID of the item
+ * @param zoteroKey Zotero key of the item
+ * @returns Promise resolving to the upsert result
+ */
+export async function ensureItemSynced(
+    libraryId: number,
+    zoteroKey: string
+): Promise<ImmediateUpsertResult> {
+    return ensureItemsSynced(libraryId, [zoteroKey]);
+}
+
+/**
+ * Ensures multiple Zotero items are synced to the backend immediately.
+ * Serializes the items and their attachments, then sends them to a special
+ * endpoint that does NOT advance the sync cursor.
+ * 
+ * This is more efficient than calling ensureItemSynced multiple times
+ * because it batches all items into a single API call.
+ * 
+ * Use cases:
+ * - After user adds items via AI agent
+ * - After user imports items from external search
+ * - Any time items need to be immediately available for follow-up queries
+ * 
+ * @param libraryId Library ID of the items
+ * @param zoteroKeys Array of Zotero keys to sync
+ * @returns Promise resolving to the upsert result
+ */
+export async function ensureItemsSynced(
+    libraryId: number,
+    zoteroKeys: string[]
+): Promise<ImmediateUpsertResult> {
+    const { serializeItemWithAttachments } = await import('./zoteroSerializers');
+    
+    if (zoteroKeys.length === 0) {
+        return { synced_items: 0, synced_attachments: 0, synced_collections: 0, pending_uploads: 0 };
+    }
+    
+    logger(`ensureItemsSynced: Syncing ${zoteroKeys.length} items in library ${libraryId}`, 3);
+    
+    try {
+        // Serialize all items and their attachments in parallel
+        const serializationResults = await Promise.all(
+            zoteroKeys.map(key => serializeItemWithAttachments(libraryId, key))
+        );
+        
+        // Combine all items and attachments
+        const items = serializationResults
+            .map(r => r.item_data)
+            .filter((item): item is ItemData => item !== undefined);
+        const attachments = serializationResults
+            .flatMap(r => r.attachment_data || []);
+        
+        if (items.length === 0 && attachments.length === 0) {
+            logger(`ensureItemsSynced: No data to sync for ${zoteroKeys.length} items`, 2);
+            return { synced_items: 0, synced_attachments: 0, synced_collections: 0, pending_uploads: 0 };
+        }
+        
+        logger(`ensureItemsSynced: Sending ${items.length} items and ${attachments.length} attachments`, 3);
+        
+        // Call the immediate upsert endpoint (doesn't advance sync cursor)
+        const result = await syncService.upsertItemsImmediate(libraryId, items, attachments);
+        
+        logger(`ensureItemsSynced: Synced ${result.synced_items} items and ${result.synced_attachments} attachments`, 3);
+        
+        // Start file uploader if there are pending uploads
+        if (result.pending_uploads > 0) {
+            logger(`ensureItemsSynced: ${result.pending_uploads} files pending upload, starting file uploader`, 3);
+            await fileUploader.start('background');
+        }
+        
+        return result;
+    } catch (error: any) {
+        // Log but don't throw - the items were still created in Zotero
+        logger(`ensureItemsSynced: Failed to sync items: ${error.message}`, 1);
+        Zotero.logError(error);
+        return { synced_items: 0, synced_attachments: 0, synced_collections: 0, pending_uploads: 0 };
+    }
+}
+
 /**
  * Gets lightweight item metadata for sorting and batching.
  * Excludes notes and annotations at DB level.

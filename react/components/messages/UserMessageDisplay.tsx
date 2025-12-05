@@ -46,7 +46,12 @@ const UserMessageDisplay: React.FC<UserMessageDisplayProps> = ({
             <div className="user-message-display">
 
                 {/* Message attachments and filters */}
-                {(messageAttachments.length > 0 || message.filters) && (
+                {(
+                    messageAttachments.filter((a): a is MessageAttachmentWithRequiredItem => Boolean(a.item)).length > 0 ||
+                    (message.filters && message.filters.libraries) ||
+                    (message.filters && message.filters.collections) ||
+                    (message.filters && message.filters.tags)
+                ) && (
                     <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
                         {/* Message filters */}
                         {message.filters && message.filters.libraries && (
