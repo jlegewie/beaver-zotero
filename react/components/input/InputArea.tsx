@@ -4,6 +4,7 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { generateResponseAtom } from '../../atoms/generateMessages';
+import { sendWSMessageAtom, isWSChatPendingAtom, wsStreamedContentAtom, wsErrorAtom } from '../../atoms/generateMessagesWS';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -35,6 +36,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const setIsCancelling = useSetAtom(isCancellingAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
+
+    // WebSocket test state
+    const sendWSMessage = useSetAtom(sendWSMessageAtom);
+    const isWSPending = useAtomValue(isWSChatPendingAtom);
+    const wsContent = useAtomValue(wsStreamedContentAtom);
+    const wsError = useAtomValue(wsErrorAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -129,6 +136,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    // WebSocket test handler
+    const handleWSTest = () => {
+        const testMessage = messageContent.length > 0 ? messageContent : 'Hello from WebSocket test!';
+        logger(`Testing WebSocket with message: ${testMessage}`);
+        sendWSMessage(testMessage);
+    };
+
     return (
         // <DragDropWrapper addFileSource={addFileSource}>
         <div
@@ -198,6 +212,18 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
                             />
                         </Tooltip>
+                        {/* ----- Temporary WebSocket test button ----- */}
+                        <Tooltip content={wsError ? `WS Error: ${wsError.message}` : (wsContent ? `WS: ${wsContent.substring(0, 50)}...` : 'Test WebSocket')} singleLine>
+                            <Button
+                                variant="outline"
+                                style={{ padding: '2px 8px' }}
+                                onClick={handleWSTest}
+                                disabled={isWSPending}
+                            >
+                                {isWSPending ? 'WS...' : 'WS'}
+                            </Button>
+                        </Tooltip>
+                        {/* ----- End of Temporary WebSocket test button ----- */}
                         <Button
                             rightIcon={isStreaming ? StopIcon : undefined}
                             type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
