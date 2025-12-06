@@ -98,6 +98,9 @@ export interface SafeProfileModel {
     usage_based_billing_enabled: boolean;
     usage_based_billing_limit: number;
     usage_based_billing_cost: number;
+
+    // Indexing status for backend processing mode
+    indexing_complete: boolean;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {
