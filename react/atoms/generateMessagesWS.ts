@@ -48,7 +48,7 @@ function getUserApiKey(model: FullModelConfig): string | undefined {
 
 /**
  * Build connection options for WebSocket based on the selected model.
- * - model_id: Included for non-custom models
+ * - access_id: Included for non-custom models (from PlanModelAccess)
  * - api_key: Included for user-key models (not app-key, not custom)
  */
 function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
@@ -56,9 +56,9 @@ function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
 
     const options: WSConnectOptions = {};
 
-    // Include model_id for non-custom models
+    // Include access_id for non-custom models
     if (!model.is_custom) {
-        options.modelId = model.id;
+        options.accessId = model.access_id;
     }
 
     // Include api_key for user-key models
@@ -149,13 +149,14 @@ export const sendWSMessageAtom = atom(
         // Log model and connection info
         console.log('[WS] Selected model:', model ? {
             id: model.id,
+            access_id: model.access_id,
             name: model.name,
             provider: model.provider,
             is_custom: model.is_custom,
             use_app_key: model.use_app_key,
         } : null);
         console.log('[WS] Connection options:', {
-            modelId: connectOptions.modelId || '(not set - will use plan default)',
+            accessId: connectOptions.accessId || '(not set - will use plan default)',
             hasApiKey: !!connectOptions.apiKey,
         });
 

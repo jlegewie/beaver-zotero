@@ -89,8 +89,8 @@ export interface WSChatRequest {
 
 /** Options for WebSocket connection */
 export interface WSConnectOptions {
-    /** Model ID to use (optional, backend will use plan default if not provided) */
-    modelId?: string;
+    /** Access ID from PlanModelAccess (optional, backend will use plan default if not provided) */
+    accessId?: string;
     /** User's own API key for the model provider (optional) */
     apiKey?: string;
 }
@@ -239,8 +239,8 @@ export class ChatServiceWS {
             // Build URL with query parameters
             const params = new URLSearchParams();
             params.set('token', token);
-            if (options?.modelId) {
-                params.set('model_id', options.modelId);
+            if (options?.accessId) {
+                params.set('access_id', options.accessId);
             }
             if (options?.apiKey) {
                 params.set('api_key', options.apiKey);
