@@ -9,8 +9,59 @@
 
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, DeltaType } from '../../src/services/chatServiceWS';
+import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, WSConnectOptions, DeltaType } from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
+import { selectedModelAtom, FullModelConfig } from './models';
+import { getPref } from '../../src/utils/prefs';
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Get the user's API key for a model based on its provider.
+ * Only returns a key if:
+ * - The model does NOT use the app's key (use_app_key = false)
+ * - The model is NOT a custom model (is_custom = false)
+ * - The user has configured an API key for the provider
+ */
+function getUserApiKey(model: FullModelConfig): string | undefined {
+    // Custom models and app-key models don't need user API keys
+    if (model.use_app_key || model.is_custom) return undefined;
+
+    if (model.provider === 'google') {
+        return getPref('googleGenerativeAiApiKey') || undefined;
+    } else if (model.provider === 'openai') {
+        return getPref('openAiApiKey') || undefined;
+    } else if (model.provider === 'anthropic') {
+        return getPref('anthropicApiKey') || undefined;
+    }
+    return undefined;
+}
+
+/**
+ * Build connection options for WebSocket based on the selected model.
+ * - model_id: Included for non-custom models
+ * - api_key: Included for user-key models (not app-key, not custom)
+ */
+function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
+    if (!model) return {};
+
+    const options: WSConnectOptions = {};
+
+    // Include model_id for non-custom models
+    if (!model.is_custom) {
+        options.modelId = model.id;
+    }
+
+    // Include api_key for user-key models
+    const apiKey = getUserApiKey(model);
+    if (apiKey) {
+        options.apiKey = apiKey;
+    }
+
+    return options;
+}
 
 // =============================================================================
 // State Atoms
@@ -83,6 +134,23 @@ export const sendWSMessageAtom = atom(
         // Reset state
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);
+
+        // Get current model and build connection options
+        const model = get(selectedModelAtom);
+        const connectOptions = buildConnectOptions(model);
+
+        // Log model and connection info
+        console.log('[WS] Selected model:', model ? {
+            id: model.id,
+            name: model.name,
+            provider: model.provider,
+            is_custom: model.is_custom,
+            use_app_key: model.use_app_key,
+        } : null);
+        console.log('[WS] Connection options:', {
+            modelId: connectOptions.modelId || '(not set - will use plan default)',
+            hasApiKey: !!connectOptions.apiKey,
+        });
 
         // Generate a message ID for tracking
         const messageId = uuidv4();
@@ -168,7 +236,7 @@ export const sendWSMessageAtom = atom(
 
         try {
             console.log('[WS] Starting connection for message:', message.substring(0, 100));
-            await chatServiceWS.connect(request, callbacks);
+            await chatServiceWS.connect(request, callbacks, connectOptions);
             console.log('[WS] Connection established and ready');
         } catch (error) {
             logger(`WS connection error: ${error}`, 1);

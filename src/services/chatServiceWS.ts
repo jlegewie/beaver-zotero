@@ -85,7 +85,14 @@ export interface WSChatRequest {
     // TODO: Add more fields as the backend evolves
     // thread_id?: string;
     // attachments?: MessageAttachment[];
-    // model_id?: string;
+}
+
+/** Options for WebSocket connection */
+export interface WSConnectOptions {
+    /** Model ID to use (optional, backend will use plan default if not provided) */
+    modelId?: string;
+    /** User's own API key for the model provider (optional) */
+    apiKey?: string;
 }
 
 // =============================================================================
@@ -209,7 +216,7 @@ export class ChatServiceWS {
      * Connect to the WebSocket endpoint and send a chat request
      * 
      * Protocol flow:
-     * 1. Client connects with token in query params
+     * 1. Client connects with token (and optionally model_id, api_key) in query params
      * 2. Server authenticates, fetches profile, validates model
      * 3. Server sends "ready" event
      * 4. Client sends chat request
@@ -217,9 +224,10 @@ export class ChatServiceWS {
      * 
      * @param request The chat request to send
      * @param callbacks Event callbacks
+     * @param options Optional connection options (modelId, apiKey)
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: WSChatRequest, callbacks: WSCallbacks): Promise<void> {
+    async connect(request: WSChatRequest, callbacks: WSCallbacks, options?: WSConnectOptions): Promise<void> {
         // Close existing connection if any
         this.close();
 
@@ -227,7 +235,17 @@ export class ChatServiceWS {
 
         try {
             const token = await this.getAuthToken();
-            const wsUrl = `${this.getWebSocketUrl()}?token=${encodeURIComponent(token)}`;
+            
+            // Build URL with query parameters
+            const params = new URLSearchParams();
+            params.set('token', token);
+            if (options?.modelId) {
+                params.set('model_id', options.modelId);
+            }
+            if (options?.apiKey) {
+                params.set('api_key', options.apiKey);
+            }
+            const wsUrl = `${this.getWebSocketUrl()}?${params.toString()}`;
 
             logger(`ChatServiceWS: Connecting to ${this.getWebSocketUrl()}`, 1);
 
