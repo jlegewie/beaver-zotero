@@ -11,6 +11,9 @@ import { supabase } from './supabaseClient';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
 import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/types/profile';
+import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
+import { MessageSearchFilters, ToolRequest } from './chatService';
+import { ZoteroItemReference } from '../../react/types/zotero';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -84,12 +87,53 @@ export type WSEvent = WSReadyEvent | WSDeltaEvent | WSCompleteEvent | WSDoneEven
 // Client Message Types (sent from frontend to backend)
 // =============================================================================
 
-/** Chat request message sent to initiate a chat */
+/**
+ * Application state sent with messages.
+ * Contains current view state and reader state if in reader view.
+ */
+export interface ApplicationStateInput {
+    /** Current application view ('library' or 'reader') */
+    current_view: 'library' | 'file_reader';
+    /** Reader state when in reader view */
+    reader_state?: ReaderState;
+    /** Currently selected library ID (optional) */
+    library_selection?: ZoteroItemReference[];
+}
+
+/**
+ * Chat message content sent by the client.
+ * Contains all user input for a chat completion request.
+ */
+export interface WSChatMessage {
+    /** Client-generated message ID (optional, will be generated if not provided) */
+    id?: string;
+    /** The message text content */
+    content: string;
+    /** Files, annotations, or sources attached to the message */
+    attachments?: MessageAttachment[];
+    /** Current application state (view, reader state, library selection) */
+    application_state?: ApplicationStateInput;
+    /** Search filters (libraries, collections, tags) */
+    filters?: MessageSearchFilters;
+    /** Explicit tool requests from the user (e.g., search_external_references) */
+    tool_requests?: ToolRequest[];
+}
+
+/**
+ * Chat request sent by the client after receiving the 'ready' event.
+ * Model selection and API key are passed as query parameters during connection.
+ */
 export interface WSChatRequest {
-    message: string;
-    // TODO: Add more fields as the backend evolves
-    // thread_id?: string;
-    // attachments?: MessageAttachment[];
+    /** Request type discriminator */
+    type: 'chat';
+    /** Existing thread ID (omit for new thread) */
+    thread_id?: string;
+    /** The user's message */
+    message: WSChatMessage;
+    /** Client-generated ID for the assistant's response message (for immediate UI rendering) */
+    assistant_message_id?: string;
+    /** Custom system instructions for this request */
+    custom_instructions?: string;
 }
 
 /** Options for WebSocket connection */
@@ -133,10 +177,16 @@ export interface WSCallbacks {
     onDelta: (messageId: string, delta: string, type: DeltaType) => void;
 
     /**
-     * Called when a message is complete
+     * Called when message streaming is complete
      * @param messageId ID of the completed message
      */
     onComplete: (messageId: string) => void;
+
+    /**
+     * Called when the full request is done (after persistence, usage logging, etc.)
+     * Safe to close connection or send another request after this.
+     */
+    onDone: () => void;
 
     /**
      * Called when an error occurs
@@ -373,6 +423,10 @@ export class ChatServiceWS {
 
                 case 'complete':
                     this.callbacks.onComplete(event.message_id);
+                    break;
+
+                case 'done':
+                    this.callbacks.onDone();
                     break;
 
                 case 'error':

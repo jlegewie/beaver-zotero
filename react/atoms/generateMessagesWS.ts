@@ -160,13 +160,22 @@ export const sendWSMessageAtom = atom(
             hasApiKey: !!connectOptions.apiKey,
         });
 
-        // Generate a message ID for tracking
-        const messageId = uuidv4();
-        set(currentWSMessageIdAtom, messageId);
+        // Generate message IDs for tracking
+        const userMessageId = uuidv4();
+        const assistantMessageId = uuidv4();
+        set(currentWSMessageIdAtom, assistantMessageId);
 
         // Create the request
         const request: WSChatRequest = {
-            message
+            type: 'chat',
+            // thread_id: undefined, // Omit for new thread
+            message: {
+                id: userMessageId,
+                content: message,
+                // attachments, application_state, filters, tool_requests can be added later
+            },
+            assistant_message_id: assistantMessageId,
+            // custom_instructions: undefined,
         };
 
         // Define callbacks with detailed logging
