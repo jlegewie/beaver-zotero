@@ -10,6 +10,7 @@
 import { supabase } from './supabaseClient';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
+import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/types/profile';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -18,6 +19,17 @@ import { logger } from '../utils/logger';
 /** Base interface for all WebSocket events from the server */
 interface WSBaseEvent {
     event: string;
+}
+
+/** Ready event sent after connection validation completes */
+export interface WSReadyEvent extends WSBaseEvent {
+    event: 'ready';
+    model_id: string | null;
+    model_name: string | null;
+    subscription_status: SubscriptionStatus;
+    charge_type: ChargeType;
+    processing_mode: ProcessingMode;
+    indexing_complete: boolean;
 }
 
 /** Delta event for streaming content updates */
@@ -61,7 +73,7 @@ export interface WSWarningEvent extends WSBaseEvent {
 }
 
 /** Union type for all WebSocket events */
-export type WSEvent = WSDeltaEvent | WSCompleteEvent | WSErrorEvent | WSWarningEvent;
+export type WSEvent = WSReadyEvent | WSDeltaEvent | WSCompleteEvent | WSErrorEvent | WSWarningEvent;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -82,7 +94,24 @@ export interface WSChatRequest {
 
 export type DeltaType = 'reasoning' | 'content';
 
+/** Data received in the ready event */
+export interface WSReadyData {
+    modelId: string | null;
+    modelName: string | null;
+    subscriptionStatus: SubscriptionStatus;
+    chargeType: ChargeType;
+    processingMode: ProcessingMode;
+    indexingComplete: boolean;
+}
+
 export interface WSCallbacks {
+    /**
+     * Called when the server is ready to accept chat requests.
+     * This is sent after connection validation (auth, profile, model validation) completes.
+     * @param data Ready event data containing model/subscription info
+     */
+    onReady: (data: WSReadyData) => void;
+
     /**
      * Called when a delta (partial content) is received
      * @param messageId ID of the message being streamed
@@ -179,9 +208,16 @@ export class ChatServiceWS {
     /**
      * Connect to the WebSocket endpoint and send a chat request
      * 
+     * Protocol flow:
+     * 1. Client connects with token in query params
+     * 2. Server authenticates, fetches profile, validates model
+     * 3. Server sends "ready" event
+     * 4. Client sends chat request
+     * 5. Server streams delta events and sends complete event
+     * 
      * @param request The chat request to send
      * @param callbacks Event callbacks
-     * @returns Promise that resolves when connection is established, rejects on connection error
+     * @returns Promise that resolves when connection is established and ready, rejects on error
      */
     async connect(request: WSChatRequest, callbacks: WSCallbacks): Promise<void> {
         // Close existing connection if any
@@ -196,15 +232,41 @@ export class ChatServiceWS {
             logger(`ChatServiceWS: Connecting to ${this.getWebSocketUrl()}`, 1);
 
             return new Promise<void>((resolve, reject) => {
+                let hasResolved = false;
+
+                // Wrap the onReady callback to send request after ready
+                const wrappedCallbacks: WSCallbacks = {
+                    ...callbacks,
+                    onReady: (data: WSReadyData) => {
+                        logger('ChatServiceWS: Server ready, sending chat request', 1);
+                        // Call the original onReady callback first
+                        callbacks.onReady(data);
+                        // Send the chat request now that server is ready
+                        this.send(request);
+                        // Resolve the connect promise
+                        if (!hasResolved) {
+                            hasResolved = true;
+                            resolve();
+                        }
+                    },
+                    onError: (type: string, message: string, messageId?: string, details?: string) => {
+                        // Call the original error callback
+                        callbacks.onError(type, message, messageId, details);
+                        // If we haven't resolved yet, this is a connection-phase error
+                        if (!hasResolved) {
+                            hasResolved = true;
+                            reject(new Error(`${type}: ${message}`));
+                        }
+                    }
+                };
+
+                this.callbacks = wrappedCallbacks;
                 this.ws = new WebSocket(wsUrl);
 
                 this.ws.onopen = () => {
-                    logger('ChatServiceWS: Connection established', 1);
+                    logger('ChatServiceWS: Connection established, waiting for ready event', 1);
                     callbacks.onOpen?.();
-
-                    // Send the chat request immediately after connection
-                    this.send(request);
-                    resolve();
+                    // Note: Don't resolve here - wait for ready event
                 };
 
                 this.ws.onmessage = (event) => {
@@ -215,7 +277,10 @@ export class ChatServiceWS {
                     logger(`ChatServiceWS: WebSocket error`, 1);
                     // Note: The error event doesn't contain useful info in browsers
                     // The actual error will come through onclose
-                    reject(new Error('WebSocket connection failed'));
+                    if (!hasResolved) {
+                        hasResolved = true;
+                        reject(new Error('WebSocket connection failed'));
+                    }
                 };
 
                 this.ws.onclose = (event) => {
@@ -223,6 +288,11 @@ export class ChatServiceWS {
                     callbacks.onClose?.(event.code, event.reason, event.wasClean);
                     this.ws = null;
                     this.callbacks = null;
+                    // If we haven't resolved yet, the connection closed before ready
+                    if (!hasResolved) {
+                        hasResolved = true;
+                        reject(new Error(`Connection closed: ${event.reason || 'Unknown reason'}`));
+                    }
                 };
             });
         } catch (error) {
@@ -256,6 +326,20 @@ export class ChatServiceWS {
             logger(`ChatServiceWS: Received event: ${event.event}`, 1);
 
             switch (event.event) {
+                case 'ready': {
+                    // Convert snake_case backend response to camelCase frontend data
+                    const readyData: WSReadyData = {
+                        modelId: event.model_id,
+                        modelName: event.model_name,
+                        subscriptionStatus: event.subscription_status,
+                        chargeType: event.charge_type,
+                        processingMode: event.processing_mode,
+                        indexingComplete: event.indexing_complete,
+                    };
+                    this.callbacks.onReady(readyData);
+                    break;
+                }
+
                 case 'delta':
                     this.callbacks.onDelta(
                         event.message_id,

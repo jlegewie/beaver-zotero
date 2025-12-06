@@ -9,7 +9,7 @@
 
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { chatServiceWS, WSCallbacks, WSChatRequest, DeltaType } from '../../src/services/chatServiceWS';
+import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, DeltaType } from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
 
 // =============================================================================
@@ -22,6 +22,12 @@ export const isWSChatPendingAtom = atom(false);
 /** Whether the WebSocket is currently connected */
 export const isWSConnectedAtom = atom(false);
 
+/** Whether the server has sent the ready event (validation complete) */
+export const isWSReadyAtom = atom(false);
+
+/** Ready event data from server (model, subscription, processing info) */
+export const wsReadyDataAtom = atom<WSReadyData | null>(null);
+
 /** Current message ID being streamed */
 export const currentWSMessageIdAtom = atom<string | null>(null);
 
@@ -32,10 +38,10 @@ export const wsStreamedContentAtom = atom('');
 export const wsStreamedReasoningAtom = atom('');
 
 /** Last error from WebSocket */
-export const wsErrorAtom = atom<{ type: string; message: string } | null>(null);
+export const wsErrorAtom = atom<{ type: string; message: string; details?: string } | null>(null);
 
 /** Last warning from WebSocket */
-export const wsWarningAtom = atom<{ type: string; message: string } | null>(null);
+export const wsWarningAtom = atom<{ type: string; message: string; data?: Record<string, any> } | null>(null);
 
 // =============================================================================
 // Action Atoms
@@ -47,6 +53,8 @@ export const wsWarningAtom = atom<{ type: string; message: string } | null>(null
 export const resetWSStateAtom = atom(null, (_get, set) => {
     set(isWSChatPendingAtom, false);
     set(isWSConnectedAtom, false);
+    set(isWSReadyAtom, false);
+    set(wsReadyDataAtom, null);
     set(currentWSMessageIdAtom, null);
     set(wsStreamedContentAtom, '');
     set(wsStreamedReasoningAtom, '');
@@ -59,6 +67,15 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
  * 
  * This is a simple implementation for testing. It will be expanded
  * to match the full functionality of generateResponseAtom.
+ * 
+ * Event flow:
+ * 1. onOpen - WebSocket connection established
+ * 2. onReady - Server validation complete (auth, profile, model)
+ * 3. onDelta - Streaming content chunks
+ * 4. onComplete - Response finished
+ * 5. onClose - Connection closed
+ * 
+ * Errors can occur at any stage, warnings are non-fatal.
  */
 export const sendWSMessageAtom = atom(
     null,
@@ -76,10 +93,27 @@ export const sendWSMessageAtom = atom(
             message
         };
 
-        // Define callbacks
+        // Define callbacks with detailed logging
         const callbacks: WSCallbacks = {
+            onReady: (data: WSReadyData) => {
+                logger(`WS onReady: model=${data.modelName}, charge=${data.chargeType}, ` +
+                       `mode=${data.processingMode}, indexing=${data.indexingComplete}`, 1);
+                console.log('[WS] Ready event received:', {
+                    modelId: data.modelId,
+                    modelName: data.modelName,
+                    subscriptionStatus: data.subscriptionStatus,
+                    chargeType: data.chargeType,
+                    processingMode: data.processingMode,
+                    indexingComplete: data.indexingComplete,
+                });
+                set(isWSReadyAtom, true);
+                set(wsReadyDataAtom, data);
+            },
+
             onDelta: (msgId: string, delta: string, type: DeltaType) => {
-                logger(`WS onDelta: ${type} - ${delta.substring(0, 50)}...`, 1);
+                const preview = delta.length > 50 ? delta.substring(0, 50) + '...' : delta;
+                logger(`WS onDelta: ${type} - "${preview}"`, 1);
+                console.log('[WS] Delta event:', { messageId: msgId, type, deltaLength: delta.length });
                 
                 if (type === 'content') {
                     set(wsStreamedContentAtom, (prev) => prev + delta);
@@ -90,36 +124,55 @@ export const sendWSMessageAtom = atom(
 
             onComplete: (msgId: string) => {
                 logger(`WS onComplete: ${msgId}`, 1);
+                console.log('[WS] Complete event:', { messageId: msgId });
                 set(isWSChatPendingAtom, false);
             },
 
-            onError: (type: string, message: string, msgId?: string, details?: string) => {
-                logger(`WS onError: ${type} - ${message}`, 1);
-                set(wsErrorAtom, { type, message });
+            onError: (type: string, errorMessage: string, msgId?: string, details?: string) => {
+                logger(`WS onError: ${type} - ${errorMessage}`, 1);
+                console.error('[WS] Error event:', {
+                    type,
+                    message: errorMessage,
+                    messageId: msgId,
+                    details,
+                });
+                set(wsErrorAtom, { type, message: errorMessage, details });
                 set(isWSChatPendingAtom, false);
             },
 
-            onWarning: (msgId: string, type: string, message: string, data?: Record<string, any>) => {
-                logger(`WS onWarning: ${type} - ${message}`, 1);
-                set(wsWarningAtom, { type, message });
+            onWarning: (msgId: string, type: string, warningMessage: string, data?: Record<string, any>) => {
+                logger(`WS onWarning: ${type} - ${warningMessage}`, 1);
+                console.warn('[WS] Warning event:', {
+                    messageId: msgId,
+                    type,
+                    message: warningMessage,
+                    data,
+                });
+                set(wsWarningAtom, { type, message: warningMessage, data });
             },
 
             onOpen: () => {
-                logger('WS onOpen', 1);
+                logger('WS onOpen: Connection established, waiting for ready...', 1);
+                console.log('[WS] Connection opened, awaiting server validation...');
                 set(isWSConnectedAtom, true);
             },
 
             onClose: (code: number, reason: string, wasClean: boolean) => {
                 logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
+                console.log('[WS] Connection closed:', { code, reason, wasClean });
                 set(isWSConnectedAtom, false);
+                set(isWSReadyAtom, false);
                 set(isWSChatPendingAtom, false);
             }
         };
 
         try {
+            console.log('[WS] Starting connection for message:', message.substring(0, 100));
             await chatServiceWS.connect(request, callbacks);
+            console.log('[WS] Connection established and ready');
         } catch (error) {
             logger(`WS connection error: ${error}`, 1);
+            console.error('[WS] Connection failed:', error);
             set(wsErrorAtom, { 
                 type: 'connection_error', 
                 message: error instanceof Error ? error.message : 'Connection failed' 
@@ -135,6 +188,7 @@ export const sendWSMessageAtom = atom(
 export const closeWSConnectionAtom = atom(null, (_get, set) => {
     chatServiceWS.close();
     set(isWSConnectedAtom, false);
+    set(isWSReadyAtom, false);
     set(isWSChatPendingAtom, false);
 });
 
