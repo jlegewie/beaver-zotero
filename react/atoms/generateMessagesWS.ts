@@ -201,6 +201,12 @@ export const sendWSMessageAtom = atom(
             onComplete: (msgId: string) => {
                 logger(`WS onComplete: ${msgId}`, 1);
                 console.log('[WS] Complete event:', { messageId: msgId });
+                // Note: Message content is done, but don't set pending=false until onDone
+            },
+
+            onDone: () => {
+                logger('WS onDone: Request fully complete', 1);
+                console.log('[WS] Done event: Full request finished (safe to close or send another)');
                 set(isWSChatPendingAtom, false);
             },
 

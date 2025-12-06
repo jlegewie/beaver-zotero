@@ -40,10 +40,15 @@ export interface WSDeltaEvent extends WSBaseEvent {
     type: 'reasoning' | 'content';
 }
 
-/** Complete event signaling the end of a response */
+/** Complete event signaling the end of message streaming */
 export interface WSCompleteEvent extends WSBaseEvent {
     event: 'complete';
     message_id: string;
+}
+
+/** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
+export interface WSDoneEvent extends WSBaseEvent {
+    event: 'done';
 }
 
 /** Error event for communicating failures */
@@ -73,7 +78,7 @@ export interface WSWarningEvent extends WSBaseEvent {
 }
 
 /** Union type for all WebSocket events */
-export type WSEvent = WSReadyEvent | WSDeltaEvent | WSCompleteEvent | WSErrorEvent | WSWarningEvent;
+export type WSEvent = WSReadyEvent | WSDeltaEvent | WSCompleteEvent | WSDoneEvent | WSErrorEvent | WSWarningEvent;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
