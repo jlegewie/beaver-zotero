@@ -14,6 +14,7 @@ import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/type
 import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
 import { MessageSearchFilters, ToolRequest } from './chatService';
 import { ZoteroItemReference } from '../../react/types/zotero';
+import { CustomChatModel } from '../../react/types/settings';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -134,6 +135,8 @@ export interface WSChatRequest {
     assistant_message_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
+    /** Custom model configuration */
+    custom_model?: CustomChatModel;
 }
 
 /** Options for WebSocket connection */
@@ -290,11 +293,14 @@ export class ChatServiceWS {
 
         try {
             const token = await this.getAuthToken();
-            
+            const useCustomModel = !!request.custom_model;
+
             // Build URL with query parameters
             const params = new URLSearchParams();
             params.set('token', token);
-            if (options?.accessId) {
+            if (useCustomModel) {
+                params.set('custom_model', 'true');
+            } else if (options?.accessId) {
                 params.set('access_id', options.accessId);
             }
             if (options?.apiKey) {

@@ -48,11 +48,14 @@ function getUserApiKey(model: FullModelConfig): string | undefined {
 
 /**
  * Build connection options for WebSocket based on the selected model.
- * - access_id: Included for non-custom models (from PlanModelAccess)
- * - api_key: Included for user-key models (not app-key, not custom)
+ * - Custom models: no access_id/api_key in query params (use custom_model payload)
+ * - Non-custom models: access_id from plan, api_key for user-key models
  */
 function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
     if (!model) return {};
+
+    // Custom models rely on the payload, not query params
+    if (model.is_custom) return {};
 
     const options: WSConnectOptions = {};
 
@@ -165,6 +168,9 @@ export const sendWSMessageAtom = atom(
         const assistantMessageId = uuidv4();
         set(currentWSMessageIdAtom, assistantMessageId);
 
+        // Custom instructions (if any)
+        const customInstructions = getPref('customInstructions') || undefined;
+
         // Create the request
         const request: WSChatRequest = {
             type: 'chat',
@@ -175,8 +181,13 @@ export const sendWSMessageAtom = atom(
                 // attachments, application_state, filters, tool_requests can be added later
             },
             assistant_message_id: assistantMessageId,
-            // custom_instructions: undefined,
+            custom_instructions: customInstructions,
         };
+
+        // Include custom model config when applicable
+        if (model?.is_custom && model.custom_model) {
+            request.custom_model = model.custom_model;
+        }
 
         // Define callbacks with detailed logging
         const callbacks: WSCallbacks = {
