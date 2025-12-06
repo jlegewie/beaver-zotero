@@ -216,6 +216,8 @@ export const sendWSMessageAtom = atom(
             onDone: () => {
                 logger('WS onDone: Request fully complete', 1);
                 console.log('[WS] Done event: Full request finished (safe to close or send another)');
+                // Connection-per-request policy: close after each completed request
+                chatServiceWS.close();
                 set(isWSChatPendingAtom, false);
             },
 
