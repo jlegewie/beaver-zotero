@@ -13,8 +13,9 @@ import { logger } from '../utils/logger';
 import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/types/profile';
 import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
 import { MessageSearchFilters, ToolRequest } from './chatService';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { AttachmentDataWithMimeType, ItemData, ZoteroItemReference } from '../../react/types/zotero';
 import { CustomChatModel } from '../../react/types/settings';
+import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -81,8 +82,70 @@ export interface WSWarningEvent extends WSBaseEvent {
     data?: Record<string, any>;
 }
 
+export interface WSDataError {
+    reference: ZoteroItemReference;
+    error: string;
+    error_code?: string;
+}
+
+export interface WSPageContent {
+    page_number: number;
+    content: string;
+}
+
+export interface WSItemDataRequest extends WSBaseEvent {
+    event: 'item_data_request';
+    request_id: string;
+    items: ZoteroItemReference[];
+}
+
+export interface WSAttachmentDataRequest extends WSBaseEvent {
+    event: 'attachment_data_request';
+    request_id: string;
+    attachments: ZoteroItemReference[];
+}
+
+export interface WSAttachmentContentRequest extends WSBaseEvent {
+    event: 'attachment_content_request';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    page_numbers?: number[] | null;
+}
+
+export interface WSItemDataResponse {
+    type: 'item_data';
+    request_id: string;
+    items: ItemData[];
+    errors?: WSDataError[];
+}
+
+export interface WSAttachmentDataResponse {
+    type: 'attachment_data';
+    request_id: string;
+    attachments: AttachmentDataWithMimeType[];
+    errors?: WSDataError[];
+}
+
+export interface WSAttachmentContentResponse {
+    type: 'attachment_content';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    pages: WSPageContent[];
+    total_pages?: number | null;
+    error?: string | null;
+}
+
 /** Union type for all WebSocket events */
-export type WSEvent = WSReadyEvent | WSDeltaEvent | WSCompleteEvent | WSDoneEvent | WSErrorEvent | WSWarningEvent;
+export type WSEvent =
+    | WSReadyEvent
+    | WSDeltaEvent
+    | WSCompleteEvent
+    | WSDoneEvent
+    | WSErrorEvent
+    | WSWarningEvent
+    | WSItemDataRequest
+    | WSAttachmentDataRequest
+    | WSAttachmentContentRequest;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -453,6 +516,27 @@ export class ChatServiceWS {
                     );
                     break;
 
+                case 'item_data_request':
+                    this.handleItemDataRequest(event).catch((error) => {
+                        logger(`ChatServiceWS: Failed to handle item_data_request: ${error}`, 1);
+                        this.callbacks?.onError('item_data_request_failed', String(error));
+                    });
+                    break;
+
+                case 'attachment_data_request':
+                    this.handleAttachmentDataRequest(event).catch((error) => {
+                        logger(`ChatServiceWS: Failed to handle attachment_data_request: ${error}`, 1);
+                        this.callbacks?.onError('attachment_data_request_failed', String(error));
+                    });
+                    break;
+
+                case 'attachment_content_request':
+                    this.handleAttachmentContentRequest(event).catch((error) => {
+                        logger(`ChatServiceWS: Failed to handle attachment_content_request: ${error}`, 1);
+                        this.callbacks?.onError('attachment_content_request_failed', String(error));
+                    });
+                    break;
+
                 default:
                     logger(`ChatServiceWS: Unknown event type: ${(event as any).event}`, 1);
             }
@@ -474,6 +558,144 @@ export class ChatServiceWS {
             this.ws = null;
         }
         this.callbacks = null;
+    }
+
+    /**
+     * Handle item_data_request event by serializing requested items.
+     */
+    private async handleItemDataRequest(request: WSItemDataRequest): Promise<void> {
+        const items: ItemData[] = [];
+        const errors: WSDataError[] = [];
+
+        for (const reference of request.items) {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                if (!item) {
+                    errors.push({
+                        reference,
+                        error: 'Item not found in local database',
+                        error_code: 'not_found'
+                    });
+                    continue;
+                }
+
+                try {
+                    // Ensure all data is available for serialization
+                    await item.loadAllData();
+                } catch (e) {
+                    // Ignore benign load errors
+                }
+
+                const serialized = await serializeItem(item, undefined);
+                items.push(serialized);
+            } catch (error: any) {
+                logger(`ChatServiceWS: Failed to serialize item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                errors.push({
+                    reference,
+                    error: 'Failed to load item metadata',
+                    error_code: 'serialization_failed'
+                });
+            }
+        }
+
+        const response: WSItemDataResponse = {
+            type: 'item_data',
+            request_id: request.request_id,
+            items,
+            errors: errors.length > 0 ? errors : undefined
+        };
+
+        this.send(response);
+    }
+
+    /**
+     * Handle attachment_data_request event by serializing requested attachments.
+     */
+    private async handleAttachmentDataRequest(request: WSAttachmentDataRequest): Promise<void> {
+        const attachments: AttachmentDataWithMimeType[] = [];
+        const errors: WSDataError[] = [];
+
+        for (const reference of request.attachments) {
+            try {
+                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                if (!attachment) {
+                    errors.push({
+                        reference,
+                        error: 'Attachment not found in local database',
+                        error_code: 'not_found'
+                    });
+                    continue;
+                }
+
+                if (!attachment.isAttachment()) {
+                    errors.push({
+                        reference,
+                        error: 'Requested item is not an attachment',
+                        error_code: 'invalid_type'
+                    });
+                    continue;
+                }
+
+                try {
+                    await attachment.loadAllData();
+                } catch (e) {
+                    // Ignore benign load errors
+                }
+
+                const serialized = await serializeAttachment(attachment, undefined);
+                if (serialized) {
+                    attachments.push(serialized);
+                } else {
+                    errors.push({
+                        reference,
+                        error: 'Attachment not available locally or on server',
+                        error_code: 'not_available'
+                    });
+                }
+            } catch (error: any) {
+                logger(`ChatServiceWS: Failed to serialize attachment ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                errors.push({
+                    reference,
+                    error: 'Failed to load attachment metadata',
+                    error_code: 'serialization_failed'
+                });
+            }
+        }
+
+        const response: WSAttachmentDataResponse = {
+            type: 'attachment_data',
+            request_id: request.request_id,
+            attachments,
+            errors: errors.length > 0 ? errors : undefined
+        };
+
+        this.send(response);
+    }
+
+    /**
+     * Handle attachment_content_request event.
+     * Currently returns placeholder content until full extraction is implemented.
+     */
+    private async handleAttachmentContentRequest(request: WSAttachmentContentRequest): Promise<void> {
+        const pageNumbers = request.page_numbers && request.page_numbers.length > 0
+            ? request.page_numbers
+            : [1];
+
+        const pages: WSPageContent[] = pageNumbers.map((pageNumber) => ({
+            page_number: pageNumber,
+            content: 'Attachment content retrieval not implemented yet.'
+        }));
+
+        const response: WSAttachmentContentResponse = {
+            type: 'attachment_content',
+            request_id: request.request_id,
+            attachment: request.attachment,
+            pages,
+            total_pages: null,
+            error: 'Attachment content retrieval not implemented'
+        };
+
+        this.send(response);
     }
 }
 
