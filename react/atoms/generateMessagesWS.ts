@@ -19,16 +19,23 @@ import { getPref } from '../../src/utils/prefs';
 // =============================================================================
 
 /**
- * Get the user's API key for a model based on its provider.
- * Only returns a key if:
- * - The model does NOT use the app's key (use_app_key = false)
- * - The model is NOT a custom model (is_custom = false)
- * - The user has configured an API key for the provider
+ * Get the user's API key for a model.
+ * 
+ * Returns a key in these cases:
+ * - Custom models: Use the API key from the custom model config
+ * - User-key models (not app-key): Use the user's configured API key for the provider
+ * - App-key models: No user API key needed (returns undefined)
  */
 function getUserApiKey(model: FullModelConfig): string | undefined {
-    // Custom models and app-key models don't need user API keys
-    if (model.use_app_key || model.is_custom) return undefined;
+    // App-key models don't need user API keys
+    if (model.use_app_key) return undefined;
 
+    // Custom models use the API key from their config
+    if (model.is_custom && model.custom_model?.api_key) {
+        return model.custom_model.api_key;
+    }
+
+    // Non-custom, non-app-key models use the user's configured provider key
     if (model.provider === 'google') {
         return getPref('googleGenerativeAiApiKey') || undefined;
     } else if (model.provider === 'openai') {
