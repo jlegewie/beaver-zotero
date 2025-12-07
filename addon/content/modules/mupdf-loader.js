@@ -275,6 +275,15 @@ var MuPDFLoader = {
                 return fromRect(libmupdf._wasm_bound_page(this.pointer, boxIdx));
             }
 
+            /**
+             * Get the label for this page (as shown in readers when custom page numbering is used).
+             * Falls back to a generated label if none is set.
+             * @returns {string} Page label, e.g. "220" or "A-3"
+             */
+            getLabel() {
+                return fromString(libmupdf._wasm_page_label(this.pointer));
+            }
+
             toStructuredText(options = "") {
                 const optionsPtr = STRING(options);
                 const stextPtr = libmupdf._wasm_new_stext_page_from_page(this.pointer, optionsPtr);
@@ -718,6 +727,36 @@ var MuPDFLoader = {
                 pageCount: doc.countPages(),
                 metadata,
             };
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Get the label assigned to a specific page.
+     * Useful when PDFs use custom numbering (e.g., first page labeled "220").
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {number} pageIndex - Zero-based page index
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<{pageIndex: number, label: string}>}
+     */
+    async getPageLabel(pdfData, pageIndex = 0, rootURI = "chrome://beaver/content/") {
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            const pageCount = doc.countPages();
+            if (pageIndex < 0 || pageIndex >= pageCount) {
+                throw new Error(`Page index ${pageIndex} out of range (0-${pageCount - 1})`);
+            }
+
+            const page = doc.loadPage(pageIndex);
+            try {
+                const label = page.getLabel();
+                return { pageIndex, label };
+            } finally {
+                page.destroy();
+            }
         } finally {
             doc.destroy();
         }
