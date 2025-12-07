@@ -9,6 +9,7 @@ import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
+import { disposeMuPDF } from "./utils/mupdf";
 
 /**
  * Compares two semantic version strings.
@@ -231,6 +232,9 @@ async function onShutdown(): Promise<void> {
 	try {
 		ztoolkit.log("Cleaning up Beaver during shutdown.");
 				
+		// Clear MuPDF module cache to allow GC to reclaim WASM memory
+		disposeMuPDF();
+
 		// Close database connection if it exists
 		if (addon.db) {
 			await addon.db.closeDatabase();
