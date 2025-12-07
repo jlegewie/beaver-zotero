@@ -8,7 +8,6 @@
  */
 
 import { atom, Getter } from 'jotai';
-import { v4 as uuidv4 } from 'uuid';
 import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, WSConnectOptions, DeltaType } from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
@@ -17,10 +16,20 @@ import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attac
 import { toMessageAttachment } from '../types/attachments/converters';
 import { search_external_references_request, MessageSearchFilters } from '../../src/services/chatService';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { currentMessageItemsAtom, currentReaderAttachmentAtom, currentMessageFiltersAtom, readerTextSelectionAtom } from './messageComposition';
-import { isWebSearchEnabledAtom, isLibraryTabAtom } from './ui';
+import { currentMessageItemsAtom, currentReaderAttachmentAtom, currentMessageFiltersAtom, readerTextSelectionAtom, currentMessageContentAtom } from './messageComposition';
+import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
 import { processImageAnnotations } from './generateMessages';
 import { getCurrentPage } from '../utils/readerUtils';
+import { createUserMessage, createAssistantMessage } from '../types/chat/uiTypes';
+import {
+    threadMessagesAtom,
+    setMessageStatusAtom,
+    streamToMessageAtom,
+    streamReasoningToMessageAtom,
+    currentAssistantMessageIdAtom,
+    userAttachmentsAtom,
+} from './threads';
+import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 
 // =============================================================================
 // Helper Functions
@@ -187,10 +196,15 @@ export const sendWSMessageAtom = atom(
             hasApiKey: !!connectOptions.apiKey,
         });
 
-        // Generate message IDs for tracking
-        const userMessageId = uuidv4();
-        const assistantMessageId = uuidv4();
-        set(currentWSMessageIdAtom, assistantMessageId);
+        // Create user and assistant messages
+        const userMsg = createUserMessage(message);
+        const assistantMsg = createAssistantMessage({ status: 'in_progress' });
+
+        // Add messages to thread
+        const threadMessages = get(threadMessagesAtom);
+        set(threadMessagesAtom, [...threadMessages, userMsg, assistantMsg]);
+        set(currentAssistantMessageIdAtom, assistantMsg.id);
+        set(currentWSMessageIdAtom, assistantMsg.id);
 
         // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
@@ -218,6 +232,21 @@ export const sendWSMessageAtom = atom(
                 } as SourceAttachment);
             }
         }
+
+        // Update user attachments (link to user message)
+        set(userAttachmentsAtom, (prev) => {
+            const newAttachments = attachments.map(a => ({
+                ...a,
+                messageId: userMsg.id,
+                image_base64: undefined
+            }) as MessageAttachmentWithId);
+            return [...prev, ...newAttachments];
+        });
+
+        // Reset user message input after adding to thread
+        set(currentMessageContentAtom, '');
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
+        set(currentMessageItemsAtom, []);
 
         // Build filters payload
         const filterState = get(currentMessageFiltersAtom);
@@ -256,14 +285,14 @@ export const sendWSMessageAtom = atom(
             type: 'chat',
             // thread_id: undefined, // Omit for new thread
             message: {
-                id: userMessageId,
+                id: userMsg.id,
                 content: message,
                 ...(attachments.length > 0 ? { attachments } : {}),
                 application_state: applicationState,
                 filters: filtersPayload,
                 ...(toolRequests ? { tool_requests: toolRequests } : {})
             },
-            assistant_message_id: assistantMessageId,
+            assistant_message_id: assistantMsg.id,
             custom_instructions: customInstructions,
         };
 
@@ -295,16 +324,28 @@ export const sendWSMessageAtom = atom(
                 console.log('[WS] Delta event:', { messageId: msgId, type, deltaLength: delta.length });
                 
                 if (type === 'content') {
+                    // Update message status and stream content to thread message
+                    set(setMessageStatusAtom, { id: msgId, status: 'in_progress' });
+                    set(streamToMessageAtom, { id: msgId, chunk: delta });
+                    // Also update local WS atom for debugging/monitoring
                     set(wsStreamedContentAtom, (prev) => prev + delta);
                 } else if (type === 'reasoning') {
-                    set(wsStreamedReasoningAtom, (prev) => prev + delta);
+                    if (delta) {
+                        // Update message status and stream reasoning to thread message
+                        set(setMessageStatusAtom, { id: msgId, status: 'thinking' });
+                        set(streamReasoningToMessageAtom, { id: msgId, chunk: delta });
+                        // Also update local WS atom for debugging/monitoring
+                        set(wsStreamedReasoningAtom, (prev) => prev + delta);
+                    }
                 }
             },
 
             onComplete: (msgId: string) => {
                 logger(`WS onComplete: ${msgId}`, 1);
                 console.log('[WS] Complete event:', { messageId: msgId });
-                // Note: Message content is done, but don't set pending=false until onDone
+                // Mark the message as completed in the thread
+                set(setMessageStatusAtom, { id: msgId, status: 'completed' });
+                // Note: Don't set pending=false until onDone (connection cleanup)
             },
 
             onDone: () => {
