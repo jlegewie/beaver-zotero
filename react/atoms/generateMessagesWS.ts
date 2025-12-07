@@ -7,12 +7,20 @@
  * It will eventually replace the SSE implementation as more features are added.
  */
 
-import { atom } from 'jotai';
+import { atom, Getter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, WSConnectOptions, DeltaType } from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
+import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
+import { toMessageAttachment } from '../types/attachments/converters';
+import { search_external_references_request, MessageSearchFilters } from '../../src/services/chatService';
+import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { currentMessageItemsAtom, currentReaderAttachmentAtom, currentMessageFiltersAtom, readerTextSelectionAtom } from './messageComposition';
+import { isWebSearchEnabledAtom, isLibraryTabAtom } from './ui';
+import { processImageAnnotations } from './generateMessages';
+import { getCurrentPage } from '../utils/readerUtils';
 
 // =============================================================================
 // Helper Functions
@@ -71,6 +79,22 @@ function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
     }
 
     return options;
+}
+
+/**
+ * Build reader state for the current reader attachment.
+ */
+function getReaderState(get: Getter): ReaderState | null {
+    const readerAttachment = get(currentReaderAttachmentAtom);
+    if (!readerAttachment) return null;
+
+    const currentTextSelection = get(readerTextSelectionAtom);
+    return {
+        library_id: readerAttachment.libraryID,
+        zotero_key: readerAttachment.key,
+        current_page: getCurrentPage() || null,
+        ...(currentTextSelection && { text_selection: currentTextSelection })
+    } as ReaderState;
 }
 
 // =============================================================================
@@ -171,6 +195,62 @@ export const sendWSMessageAtom = atom(
         // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
+        // Build attachments from current message items
+        const selectedItems = get(currentMessageItemsAtom);
+        let attachments: MessageAttachment[] =
+            selectedItems
+                .map(item => toMessageAttachment(item))
+                .filter((attachment): attachment is MessageAttachment => attachment !== null);
+        attachments = await processImageAnnotations(attachments);
+
+        // Add current reader attachment as source if not already present
+        const readerState = getReaderState(get);
+        const readerAttachment = get(currentReaderAttachmentAtom);
+        if (readerAttachment && readerState) {
+            const existingKeys = new Set(attachments.map(att => `${att.library_id}-${att.zotero_key}`));
+            const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
+            if (!existingKeys.has(readerKey)) {
+                attachments.push({
+                    library_id: readerAttachment.libraryID,
+                    zotero_key: readerAttachment.key,
+                    type: 'source',
+                    include: 'fulltext'
+                } as SourceAttachment);
+            }
+        }
+
+        // Build filters payload
+        const filterState = get(currentMessageFiltersAtom);
+        const filterLibraries = filterState.libraryIds.length > 0
+            ? filterState.libraryIds
+                .map(id => Zotero.Libraries.get(id))
+                .filter((l): l is Zotero.Library => !!l)
+                .map(serializeZoteroLibrary)
+            : null;
+        const filterCollections = filterState.collectionIds.length > 0
+            ? (await Promise.all(filterState.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))).filter(Boolean)
+            : null;
+        const filterTags = filterState.tagSelections.length > 0
+            ? filterState.tagSelections.map(tag => ({ ...tag }))
+            : null;
+        const filtersPayload: MessageSearchFilters = {
+            libraries: filterLibraries,
+            collections: filterCollections,
+            tags: filterTags
+        };
+
+        // Tool requests (web search)
+        const toolRequests = get(isWebSearchEnabledAtom)
+            ? [search_external_references_request]
+            : undefined;
+
+        // Application state
+        const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
+        const applicationState = {
+            current_view: currentView,
+            ...(readerState ? { reader_state: readerState } : {})
+        };
+
         // Create the request
         const request: WSChatRequest = {
             type: 'chat',
@@ -178,7 +258,10 @@ export const sendWSMessageAtom = atom(
             message: {
                 id: userMessageId,
                 content: message,
-                // attachments, application_state, filters, tool_requests can be added later
+                ...(attachments.length > 0 ? { attachments } : {}),
+                application_state: applicationState,
+                filters: filtersPayload,
+                ...(toolRequests ? { tool_requests: toolRequests } : {})
             },
             assistant_message_id: assistantMessageId,
             custom_instructions: customInstructions,
