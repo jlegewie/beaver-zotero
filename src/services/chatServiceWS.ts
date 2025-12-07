@@ -505,6 +505,8 @@ export class ChatServiceWS {
                         event.message_id,
                         event.details
                     );
+                    // Close the connection after an error
+                    this.close(1011, `Server error: ${event.type}`);
                     break;
 
                 case 'warning':
