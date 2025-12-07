@@ -212,6 +212,19 @@ var MuPDFLoader = {
                 return libmupdf._wasm_count_pages(this.pointer);
             }
 
+            /**
+             * Get a single metadata field from the document.
+             * @param {string} key - Metadata key, e.g. "format", "info:Title"
+             * @returns {string|undefined} Metadata value if present
+             */
+            getMetadata(key) {
+                const valuePtr = libmupdf._wasm_lookup_metadata(this.pointer, STRING(key));
+                if (!valuePtr) {
+                    return undefined;
+                }
+                return fromString(valuePtr);
+            }
+
             loadPage(index) {
                 const pagePtr = libmupdf._wasm_load_page(this.pointer, index);
                 if (!pagePtr) {
@@ -669,15 +682,41 @@ var MuPDFLoader = {
      * Get document metadata
      * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
      * @param {string} [rootURI] - Root URI for the addon
-     * @returns {Promise<Object>} - Document metadata
+     * @param {string[]} [keys] - Metadata keys to retrieve (see MuPDF docs)
+     * @returns {Promise<Object>} - Document metadata and page count
      */
-    async getMetadata(pdfData, rootURI = "chrome://beaver/content/") {
+    async getMetadata(
+        pdfData,
+        rootURI = "chrome://beaver/content/",
+        keys = [
+            "format",
+            "encryption",
+            "info:Title",
+            "info:Author",
+            "info:Subject",
+            "info:Keywords",
+            "info:Creator",
+            "info:Producer",
+            "info:CreationDate",
+            "info:ModDate",
+        ]
+    ) {
         const mupdf = await this.init(rootURI);
         const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
 
         try {
+            const metadata = {};
+
+            for (const key of keys) {
+                const value = doc.getMetadata(key);
+                if (typeof value !== "undefined" && value !== "") {
+                    metadata[key] = value;
+                }
+            }
+
             return {
                 pageCount: doc.countPages(),
+                metadata,
             };
         } finally {
             doc.destroy();
