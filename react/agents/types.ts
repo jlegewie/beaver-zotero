@@ -1,5 +1,5 @@
 import { CitationMetadata } from "../types/citations";
-import { WSChatRequest } from "../../src/services/chatServiceWS";
+import { WSChatMessage } from "../../src/services/chatServiceWS";
 
 /**
  * LLM usage associated with an agent run.
@@ -73,7 +73,7 @@ export interface AgentRun {
     id: string;
     thread_id: string;
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
-    request: WSChatRequest;           // User's request (always available)
+    message: WSChatMessage;            // User's message (always available)
     model_messages: ModelMessage[];   // Built incrementally during streaming
     citations: CitationMetadata[];
     total_usage?: RunUsage;
