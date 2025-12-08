@@ -9,13 +9,14 @@ import { TagButton } from '../library/TagButton';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
+    runId: string;
 }
 
 /**
  * Renders the user's request in an agent run.
  * Displays attachments, filters, and the userPrompt content.
  */
-export const UserRequestView: React.FC<UserRequestViewProps> = ({ userPrompt }) => {
+export const UserRequestView: React.FC<UserRequestViewProps> = ({ userPrompt, runId }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
 
     const {
@@ -46,7 +47,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({ userPrompt }) 
 
     return (
         <div className="px-3 py-1">
-            <div className="user-message-display">
+            <div id={`user-request-${runId}`} className="user-message-display">
 
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
