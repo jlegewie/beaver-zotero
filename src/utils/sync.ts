@@ -15,6 +15,7 @@ import { isAttachmentOnServer, getFileHashes } from './webAPI';
 import { getServerOnlyAttachmentCount } from './libraries';
 import { skippedItemsManager } from '../services/skippedItemsManager';
 import { serializeCollection, serializeItem, serializeAttachment, NEEDS_HASH } from './zoteroSerializers';
+import { safeIsInTrash } from './zoteroUtils';
 
 
 const MAX_SERVER_FILES = 100;
@@ -92,7 +93,15 @@ export const isSupportedItem = (item: Zotero.Item | false) => {
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => {
     if (!item) return false;
     if (!isSupportedItem(item)) return false;
-    if (item.isInTrash()) return false;
+    const trashState = safeIsInTrash(item);
+    if (trashState === null) {
+        logger(
+            `syncingItemFilter: Item missing isInTrash, skipping. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
+            2
+        );
+        return false;
+    }
+    if (trashState) return false;
     if (collectionIds) {
         const itemCollections = new Set(item.getCollections());
         return collectionIds.some(id => itemCollections.has(id));
