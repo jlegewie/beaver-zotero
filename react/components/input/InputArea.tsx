@@ -4,7 +4,7 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { generateResponseAtom } from '../../atoms/generateMessages';
-import { sendWSMessageAtom, isWSChatPendingAtom, wsStreamedContentAtom, wsErrorAtom } from '../../atoms/generateMessagesWS';
+import { sendWSMessageAtom, isWSChatPendingAtom, wsErrorAtom } from '../../atoms/generateMessagesWS';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -40,7 +40,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     // WebSocket test state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const isWSPending = useAtomValue(isWSChatPendingAtom);
-    const wsContent = useAtomValue(wsStreamedContentAtom);
     const wsError = useAtomValue(wsErrorAtom);
 
     useEffect(() => {
@@ -213,7 +212,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             />
                         </Tooltip>
                         {/* ----- Temporary WebSocket test button ----- */}
-                        <Tooltip content={wsError ? `WS Error: ${wsError.message}` : (wsContent ? `WS: ${wsContent.substring(0, 50)}...` : 'Test WebSocket')} singleLine>
+                        <Tooltip content='Test WebSocket' singleLine>
                             <Button
                                 variant="outline"
                                 style={{ padding: '2px 8px' }}
