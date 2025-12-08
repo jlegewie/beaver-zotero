@@ -295,7 +295,6 @@ export const sendWSMessageAtom = atom(
 
         // Build the message
         const wsMessage: BeaverAgentPrompt = {
-            id: uuidv4(),
             content: message,
             ...(attachments.length > 0 ? { attachments } : {}),
             application_state: applicationState,
