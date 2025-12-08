@@ -761,3 +761,27 @@ export function createCitationHTML(itemOrID: Zotero.Item | number | string, page
 
 // Citation with page range
 // const citation3 = createCitationHTML(item, "123-145");
+
+/**
+ * Safely check trash status on a Zotero item.
+ * Returns null if the item is missing the isInTrash method or if the call throws.
+ * 
+ * Background: Some edge cases (e.g., corrupted items) can cause isInTrash to be
+ * missing or throw. This wrapper provides a safe way to check trash status.
+ * 
+ * @param item Zotero item (or any object) to check
+ * @returns true if in trash, false if not, null if unable to determine
+ */
+export const safeIsInTrash = (item: any): boolean | null => {
+    if (!item || typeof item.isInTrash !== "function") {
+        logger(`safeIsInTrash: isInTrash not found on item ${item?.id ?? "unknown"}`, 2);
+        return null;
+    }
+
+    try {
+        return item.isInTrash();
+    } catch (error: any) {
+        logger(`safeIsInTrash: isInTrash threw for item ${item?.id ?? "unknown"}: ${error?.message ?? error}`, 2);
+        return null;
+    }
+};
