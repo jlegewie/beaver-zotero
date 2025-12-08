@@ -201,7 +201,7 @@ export interface WSChatRequest {
     /** Client-generated run ID for this agent run */
     run_id: string;
     /** Thread ID (new UUID for new thread, existing UUID for continuation) */
-    thread_id: string;
+    thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
     /** Custom system instructions for this request */

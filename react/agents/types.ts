@@ -90,7 +90,7 @@ export interface ToolCallPart {
 
 export interface AgentRun {
     id: string;
-    thread_id: string;
+    thread_id: string | null;  // null for new threads until backend sends thread event
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
     user_prompt: BeaverAgentPrompt;   // User prompt (always available)
     model_messages: ModelMessage[];   // Built incrementally during streaming

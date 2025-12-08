@@ -132,22 +132,23 @@ function createAgentRunShell(
     customModel?: FullModelConfig['custom_model'],
 ): { run: AgentRun; request: WSChatRequest } {
     const runId = uuidv4();
-    const resolvedThreadId = threadId ?? uuidv4();
 
     // Create the request that will be sent to the backend
+    // thread_id is null for new threads - backend generates the ID
     const request: WSChatRequest = {
         type: 'chat',
         run_id: runId,
-        thread_id: resolvedThreadId,
+        thread_id: threadId,
         user_prompt: userPrompt,
         custom_instructions: customInstructions,
         custom_model: customModel,
     };
 
     // Create the shell AgentRun for immediate UI rendering
+    // thread_id will be updated when we receive the 'thread' event from backend
     const run: AgentRun = {
         id: runId,
-        thread_id: resolvedThreadId,
+        thread_id: threadId,
         status: 'in_progress',
         user_prompt: userPrompt,
         model_messages: [],
@@ -313,12 +314,8 @@ export const sendWSMessageAtom = atom(
         );
 
         // Set active run - UI now shows user message + spinner
+        // Note: thread_id may be null for new threads; it will be set when we receive 'thread' event
         set(activeRunAtom, run);
-
-        // Update thread ID if this is a new thread
-        if (!threadId) {
-            set(currentThreadIdAtom, run.thread_id);
-        }
 
         // Reset user message input after creating the run
         set(currentMessageContentAtom, '');
@@ -366,10 +363,13 @@ export const sendWSMessageAtom = atom(
                 set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             },
 
-            onThread: (threadId: string) => {
-                logger(`WS onThread: ${threadId}`, 1);
-                console.log('[WS] Thread event:', { threadId });
-                set(currentThreadIdAtom, threadId);
+            onThread: (newThreadId: string) => {
+                logger(`WS onThread: ${newThreadId}`, 1);
+                console.log('[WS] Thread event:', { threadId: newThreadId });
+                // Update the current thread ID atom
+                set(currentThreadIdAtom, newThreadId);
+                // Update the active run with the thread ID (important for new threads)
+                set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
             },
 
             onDone: () => {
