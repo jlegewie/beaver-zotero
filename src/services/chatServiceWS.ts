@@ -21,6 +21,14 @@ import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
 // WebSocket Event Types (matching backend ws_events.py)
 // =============================================================================
 
+import {
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    RunUsage,
+} from '../../react/agents/types';
+
 /** Base interface for all WebSocket events from the server */
 interface WSBaseEvent {
     event: string;
@@ -37,18 +45,29 @@ export interface WSReadyEvent extends WSBaseEvent {
     indexing_complete: boolean;
 }
 
-/** Delta event for streaming content updates */
-export interface WSDeltaEvent extends WSBaseEvent {
-    event: 'delta';
-    message_id: string;
-    delta: string;
-    type: 'reasoning' | 'content';
+/** Part event for streaming content (text, thinking, tool calls) */
+export interface WSPartEvent extends WSBaseEvent {
+    event: 'part';
+    run_id: string;
+    message_index: number;
+    part_index: number;
+    part: TextPart | ThinkingPart | ToolCallPart;
 }
 
-/** Complete event signaling the end of message streaming */
-export interface WSCompleteEvent extends WSBaseEvent {
-    event: 'complete';
-    message_id: string;
+/** Tool return event for tool execution results */
+export interface WSToolReturnEvent extends WSBaseEvent {
+    event: 'tool_return';
+    run_id: string;
+    message_index: number;
+    part: ToolReturnPart;
+}
+
+/** Run complete event signaling the agent run finished */
+export interface WSRunCompleteEvent extends WSBaseEvent {
+    event: 'run_complete';
+    run_id: string;
+    usage: RunUsage | null;
+    cost: number | null;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -61,7 +80,7 @@ export interface WSErrorEvent extends WSBaseEvent {
     event: 'error';
     type: string;
     message: string;
-    message_id?: string;
+    run_id?: string;
     details?: string;
 }
 
@@ -76,7 +95,7 @@ export type WSWarningType =
 /** Warning event for non-fatal issues */
 export interface WSWarningEvent extends WSBaseEvent {
     event: 'warning';
-    message_id: string;
+    run_id: string;
     type: WSWarningType;
     message: string;
     data?: Record<string, any>;
@@ -138,8 +157,9 @@ export interface WSAttachmentContentResponse {
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
-    | WSDeltaEvent
-    | WSCompleteEvent
+    | WSPartEvent
+    | WSToolReturnEvent
+    | WSRunCompleteEvent
     | WSDoneEvent
     | WSErrorEvent
     | WSWarningEvent
@@ -190,12 +210,12 @@ export interface WSChatMessage {
 export interface WSChatRequest {
     /** Request type discriminator */
     type: 'chat';
-    /** Existing thread ID (omit for new thread) */
-    thread_id?: string;
+    /** Client-generated run ID for this agent run */
+    run_id: string;
+    /** Thread ID (new UUID for new thread, existing UUID for continuation) */
+    thread_id: string;
     /** The user's message */
     message: WSChatMessage;
-    /** Client-generated ID for the assistant's response message (for immediate UI rendering) */
-    assistant_message_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Custom model configuration */
@@ -213,8 +233,6 @@ export interface WSConnectOptions {
 // =============================================================================
 // Callback Types
 // =============================================================================
-
-export type DeltaType = 'reasoning' | 'content';
 
 /** Data received in the ready event */
 export interface WSReadyData {
@@ -235,18 +253,22 @@ export interface WSCallbacks {
     onReady: (data: WSReadyData) => void;
 
     /**
-     * Called when a delta (partial content) is received
-     * @param messageId ID of the message being streamed
-     * @param delta The text chunk
-     * @param type Whether this is reasoning or content
+     * Called when a part event is received (text, thinking, or tool_call)
+     * @param event The part event with run_id, message_index, part_index, and part data
      */
-    onDelta: (messageId: string, delta: string, type: DeltaType) => void;
+    onPart: (event: WSPartEvent) => void;
 
     /**
-     * Called when message streaming is complete
-     * @param messageId ID of the completed message
+     * Called when a tool return event is received
+     * @param event The tool return event with run_id, message_index, and part data
      */
-    onComplete: (messageId: string) => void;
+    onToolReturn: (event: WSToolReturnEvent) => void;
+
+    /**
+     * Called when the agent run completes
+     * @param event The run complete event with usage and cost info
+     */
+    onRunComplete: (event: WSRunCompleteEvent) => void;
 
     /**
      * Called when the full request is done (after persistence, usage logging, etc.)
@@ -256,21 +278,15 @@ export interface WSCallbacks {
 
     /**
      * Called when an error occurs
-     * @param type Error type identifier
-     * @param message Human-readable error message
-     * @param messageId Optional message ID if error is associated with a specific message
-     * @param details Optional additional error details
+     * @param event The error event
      */
-    onError: (type: string, message: string, messageId?: string, details?: string) => void;
+    onError: (event: WSErrorEvent) => void;
 
     /**
      * Called when a warning occurs (non-fatal)
-     * @param messageId Message ID associated with the warning
-     * @param type Warning type identifier
-     * @param message Human-readable warning message
-     * @param data Optional additional warning data
+     * @param event The warning event
      */
-    onWarning: (messageId: string, type: WSWarningType, message: string, data?: Record<string, any>) => void;
+    onWarning: (event: WSWarningEvent) => void;
 
     /**
      * Called when the WebSocket connection is established
@@ -391,13 +407,13 @@ export class ChatServiceWS {
                             resolve();
                         }
                     },
-                    onError: (type: string, message: string, messageId?: string, details?: string) => {
+                    onError: (event: WSErrorEvent) => {
                         // Call the original error callback
-                        callbacks.onError(type, message, messageId, details);
+                        callbacks.onError(event);
                         // If we haven't resolved yet, this is a connection-phase error
                         if (!hasResolved) {
                             hasResolved = true;
-                            reject(new Error(`${type}: ${message}`));
+                            reject(new Error(`${event.type}: ${event.message}`));
                         }
                     }
                 };
@@ -482,16 +498,16 @@ export class ChatServiceWS {
                     break;
                 }
 
-                case 'delta':
-                    this.callbacks.onDelta(
-                        event.message_id,
-                        event.delta,
-                        event.type
-                    );
+                case 'part':
+                    this.callbacks.onPart(event);
                     break;
 
-                case 'complete':
-                    this.callbacks.onComplete(event.message_id);
+                case 'tool_return':
+                    this.callbacks.onToolReturn(event);
+                    break;
+
+                case 'run_complete':
+                    this.callbacks.onRunComplete(event);
                     break;
 
                 case 'done':
@@ -499,43 +515,45 @@ export class ChatServiceWS {
                     break;
 
                 case 'error':
-                    this.callbacks.onError(
-                        event.type,
-                        event.message,
-                        event.message_id,
-                        event.details
-                    );
+                    this.callbacks.onError(event);
                     // Close the connection after an error
                     this.close(1011, `Server error: ${event.type}`);
                     break;
 
                 case 'warning':
-                    this.callbacks.onWarning(
-                        event.message_id,
-                        event.type,
-                        event.message,
-                        event.data
-                    );
+                    this.callbacks.onWarning(event);
                     break;
 
                 case 'item_data_request':
                     this.handleItemDataRequest(event).catch((error) => {
                         logger(`ChatServiceWS: Failed to handle item_data_request: ${error}`, 1);
-                        this.callbacks?.onError('item_data_request_failed', String(error));
+                        this.callbacks?.onError({
+                            event: 'error',
+                            type: 'item_data_request_failed',
+                            message: String(error),
+                        });
                     });
                     break;
 
                 case 'attachment_data_request':
                     this.handleAttachmentDataRequest(event).catch((error) => {
                         logger(`ChatServiceWS: Failed to handle attachment_data_request: ${error}`, 1);
-                        this.callbacks?.onError('attachment_data_request_failed', String(error));
+                        this.callbacks?.onError({
+                            event: 'error',
+                            type: 'attachment_data_request_failed',
+                            message: String(error),
+                        });
                     });
                     break;
 
                 case 'attachment_content_request':
                     this.handleAttachmentContentRequest(event).catch((error) => {
                         logger(`ChatServiceWS: Failed to handle attachment_content_request: ${error}`, 1);
-                        this.callbacks?.onError('attachment_content_request_failed', String(error));
+                        this.callbacks?.onError({
+                            event: 'error',
+                            type: 'attachment_content_request_failed',
+                            message: String(error),
+                        });
                     });
                     break;
 
@@ -544,7 +562,11 @@ export class ChatServiceWS {
             }
         } catch (error) {
             logger(`ChatServiceWS: Failed to parse message: ${error}`, 1);
-            this.callbacks.onError('parse_error', 'Failed to parse server message');
+            this.callbacks.onError({
+                event: 'error',
+                type: 'parse_error',
+                message: 'Failed to parse server message',
+            });
         }
     }
 

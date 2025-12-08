@@ -2,13 +2,24 @@
  * WebSocket-based message generation atoms
  * 
  * This module provides Jotai atoms for WebSocket-based chat completion,
- * as an alternative to the SSE-based generateMessages.ts.
- * 
- * It will eventually replace the SSE implementation as more features are added.
+ * using AgentRun for structured run management.
  */
 
 import { atom, Getter } from 'jotai';
-import { chatServiceWS, WSCallbacks, WSChatRequest, WSReadyData, WSConnectOptions, DeltaType } from '../../src/services/chatServiceWS';
+import { v4 as uuidv4 } from 'uuid';
+import {
+    chatServiceWS,
+    WSCallbacks,
+    WSChatRequest,
+    WSChatMessage,
+    WSReadyData,
+    WSConnectOptions,
+    WSPartEvent,
+    WSToolReturnEvent,
+    WSRunCompleteEvent,
+    WSErrorEvent,
+    WSWarningEvent,
+} from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -16,20 +27,25 @@ import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attac
 import { toMessageAttachment } from '../types/attachments/converters';
 import { search_external_references_request, MessageSearchFilters } from '../../src/services/chatService';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { currentMessageItemsAtom, currentReaderAttachmentAtom, currentMessageFiltersAtom, readerTextSelectionAtom, currentMessageContentAtom } from './messageComposition';
+import {
+    currentMessageItemsAtom,
+    currentReaderAttachmentAtom,
+    currentMessageFiltersAtom,
+    readerTextSelectionAtom,
+    currentMessageContentAtom,
+} from './messageComposition';
 import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
 import { processImageAnnotations } from './generateMessages';
 import { getCurrentPage } from '../utils/readerUtils';
-import { createUserMessage, createAssistantMessage } from '../types/chat/uiTypes';
+import { AgentRun } from '../agents/types';
 import {
-    threadMessagesAtom,
-    setMessageStatusAtom,
-    streamToMessageAtom,
-    streamReasoningToMessageAtom,
-    currentAssistantMessageIdAtom,
-    userAttachmentsAtom,
-} from './threads';
-import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
+    threadRunsAtom,
+    activeRunAtom,
+    currentThreadIdAtom,
+    updateRunWithPart,
+    updateRunWithToolReturn,
+    updateRunComplete,
+} from '../agents/atoms';
 
 // =============================================================================
 // Helper Functions
@@ -106,6 +122,43 @@ function getReaderState(get: Getter): ReaderState | null {
     } as ReaderState;
 }
 
+/**
+ * Create the initial AgentRun shell when user presses send.
+ * This happens BEFORE WebSocket connection.
+ */
+function createAgentRunShell(
+    message: WSChatMessage,
+    threadId: string | null,
+    customInstructions?: string,
+    customModel?: FullModelConfig['custom_model'],
+): { run: AgentRun; request: WSChatRequest } {
+    const runId = uuidv4();
+    const resolvedThreadId = threadId ?? uuidv4();
+
+    // Create the request that will be sent to the backend
+    const request: WSChatRequest = {
+        type: 'chat',
+        run_id: runId,
+        thread_id: resolvedThreadId,
+        message,
+        custom_instructions: customInstructions,
+        custom_model: customModel,
+    };
+
+    // Create the shell AgentRun for immediate UI rendering
+    const run: AgentRun = {
+        id: runId,
+        thread_id: resolvedThreadId,
+        status: 'in_progress',
+        message,
+        model_messages: [],
+        citations: [],
+        created_at: new Date().toISOString(),
+    };
+
+    return { run, request };
+}
+
 // =============================================================================
 // State Atoms
 // =============================================================================
@@ -122,20 +175,11 @@ export const isWSReadyAtom = atom(false);
 /** Ready event data from server (model, subscription, processing info) */
 export const wsReadyDataAtom = atom<WSReadyData | null>(null);
 
-/** Current message ID being streamed */
-export const currentWSMessageIdAtom = atom<string | null>(null);
-
-/** Accumulated content from delta events */
-export const wsStreamedContentAtom = atom('');
-
-/** Accumulated reasoning from delta events */
-export const wsStreamedReasoningAtom = atom('');
-
 /** Last error from WebSocket */
-export const wsErrorAtom = atom<{ type: string; message: string; details?: string } | null>(null);
+export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 
 /** Last warning from WebSocket */
-export const wsWarningAtom = atom<{ type: string; message: string; data?: Record<string, any> } | null>(null);
+export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
 // =============================================================================
 // Action Atoms
@@ -149,9 +193,6 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
     set(wsReadyDataAtom, null);
-    set(currentWSMessageIdAtom, null);
-    set(wsStreamedContentAtom, '');
-    set(wsStreamedReasoningAtom, '');
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
 });
@@ -159,17 +200,14 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 /**
  * Send a chat message via WebSocket
  * 
- * This is a simple implementation for testing. It will be expanded
- * to match the full functionality of generateResponseAtom.
- * 
- * Event flow:
- * 1. onOpen - WebSocket connection established
- * 2. onReady - Server validation complete (auth, profile, model)
- * 3. onDelta - Streaming content chunks
- * 4. onComplete - Response finished
- * 5. onClose - Connection closed
- * 
- * Errors can occur at any stage, warnings are non-fatal.
+ * Flow:
+ * 1. Create AgentRun shell → set activeRunAtom → UI shows user message + spinner
+ * 2. Connect WebSocket with auth params
+ * 3. Receive "ready" event → send WSChatRequest
+ * 4. "part" events → update model_messages with text/thinking/tool_call
+ * 5. "tool_return" events → add ToolReturnPart to model_messages
+ * 6. "run_complete" event → update usage, set status="completed"
+ * 7. "done" event → move activeRun to threadRuns, close connection
  */
 export const sendWSMessageAtom = atom(
     null,
@@ -195,16 +233,6 @@ export const sendWSMessageAtom = atom(
             accessId: connectOptions.accessId || '(not set - will use plan default)',
             hasApiKey: !!connectOptions.apiKey,
         });
-
-        // Create user and assistant messages
-        const userMsg = createUserMessage(message);
-        const assistantMsg = createAssistantMessage({ status: 'in_progress' });
-
-        // Add messages to thread
-        const threadMessages = get(threadMessagesAtom);
-        set(threadMessagesAtom, [...threadMessages, userMsg, assistantMsg]);
-        set(currentAssistantMessageIdAtom, assistantMsg.id);
-        set(currentWSMessageIdAtom, assistantMsg.id);
 
         // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
@@ -232,21 +260,6 @@ export const sendWSMessageAtom = atom(
                 } as SourceAttachment);
             }
         }
-
-        // Update user attachments (link to user message)
-        set(userAttachmentsAtom, (prev) => {
-            const newAttachments = attachments.map(a => ({
-                ...a,
-                messageId: userMsg.id,
-                image_base64: undefined
-            }) as MessageAttachmentWithId);
-            return [...prev, ...newAttachments];
-        });
-
-        // Reset user message input after adding to thread
-        set(currentMessageContentAtom, '');
-        set(removePopupMessagesByTypeAtom, ['items_summary']);
-        set(currentMessageItemsAtom, []);
 
         // Build filters payload
         const filterState = get(currentMessageFiltersAtom);
@@ -280,103 +293,115 @@ export const sendWSMessageAtom = atom(
             ...(readerState ? { reader_state: readerState } : {})
         };
 
-        // Create the request
-        const request: WSChatRequest = {
-            type: 'chat',
-            // thread_id: undefined, // Omit for new thread
-            message: {
-                id: userMsg.id,
-                content: message,
-                ...(attachments.length > 0 ? { attachments } : {}),
-                application_state: applicationState,
-                filters: filtersPayload,
-                ...(toolRequests ? { tool_requests: toolRequests } : {})
-            },
-            assistant_message_id: assistantMsg.id,
-            custom_instructions: customInstructions,
+        // Build the message
+        const wsMessage: WSChatMessage = {
+            id: uuidv4(),
+            content: message,
+            ...(attachments.length > 0 ? { attachments } : {}),
+            application_state: applicationState,
+            filters: filtersPayload,
+            ...(toolRequests ? { tool_requests: toolRequests } : {})
         };
 
-        // Include custom model config when applicable
-        if (model?.is_custom && model.custom_model) {
-            request.custom_model = model.custom_model;
+        // Get current thread ID (null for new thread)
+        const threadId = get(currentThreadIdAtom);
+
+        // Create AgentRun shell and request
+        const { run, request } = createAgentRunShell(
+            wsMessage,
+            threadId,
+            customInstructions,
+            model?.is_custom ? model.custom_model : undefined,
+        );
+
+        // Set active run - UI now shows user message + spinner
+        set(activeRunAtom, run);
+
+        // Update thread ID if this is a new thread
+        if (!threadId) {
+            set(currentThreadIdAtom, run.thread_id);
         }
 
-        // Define callbacks with detailed logging
+        // Reset user message input after creating the run
+        set(currentMessageContentAtom, '');
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
+        set(currentMessageItemsAtom, []);
+
+        // Define callbacks
         const callbacks: WSCallbacks = {
             onReady: (data: WSReadyData) => {
                 logger(`WS onReady: model=${data.modelName}, charge=${data.chargeType}, ` +
                        `mode=${data.processingMode}, indexing=${data.indexingComplete}`, 1);
-                console.log('[WS] Ready event received:', {
-                    modelId: data.modelId,
-                    modelName: data.modelName,
-                    subscriptionStatus: data.subscriptionStatus,
-                    chargeType: data.chargeType,
-                    processingMode: data.processingMode,
-                    indexingComplete: data.indexingComplete,
-                });
+                console.log('[WS] Ready event received:', data);
                 set(isWSReadyAtom, true);
                 set(wsReadyDataAtom, data);
             },
 
-            onDelta: (msgId: string, delta: string, type: DeltaType) => {
-                const preview = delta.length > 50 ? delta.substring(0, 50) + '...' : delta;
-                logger(`WS onDelta: ${type} - "${preview}"`, 1);
-                console.log('[WS] Delta event:', { messageId: msgId, type, deltaLength: delta.length });
-                
-                if (type === 'content') {
-                    // Update message status and stream content to thread message
-                    set(setMessageStatusAtom, { id: msgId, status: 'in_progress' });
-                    set(streamToMessageAtom, { id: msgId, chunk: delta });
-                    // Also update local WS atom for debugging/monitoring
-                    set(wsStreamedContentAtom, (prev) => prev + delta);
-                } else if (type === 'reasoning') {
-                    if (delta) {
-                        // Update message status and stream reasoning to thread message
-                        set(setMessageStatusAtom, { id: msgId, status: 'thinking' });
-                        set(streamReasoningToMessageAtom, { id: msgId, chunk: delta });
-                        // Also update local WS atom for debugging/monitoring
-                        set(wsStreamedReasoningAtom, (prev) => prev + delta);
-                    }
-                }
+            onPart: (event: WSPartEvent) => {
+                const partKind = event.part.part_kind;
+                console.log('[WS] Part event:', {
+                    runId: event.run_id,
+                    messageIndex: event.message_index,
+                    partIndex: event.part_index,
+                    partKind,
+                });
+                set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
             },
 
-            onComplete: (msgId: string) => {
-                logger(`WS onComplete: ${msgId}`, 1);
-                console.log('[WS] Complete event:', { messageId: msgId });
-                // Mark the message as completed in the thread
-                set(setMessageStatusAtom, { id: msgId, status: 'completed' });
-                // Note: Don't set pending=false until onDone (connection cleanup)
+            onToolReturn: (event: WSToolReturnEvent) => {
+                console.log('[WS] Tool return event:', {
+                    runId: event.run_id,
+                    messageIndex: event.message_index,
+                    toolName: event.part.tool_name,
+                    toolCallId: event.part.tool_call_id,
+                });
+                set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
+            },
+
+            onRunComplete: (event: WSRunCompleteEvent) => {
+                logger(`WS onRunComplete: ${event.run_id}`, 1);
+                console.log('[WS] Run complete event:', {
+                    runId: event.run_id,
+                    usage: event.usage,
+                    cost: event.cost,
+                });
+                set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             },
 
             onDone: () => {
                 logger('WS onDone: Request fully complete', 1);
-                console.log('[WS] Done event: Full request finished (safe to close or send another)');
+                console.log('[WS] Done event: Full request finished');
+
+                // Move active run to completed runs
+                set(activeRunAtom, (prev) => {
+                    if (prev) {
+                        const finalRun: AgentRun = {
+                            ...prev,
+                            status: prev.status === 'in_progress' ? 'completed' : prev.status,
+                            completed_at: prev.completed_at || new Date().toISOString(),
+                        };
+                        set(threadRunsAtom, (runs) => [...runs, finalRun]);
+                    }
+                    return null;
+                });
+
                 // Connection-per-request policy: close after each completed request
                 chatServiceWS.close();
                 set(isWSChatPendingAtom, false);
             },
 
-            onError: (type: string, errorMessage: string, msgId?: string, details?: string) => {
-                logger(`WS onError: ${type} - ${errorMessage}`, 1);
-                console.error('[WS] Error event:', {
-                    type,
-                    message: errorMessage,
-                    messageId: msgId,
-                    details,
-                });
-                set(wsErrorAtom, { type, message: errorMessage, details });
+            onError: (event: WSErrorEvent) => {
+                logger(`WS onError: ${event.type} - ${event.message}`, 1);
+                console.error('[WS] Error event:', event);
+                set(wsErrorAtom, event);
+                set(activeRunAtom, (prev) => prev ? { ...prev, status: 'error' } : prev);
                 set(isWSChatPendingAtom, false);
             },
 
-            onWarning: (msgId: string, type: string, warningMessage: string, data?: Record<string, any>) => {
-                logger(`WS onWarning: ${type} - ${warningMessage}`, 1);
-                console.warn('[WS] Warning event:', {
-                    messageId: msgId,
-                    type,
-                    message: warningMessage,
-                    data,
-                });
-                set(wsWarningAtom, { type, message: warningMessage, data });
+            onWarning: (event: WSWarningEvent) => {
+                logger(`WS onWarning: ${event.type} - ${event.message}`, 1);
+                console.warn('[WS] Warning event:', event);
+                set(wsWarningAtom, event);
             },
 
             onOpen: () => {
@@ -401,10 +426,12 @@ export const sendWSMessageAtom = atom(
         } catch (error) {
             logger(`WS connection error: ${error}`, 1);
             console.error('[WS] Connection failed:', error);
-            set(wsErrorAtom, { 
-                type: 'connection_error', 
-                message: error instanceof Error ? error.message : 'Connection failed' 
+            set(wsErrorAtom, {
+                event: 'error',
+                type: 'connection_error',
+                message: error instanceof Error ? error.message : 'Connection failed',
             });
+            set(activeRunAtom, (prev) => prev ? { ...prev, status: 'error' } : prev);
             set(isWSChatPendingAtom, false);
         }
     }
@@ -420,3 +447,12 @@ export const closeWSConnectionAtom = atom(null, (_get, set) => {
     set(isWSChatPendingAtom, false);
 });
 
+/**
+ * Clear the current thread and start fresh
+ */
+export const clearThreadAtom = atom(null, (_get, set) => {
+    set(threadRunsAtom, []);
+    set(activeRunAtom, null);
+    set(currentThreadIdAtom, null);
+    set(resetWSStateAtom);
+});
