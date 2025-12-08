@@ -11,7 +11,7 @@ interface ModelMessagesViewProps {
 /**
  * Renders the model messages in an agent run.
  * Only renders ModelResponse messages (kind='response').
- * ModelRequest messages (tool returns) are handled via toolResultsMapAtom.
+ * ModelRequest messages (user prompts or tool returns) are handled via toolResultsMapAtom.
  */
 export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
     messages,
@@ -21,8 +21,9 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
     return (
         <div className="model-messages-view display-flex flex-col gap-3 px-4">
             {messages.map((message, index) => {
-                // Only render response messages - request messages (tool returns)
-                // are displayed inline with their corresponding tool calls
+                // Only render response messages - request messages are either displayed
+                // seperately (user prompts) or inline with their corresponding
+                // tool calls (tool returns)
                 if (message.kind === 'response') {
                     const isLastMessage = index === messages.length - 1;
                     return (
