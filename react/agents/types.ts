@@ -4,7 +4,7 @@ import { WSChatRequest } from "../../src/services/chatServiceWS";
 /**
  * LLM usage associated with an agent run.
  */
-interface RunUsage {
+export interface RunUsage {
     requests: number;
     /** Number of requests made to the LLM API. */
 
@@ -36,29 +36,29 @@ interface RunUsage {
 // Model Message Parts
 // ============================================================================
 
-interface UserPromptPart {
+export interface UserPromptPart {
     part_kind: 'user-prompt';
     content: string;
 }
 
-interface ToolReturnPart {
+export interface ToolReturnPart {
     part_kind: 'tool-return';
     tool_name: string;
     content: any;
     tool_call_id: string;
 }
 
-interface TextPart {
+export interface TextPart {
     part_kind: 'text';
     content: string;
 }
 
-interface ThinkingPart {
+export interface ThinkingPart {
     part_kind: 'thinking';
     content: string;
 }
 
-interface ToolCallPart {
+export interface ToolCallPart {
     part_kind: 'tool-call';
     tool_name: string;
     args: string | Record<string, any> | null;
@@ -82,9 +82,9 @@ export interface AgentRun {
     completed_at?: string;
 }
 
-type ModelMessage = ModelRequest | ModelResponse;
+export type ModelMessage = ModelRequest | ModelResponse;
 
-interface ModelRequest {
+export interface ModelRequest {
     kind: 'request';
     /* Message type identifier, this is available on all parts as a discriminator. */
 
@@ -98,7 +98,7 @@ interface ModelRequest {
     /* The instructions for the model. Unused and should be empty. */
 }
 
-interface ModelResponse {
+export interface ModelResponse {
     kind: 'response';
     /* Message type identifier */
 
