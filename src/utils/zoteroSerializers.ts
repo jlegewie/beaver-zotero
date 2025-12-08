@@ -5,6 +5,7 @@ import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, get
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
+import { safeIsInTrash } from './zoteroUtils';
 
 export const NEEDS_HASH = '[needs_hash]';
 
@@ -226,7 +227,17 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
         formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
-        deleted: item.isInTrash(),
+        deleted: (() => {
+            const trashState = safeIsInTrash(item);
+            if (trashState === null) {
+                logger(
+                    `serializeItem: Item missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
+                    2
+                );
+                return true;
+            }
+            return trashState;
+        })(),
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
@@ -327,7 +338,17 @@ export async function serializeAttachment(
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
-        deleted: item.isInTrash(),
+        deleted: (() => {
+            const trashState = safeIsInTrash(item);
+            if (trashState === null) {
+                logger(
+                    `serializeAttachment: Attachment missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"}`,
+                    2
+                );
+                return true;
+            }
+            return trashState;
+        })(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
     };
