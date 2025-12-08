@@ -367,6 +367,12 @@ export const sendWSMessageAtom = atom(
                 set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             },
 
+            onThread: (threadId: string) => {
+                logger(`WS onThread: ${threadId}`, 1);
+                console.log('[WS] Thread event:', { threadId });
+                set(currentThreadIdAtom, threadId);
+            },
+
             onDone: () => {
                 logger('WS onDone: Request fully complete', 1);
                 console.log('[WS] Done event: Full request finished');

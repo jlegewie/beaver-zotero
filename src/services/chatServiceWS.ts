@@ -75,6 +75,12 @@ export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
 }
 
+/** Thread event sent when a thread is initialized or created */
+export interface WSThreadEvent extends WSBaseEvent {
+    event: 'thread';
+    thread_id: string;
+}
+
 /** Error event for communicating failures */
 export interface WSErrorEvent extends WSBaseEvent {
     event: 'error';
@@ -161,6 +167,7 @@ export type WSEvent =
     | WSToolReturnEvent
     | WSRunCompleteEvent
     | WSDoneEvent
+    | WSThreadEvent
     | WSErrorEvent
     | WSWarningEvent
     | WSItemDataRequest
@@ -273,6 +280,12 @@ export interface WSCallbacks {
      * Safe to close connection or send another request after this.
      */
     onDone: () => void;
+
+    /**
+     * Called when a thread is initialized or created
+     * @param threadId The thread ID
+     */
+    onThread: (threadId: string) => void;
 
     /**
      * Called when an error occurs
@@ -510,6 +523,10 @@ export class ChatServiceWS {
 
                 case 'done':
                     this.callbacks.onDone();
+                    break;
+
+                case 'thread':
+                    this.callbacks.onThread(event.thread_id);
                     break;
 
                 case 'error':
