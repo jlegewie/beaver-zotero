@@ -1,5 +1,5 @@
 import React, { useMemo, useRef } from 'react';
-import { WSChatMessage } from '../../../src/services/chatServiceWS';
+import { BeaverAgentPrompt } from '../../../src/services/chatServiceWS';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { MessageItemButton } from '../input/MessageItemButton';
@@ -8,7 +8,7 @@ import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 
 interface UserRequestViewProps {
-    message: WSChatMessage;
+    message: BeaverAgentPrompt;
 }
 
 /**
@@ -45,7 +45,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({ message }) => 
         (message.filters?.tags && message.filters.tags.length > 0);
 
     return (
-        <div id={`message-${message.id || 'user'}`} className="px-3 py-1">
+        <div className="px-3 py-1">
             <div className="user-message-display">
 
                 {/* Message attachments and filters */}

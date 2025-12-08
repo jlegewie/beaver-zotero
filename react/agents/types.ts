@@ -1,5 +1,5 @@
 import { CitationMetadata } from "../types/citations";
-import { WSChatMessage } from "../../src/services/chatServiceWS";
+import { BeaverAgentPrompt } from "../../src/services/chatServiceWS";
 
 /**
  * LLM usage associated with an agent run.
@@ -73,7 +73,7 @@ export interface AgentRun {
     id: string;
     thread_id: string;
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
-    message: WSChatMessage;            // User's message (always available)
+    message: BeaverAgentPrompt;       // Agent prompt (always available)
     model_messages: ModelMessage[];   // Built incrementally during streaming
     citations: CitationMetadata[];
     total_usage?: RunUsage;

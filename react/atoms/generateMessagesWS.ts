@@ -11,7 +11,7 @@ import {
     chatServiceWS,
     WSCallbacks,
     WSChatRequest,
-    WSChatMessage,
+    BeaverAgentPrompt,
     WSReadyData,
     WSConnectOptions,
     WSPartEvent,
@@ -127,7 +127,7 @@ function getReaderState(get: Getter): ReaderState | null {
  * This happens BEFORE WebSocket connection.
  */
 function createAgentRunShell(
-    message: WSChatMessage,
+    message: BeaverAgentPrompt,
     threadId: string | null,
     customInstructions?: string,
     customModel?: FullModelConfig['custom_model'],
@@ -294,7 +294,7 @@ export const sendWSMessageAtom = atom(
         };
 
         // Build the message
-        const wsMessage: WSChatMessage = {
+        const wsMessage: BeaverAgentPrompt = {
             id: uuidv4(),
             content: message,
             ...(attachments.length > 0 ? { attachments } : {}),

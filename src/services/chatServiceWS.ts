@@ -188,9 +188,7 @@ export interface ApplicationStateInput {
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
  */
-export interface WSChatMessage {
-    /** Client-generated message ID (optional, will be generated if not provided) */
-    id?: string;
+export interface BeaverAgentPrompt {
     /** The message text content */
     content: string;
     /** Files, annotations, or sources attached to the message */
@@ -215,7 +213,7 @@ export interface WSChatRequest {
     /** Thread ID (new UUID for new thread, existing UUID for continuation) */
     thread_id: string;
     /** The user's message */
-    message: WSChatMessage;
+    message: BeaverAgentPrompt;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Custom model configuration */
