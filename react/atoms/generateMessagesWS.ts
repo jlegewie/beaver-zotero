@@ -11,7 +11,6 @@ import {
     chatServiceWS,
     WSCallbacks,
     WSChatRequest,
-    BeaverAgentPrompt,
     WSReadyData,
     WSConnectOptions,
     WSPartEvent,
@@ -37,7 +36,7 @@ import {
 import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
 import { processImageAnnotations } from './generateMessages';
 import { getCurrentPage } from '../utils/readerUtils';
-import { AgentRun } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -127,7 +126,7 @@ function getReaderState(get: Getter): ReaderState | null {
  * This happens BEFORE WebSocket connection.
  */
 function createAgentRunShell(
-    message: BeaverAgentPrompt,
+    userPrompt: BeaverAgentPrompt,
     threadId: string | null,
     customInstructions?: string,
     customModel?: FullModelConfig['custom_model'],
@@ -140,7 +139,7 @@ function createAgentRunShell(
         type: 'chat',
         run_id: runId,
         thread_id: resolvedThreadId,
-        message,
+        user_prompt: userPrompt,
         custom_instructions: customInstructions,
         custom_model: customModel,
     };
@@ -150,7 +149,7 @@ function createAgentRunShell(
         id: runId,
         thread_id: resolvedThreadId,
         status: 'in_progress',
-        message,
+        user_prompt: userPrompt,
         model_messages: [],
         citations: [],
         created_at: new Date().toISOString(),
@@ -294,7 +293,7 @@ export const sendWSMessageAtom = atom(
         };
 
         // Build the message
-        const wsMessage: BeaverAgentPrompt = {
+        const userPrompt: BeaverAgentPrompt = {
             content: message,
             ...(attachments.length > 0 ? { attachments } : {}),
             application_state: applicationState,
@@ -307,7 +306,7 @@ export const sendWSMessageAtom = atom(
 
         // Create AgentRun shell and request
         const { run, request } = createAgentRunShell(
-            wsMessage,
+            userPrompt,
             threadId,
             customInstructions,
             model?.is_custom ? model.custom_model : undefined,

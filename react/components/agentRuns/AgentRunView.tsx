@@ -21,7 +21,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
             {/* User's message */}
-            <UserRequestView message={run.message} />
+            <UserRequestView userPrompt={run.user_prompt} />
 
             {/* Model responses */}
             {run.model_messages.length > 0 && (

@@ -11,8 +11,8 @@ import { supabase } from './supabaseClient';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
 import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/types/profile';
-import { MessageAttachment, ReaderState } from '../../react/types/attachments/apiTypes';
-import { MessageSearchFilters, ToolRequest } from './chatService';
+import { ReaderState } from '../../react/types/attachments/apiTypes';
+import { BeaverAgentPrompt } from '../../react/agents/types';
 import { AttachmentDataWithMimeType, ItemData, ZoteroItemReference } from '../../react/types/zotero';
 import { CustomChatModel } from '../../react/types/settings';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
@@ -192,23 +192,6 @@ export interface ApplicationStateInput {
 }
 
 /**
- * Chat message content sent by the client.
- * Contains all user input for a chat completion request.
- */
-export interface BeaverAgentPrompt {
-    /** The message text content */
-    content: string;
-    /** Files, annotations, or sources attached to the message */
-    attachments?: MessageAttachment[];
-    /** Current application state (view, reader state, library selection) */
-    application_state?: ApplicationStateInput;
-    /** Search filters (libraries, collections, tags) */
-    filters?: MessageSearchFilters;
-    /** Explicit tool requests from the user (e.g., search_external_references) */
-    tool_requests?: ToolRequest[];
-}
-
-/**
  * Chat request sent by the client after receiving the 'ready' event.
  * Model selection and API key are passed as query parameters during connection.
  */
@@ -220,7 +203,7 @@ export interface WSChatRequest {
     /** Thread ID (new UUID for new thread, existing UUID for continuation) */
     thread_id: string;
     /** The user's message */
-    message: BeaverAgentPrompt;
+    user_prompt: BeaverAgentPrompt;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Custom model configuration */

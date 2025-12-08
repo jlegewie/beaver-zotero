@@ -1,5 +1,7 @@
 import { CitationMetadata } from "../types/citations";
-import { BeaverAgentPrompt } from "../../src/services/chatServiceWS";
+import { ApplicationStateInput } from "../../src/services/chatServiceWS";
+import { MessageAttachment } from "../types/attachments/apiTypes";
+import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 
 /**
  * LLM usage associated with an agent run.
@@ -30,6 +32,23 @@ export interface RunUsage {
     /** Total number of output/completion tokens. */
 
     details?: Record<string, number>;
+}
+
+/**
+ * Chat message content sent by the client.
+ * Contains all user input for a chat completion request.
+ */
+export interface BeaverAgentPrompt {
+    /** The message text content */
+    content: string;
+    /** Files, annotations, or sources attached to the message */
+    attachments?: MessageAttachment[];
+    /** Current application state (view, reader state, library selection) */
+    application_state?: ApplicationStateInput;
+    /** Search filters (libraries, collections, tags) */
+    filters?: MessageSearchFilters;
+    /** Explicit tool requests from the user (e.g., search_external_references) */
+    tool_requests?: ToolRequest[];
 }
 
 // ============================================================================
@@ -73,7 +92,7 @@ export interface AgentRun {
     id: string;
     thread_id: string;
     status: 'in_progress' | 'completed' | 'error' | 'canceled';
-    message: BeaverAgentPrompt;       // Agent prompt (always available)
+    user_prompt: BeaverAgentPrompt;   // User prompt (always available)
     model_messages: ModelMessage[];   // Built incrementally during streaming
     citations: CitationMetadata[];
     total_usage?: RunUsage;
