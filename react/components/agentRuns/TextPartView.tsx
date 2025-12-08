@@ -4,6 +4,8 @@ import MarkdownRenderer from '../messages/MarkdownRenderer';
 
 interface TextPartViewProps {
     part: TextPart;
+    // TODO: Add runId prop once proposed actions are migrated from messageId to runId
+    // This will be needed for citation linking and note saving
 }
 
 /**
@@ -20,6 +22,7 @@ export const TextPartView: React.FC<TextPartViewProps> = ({ part }) => {
         <MarkdownRenderer 
             className="markdown" 
             content={part.content}
+            // TODO: Pass runId once proposed actions migration is complete
         />
     );
 };

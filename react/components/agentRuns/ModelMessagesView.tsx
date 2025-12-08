@@ -22,7 +22,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
         <div className="model-messages-view display-flex flex-col gap-3 px-4">
             {messages.map((message, index) => {
                 // Only render response messages - request messages are either displayed
-                // seperately (user prompts) or inline with their corresponding
+                // separately (user prompts) or inline with their corresponding
                 // tool calls (tool returns)
                 if (message.kind === 'response') {
                     const isLastMessage = index === messages.length - 1;
@@ -31,6 +31,8 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
                             key={`${runId}-response-${index}`}
                             message={message}
                             isStreaming={isStreaming && isLastMessage}
+                            runId={runId}
+                            responseIndex={index}
                         />
                     );
                 }

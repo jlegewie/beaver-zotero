@@ -9,6 +9,10 @@ import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 interface ModelResponseViewProps {
     message: ModelResponse;
     isStreaming: boolean;
+    /** Run ID for element identification */
+    runId: string;
+    /** Index of this response within the run (for unique DOM IDs) */
+    responseIndex: number;
 }
 
 /**
@@ -18,6 +22,8 @@ interface ModelResponseViewProps {
 export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     message,
     isStreaming,
+    runId,
+    responseIndex,
 }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
     
@@ -41,8 +47,13 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
         return null;
     }
 
+    // Generate a unique ID for this response (used for DOM identification and UI state persistence)
+    // Note: This is NOT used for proposed actions - those will use runId directly once migrated
+    const responseId = `${runId}-response-${responseIndex}`;
+
     return (
         <div
+            id={`response-${responseId}`}
             className="model-response-view hover-trigger user-select-text"
             ref={contentRef}
             onContextMenu={handleContextMenu}
@@ -55,6 +66,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                         part={part}
                         isThinking={isStreaming && index === thinkingParts.length - 1}
                         hasFollowingContent={textParts.length > 0 || toolCallParts.length > 0}
+                        thinkingId={`${responseId}-thinking-${index}`}
                     />
                 )
             ))}

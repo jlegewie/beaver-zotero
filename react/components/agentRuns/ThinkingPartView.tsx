@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ThinkingPart } from '../../agents/types';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import Button from '../ui/Button';
 import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icons/icons';
+import { thinkingVisibilityAtom, toggleThinkingVisibilityAtom } from '../../atoms/messageUIState';
 
 interface ThinkingPartViewProps {
     part: ThinkingPart;
     isThinking: boolean;
     hasFollowingContent: boolean;
+    /** Unique ID for persistent visibility state */
+    thinkingId: string;
 }
 
 /**
@@ -18,12 +22,16 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
     part,
     isThinking,
     hasFollowingContent,
+    thinkingId,
 }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+    // Use Jotai atom for persistent visibility state (matches ThinkingContent behavior)
+    const thinkingVisibilityMap = useAtomValue(thinkingVisibilityAtom);
+    const toggleVisibility = useSetAtom(toggleThinkingVisibilityAtom);
+    const isExpanded = thinkingVisibilityMap[thinkingId] ?? false;
     const [isHovered, setIsHovered] = useState(false);
 
     const toggleExpanded = () => {
-        setIsExpanded(!isExpanded);
+        toggleVisibility(thinkingId);
     };
 
     const getIcon = () => {
