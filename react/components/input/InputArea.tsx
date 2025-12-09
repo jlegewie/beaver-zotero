@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { isStreamingAtom, newThreadAtom, isCancellableAtom, cancellerHolder, isCancellingAtom } from '../../atoms/threads';
+import { newThreadAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
-import { generateResponseAtom } from '../../atoms/generateMessages';
-import { sendWSMessageAtom, isWSChatPendingAtom, wsErrorAtom } from '../../atoms/generateMessagesWS';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom } from '../../atoms/generateMessagesWS';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -26,21 +25,17 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const [isCommandPressed, setIsCommandPressed] = useState(false);
-    const isStreaming = useAtomValue(isStreamingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
-    const generateResponse = useSetAtom(generateResponseAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
-    const [isCancellable, setIsCancellable] = useAtom(isCancellableAtom);
-    const setIsCancelling = useSetAtom(isCancellingAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
 
-    // WebSocket test state
+    // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
-    const isWSPending = useAtomValue(isWSChatPendingAtom);
-    const wsError = useAtomValue(wsErrorAtom);
+    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -57,40 +52,18 @@ const InputArea: React.FC<InputAreaProps> = ({
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
     ) => {
         e.preventDefault();
-        chatCompletion(messageContent);
+        sendMessage(messageContent);
     };
 
-    const chatCompletion = async (
-        query: string
-    ) => {
-        if (isStreaming || query.length === 0) return;
-
-        // Generate response
-        generateResponse({
-            content: query,
-            items: currentMessageItems
-        });
-
-        logger(`Chat completion: ${query}`);
+    const sendMessage = (message: string) => {
+        if (isPending || message.length === 0) return;
+        logger(`Sending message: ${message}`);
+        sendWSMessage(message);
     };
 
     const handleStop = () => {
         logger('Stopping chat completion');
-        if (isCancellable && cancellerHolder.current) {
-            // Set the cancelling state to true so that onError will cancel the message
-            setIsCancelling(true);
-            // Cancel the html connection (which will trigger the onError event)
-            cancellerHolder.current();
-            cancellerHolder.current = null;
-            // Reset the cancellable state to false
-            setIsCancellable(false);
-        } else {
-            logger('WARNING: handleStop called but no canceller function was found in holder.');
-        }
-    };
-
-    const handleAddSources = async () => {
-        logger('Adding context item');
+        closeWSConnection();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {        
@@ -115,7 +88,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         const customPrompt = customPrompts[i - 1];
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
         if (customPrompt && (!customPrompt.requiresAttachment || currentMessageItems.length > 0)) {
-            chatCompletion(customPrompt.text);
+            sendMessage(customPrompt.text);
         }
     }
 
@@ -135,15 +108,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
-    // WebSocket test handler
-    const handleWSTest = () => {
-        const testMessage = messageContent.length > 0 ? messageContent : 'Hello from WebSocket test!';
-        logger(`Testing WebSocket with message: ${testMessage}`);
-        sendWSMessage(testMessage);
-    };
-
     return (
-        // <DragDropWrapper addFileSource={addFileSource}>
         <div
             className="user-message-display shadow-md shadow-md-top"
             onClick={handleContainerClick}
@@ -165,7 +130,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <textarea
                         ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                         value={messageContent}
-                        // onChange={(e) => setMessageContent(e.target.value)}
                         onChange={(e) => {
                             if (e.target.value.endsWith('@')) {
                                 const rect = e.currentTarget.getBoundingClientRect();
@@ -211,27 +175,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
                             />
                         </Tooltip>
-                        {/* ----- Temporary WebSocket test button ----- */}
-                        <Tooltip content='Test WebSocket' singleLine>
-                            <Button
-                                variant="outline"
-                                style={{ padding: '2px 8px' }}
-                                onClick={handleWSTest}
-                                disabled={isWSPending}
-                            >
-                                {isWSPending ? 'WS...' : 'WS'}
-                            </Button>
-                        </Tooltip>
-                        {/* ----- End of Temporary WebSocket test button ----- */}
                         <Button
-                            rightIcon={isStreaming ? StopIcon : undefined}
-                            type={!isCommandPressed && !isStreaming && messageContent.length > 0 ? "button" : undefined}
-                            variant={!isCommandPressed || isStreaming ? 'solid' : 'outline'  }
+                            rightIcon={isPending ? StopIcon : undefined}
+                            type={!isCommandPressed && !isPending && messageContent.length > 0 ? "button" : undefined}
+                            variant={!isCommandPressed || isPending ? 'solid' : 'outline'}
                             style={{ padding: '2px 5px' }}
-                            onClick={isStreaming ? handleStop : handleSubmit}
-                            disabled={(messageContent.length === 0 && !isStreaming) || (isStreaming && !isCancellable) || !selectedModel}
+                            onClick={isPending ? handleStop : handleSubmit}
+                            disabled={(messageContent.length === 0 && !isPending) || !selectedModel}
                         >
-                            {isStreaming
+                            {isPending
                                 ? 'Stop'
                                 : (<span>Send <span className="opacity-50">⏎</span></span>)
                             }
@@ -240,7 +192,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             </form>
         </div>
-        // </DragDropWrapper>
     );
 };
 
