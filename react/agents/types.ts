@@ -1,5 +1,5 @@
-import { CitationMetadata } from "../types/citations";
 import { ApplicationStateInput } from "../../src/services/chatServiceWS";
+import { CitationMetadata } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 
@@ -88,17 +88,53 @@ export interface ToolCallPart {
 // Agent Run Types
 // ============================================================================
 
-export interface AgentRun {
-    id: string;
-    thread_id: string | null;  // null for new threads until backend sends thread event
-    status: 'in_progress' | 'completed' | 'error' | 'canceled';
-    user_prompt: BeaverAgentPrompt;   // User prompt (always available)
-    model_messages: ModelMessage[];   // Built incrementally during streaming
+export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred';
+
+interface AgentRunMetadata {
     citations: CitationMetadata[];
+}
+
+/**
+ * Complete agent run from request to final output.
+ * Stored in DB and used for rendering conversation history.
+ */
+export interface AgentRun {
+    /** Client-generated agent run ID */
+    id: string;
+    user_id: string;
+    /** The thread ID if the agent run is part of a thread (null for new threads until backend sends thread event) */
+    thread_id: string | null;
+
+    /** Agent type */
+    agent_name: string;
+
+    /** The user's message */
+    user_prompt: BeaverAgentPrompt;
+
+    /** Status */
+    status: AgentRunStatus;
+    error_message?: string;
+
+    /** The model messages (built incrementally during streaming) */
+    model_messages: ModelMessage[];
+
+    /** Extracted/derived data */
+    metadata?: AgentRunMetadata;
+
+    /** Usage & cost */
     total_usage?: RunUsage;
     total_cost?: number;
+
+    /** Model info */
+    model_name: string;
+    provider_name?: string;
+
+    /** Timestamps */
     created_at: string;
     completed_at?: string;
+
+    /** Data governance */
+    consent_to_share: boolean;
 }
 
 export type ModelMessage = ModelRequest | ModelResponse;

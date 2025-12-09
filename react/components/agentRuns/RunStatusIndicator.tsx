@@ -1,9 +1,10 @@
 import React from 'react';
 import Button from '../ui/Button';
 import { Icon, Spinner, AlertIcon } from '../icons/icons';
+import { AgentRunStatus } from '../../agents/types';
 
 interface RunStatusIndicatorProps {
-    status: 'in_progress' | 'completed' | 'error' | 'canceled';
+    status: AgentRunStatus;
 }
 
 /**
@@ -16,13 +17,14 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status }
     }
 
     const getIcon = () => {
-        if (status === 'in_progress') return Spinner;
+        if (status === 'in_progress' || status === 'awaiting_deferred') return Spinner;
         if (status === 'error') return AlertIcon;
         return Spinner;
     };
 
     const getText = () => {
         if (status === 'in_progress') return 'Generating';
+        if (status === 'awaiting_deferred') return 'Processing';
         if (status === 'error') return 'Error';
         return 'Processing';
     };

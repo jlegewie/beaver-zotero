@@ -45,6 +45,7 @@ import {
     updateRunWithToolReturn,
     updateRunComplete,
 } from '../agents/atoms';
+import { userIdAtom } from './auth';
 
 // =============================================================================
 // Helper Functions
@@ -128,6 +129,9 @@ function getReaderState(get: Getter): ReaderState | null {
 function createAgentRunShell(
     userPrompt: BeaverAgentPrompt,
     threadId: string | null,
+    userId: string,
+    modelName: string,
+    providerName?: string,
     customInstructions?: string,
     customModel?: FullModelConfig['custom_model'],
 ): { run: AgentRun; request: WSChatRequest } {
@@ -148,12 +152,16 @@ function createAgentRunShell(
     // thread_id will be updated when we receive the 'thread' event from backend
     const run: AgentRun = {
         id: runId,
+        user_id: userId,
         thread_id: threadId,
-        status: 'in_progress',
+        agent_name: 'beaver',
         user_prompt: userPrompt,
+        status: 'in_progress',
         model_messages: [],
-        citations: [],
+        model_name: modelName,
+        provider_name: providerName,
         created_at: new Date().toISOString(),
+        consent_to_share: false,
     };
 
     return { run, request };
@@ -305,10 +313,20 @@ export const sendWSMessageAtom = atom(
         // Get current thread ID (null for new thread)
         const threadId = get(currentThreadIdAtom);
 
+        // Get user ID for the run
+        const userId = get(userIdAtom);
+        if (!userId) {
+            console.error('[WS] User ID not found');
+            return;
+        }
+
         // Create AgentRun shell and request
         const { run, request } = createAgentRunShell(
             userPrompt,
             threadId,
+            userId,
+            model?.name ?? 'unknown',
+            model?.provider,
             customInstructions,
             model?.is_custom ? model.custom_model : undefined,
         );
