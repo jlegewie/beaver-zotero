@@ -1,4 +1,4 @@
-import { citationMetadataAtom, citationDataListAtom } from "../atoms/citations"
+import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom } from "../atoms/messageComposition"
@@ -9,15 +9,41 @@ import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isS
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
 
+// Agent-related atoms
+import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "../agents/atoms"
+import { threadAgentActionsAtom, agentActionsByToolcallAtom, agentActionsByRunAtom } from "../agents/agentActions"
+import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/generateMessagesWS"
+
 export const atomRegistry = {
     // Auth
     isAuthenticated: isAuthenticatedAtom,
     user: userAtom,
     authLoading: authLoadingAtom,
 
+    // Agent Runs
+    threadRuns: threadRunsAtom,
+    activeRun: activeRunAtom,
+    allRuns: allRunsAtom,
+    isAgentStreaming: isAgentStreamingAtom,
+    toolResultsMap: toolResultsMapAtom,
+
+    // Agent Actions
+    threadAgentActions: threadAgentActionsAtom,
+    agentActionsByToolcall: agentActionsByToolcallAtom,
+    agentActionsByRun: agentActionsByRunAtom,
+
+    // WebSocket State
+    isWSChatPending: isWSChatPendingAtom,
+    isWSConnected: isWSConnectedAtom,
+    isWSReady: isWSReadyAtom,
+    wsReadyData: wsReadyDataAtom,
+    wsError: wsErrorAtom,
+    wsWarning: wsWarningAtom,
+
     // Citations
     citationMetadata: citationMetadataAtom,
     citationMetadataView: citationDataListAtom,
+    citationsByRunId: citationsByRunIdAtom,
 
     // Files
     fileStatus: fileStatusAtom,
@@ -61,7 +87,7 @@ export const atomRegistry = {
     syncStatusSummary: syncStatusSummaryAtom,
     overallSyncStatus: overallSyncStatusAtom,
 
-    // Threads
+    // Threads (Legacy - will be deprecated)
     userAttachments: userAttachmentsAtom,
     toolAttachments: toolAttachmentsAtom,
     isChatRequestPending: isChatRequestPendingAtom,
