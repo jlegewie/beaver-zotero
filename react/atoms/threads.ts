@@ -161,9 +161,17 @@ export const newThreadAtom = atom(
     async (get, set) => {
         const isLibraryTab = get(isLibraryTabAtom);
         set(currentThreadIdAtom, null);
+        
+        // Clear agent-based atoms
+        set(threadRunsAtom, []);
+        set(activeRunAtom, null);
+        set(threadAgentActionsAtom, []);
+        
+        // Clear legacy message atoms (can be removed once migration is complete)
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
+        
         set(currentMessageItemsAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
