@@ -46,9 +46,9 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Usage footer for completed runs */}
-            {run.status === 'completed' && run.total_usage && (
+            {/* {run.status === 'completed' && run.total_usage && (
                 <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
-            )}
+            )} */}
         </div>
     );
 };
