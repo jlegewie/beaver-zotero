@@ -345,7 +345,7 @@ export class ChatServiceWS {
     private getWebSocketUrl(): string {
         const wsProtocol = this.baseUrl.startsWith('https') ? 'wss' : 'ws';
         const httpUrl = new URL(this.baseUrl);
-        return `${wsProtocol}://${httpUrl.host}/api/v1/chat/ws/completions`;
+        return `${wsProtocol}://${httpUrl.host}/api/v1/agents/beaver/run`;
     }
 
     /**
