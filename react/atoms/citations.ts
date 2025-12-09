@@ -102,7 +102,7 @@ export const updateCitationDataAtom = atom(
                     name: citation.author_year || null,
                     citation: citation.author_year || null,
                     formatted_citation: externalFormattedCitation || null,
-                    preview: undefined,
+                    preview: citation.preview,
                     url: null, 
                     numericCitation
                 };

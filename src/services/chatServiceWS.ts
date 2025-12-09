@@ -107,6 +107,20 @@ export interface WSWarningEvent extends WSBaseEvent {
     data?: Record<string, any>;
 }
 
+/** Citation event sent when a citation is parsed during streaming */
+export interface WSCitationEvent extends WSBaseEvent {
+    event: 'citation';
+    run_id: string;
+    citation: import('../../react/types/citations').CitationMetadata;
+}
+
+/** Agent action event sent when an action is detected during streaming */
+export interface WSAgentActionEvent extends WSBaseEvent {
+    event: 'agent_action';
+    run_id: string;
+    action: import('../../react/agents/agentActions').AgentAction;
+}
+
 export interface WSDataError {
     reference: ZoteroItemReference;
     error: string;
@@ -170,6 +184,8 @@ export type WSEvent =
     | WSThreadEvent
     | WSErrorEvent
     | WSWarningEvent
+    | WSCitationEvent
+    | WSAgentActionEvent
     | WSItemDataRequest
     | WSAttachmentDataRequest
     | WSAttachmentContentRequest;
@@ -281,6 +297,18 @@ export interface WSCallbacks {
      * @param event The warning event
      */
     onWarning: (event: WSWarningEvent) => void;
+
+    /**
+     * Called when a citation is parsed during streaming
+     * @param event The citation event with run_id and citation metadata
+     */
+    onCitation?: (event: WSCitationEvent) => void;
+
+    /**
+     * Called when an agent action is detected during streaming
+     * @param event The agent action event with run_id and action data
+     */
+    onAgentAction?: (event: WSAgentActionEvent) => void;
 
     /**
      * Called when the WebSocket connection is established
@@ -520,6 +548,14 @@ export class ChatServiceWS {
 
                 case 'warning':
                     this.callbacks.onWarning(event);
+                    break;
+
+                case 'citation':
+                    this.callbacks.onCitation?.(event);
+                    break;
+
+                case 'agent_action':
+                    this.callbacks.onAgentAction?.(event);
                     break;
 
                 case 'item_data_request':

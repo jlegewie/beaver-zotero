@@ -79,6 +79,8 @@ export interface CitationMetadata {
     external_source_id?: string;
     
     // Common fields for all citation types
+    /** Citation type discriminator */
+    citation_type?: "item" | "attachment" | "external_reference";
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -87,8 +89,11 @@ export interface CitationMetadata {
     preview?: string;
     /** A list of the specific parts/chunks cited. */
     parts: CitationPart[];
-    /** The message ID of the citation. */
-    message_id: string;
+    
+    /** The agent run ID of the citation. */
+    run_id: string;
+    /** The original citation tag from the LLM response. */
+    raw_tag?: string;
 }
 
 /**

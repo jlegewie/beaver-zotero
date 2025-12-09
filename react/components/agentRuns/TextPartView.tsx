@@ -4,8 +4,8 @@ import MarkdownRenderer from '../messages/MarkdownRenderer';
 
 interface TextPartViewProps {
     part: TextPart;
-    // TODO: Add runId prop once proposed actions are migrated from messageId to runId
-    // This will be needed for citation linking and note saving
+    /** Agent run ID for linking citations and saving notes */
+    runId?: string;
 }
 
 /**
@@ -13,7 +13,7 @@ interface TextPartViewProps {
  * Since WSPartEvent sends accumulated content (not deltas),
  * we simply render the current content state.
  */
-export const TextPartView: React.FC<TextPartViewProps> = ({ part }) => {
+export const TextPartView: React.FC<TextPartViewProps> = ({ part, runId }) => {
     if (!part.content || part.content.trim() === '') {
         return null;
     }
@@ -22,7 +22,7 @@ export const TextPartView: React.FC<TextPartViewProps> = ({ part }) => {
         <MarkdownRenderer 
             className="markdown" 
             content={part.content}
-            // TODO: Pass runId once proposed actions migration is complete
+            runId={runId}
         />
     );
 };

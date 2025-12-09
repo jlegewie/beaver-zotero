@@ -19,7 +19,14 @@ import {
     getProposedActionByIdAtom,
     setProposedActionsToErrorAtom
 } from '../../atoms/proposedActions';
-import { isZoteroNoteAction } from '../../types/proposedActions/base';
+import {
+    getAgentActionByIdAtom,
+    applyAgentActionsAtom,
+    setAgentActionsToErrorAtom,
+    isZoteroNoteAgentAction,
+    AgentAction
+} from '../../agents/agentActions';
+import { isZoteroNoteAction, NoteProposedAction } from '../../types/proposedActions/base';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
     notePanelStateAtom,
@@ -45,7 +52,10 @@ export interface StreamingNoteBlock {
 
 interface NoteDisplayProps {
     note: StreamingNoteBlock;
+    /** Message ID for SSE/HTTP streaming (proposed actions) */
     messageId?: string;
+    /** Agent run ID for WebSocket streaming (agent actions) */
+    runId?: string;
     exportRendering?: boolean;
 }
 
@@ -243,10 +253,17 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
 });
 
 
-const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRendering = false }) => {
+const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, runId, exportRendering = false }) => {
+    // Proposed actions (SSE/HTTP streaming)
     const getProposedActionById = useAtomValue(getProposedActionByIdAtom);
     const ackProposedActions = useSetAtom(ackProposedActionsAtom);
     const setProposedActionsToError = useSetAtom(setProposedActionsToErrorAtom);
+    
+    // Agent actions (WebSocket streaming)
+    const getAgentActionById = useAtomValue(getAgentActionByIdAtom);
+    const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
+
     const citationDataMap = useAtomValue(citationDataMapAtom);
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
@@ -259,10 +276,23 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     const setNotePanelState = useSetAtom(setNotePanelStateAtom);
     const toggleNotePanelVisibility = useSetAtom(toggleNotePanelVisibilityAtom);
 
-    const proposedAction = getProposedActionById(note.id);
+    // Determine which action system to use based on whether runId is provided
+    const useAgentActions = !!runId;
+    
+    // Get the action from the appropriate source
+    const proposedAction = !useAgentActions ? getProposedActionById(note.id) : null;
+    const agentAction = useAgentActions ? getAgentActionById(note.id) : null;
+    
+    // Unified note action for rendering
     const noteAction = useMemo(() => {
-        return proposedAction && isZoteroNoteAction(proposedAction) ? proposedAction : null;
-    }, [proposedAction]);
+        if (useAgentActions && agentAction && isZoteroNoteAgentAction(agentAction)) {
+            return agentAction;
+        }
+        if (!useAgentActions && proposedAction && isZoteroNoteAction(proposedAction)) {
+            return proposedAction;
+        }
+        return null;
+    }, [useAgentActions, agentAction, proposedAction]);
 
     const status: NoteStatus = noteAction ? noteAction.status : 'missing';
 
@@ -289,7 +319,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
     }, [noteAction]);
 
     const handleSave = useCallback(async () => {
-        if (!noteAction || !messageId || !note.isComplete) {
+        // Require either messageId (proposed actions) or runId (agent actions)
+        const hasValidContext = useAgentActions ? !!runId : !!messageId;
+        if (!noteAction || !hasValidContext || !note.isComplete) {
             return;
         }
         
@@ -333,19 +365,30 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, messageId, exportRender
                  }
             }
 
-            await ackProposedActions(messageId, [
-                {
-                    action_id: noteAction.id,
-                    result_data: result
-                }
-            ]);
+            // Update the appropriate action system
+            if (useAgentActions) {
+                // Agent actions: update local state (backend persistence will be added later)
+                applyAgentActions([{ action_id: noteAction.id, result_data: result }]);
+            } else if (messageId) {
+                // Proposed actions: update local state and persist to backend
+                await ackProposedActions(messageId, [
+                    {
+                        action_id: noteAction.id,
+                        result_data: result
+                    }
+                ]);
+            }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to save note';
-            setProposedActionsToError([noteAction.id], errorMessage);
+            if (useAgentActions) {
+                setAgentActionsToError([noteAction.id], errorMessage);
+            } else {
+                setProposedActionsToError([noteAction.id], errorMessage);
+            }
         } finally {
             setNotePanelState({ key: note.id, updates: { isSaving: false } });
         }
-    }, [ackProposedActions, messageId, note.id, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setProposedActionsToError, setNotePanelState]);
+    }, [useAgentActions, ackProposedActions, applyAgentActions, messageId, runId, note.id, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setProposedActionsToError, setAgentActionsToError, setNotePanelState]);
 
     // Determine when content can be toggled
     const canToggleContent = note.isComplete;

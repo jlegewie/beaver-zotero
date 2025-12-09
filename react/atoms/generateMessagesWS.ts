@@ -18,6 +18,8 @@ import {
     WSRunCompleteEvent,
     WSErrorEvent,
     WSWarningEvent,
+    WSCitationEvent,
+    WSAgentActionEvent,
 } from '../../src/services/chatServiceWS';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
@@ -46,6 +48,8 @@ import {
     updateRunComplete,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
+import { citationMetadataAtom, updateCitationDataAtom } from './citations';
+import { addAgentActionsAtom, toAgentAction, clearAgentActionsAtom } from '../agents/agentActions';
 
 // =============================================================================
 // Helper Functions
@@ -426,6 +430,31 @@ export const sendWSMessageAtom = atom(
                 set(wsWarningAtom, event);
             },
 
+            onCitation: (event: WSCitationEvent) => {
+                logger(`WS onCitation: ${event.citation.citation_id} for run ${event.run_id}`, 1);
+                console.log('[WS] Citation event:', {
+                    runId: event.run_id,
+                    citationId: event.citation.citation_id,
+                    authorYear: event.citation.author_year,
+                });
+                // Add citation to the metadata atom (run_id is already included from backend)
+                set(citationMetadataAtom, (prev) => [...prev, event.citation]);
+                set(updateCitationDataAtom);
+            },
+
+            onAgentAction: (event: WSAgentActionEvent) => {
+                logger(`WS onAgentAction: ${event.action.id} (${event.action.action_type}) for run ${event.run_id}`, 1);
+                console.log('[WS] Agent action event:', {
+                    runId: event.run_id,
+                    actionId: event.action.id,
+                    actionType: event.action.action_type,
+                    status: event.action.status,
+                });
+                // Convert and add the agent action
+                const agentAction = toAgentAction(event.action);
+                set(addAgentActionsAtom, [agentAction]);
+            },
+
             onOpen: () => {
                 logger('WS onOpen: Connection established, waiting for ready...', 1);
                 console.log('[WS] Connection opened, awaiting server validation...');
@@ -477,4 +506,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(activeRunAtom, null);
     set(currentThreadIdAtom, null);
     set(resetWSStateAtom);
+    // Clear agent actions and citations for the thread
+    set(clearAgentActionsAtom);
+    set(citationMetadataAtom, []);
 });

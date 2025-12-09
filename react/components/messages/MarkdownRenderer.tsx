@@ -26,7 +26,10 @@ type MarkdownRendererProps = {
     content: string;
     className?: string;
     exportRendering?: boolean;
+    /** Message ID for SSE/HTTP streaming (proposed actions) */
     messageId?: string;
+    /** Agent run ID for WebSocket streaming (agent actions) */
+    runId?: string;
     enableNoteBlocks?: boolean;
 };
 
@@ -160,6 +163,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     className = 'markdown', 
     exportRendering = false,
     messageId,
+    runId,
     enableNoteBlocks = true
 }) => {
     // Process partial tags at the end of content
@@ -257,6 +261,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                             key={`note-${segment.data.id}-${index}`}
                             note={segment.data}
                             messageId={messageId}
+                            runId={runId}
                             exportRendering={exportRendering}
                         />
                     );

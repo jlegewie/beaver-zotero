@@ -77,6 +77,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                     <TextPartView
                         key={`text-${index}`}
                         part={part}
+                        runId={runId}
                     />
                 )
             ))}
