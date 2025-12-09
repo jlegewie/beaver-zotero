@@ -1,5 +1,7 @@
 import React from 'react';
 import { ToolReturnPart } from '../../agents/types';
+import { isItemSearchResult } from '../../agents/toolResultTypes';
+import { ItemSearchResultView } from './ItemSearchResultView';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 
 interface ToolResultViewProps {
@@ -8,41 +10,55 @@ interface ToolResultViewProps {
 
 /**
  * Renders the result of a tool call.
- * Handles different content types (string, object, etc.)
+ * Dispatches to specialized renderers based on the result type,
+ * with a fallback to generic JSON/markdown rendering.
  */
 export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
-    // Format the content for display
+    const content = result.content;
+
+    // Dispatch to specialized renderers based on result type
+    if (isItemSearchResult(content)) {
+        return <ItemSearchResultView result={content} />;
+    }
+
+    // Fallback: generic rendering for other result types
+    return <GenericResultView content={content} />;
+};
+
+/**
+ * Generic fallback renderer for tool results that don't have a specialized view.
+ */
+const GenericResultView: React.FC<{ content: unknown }> = ({ content }) => {
     const formatContent = () => {
-        if (typeof result.content === 'string') {
-            return result.content;
+        if (typeof content === 'string') {
+            return content;
         }
-        if (result.content === null || result.content === undefined) {
+        if (content === null || content === undefined) {
             return 'No result';
         }
-        // For objects, pretty-print as JSON
         try {
-            return JSON.stringify(result.content, null, 2);
+            return JSON.stringify(content, null, 2);
         } catch {
-            return String(result.content);
+            return String(content);
         }
     };
 
-    const content = formatContent();
+    const formattedContent = formatContent();
 
-    // Check if content looks like markdown or is plain text
-    const looksLikeMarkdown = /[#*`\[\]]/.test(content);
+    // Check if content looks like markdown
+    const looksLikeMarkdown = /[#*`\[\]]/.test(formattedContent);
 
     return (
         <div className="tool-result-view p-3 text-sm overflow-x-auto">
             {looksLikeMarkdown ? (
-                <MarkdownRenderer 
-                    className="markdown" 
-                    content={content}
+                <MarkdownRenderer
+                    className="markdown"
+                    content={formattedContent}
                     enableNoteBlocks={false}
                 />
             ) : (
                 <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
-                    {content}
+                    {formattedContent}
                 </pre>
             )}
         </div>
@@ -50,4 +66,3 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
 };
 
 export default ToolResultView;
-
