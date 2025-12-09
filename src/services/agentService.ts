@@ -12,10 +12,12 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
 import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/types/profile';
 import { ReaderState } from '../../react/types/attachments/apiTypes';
-import { BeaverAgentPrompt } from '../../react/agents/types';
+import { AgentRun, BeaverAgentPrompt } from '../../react/agents/types';
+import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
 import { AttachmentDataWithMimeType, ItemData, ZoteroItemReference } from '../../react/types/zotero';
 import { CustomChatModel } from '../../react/types/settings';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
+import { ApiService } from './apiService';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -760,7 +762,109 @@ export class AgentService {
 }
 
 // =============================================================================
-// Singleton Export
+// Agent Run REST API Types
+// =============================================================================
+
+/** Response for getting thread runs with optional actions */
+export interface ThreadRunsResponse {
+    runs: AgentRun[];
+    agent_actions: AgentAction[] | null;
+}
+
+/** Response for getting a single run with optional actions */
+export interface AgentRunWithActionsResponse {
+    run: AgentRun;
+    agent_actions: AgentAction[] | null;
+}
+
+/** Response for paginated runs list */
+export interface PaginatedRunsResponse {
+    data: AgentRun[];
+    next_cursor: string | null;
+    has_more: boolean;
+}
+
+// =============================================================================
+// Agent Run REST API Service
+// =============================================================================
+
+/**
+ * Service for managing agent runs via REST API.
+ * Handles fetching runs, run details, and associated actions.
+ */
+export class AgentRunService extends ApiService {
+    constructor(baseUrl: string) {
+        super(baseUrl);
+    }
+
+    /**
+     * Gets all runs for a thread with optional agent actions.
+     * @param threadId The thread ID to fetch runs for
+     * @param includeActions Whether to include agent actions in the response
+     * @returns Promise with runs and optionally actions
+     */
+    async getThreadRuns(
+        threadId: string,
+        includeActions: boolean = false
+    ): Promise<ThreadRunsResponse> {
+        let endpoint = `/api/v1/agents/beaver/threads/${threadId}/runs`;
+        if (includeActions) {
+            endpoint += '?include_actions=true';
+        }
+        
+        const response = await this.get<{ runs: AgentRun[]; agent_actions?: Record<string, any>[] | null }>(endpoint);
+        
+        return {
+            runs: response.runs,
+            agent_actions: response.agent_actions?.map(toAgentAction) ?? null
+        };
+    }
+
+    /**
+     * Gets a single run by ID with optional agent actions.
+     * @param runId The run ID to fetch
+     * @param includeActions Whether to include agent actions in the response
+     * @returns Promise with the run and optionally actions
+     */
+    async getRun(
+        runId: string,
+        includeActions: boolean = false
+    ): Promise<AgentRunWithActionsResponse> {
+        let endpoint = `/api/v1/agents/beaver/runs/${runId}`;
+        if (includeActions) {
+            endpoint += '?include_actions=true';
+        }
+        
+        const response = await this.get<{ run: AgentRun; agent_actions?: Record<string, any>[] | null }>(endpoint);
+        
+        return {
+            run: response.run,
+            agent_actions: response.agent_actions?.map(toAgentAction) ?? null
+        };
+    }
+
+    /**
+     * Gets paginated list of all runs for the current user.
+     * @param limit Maximum number of runs to return (default: 20)
+     * @param after Cursor for pagination (run ID of the last item from previous page)
+     * @returns Promise with paginated runs data
+     */
+    async getRuns(
+        limit: number = 20,
+        after: string | null = null
+    ): Promise<PaginatedRunsResponse> {
+        let endpoint = `/api/v1/agents/beaver/runs?limit=${limit}`;
+        if (after) {
+            endpoint += `&after=${after}`;
+        }
+        
+        return this.get<PaginatedRunsResponse>(endpoint);
+    }
+}
+
+// =============================================================================
+// Singleton Exports
 // =============================================================================
 
 export const agentService = new AgentService(API_BASE_URL);
+export const agentRunService = new AgentRunService(API_BASE_URL);
