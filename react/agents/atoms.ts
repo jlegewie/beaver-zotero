@@ -39,6 +39,9 @@ export const allRunsAtom = atom((get) => {
     return active ? [...completed, active] : completed;
 });
 
+/** Total number of runs in the thread */
+export const runsCountAtom = atom((get) => get(allRunsAtom).length);
+
 /** Is there an active streaming run? */
 export const isStreamingAtom = atom((get) => get(activeRunAtom) !== null);
 

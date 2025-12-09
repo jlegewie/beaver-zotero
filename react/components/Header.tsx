@@ -2,7 +2,8 @@ import React from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
+import { newThreadAtom } from '../atoms/threads';
+import { runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
@@ -19,7 +20,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
-    const threadMessages = useAtomValue(threadMessagesAtom);
+    const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
@@ -58,7 +59,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                             onClick={handleNewThread}
                             className="scale-14"
                             ariaLabel="New thread"
-                            disabled={threadMessages.length === 0 && !isPreferencePageVisible}
+                            disabled={runsCount === 0 && !isPreferencePageVisible}
                         />
                     </Tooltip>
                     <ThreadsMenu
