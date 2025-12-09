@@ -12,7 +12,7 @@ import {
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
-} from "../../src/services/chatServiceWS";
+} from "../../src/services/agentService";
 
 // =============================================================================
 // Core Atoms

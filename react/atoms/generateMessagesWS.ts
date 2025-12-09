@@ -8,11 +8,11 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
-    chatServiceWS,
+    agentService,
     WSCallbacks,
-    WSChatRequest,
+    AgentRunRequest,
     WSReadyData,
-    WSConnectOptions,
+    AgentRunOptions,
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
@@ -20,7 +20,7 @@ import {
     WSWarningEvent,
     WSCitationEvent,
     WSAgentActionEvent,
-} from '../../src/services/chatServiceWS';
+} from '../../src/services/agentService';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -96,13 +96,13 @@ function getUserApiKey(model: FullModelConfig): string | undefined {
  * - Custom models: no access_id/api_key in query params (use custom_model payload)
  * - Non-custom models: access_id from plan, api_key for user-key models
  */
-function buildConnectOptions(model: FullModelConfig | null): WSConnectOptions {
+function buildConnectOptions(model: FullModelConfig | null): AgentRunOptions {
     if (!model) return {};
 
     // Custom models rely on the payload, not query params
     if (model.is_custom) return {};
 
-    const options: WSConnectOptions = {};
+    const options: AgentRunOptions = {};
 
     // Include access_id for non-custom models
     if (!model.is_custom) {
@@ -147,12 +147,12 @@ function createAgentRunShell(
     customInstructions?: string,
     customModel?: FullModelConfig['custom_model'],
     rewriteFromRunId?: string,
-): { run: AgentRun; request: WSChatRequest } {
+): { run: AgentRun; request: AgentRunRequest } {
     const runId = uuidv4();
 
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
-    const request: WSChatRequest = {
+    const request: AgentRunRequest = {
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
@@ -336,7 +336,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 return null;
             });
 
-            chatServiceWS.close();
+            agentService.close();
             set(isWSChatPendingAtom, false);
         },
 
@@ -399,15 +399,15 @@ function createWSCallbacks(set: Setter): WSCallbacks {
  */
 async function executeWSRequest(
     run: AgentRun,
-    request: WSChatRequest,
-    connectOptions: WSConnectOptions,
+    request: AgentRunRequest,
+    connectOptions: AgentRunOptions,
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
 
     try {
         console.log('[WS] Starting connection for run:', run.id);
-        await chatServiceWS.connect(request, callbacks, connectOptions);
+        await agentService.connect(request, callbacks, connectOptions);
         console.log('[WS] Connection established and ready');
     } catch (error) {
         logger(`WS connection error: ${error}`, 1);
@@ -428,7 +428,7 @@ async function executeWSRequest(
  * Flow:
  * 1. Create AgentRun shell → set activeRunAtom → UI shows user message + spinner
  * 2. Connect WebSocket with auth params
- * 3. Receive "ready" event → send WSChatRequest
+ * 3. Receive "ready" event → send AgentRunRequest
  * 4. "part" events → update model_messages with text/thinking/tool_call
  * 5. "tool_return" events → add ToolReturnPart to model_messages
  * 6. "run_complete" event → update usage, set status="completed"
@@ -673,7 +673,7 @@ export const regenerateFromRunAtom = atom(
  * Close the WebSocket connection
  */
 export const closeWSConnectionAtom = atom(null, (_get, set) => {
-    chatServiceWS.close();
+    agentService.close();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
     set(isWSChatPendingAtom, false);

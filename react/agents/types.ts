@@ -1,4 +1,4 @@
-import { ApplicationStateInput } from "../../src/services/chatServiceWS";
+import { ApplicationStateInput } from "../../src/services/agentService";
 import { CitationMetadata } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { MessageSearchFilters, ToolRequest } from "src/services/chatService";

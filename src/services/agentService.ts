@@ -1,10 +1,10 @@
 /**
- * WebSocket-based Chat Service
+ * Agent Service
  * 
- * This service provides WebSocket communication for chat completions,
- * offering bidirectional communication as an alternative to the SSE-based chatService.
+ * This service provides WebSocket communication for agent runs,
+ * enabling bidirectional communication between the Zotero plugin and the backend.
  * 
- * It will eventually replace the SSE implementation as more features are added.
+ * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
 import { supabase } from './supabaseClient';
@@ -208,10 +208,10 @@ export interface ApplicationStateInput {
 }
 
 /**
- * Chat request sent by the client after receiving the 'ready' event.
+ * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection and API key are passed as query parameters during connection.
  */
-export interface WSChatRequest {
+export interface AgentRunRequest {
     /** Request type discriminator */
     type: 'chat';
     /** Client-generated run ID for this agent run */
@@ -228,8 +228,8 @@ export interface WSChatRequest {
     custom_model?: CustomChatModel;
 }
 
-/** Options for WebSocket connection */
-export interface WSConnectOptions {
+/** Options for agent run connection */
+export interface AgentRunOptions {
     /** Access ID from PlanModelAccess (optional, backend will use plan default if not provided) */
     accessId?: string;
     /** User's own API key for the model provider (optional) */
@@ -327,10 +327,10 @@ export interface WSCallbacks {
 }
 
 // =============================================================================
-// WebSocket Chat Service
+// Agent Service
 // =============================================================================
 
-export class ChatServiceWS {
+export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
@@ -355,7 +355,7 @@ export class ChatServiceWS {
         const { data, error } = await supabase.auth.getSession();
 
         if (error) {
-            logger(`ChatServiceWS: Error getting session: ${error.message}`, 2);
+            logger(`AgentService: Error getting session: ${error.message}`, 2);
             throw new Error('Error retrieving user session');
         }
 
@@ -374,21 +374,21 @@ export class ChatServiceWS {
     }
 
     /**
-     * Connect to the WebSocket endpoint and send a chat request
+     * Connect to the WebSocket endpoint and send an agent run request
      * 
      * Protocol flow:
-     * 1. Client connects with token (and optionally model_id, api_key) in query params
+     * 1. Client connects with token (and optionally access_id, api_key) in query params
      * 2. Server authenticates, fetches profile, validates model
      * 3. Server sends "ready" event
-     * 4. Client sends chat request
+     * 4. Client sends agent run request
      * 5. Server streams delta events and sends complete event
      * 
-     * @param request The chat request to send
+     * @param request The agent run request to send
      * @param callbacks Event callbacks
-     * @param options Optional connection options (modelId, apiKey)
+     * @param options Optional connection options (accessId, apiKey)
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: WSChatRequest, callbacks: WSCallbacks, options?: WSConnectOptions): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks, options?: AgentRunOptions): Promise<void> {
         // Close existing connection if any
         this.close();
 
@@ -411,7 +411,7 @@ export class ChatServiceWS {
             }
             const wsUrl = `${this.getWebSocketUrl()}?${params.toString()}`;
 
-            logger(`ChatServiceWS: Connecting to ${this.getWebSocketUrl()}`, 1);
+            logger(`AgentService: Connecting to ${this.getWebSocketUrl()}`, 1);
 
             return new Promise<void>((resolve, reject) => {
                 let hasResolved = false;
@@ -420,7 +420,7 @@ export class ChatServiceWS {
                 const wrappedCallbacks: WSCallbacks = {
                     ...callbacks,
                     onReady: (data: WSReadyData) => {
-                        logger('ChatServiceWS: Server ready, sending chat request', 1);
+                        logger('AgentService: Server ready, sending agent run request', 1);
                         // Call the original onReady callback first
                         callbacks.onReady(data);
                         // Send the chat request now that server is ready
@@ -446,7 +446,7 @@ export class ChatServiceWS {
                 this.ws = new WebSocket(wsUrl);
 
                 this.ws.onopen = () => {
-                    logger('ChatServiceWS: Connection established, waiting for ready event', 1);
+                    logger('AgentService: Connection established, waiting for ready event', 1);
                     callbacks.onOpen?.();
                     // Note: Don't resolve here - wait for ready event
                 };
@@ -456,7 +456,7 @@ export class ChatServiceWS {
                 };
 
                 this.ws.onerror = (event) => {
-                    logger(`ChatServiceWS: WebSocket error`, 1);
+                    logger(`AgentService: WebSocket error`, 1);
                     // Note: The error event doesn't contain useful info in browsers
                     // The actual error will come through onclose
                     if (!hasResolved) {
@@ -466,7 +466,7 @@ export class ChatServiceWS {
                 };
 
                 this.ws.onclose = (event) => {
-                    logger(`ChatServiceWS: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
+                    logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
                     callbacks.onClose?.(event.code, event.reason, event.wasClean);
                     this.ws = null;
                     this.callbacks = null;
@@ -478,7 +478,7 @@ export class ChatServiceWS {
                 };
             });
         } catch (error) {
-            logger(`ChatServiceWS: Connection setup error: ${error}`, 1);
+            logger(`AgentService: Connection setup error: ${error}`, 1);
             throw error;
         }
     }
@@ -486,14 +486,14 @@ export class ChatServiceWS {
     /**
      * Send a message to the server
      */
-    send(data: WSChatRequest | Record<string, any>): void {
+    send(data: AgentRunRequest | Record<string, any>): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            logger('ChatServiceWS: Cannot send - WebSocket not connected', 1);
+            logger('AgentService: Cannot send - WebSocket not connected', 1);
             return;
         }
 
         const message = JSON.stringify(data);
-        logger(`ChatServiceWS: Sending message: ${message}`, 1);
+        logger(`AgentService: Sending message: ${message}`, 1);
         this.ws.send(message);
     }
 
@@ -505,7 +505,7 @@ export class ChatServiceWS {
 
         try {
             const event = JSON.parse(rawData) as WSEvent;
-            logger(`ChatServiceWS: Received event: ${event.event}`, 1);
+            logger(`AgentService: Received event: ${event.event}`, 1);
 
             switch (event.event) {
                 case 'ready': {
@@ -562,7 +562,7 @@ export class ChatServiceWS {
 
                 case 'item_data_request':
                     this.handleItemDataRequest(event).catch((error) => {
-                        logger(`ChatServiceWS: Failed to handle item_data_request: ${error}`, 1);
+                        logger(`AgentService: Failed to handle item_data_request: ${error}`, 1);
                         this.callbacks?.onError({
                             event: 'error',
                             type: 'item_data_request_failed',
@@ -573,7 +573,7 @@ export class ChatServiceWS {
 
                 case 'attachment_data_request':
                     this.handleAttachmentDataRequest(event).catch((error) => {
-                        logger(`ChatServiceWS: Failed to handle attachment_data_request: ${error}`, 1);
+                        logger(`AgentService: Failed to handle attachment_data_request: ${error}`, 1);
                         this.callbacks?.onError({
                             event: 'error',
                             type: 'attachment_data_request_failed',
@@ -584,7 +584,7 @@ export class ChatServiceWS {
 
                 case 'attachment_content_request':
                     this.handleAttachmentContentRequest(event).catch((error) => {
-                        logger(`ChatServiceWS: Failed to handle attachment_content_request: ${error}`, 1);
+                        logger(`AgentService: Failed to handle attachment_content_request: ${error}`, 1);
                         this.callbacks?.onError({
                             event: 'error',
                             type: 'attachment_content_request_failed',
@@ -594,10 +594,10 @@ export class ChatServiceWS {
                     break;
 
                 default:
-                    logger(`ChatServiceWS: Unknown event type: ${(event as any).event}`, 1);
+                    logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
         } catch (error) {
-            logger(`ChatServiceWS: Failed to parse message: ${error}`, 1);
+            logger(`AgentService: Failed to parse message: ${error}`, 1);
             this.callbacks.onError({
                 event: 'error',
                 type: 'parse_error',
@@ -613,7 +613,7 @@ export class ChatServiceWS {
      */
     close(code: number = 1000, reason: string = 'Client closing'): void {
         if (this.ws) {
-            logger(`ChatServiceWS: Closing connection - code=${code}, reason=${reason}`, 1);
+            logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
             this.ws.close(code, reason);
             this.ws = null;
         }
@@ -649,7 +649,7 @@ export class ChatServiceWS {
                 const serialized = await serializeItem(item, undefined);
                 items.push(serialized);
             } catch (error: any) {
-                logger(`ChatServiceWS: Failed to serialize item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                logger(`AgentService: Failed to serialize item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 errors.push({
                     reference,
                     error: 'Failed to load item metadata',
@@ -713,7 +713,7 @@ export class ChatServiceWS {
                     });
                 }
             } catch (error: any) {
-                logger(`ChatServiceWS: Failed to serialize attachment ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                logger(`AgentService: Failed to serialize attachment ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 errors.push({
                     reference,
                     error: 'Failed to load attachment metadata',
@@ -763,4 +763,4 @@ export class ChatServiceWS {
 // Singleton Export
 // =============================================================================
 
-export const chatServiceWS = new ChatServiceWS(API_BASE_URL);
+export const agentService = new AgentService(API_BASE_URL);
