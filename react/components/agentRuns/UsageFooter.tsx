@@ -1,31 +1,19 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { RunUsage } from '../../agents/types';
-import Button from '../ui/Button';
-import { Icon, ArrowDownIcon, ArrowRightIcon, DatabaseIcon } from '../icons/icons';
+import { Icon, DollarCircleIcon } from '../icons/icons';
+import Tooltip from '../ui/Tooltip';
 
 interface UsageFooterProps {
     usage: RunUsage;
     cost?: number;
+    showDetails?: boolean;
 }
 
 /**
  * Displays usage statistics for a completed agent run.
- * Shows token counts and cost in an expandable section.
+ * Shows an icon with optional token/cost summary, with full details in tooltip.
  */
-export const UsageFooter: React.FC<UsageFooterProps> = ({ usage, cost }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [isHovered, setIsHovered] = useState(false);
-
-    const toggleExpanded = () => {
-        setIsExpanded(!isExpanded);
-    };
-
-    const getIcon = () => {
-        if (isExpanded) return ArrowDownIcon;
-        if (isHovered) return ArrowRightIcon;
-        return DatabaseIcon;
-    };
-
+export const UsageFooter: React.FC<UsageFooterProps> = ({ usage, cost, showDetails = false }) => {
     // Format cost as currency
     const formatCost = (cost: number) => {
         if (cost < 0.01) {
@@ -47,81 +35,62 @@ export const UsageFooter: React.FC<UsageFooterProps> = ({ usage, cost }) => {
         ? `${formatTokens(totalTokens)} tokens • ${formatCost(cost)}`
         : `${formatTokens(totalTokens)} tokens`;
 
-    return (
-        <div
-            className={`
-                rounded-md flex flex-col min-w-0 px-4
-                ${isExpanded ? 'border-popup' : 'border-transparent'}
-            `}
-        >
-            <div
-                className={`
-                    display-flex flex-row py-15
-                    ${isExpanded ? 'border-bottom-quinary bg-senary' : ''}
-                `}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-            >
-                <div className="display-flex flex-row flex-1" onClick={toggleExpanded}>
-                    <Button
-                        variant="ghost-secondary"
-                        className="text-base scale-105 w-full min-w-0 align-start text-left opacity-60"
-                        style={{ padding: '2px 6px', maxHeight: 'none' }}
-                    >
-                        <div className="display-flex flex-row px-3 gap-2">
-                            <div className={`flex-1 display-flex mt-010 ${isExpanded ? 'font-color-primary' : ''}`}>
-                                <Icon icon={getIcon()} />
-                            </div>
-                            
-                            <div className={`display-flex text-sm ${isExpanded ? 'font-color-primary' : ''}`}>
-                                {summaryText}
-                            </div>
-                        </div>
-                    </Button>
-                    <div className="flex-1"/>
-                </div>
+    const tooltipContent = (
+        <div className="display-flex flex-col gap-1 text-sm min-w-[140px]">
+            <div className="display-flex justify-between gap-4">
+                <span className="font-color-secondary">Input tokens:</span>
+                <span>{formatTokens(usage.input_tokens)}</span>
             </div>
-
-            {isExpanded && (
-                <div className="p-3 text-sm opacity-70">
-                    <div className="display-flex flex-col gap-1">
-                        <div className="display-flex justify-between">
-                            <span>Input tokens:</span>
-                            <span>{formatTokens(usage.input_tokens)}</span>
-                        </div>
-                        <div className="display-flex justify-between">
-                            <span>Output tokens:</span>
-                            <span>{formatTokens(usage.output_tokens)}</span>
-                        </div>
-                        {usage.cache_read_tokens > 0 && (
-                            <div className="display-flex justify-between">
-                                <span>Cache read:</span>
-                                <span>{formatTokens(usage.cache_read_tokens)}</span>
-                            </div>
-                        )}
-                        {usage.cache_write_tokens > 0 && (
-                            <div className="display-flex justify-between">
-                                <span>Cache write:</span>
-                                <span>{formatTokens(usage.cache_write_tokens)}</span>
-                            </div>
-                        )}
-                        <div className="display-flex justify-between">
-                            <span>Requests:</span>
-                            <span>{usage.requests}</span>
-                        </div>
-                        <div className="display-flex justify-between">
-                            <span>Tool calls:</span>
-                            <span>{usage.tool_calls}</span>
-                        </div>
-                        {cost !== undefined && (
-                            <div className="display-flex justify-between font-medium mt-1 pt-1 border-top-quinary">
-                                <span>Total cost:</span>
-                                <span>{formatCost(cost)}</span>
-                            </div>
-                        )}
-                    </div>
+            <div className="display-flex justify-between gap-4">
+                <span className="font-color-secondary">Output tokens:</span>
+                <span>{formatTokens(usage.output_tokens)}</span>
+            </div>
+            {usage.cache_read_tokens > 0 && (
+                <div className="display-flex justify-between gap-4">
+                    <span className="font-color-secondary">Cache read:</span>
+                    <span>{formatTokens(usage.cache_read_tokens)}</span>
                 </div>
             )}
+            {usage.cache_write_tokens > 0 && (
+                <div className="display-flex justify-between gap-4">
+                    <span className="font-color-secondary">Cache write:</span>
+                    <span>{formatTokens(usage.cache_write_tokens)}</span>
+                </div>
+            )}
+            {/* <div className="display-flex justify-between gap-4">
+                <span className="font-color-secondary">Requests:</span>
+                <span>{usage.requests}</span>
+            </div>
+            <div className="display-flex justify-between gap-4">
+                <span className="font-color-secondary">Tool calls:</span>
+                <span>{usage.tool_calls}</span>
+            </div> */}
+            {cost !== undefined && (
+                <div className="display-flex justify-between gap-4 font-medium mt-1 pt-1 border-top-quinary">
+                    <span>Total cost:</span>
+                    <span>{formatCost(cost)}</span>
+                </div>
+            )}
+        </div>
+    );
+
+    return (
+        <div className="rounded-md flex flex-col min-w-0 px-4">
+            <div className="display-flex flex-row py-15">
+                <Tooltip
+                    content="Usage details"
+                    customContent={tooltipContent}
+                    showArrow={true}
+                >
+                    <div className="display-flex flex-row gap-2 items-center opacity-60 cursor-default">
+                        <Icon icon={DollarCircleIcon} />
+                        {showDetails && (
+                            <span className="text-sm">{summaryText}</span>
+                        )}
+                    </div>
+                </Tooltip>
+                <div className="flex-1"/>
+            </div>
         </div>
     );
 };
