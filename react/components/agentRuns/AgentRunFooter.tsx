@@ -277,7 +277,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 {/* Action buttons */}
                 <div className="display-flex gap-4">
                     {/* Usage display */}
-                    {run.total_usage && run.total_cost && (
+                    {Zotero.Beaver.data.env === "development" && run.status === 'completed' && run.total_usage && run.total_cost && (
                         <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
                     )}
                     {!hasError && (
