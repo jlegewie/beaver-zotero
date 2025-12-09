@@ -9,13 +9,14 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataMapAtom } from '../../atoms/citations';
+import { citationDataMapAtom, citationsByRunIdAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData, getUniqueKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom, getToolCallLabel } from '../../agents/atoms';
+import TokenUsageDisplay from './TokenUsageDisplay';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -27,6 +28,8 @@ interface AgentRunFooterProps {
  */
 export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationsByRunId = useAtomValue(citationsByRunIdAtom);
+    const runCitations = citationsByRunId[run.id] || [];
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
@@ -36,7 +39,6 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     // Get unique citations for this run, enriched with CitationData
     const uniqueCitations = useMemo(() => {
-        const runCitations = run.metadata?.citations || [];
         const seen = new Set<string>();
         const unique: CitationData[] = [];
         
@@ -71,7 +73,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
         
         return unique;
-    }, [run.metadata?.citations, run.id, citationDataMap]);
+    }, [runCitations, citationDataMap]);
 
     // Sources visibility state
     const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);
@@ -235,7 +237,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const copyCitationMetadata = async () => {
-        await copyToClipboard(JSON.stringify(run.metadata?.citations || [], null, 2));
+        await copyToClipboard(JSON.stringify(runCitations, null, 2));
     };
 
     const handleRegenerate = async () => {
@@ -274,6 +276,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 
                 {/* Action buttons */}
                 <div className="display-flex gap-4">
+                    {/* Usage display */}
+                    {run.total_usage && run.total_cost && (
+                        <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
+                    )}
                     {!hasError && (
                         <MenuButton
                             icon={ShareIcon}

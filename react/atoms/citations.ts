@@ -31,6 +31,26 @@ export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>(
 export const citationMetadataAtom = atom<CitationMetadata[]>([]);
 
 
+/**
+ * Citations by run ID
+ *
+ * citationsByRunIdAtom is a Record mapping run_id to CitationMetadata[].
+ */
+export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
+    (get) => {
+        const citations = get(citationMetadataAtom);
+        const citationsByRunId: Record<string, CitationMetadata[]> = {};
+        for (const citation of citations) {
+            if (!citationsByRunId[citation.run_id]) {
+                citationsByRunId[citation.run_id] = [];
+            }
+            citationsByRunId[citation.run_id].push(citation);
+        }
+        return citationsByRunId;
+    }
+);
+
+
 /*
  * Citation data mapping for UI display
  *

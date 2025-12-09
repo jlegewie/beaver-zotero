@@ -437,8 +437,8 @@ export const sendWSMessageAtom = atom(
                     citationId: event.citation.citation_id,
                     authorYear: event.citation.author_year,
                 });
-                // Add citation to the metadata atom (run_id is already included from backend)
-                set(citationMetadataAtom, (prev) => [...prev, event.citation]);
+                // Add citation to the metadata atom with run_id from the event
+                set(citationMetadataAtom, (prev) => [...prev, { ...event.citation, run_id: event.run_id }]);
                 set(updateCitationDataAtom);
             },
 
