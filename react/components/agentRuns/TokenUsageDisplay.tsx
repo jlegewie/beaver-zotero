@@ -75,23 +75,18 @@ export const TokenUsageDisplay: React.FC<TokenUsageDisplayProps> = ({ usage, cos
     );
 
     return (
-        <div className="rounded-md flex flex-col min-w-0">
-            <div className="display-flex flex-row py-15">
-                <Tooltip
-                    content="Usage details"
-                    customContent={tooltipContent}
-                    showArrow={true}
-                >
-                    <div className="display-flex flex-row gap-2 items-center font-color-tertiary cursor-default">
-                        <Icon icon={DollarCircleIcon} className="scale-11" />
-                        {showDetails && (
-                            <span className="text-sm">{summaryText}</span>
-                        )}
-                    </div>
-                </Tooltip>
-                <div className="flex-1"/>
-            </div>
-        </div>
+        <Tooltip
+            content="Usage details"
+            customContent={tooltipContent}
+            showArrow={true}
+        >
+            <span className="variant-ghost icon-only scale-11 cursor-default">
+                <Icon icon={DollarCircleIcon} />
+                {showDetails && (
+                    <span className="text-sm ml-1">{summaryText}</span>
+                )}
+            </span>
+        </Tooltip>
     );
 };
 
