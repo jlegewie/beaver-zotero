@@ -9,6 +9,7 @@ export { ThinkingPartView } from './ThinkingPartView';
 export { ToolCallPartView } from './ToolCallPartView';
 export { ToolResultView } from './ToolResultView';
 export { ItemSearchResultView } from './ItemSearchResultView';
+export { AgentRunFooter } from './AgentRunFooter';
 export { RunStatusIndicator } from './RunStatusIndicator';
 export { UsageFooter } from './UsageFooter';
 
