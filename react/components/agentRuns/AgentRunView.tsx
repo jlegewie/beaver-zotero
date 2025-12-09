@@ -1,15 +1,30 @@
 import React from 'react';
-import { AgentRun } from '../../agents/types';
+import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
 import { RunStatusIndicator } from './RunStatusIndicator';
-import { TokenUsageDisplay } from './TokenUsageDisplay';
 
 interface AgentRunViewProps {
     run: AgentRun;
     isLastRun: boolean;
 }
+
+/** Check if there's any visible content in the run's model messages */
+const hasVisibleContent = (run: AgentRun): boolean => {
+    if (run.model_messages.length === 0) return false;
+    
+    // Check the last message for visible content
+    const lastMessage = run.model_messages[run.model_messages.length - 1];
+    if (lastMessage.kind !== 'response') return false;
+    
+    const response = lastMessage as ModelResponse;
+    return response.parts.some(part => 
+        (part.part_kind === 'text' && part.content.trim() !== '') ||
+        (part.part_kind === 'thinking' && part.content.trim() !== '') ||
+        part.part_kind === 'tool-call'
+    );
+};
 
 /**
  * Container component for a single agent run.
@@ -18,6 +33,11 @@ interface AgentRunViewProps {
 export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) => {
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
+    
+    // Only show spinner when streaming AND no visible content yet
+    const showStatusIndicator = isLastRun && (
+        hasError || (isStreaming && !hasVisibleContent(run))
+    );
 
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
@@ -33,8 +53,8 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                 />
             )}
 
-            {/* Status indicator for streaming or error states */}
-            {(isStreaming || hasError) && isLastRun && (
+            {/* Status indicator - only shown when no visible content yet or on error */}
+            {showStatusIndicator && (
                 <RunStatusIndicator status={run.status} />
             )}
 
