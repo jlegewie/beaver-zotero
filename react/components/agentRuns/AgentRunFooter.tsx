@@ -255,7 +255,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         <>
             <div
                 className={`
-                    display-flex flex-row items-center pt-2 mr-4
+                    display-flex flex-row items-center pt-2 mr-2
                     ${isStreaming ? 'hidden' : ''}
                 `}
             >
