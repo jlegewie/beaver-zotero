@@ -220,6 +220,8 @@ export interface WSChatRequest {
     thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
+    /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
+    retry_run_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Custom model configuration */
@@ -762,4 +764,3 @@ export class ChatServiceWS {
 // =============================================================================
 
 export const chatServiceWS = new ChatServiceWS(API_BASE_URL);
-

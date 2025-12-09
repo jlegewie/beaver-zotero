@@ -17,6 +17,7 @@ import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMe
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom, getToolCallLabel } from '../../agents/atoms';
 import TokenUsageDisplay from './TokenUsageDisplay';
+import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -240,10 +241,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         await copyToClipboard(JSON.stringify(runCitations, null, 2));
     };
 
+    const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+
     const handleRegenerate = async () => {
-        // TODO: Implement regenerate for agent runs
-        // This would require a new atom similar to regenerateFromMessageAtom
-        console.log('Regenerate not yet implemented for agent runs');
+        await regenerateFromRun(run.id);
     };
 
     // Determine if we should show the footer (hide during streaming)
