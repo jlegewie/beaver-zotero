@@ -9,7 +9,7 @@ import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom } fro
 import { isExternalCitation } from "../types/citations";
 import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
-import { threadService } from "../../src/services/threadService";
+import { agentRunService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { validateAppliedAction } from "../utils/proposedActions";
@@ -18,6 +18,9 @@ import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUISta
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
+import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
+import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction } from "../agents/agentActions";
+import { AgentRun, ToolCallPart } from "../agents/types";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -207,17 +210,45 @@ export const loadThreadAtom = atom(
             set(isPreferencePageVisibleAtom, false);
             set(clearExternalReferenceCacheAtom);
             
-            // Use remote API
-            const { messages, userAttachments, toolAttachments, citationMetadata, proposedActions } = await threadService.getThreadMessages(threadId);
+            // Clear active run when loading a different thread
+            set(activeRunAtom, null);
             
-            if (messages.length > 0) {
-                // Extract external references from tool calls and populate cache
+            // Load agent runs with actions from the backend
+            const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
+            
+            if (runs.length > 0) {
+                // Set agent runs
+                set(threadRunsAtom, runs);
+                
+                // Set agent actions
+                set(threadAgentActionsAtom, agent_actions || []);
+                
+                // Extract citations from runs
+                const citationMetadata = runs.flatMap(run => 
+                    (run.metadata?.citations || []).map(citation => ({
+                        ...citation,
+                        run_id: run.id
+                    }))
+                );
+                
+                // Extract external references from tool calls
                 const externalReferences: ExternalReference[] = [];
-                for (const message of messages) {
-                    if (message.tool_calls) {
-                        for (const toolCall of message.tool_calls) {
-                            if (isSearchExternalReferencesTool(toolCall.function?.name)) {
-                                externalReferences.push(...(toolCall.result?.references || [] as ExternalReference[]));
+                for (const run of runs) {
+                    for (const message of run.model_messages) {
+                        if (message.kind === 'response') {
+                            for (const part of message.parts) {
+                                if (part.part_kind === 'tool-call') {
+                                    const toolCall = part as ToolCallPart;
+                                    // Check for search_external_references tool
+                                    if (isSearchExternalReferencesTool(toolCall.tool_name)) {
+                                        // Tool results come in the next request message
+                                        // Look for matching tool return
+                                        const toolReturn = findToolReturn(runs, toolCall.tool_call_id);
+                                        if (toolReturn?.content?.references) {
+                                            externalReferences.push(...(toolReturn.content.references as ExternalReference[]));
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -225,69 +256,82 @@ export const loadThreadAtom = atom(
                 
                 if (externalReferences.length > 0) {
                     logger(`loadThreadAtom: Adding ${externalReferences.length} external references to mapping`, 1);
-                    // Add to external reference mapping for UI display
                     set(addExternalReferencesToMappingAtom, externalReferences);
-                    // Check if references exist in Zotero
                     set(checkExternalReferencesAtom, externalReferences);
                 }
                 
-                // Load item data
+                // Load item data for citations and attachments
                 const allItemReferences = new Set<string>();
                 
-                // Filter out external citations before trying to load item data
+                // From citations (filter out external citations)
                 const zoteroCitations = citationMetadata.filter(citation => !isExternalCitation(citation));
+                zoteroCitations
+                    .filter(c => c.library_id && c.zotero_key)
+                    .forEach(c => allItemReferences.add(`${c.library_id}-${c.zotero_key}`));
                 
-                [...userAttachments, ...zoteroCitations, ...toolAttachments]
-                    .filter(att => att.library_id && att.zotero_key) // Extra safety check
-                    .map(att => `${att.library_id}-${att.zotero_key}`)
-                    .forEach(ref => allItemReferences.add(ref));
+                // From user attachments in runs
+                for (const run of runs) {
+                    const attachments = run.user_prompt.attachments || [];
+                    attachments
+                        .filter(att => att.library_id && att.zotero_key)
+                        .forEach(att => allItemReferences.add(`${att.library_id}-${att.zotero_key}`));
+                }
 
                 const itemsPromises = Array.from(allItemReferences).map(ref => {
                     const [libraryId, key] = ref.split('-');
                     return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
-                })
+                });
                 const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
 
                 if (itemsToLoad.length > 0) {
                     await loadFullItemDataWithAllTypes(itemsToLoad);
-
                     if (!Zotero.Styles.initialized()) {
                         await Zotero.Styles.init();
                     }
                 }
 
-                // Update the thread messages and attachments state
-                set(threadMessagesAtom, messages);
-                set(userAttachmentsAtom, userAttachments);
+                // Update citation state
                 set(citationMetadataAtom, citationMetadata);
                 await set(updateCitationDataAtom);
-                // set(toolAttachmentsAtom, toolAttachments);
-                set(addToolCallResponsesToToolAttachmentsAtom, {messages: messages});
-                
-                // Set proposed actions
-                set(threadProposedActionsAtom, proposedActions);
 
-                // Validate proposed actions and undo if not valid
-                await Promise.all(proposedActions.map(async action => {
-                    const isValid = await validateAppliedAction(action);
-                    if (!isValid) {
-                        logger(`loadThreadAtom: undoing proposedAction ${action.id} because it is not valid`, 1);
-                        set(undoProposedActionAtom, action.id);
-                    }
-                    return isValid;
-                }));
-
-                // Check for external references and populate cache
-                const createItemActions = proposedActions.filter(isCreateItemAction) as CreateItemProposedAction[];
-                if (createItemActions.length > 0) {
-                    logger(`loadThreadAtom: Adding external references from proposed actions to mapping`, 1);
-                    const references = createItemActions.map((action) => action.proposed_data?.item).filter(Boolean) as ExternalReference[];
-                    // Add to external reference mapping for UI display
-                    set(addExternalReferencesToMappingAtom, references);
-                    // Check if references exist in Zotero
-                    set(checkExternalReferencesAtom, references);
+                // Validate agent actions and undo if not valid
+                if (agent_actions && agent_actions.length > 0) {
+                    await Promise.all(agent_actions.map(async (action: AgentAction) => {
+                        // Only validate applied actions that have result data
+                        if (action.status === 'applied' && action.result_data?.zotero_key) {
+                            const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                                action.result_data.library_id,
+                                action.result_data.zotero_key
+                            );
+                            if (!item) {
+                                logger(`loadThreadAtom: Agent action ${action.id} references missing item, marking as undone`, 1);
+                                // Update local state to reflect the missing item
+                                set(threadAgentActionsAtom, (prev: AgentAction[]) =>
+                                    prev.map(a => a.id === action.id 
+                                        ? { ...a, status: 'undone' as const, result_data: undefined }
+                                        : a
+                                    )
+                                );
+                            }
+                        }
+                    }));
                 }
                 
+                // Check for create_item agent actions and populate external reference cache
+                const createItemActions = (agent_actions || []).filter(isCreateItemAgentAction);
+                if (createItemActions.length > 0) {
+                    logger(`loadThreadAtom: Adding external references from agent actions to mapping`, 1);
+                    const references = createItemActions
+                        .map((action: AgentAction) => action.proposed_data?.item)
+                        .filter(Boolean) as ExternalReference[];
+                    set(addExternalReferencesToMappingAtom, references);
+                    set(checkExternalReferencesAtom, references);
+                }
+            } else {
+                // No runs found, clear state
+                set(threadRunsAtom, []);
+                set(threadAgentActionsAtom, []);
+                set(citationMetadataAtom, []);
             }
         } catch (error) {
             console.error('Error loading thread:', error);
@@ -300,6 +344,22 @@ export const loadThreadAtom = atom(
         set(currentMessageContentAtom, '');
     }
 );
+
+/** Helper to find a tool return part by tool_call_id across all runs */
+function findToolReturn(runs: AgentRun[], toolCallId: string) {
+    for (const run of runs) {
+        for (const message of run.model_messages) {
+            if (message.kind === 'request') {
+                for (const part of message.parts) {
+                    if (part.part_kind === 'tool-return' && part.tool_call_id === toolCallId) {
+                        return part;
+                    }
+                }
+            }
+        }
+    }
+    return null;
+}
 
 
 export const setMessageContentAtom = atom(
@@ -390,12 +450,14 @@ export const removeWarningFromMessageAtom = atom(
     }
 );
 
+/** @deprecated Use agent runs instead - this atom will be removed after migration */
 export const removeMessageAtom = atom(
     null,
     (get, set, { id }: { id: string }) => {
         set(threadMessagesAtom, get(threadMessagesAtom).filter(message => message.id !== id));
+        // Note: Legacy code - citations now use run_id instead of message_id
         set(citationMetadataAtom, (prev) => 
-            prev.filter(a => a.message_id !== id)
+            prev.filter(a => (a as any).message_id !== id)
         );
         set(updateCitationDataAtom);
         set(clearMessageUIStateAtom, id);

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { citationDataMapAtom } from '../../atoms/citations';
+import { citationDataMapAtom, citationDataByRawTagAtom, normalizeRawTag } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { createZoteroURI } from '../../utils/zoteroURI';
@@ -21,8 +21,10 @@ export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
 // Define prop types for the component
 interface ZoteroCitationProps {
     id?: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization) - for Zotero citations
-    cid: string;           // Citation ID
+    cid?: string;          // Citation ID (may be absent during streaming)
     external_id?: string;  // External source ID for external reference citations
+    raw_tag?: string;      // Raw tag for matching (URL-encoded) when cid is not present
+    att_id?: string;       // Attachment ID attribute from raw tag
     pages?: string;        // Format: "3-6,19"
     consecutive?: boolean;
     adjacent?: boolean;   // True when consecutive AND only whitespace between citations
@@ -34,6 +36,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     id: unique_key,
     cid: citationId,
     external_id,
+    raw_tag: rawTagProp,
+    att_id,
     consecutive = false,
     adjacent = false,
     children,
@@ -41,25 +45,60 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 }) => {
     // Get citation data maps
     const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationDataByRawTag = useAtomValue(citationDataByRawTagAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
 
+    // Decode and normalize raw_tag if provided (URL-encoded in the attribute)
+    const normalizedRawTag = rawTagProp 
+        ? normalizeRawTag(decodeURIComponent(rawTagProp)) 
+        : undefined;
+
     // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
     const { libraryID, itemKey, cleanKey } = useMemo(() => {
-        if (!unique_key) return { libraryID: 1, itemKey: '', cleanKey: '' };
-        const cleanKey = unique_key.replace('user-content-', '');
-        const [libraryIDString, itemKey] = cleanKey.includes('-') 
-            ? cleanKey.split('-') 
-            : [cleanKey, cleanKey];
-        return { 
-            libraryID: parseInt(libraryIDString) || 1, 
-            itemKey, 
-            cleanKey 
-        };
-    }, [unique_key]);
+        // Try to get from unique_key first
+        if (unique_key) {
+            const cleanKey = unique_key.replace('user-content-', '');
+            const [libraryIDString, itemKey] = cleanKey.includes('-') 
+                ? cleanKey.split('-') 
+                : [cleanKey, cleanKey];
+            return { 
+                libraryID: parseInt(libraryIDString) || 1, 
+                itemKey, 
+                cleanKey 
+            };
+        }
+        
+        // Fallback: try to parse from att_id attribute (format: "libraryID-itemKey")
+        if (att_id) {
+            const cleanKey = att_id.replace('user-content-', '');
+            const [libraryIDString, itemKey] = cleanKey.includes('-') 
+                ? cleanKey.split('-') 
+                : [cleanKey, cleanKey];
+            return { 
+                libraryID: parseInt(libraryIDString) || 1, 
+                itemKey, 
+                cleanKey 
+            };
+        }
+        
+        return { libraryID: 1, itemKey: '', cleanKey: '' };
+    }, [unique_key, att_id]);
 
-    // Get attachment citation data from map
-    const citationMetadata = citationId ? citationDataMap[citationId] : undefined;
+    // Get citation metadata - try cid first, then fallback to raw_tag
+    const citationMetadata = useMemo(() => {
+        // Try cid match first (for historical data with injected IDs)
+        if (citationId && citationDataMap[citationId]) {
+            return citationDataMap[citationId];
+        }
+        
+        // Fallback to raw_tag match (for streaming or unprocessed content)
+        if (normalizedRawTag && citationDataByRawTag[normalizedRawTag]) {
+            return citationDataByRawTag[normalizedRawTag];
+        }
+        
+        return undefined;
+    }, [citationId, normalizedRawTag, citationDataMap, citationDataByRawTag]);
     
     // Load fallback citation data when citation metadata is not available
     const fallbackCitation = useFallbackCitation({
@@ -147,8 +186,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }, [citationMetadata, fallbackCitation]);
 
 
-    // Zotero citations need an id/cid; external citations intentionally omit the Zotero id
-    if ((!unique_key || !citationId) && !isExternal) return null;
+    // Zotero citations need either id/cid or raw_tag match; external citations intentionally omit the Zotero id
+    const hasValidZoteroId = unique_key || att_id || citationId;
+    const hasRawTagMatch = normalizedRawTag && citationMetadata;
+    if (!hasValidZoteroId && !hasRawTagMatch && !isExternal) return null;
 
     // Hide adjacent fallback citations (identical and immediately next to each other)
     if (adjacent && !citationMetadata) return null;

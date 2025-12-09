@@ -18,6 +18,19 @@ export interface FallbackCitation {
 export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>({});
 
 
+/**
+ * Normalize a raw tag string for consistent matching.
+ * Removes extra whitespace to ensure tags with different formatting match.
+ */
+export function normalizeRawTag(rawTag: string): string {
+    return rawTag
+        .replace(/\s+/g, ' ')     // Collapse multiple spaces to single space
+        .replace(/\s*\/>/g, '/>') // Remove space before />
+        .replace(/\s*>/g, '>')    // Remove space before >
+        .replace(/<\s*/g, '<')    // Remove space after <
+        .trim();
+}
+
 /*
  * Citation metadata
  *
@@ -60,6 +73,25 @@ export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
  * "citation_metadata" events and when loading previous threads.
  */
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
+
+/**
+ * Citation data mapped by normalized raw_tag for matching during streaming
+ * This enables matching citations when cid is not present in the text
+ */
+export const citationDataByRawTagAtom = atom<Record<string, CitationData>>((get) => {
+    const dataMap = get(citationDataMapAtom);
+    const byRawTag: Record<string, CitationData> = {};
+    
+    for (const citation of Object.values(dataMap)) {
+        if (citation.raw_tag) {
+            // Normalize the key for consistent matching
+            const normalizedKey = normalizeRawTag(citation.raw_tag);
+            byRawTag[normalizedKey] = citation;
+        }
+    }
+    
+    return byRawTag;
+});
 
 /**
  * Get all citation data as an array (for components that need the full list)

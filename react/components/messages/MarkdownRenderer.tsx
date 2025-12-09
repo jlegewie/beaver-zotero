@@ -14,7 +14,7 @@ const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id']
+        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id', 'raw_tag', 'att_id', 'item_id']
     }
 });
 
@@ -32,6 +32,19 @@ type MarkdownRendererProps = {
     runId?: string;
     enableNoteBlocks?: boolean;
 };
+
+/**
+ * Construct a raw tag string from attributes (excluding id which is injected)
+ * This is used to match against the raw_tag from agent actions
+ */
+function constructRawTag(tagName: string, attributes: Record<string, string>): string {
+    // Filter out 'id' attribute as it's injected by the backend
+    const attrs = Object.entries(attributes)
+        .filter(([key]) => key !== 'id')
+        .map(([key, value]) => `${key}="${value}"`)
+        .join(' ');
+    return attrs ? `<${tagName} ${attrs}>` : `<${tagName}>`;
+}
 
 /**
  * Parse content into alternating segments of markdown and note blocks
@@ -87,6 +100,9 @@ function parseContentIntoSegments(content: string): Segment[] {
             nextIndex = content.length;
         }
         
+        // Construct raw tag for matching (excludes 'id' attribute)
+        const rawTag = constructRawTag('note', attributes);
+        
         // Create note block
         const noteBlock: StreamingNoteBlock = {
             id: attributes.id || '',
@@ -94,7 +110,8 @@ function parseContentIntoSegments(content: string): Segment[] {
             itemId: attributes.item_id || null,
             attributes,
             content: noteContent,
-            isComplete
+            isComplete,
+            rawTag
         };
         
         segments.push({ type: 'note', data: noteBlock });
@@ -115,6 +132,24 @@ function parseContentIntoSegments(content: string): Segment[] {
     }
     
     return segments;
+}
+
+/**
+ * Construct a raw citation tag string from attributes (excluding cid which is injected)
+ * This is used to match against the raw_tag from citation metadata.
+ * The output will be normalized during lookup, so exact spacing doesn't matter.
+ */
+function constructCitationRawTag(attributesStr: string): string {
+    // Parse attributes and filter out 'cid' (injected by backend)
+    const attrs: string[] = [];
+    const attrRegex = /(\w+)="([^"]*)"/g;
+    let attrMatch: RegExpExecArray | null;
+    while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
+        if (attrMatch[1] !== 'cid') {
+            attrs.push(`${attrMatch[1]}="${attrMatch[2]}"`);
+        }
+    }
+    return attrs.length > 0 ? `<citation ${attrs.join(' ')}/>` : '<citation/>';
 }
 
 /**
@@ -145,15 +180,19 @@ function preprocessCitations(content: string, lastCitationIdRef: { value: string
             lastCitationIdRef.value = id;
             lastCitationEndIndex = offset + match.length;
             
+            // Construct raw_tag for matching (excludes 'cid' attribute)
+            const rawTag = constructCitationRawTag(attributesStr);
+            const rawTagAttr = `raw_tag="${encodeURIComponent(rawTag)}"`;
+            
             // Add attributes as needed
             if (isAdjacent) {
-                return `<citation ${attributesStr} consecutive="true" adjacent="true"></citation>`;
+                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true" adjacent="true"></citation>`;
             }
             if (isConsecutive) {
-                return `<citation ${attributesStr} consecutive="true"></citation>`;
+                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true"></citation>`;
             }
             
-            return `<citation ${attributesStr}></citation>`;
+            return `<citation ${attributesStr} ${rawTagAttr}></citation>`;
         }
     );
 }
@@ -256,9 +295,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         <div className="display-flex flex-col gap-3">
             {processedSegments.map((segment, index) => {
                 if (segment.type === 'note') {
+                    // Use id if available, otherwise use rawTag or index for key stability
+                    const noteKey = segment.data.id || segment.data.rawTag || `${segment.data.title}-${index}`;
                     return (
                         <NoteDisplay
-                            key={`note-${segment.data.id}-${index}`}
+                            key={`note-${noteKey}`}
                             note={segment.data}
                             messageId={messageId}
                             runId={runId}

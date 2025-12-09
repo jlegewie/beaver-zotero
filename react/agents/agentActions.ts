@@ -151,6 +151,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
+        const rawTag = proposedData.raw_tag ?? proposedData.rawTag;
 
         let normalizedLibraryId: number | undefined;
         if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
@@ -167,6 +168,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
         proposedData = {
@@ -304,6 +306,20 @@ export const getAgentActionsByRunAtom = atom(
 export const getAgentActionByIdAtom = atom(
     (get) => (actionId: string): AgentAction | null => {
         return get(threadAgentActionsAtom).find((action) => action.id === actionId) ?? null;
+    }
+);
+
+/**
+ * Get a note agent action by matching raw_tag within a specific run.
+ * Used for streaming when note tags don't have an id attribute.
+ */
+export const getAgentNoteActionByRawTagAtom = atom(
+    (get) => (runId: string, rawTag: string): AgentAction | null => {
+        return get(threadAgentActionsAtom).find((action) => 
+            action.run_id === runId &&
+            action.action_type === 'zotero_note' &&
+            action.proposed_data?.raw_tag === rawTag
+        ) ?? null;
     }
 );
 

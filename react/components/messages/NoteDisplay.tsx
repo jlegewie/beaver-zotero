@@ -16,6 +16,7 @@ import {
 import MarkdownRenderer from './MarkdownRenderer';
 import {
     getAgentActionByIdAtom,
+    getAgentNoteActionByRawTagAtom,
     applyAgentActionsAtom,
     setAgentActionsToErrorAtom,
     isZoteroNoteAgentAction,
@@ -41,11 +42,16 @@ export interface StreamingNoteBlock {
     attributes: Record<string, string>;
     content: string;
     isComplete: boolean;
+    /** Raw tag from LLM output - used for matching when id is not present */
+    rawTag?: string;
 }
 
 interface NoteDisplayProps {
     note: StreamingNoteBlock;
-    runId: string;
+    /** Agent run ID for matching agent actions */
+    runId?: string;
+    /** Message ID (legacy - for SSE streaming) */
+    messageId?: string;
     exportRendering?: boolean;
 }
 
@@ -243,9 +249,10 @@ const NoteBody = React.memo(function NoteBody(props: NoteBodyProps) {
 });
 
 
-const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, exportRendering = false }) => {
+const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, exportRendering = false }) => {
     // Agent actions
     const getAgentActionById = useAtomValue(getAgentActionByIdAtom);
+    const getAgentNoteActionByRawTag = useAtomValue(getAgentNoteActionByRawTagAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
 
@@ -253,24 +260,36 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, exportRendering 
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
 
-    // UI state for collapsible note panel
+    // UI state for collapsible note panel - use id if available, otherwise use rawTag
+    const panelKey = note.id || note.rawTag || `note-${note.title}`;
     const panelStates = useAtomValue(notePanelStateAtom);
-    const panelState = panelStates[note.id] ?? defaultNotePanelState;
+    const panelState = panelStates[panelKey] ?? defaultNotePanelState;
     const { contentVisible, isSaving } = panelState;
 
     const setNotePanelState = useSetAtom(setNotePanelStateAtom);
     const toggleNotePanelVisibility = useSetAtom(toggleNotePanelVisibilityAtom);
 
     // Get the agent action for this note
-    const agentAction = getAgentActionById(note.id);
-    
-    // Validate that it's a Zotero note action
+    // Strategy: try id match first, then fallback to raw_tag match
     const noteAction = useMemo(() => {
-        if (agentAction && isZoteroNoteAgentAction(agentAction)) {
-            return agentAction;
+        // Try id match first (for historical data with injected IDs)
+        if (note.id) {
+            const actionById = getAgentActionById(note.id);
+            if (actionById && isZoteroNoteAgentAction(actionById)) {
+                return actionById;
+            }
         }
+        
+        // Fallback to raw_tag match (for streaming or unprocessed content)
+        if (runId && note.rawTag) {
+            const actionByRawTag = getAgentNoteActionByRawTag(runId, note.rawTag);
+            if (actionByRawTag && isZoteroNoteAgentAction(actionByRawTag)) {
+                return actionByRawTag;
+            }
+        }
+        
         return null;
-    }, [agentAction]);
+    }, [note.id, note.rawTag, runId, getAgentActionById, getAgentNoteActionByRawTag]);
 
     const status: NoteStatus = noteAction ? noteAction.status : 'missing';
 
@@ -279,8 +298,8 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, exportRendering 
 
     // Toggle visibility of note content
     const toggleContent = useCallback(() => {
-        toggleNotePanelVisibility(note.id);
-    }, [note.id, toggleNotePanelVisibility]);
+        toggleNotePanelVisibility(panelKey);
+    }, [panelKey, toggleNotePanelVisibility]);
 
     const handleCopy = useCallback(async () => {
         const formattedContent = renderToMarkdown(`# ${noteTitle}\n\n${trimmedContent || note.content}`);
@@ -297,11 +316,11 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, exportRendering 
     }, [noteAction]);
 
     const handleSave = useCallback(async () => {
-        if (!noteAction || !runId || !note.isComplete) {
+        if (!noteAction || !note.isComplete) {
             return;
         }
         
-        setNotePanelState({ key: note.id, updates: { isSaving: true } });
+        setNotePanelState({ key: panelKey, updates: { isSaving: true } });
         try {
             const { targetLibraryId, parentReference, collectionToAddTo } = await getZoteroTargetContext();
 
@@ -347,9 +366,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, exportRendering 
             const errorMessage = error?.message || 'Failed to save note';
             setAgentActionsToError([noteAction.id], errorMessage);
         } finally {
-            setNotePanelState({ key: note.id, updates: { isSaving: false } });
+            setNotePanelState({ key: panelKey, updates: { isSaving: false } });
         }
-    }, [applyAgentActions, runId, note.id, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setAgentActionsToError, setNotePanelState, citationDataMap, externalMapping, externalReferencesMap]);
+    }, [applyAgentActions, panelKey, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setAgentActionsToError, setNotePanelState, citationDataMap, externalMapping, externalReferencesMap]);
 
     // Determine when content can be toggled
     const canToggleContent = note.isComplete;

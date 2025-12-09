@@ -31,6 +31,8 @@ export interface NoteProposedData {
     content?: string | null;
     library_id?: number | null;
     zotero_key?: string | null;
+    /** Raw tag from LLM output - used for matching during streaming */
+    raw_tag?: string;
 }
 
 export interface NoteResultData {
@@ -179,6 +181,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
+        const rawTag = proposedData.raw_tag ?? proposedData.rawTag;
 
         let normalizedLibraryId: number | undefined;
         if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
@@ -195,6 +198,7 @@ export function toProposedAction(raw: Record<string, any>): ProposedAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
         proposedData = {
