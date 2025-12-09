@@ -1,8 +1,9 @@
 import React, { useRef, useEffect } from 'react';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
-import { MessagesArea } from "./messages/MessagesArea"
-import { currentThreadIdAtom, threadMessagesAtom, currentThreadScrollPositionAtom } from '../atoms/threads';
+import { ThreadView } from "./agentRuns";
+import { currentThreadScrollPositionAtom } from '../atoms/threads';
+import { allRunsAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -24,8 +25,7 @@ import PreviewAndPopupContainer from './PreviewAndPopupContainer';
 const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
-    const threadId = useAtomValue(currentThreadIdAtom);
-    const threadMessages = useAtomValue(threadMessagesAtom);
+    const runs = useAtomValue(allRunsAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
@@ -114,12 +114,9 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
             {/* Header */}
             <Header />
 
-            {/* Messages area (scrollable) */}
-            {threadMessages.length > 0 ? (
-                <MessagesArea 
-                    messages={threadMessages} 
-                    ref={messagesContainerRef}
-                />
+            {/* Thread view with agent runs */}
+            {runs.length > 0 ? (
+                <ThreadView ref={messagesContainerRef} />
             ) : (
                 <HomePage />
             )}
