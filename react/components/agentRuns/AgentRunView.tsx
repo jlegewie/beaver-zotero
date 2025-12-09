@@ -59,7 +59,8 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Footer with sources and action buttons */}
-            {run.status === 'completed' && run.model_messages.length > 0 && (
+            {/* Show full footer on completed, limited footer (only repeat) on error */}
+            {(run.status === 'completed' || run.status === 'error') && (
                 <div className="px-4">
                     <AgentRunFooter run={run} />
                 </div>
