@@ -3,7 +3,7 @@ import { RunUsage } from '../../agents/types';
 import { Icon, DollarCircleIcon } from '../icons/icons';
 import Tooltip from '../ui/Tooltip';
 
-interface UsageFooterProps {
+interface TokenUsageDisplayProps {
     usage: RunUsage;
     cost?: number;
     showDetails?: boolean;
@@ -13,7 +13,7 @@ interface UsageFooterProps {
  * Displays usage statistics for a completed agent run.
  * Shows an icon with optional token/cost summary, with full details in tooltip.
  */
-export const UsageFooter: React.FC<UsageFooterProps> = ({ usage, cost, showDetails = false }) => {
+export const TokenUsageDisplay: React.FC<TokenUsageDisplayProps> = ({ usage, cost, showDetails = false }) => {
     // Format cost as currency
     const formatCost = (cost: number) => {
         if (cost < 0.01) {
@@ -95,5 +95,5 @@ export const UsageFooter: React.FC<UsageFooterProps> = ({ usage, cost, showDetai
     );
 };
 
-export default UsageFooter;
+export default TokenUsageDisplay;
 

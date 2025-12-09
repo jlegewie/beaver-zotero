@@ -4,7 +4,7 @@ import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
 import { RunStatusIndicator } from './RunStatusIndicator';
-import { UsageFooter } from './UsageFooter';
+import { TokenUsageDisplay } from './TokenUsageDisplay';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -47,7 +47,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
 
             {/* Usage footer for completed runs */}
             {run.status === 'completed' && run.total_usage && (
-                <UsageFooter usage={run.total_usage} cost={run.total_cost} />
+                <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
             )}
         </div>
     );

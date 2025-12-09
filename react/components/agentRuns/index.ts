@@ -11,5 +11,5 @@ export { ToolResultView } from './ToolResultView';
 export { ItemSearchResultView } from './ItemSearchResultView';
 export { AgentRunFooter } from './AgentRunFooter';
 export { RunStatusIndicator } from './RunStatusIndicator';
-export { UsageFooter } from './UsageFooter';
+export { TokenUsageDisplay } from './TokenUsageDisplay';
 
