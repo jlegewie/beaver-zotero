@@ -2,6 +2,7 @@ import React from 'react';
 import { AgentRun } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
+import { AgentRunFooter } from './AgentRunFooter';
 import { RunStatusIndicator } from './RunStatusIndicator';
 import { UsageFooter } from './UsageFooter';
 
@@ -35,6 +36,13 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             {/* Status indicator for streaming or error states */}
             {(isStreaming || hasError) && isLastRun && (
                 <RunStatusIndicator status={run.status} />
+            )}
+
+            {/* Footer with sources and action buttons */}
+            {run.status === 'completed' && run.model_messages.length > 0 && (
+                <div className="px-4">
+                    <AgentRunFooter run={run} />
+                </div>
             )}
 
             {/* Usage footer for completed runs */}
