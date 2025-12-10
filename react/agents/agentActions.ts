@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { ZoteroItemReference } from '../types/zotero';
 import {
     ActionStatus,
@@ -369,29 +370,47 @@ export const updateAgentActionsAtom = atom(
 );
 
 /**
- * Set agent actions to applied status with result data
+ * Acknowledge agent actions as applied with result data.
+ * Updates both UI state and backend.
  */
-export const applyAgentActionsAtom = atom(
+export const ackAgentActionsAtom = atom(
     null,
-    (_, set, results: Array<{ action_id: string; result_data: Record<string, any> }>) => {
+    async (_, set, runId: string, actionResultData: AckActionLink[]) => {
+        // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
-            const resultMap = new Map(results.map((r) => [r.action_id, r.result_data]));
-            return prev.map((action) => {
-                const resultData = resultMap.get(action.id);
-                return resultData
-                    ? { ...action, status: 'applied' as ActionStatus, result_data: resultData }
-                    : action;
-            });
+            const actionIds = actionResultData.map((result) => result.action_id);
+            return prev.map((action) => 
+                actionIds.includes(action.id)
+                    ? {
+                        ...action,
+                        status: 'applied' as ActionStatus,
+                        result_data: actionResultData.find((result) => result.action_id === action.id)?.result_data
+                    }
+                    : action
+            );
         });
+
+        // Backend: Acknowledge actions
+        const response = await agentActionsService.acknowledgeActions(
+            runId,
+            actionResultData
+        );
+        if (!response.success) {
+            logger(`ackAgentActionsAtom: failed to acknowledge actions for run ${runId}: ${response.errors.map((error) => error.detail).join(', ')}`, 1);
+            return;
+        }
+        return response;
     }
 );
 
 /**
- * Set agent actions to error status
+ * Set agent actions to error status.
+ * Updates both UI state and backend.
  */
 export const setAgentActionsToErrorAtom = atom(
     null,
     (_, set, actionIds: string[], errorMessage: string) => {
+        // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => 
                 actionIds.includes(action.id)
@@ -399,44 +418,65 @@ export const setAgentActionsToErrorAtom = atom(
                     : action
             );
         });
-        // Note: Backend persistence for agent actions will be added when the API endpoints are available
+        // Backend: Update each action
         for (const actionId of actionIds) {
-            logger(`setAgentActionsToErrorAtom: Set action ${actionId} to error: ${errorMessage}`, 1);
+            agentActionsService.updateAction(actionId, {
+                status: 'error',
+                error_message: errorMessage,
+            }).catch((error) => {
+                logger(`setAgentActionsToErrorAtom: failed to persist error status for action ${actionId}: ${error}`, 1);
+            });
         }
     }
 );
 
 /**
- * Reject an agent action
+ * Reject an agent action.
+ * Updates both UI state and backend.
  */
 export const rejectAgentActionAtom = atom(
     null,
     (_, set, actionId: string) => {
+        // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => action.id === actionId
                 ? { ...action, status: 'rejected' as ActionStatus, result_data: undefined, error_message: undefined }
                 : action
             );
         });
-        // Note: Backend persistence for agent actions will be added when the API endpoints are available
-        logger(`rejectAgentActionAtom: Rejected action ${actionId}`, 1);
+        // Backend: Update action state
+        agentActionsService.updateAction(actionId, {
+            status: 'rejected',
+            clear_result_data: true,
+            clear_error_message: true,
+        }).catch((error) => {
+            logger(`rejectAgentActionAtom: failed to persist state for action ${actionId}: ${error}`, 1);
+        });
     }
 );
 
 /**
- * Undo an applied agent action
+ * Undo an applied agent action.
+ * Updates both UI state and backend.
  */
 export const undoAgentActionAtom = atom(
     null,
     (_, set, actionId: string) => {
+        // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => action.id === actionId
                 ? { ...action, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined }
                 : action
             );
         });
-        // Note: Backend persistence for agent actions will be added when the API endpoints are available
-        logger(`undoAgentActionAtom: Undone action ${actionId}`, 1);
+        // Backend: Update action state
+        agentActionsService.updateAction(actionId, {
+            status: 'undone',
+            clear_result_data: true,
+            clear_error_message: true,
+        }).catch((error) => {
+            logger(`undoAgentActionAtom: failed to persist state for action ${actionId}: ${error}`, 1);
+        });
     }
 );
 
