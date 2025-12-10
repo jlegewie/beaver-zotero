@@ -57,16 +57,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
         return PuzzleIcon;
     };
 
-    const getButtonText = () => {
-        if (hasError) {
-            return `${label}: Error`;
-        }
-        if (isInProgress) {
-            return label;
-        }
-        return label;
-    };
-
     const isButtonDisabled = isInProgress || (hasError && !hasResult);
 
     return (
@@ -101,7 +91,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
                         </div>
                         
                         <div className={`display-flex ${isExpanded ? 'font-color-primary' : ''} ${isInProgress ? 'shimmer-text' : ''}`}>
-                            {getButtonText()}
+                            {label}
                         </div>
                     </div>
                 </Button>
