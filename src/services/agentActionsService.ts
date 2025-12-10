@@ -35,6 +35,9 @@ export interface UpdateActionRequest {
     error_message?: string;
     result_data?: Record<string, any>;
     error_details?: Record<string, any>;
+    clear_error_message?: boolean;
+    clear_result_data?: boolean;
+    clear_error_details?: boolean;
 }
 
 export interface ActionResponse {
