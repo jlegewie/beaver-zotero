@@ -19,7 +19,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
     isStreaming,
 }) => {
     return (
-        <div className="model-messages-view display-flex flex-col gap-3 px-4">
+        <div className="model-messages-view display-flex flex-col px-4">
             {messages.map((message, index) => {
                 // Only render response messages - request messages are either displayed
                 // separately (user prompts) or inline with their corresponding
