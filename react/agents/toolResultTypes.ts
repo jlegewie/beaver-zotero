@@ -40,7 +40,9 @@ export function isItemSearchResult(content: unknown): content is ItemSearchResul
     const obj = content as Record<string, unknown>;
     return (
         (obj.tool_name === 'search_references_by_topic' ||
-         obj.tool_name === 'search_references_by_metadata') &&
+        obj.tool_name === 'search_references_by_metadata' ||
+         obj.tool_name === 'search_by_topic' ||
+         obj.tool_name === 'search_by_metadata') &&
         typeof obj.total_items === 'number' &&
         Array.isArray(obj.items)
     );
