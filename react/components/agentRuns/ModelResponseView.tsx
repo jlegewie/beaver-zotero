@@ -59,17 +59,15 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             onContextMenu={handleContextMenu}
         >
             {/* Thinking parts (collapsible) */}
-            {thinkingParts.map((part, index) => (
-                part.part_kind === 'thinking' && (
-                    <ThinkingPartView
-                        key={`thinking-${index}`}
-                        part={part}
-                        isThinking={isStreaming && index === thinkingParts.length - 1 && textParts.length === 0 && toolCallParts.length === 0}
-                        hasFollowingContent={textParts.length > 0 || toolCallParts.length > 0}
-                        thinkingId={`${responseId}-thinking-${index}`}
-                    />
-                )
-            ))}
+            {thinkingParts.length > 0 && (
+                <ThinkingPartView
+                    key={`${responseId}-thinking`}
+                    parts={thinkingParts}
+                    isThinking={isStreaming && textParts.length === 0 && toolCallParts.length === 0}
+                    hasFollowingContent={textParts.length > 0 || toolCallParts.length > 0}
+                    thinkingId={`${responseId}-thinking`}
+                />
+            )}
 
             {/* Text parts (markdown rendered) */}
             {textParts.map((part, index) => (

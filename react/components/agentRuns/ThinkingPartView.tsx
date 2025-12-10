@@ -7,7 +7,7 @@ import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icon
 import { thinkingVisibilityAtom, toggleThinkingVisibilityAtom } from '../../atoms/messageUIState';
 
 interface ThinkingPartViewProps {
-    part: ThinkingPart;
+    parts: ThinkingPart[];
     isThinking: boolean;
     hasFollowingContent: boolean;
     /** Unique ID for persistent visibility state */
@@ -19,7 +19,7 @@ interface ThinkingPartViewProps {
  * Shows a button that can be expanded to reveal the thinking content.
  */
 export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
-    part,
+    parts,
     isThinking,
     hasFollowingContent,
     thinkingId,
@@ -41,7 +41,9 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
         return BrainIcon;
     };
 
-    if (!part.content || part.content.trim() === '') {
+    const content = parts.map(part => part.content).join('\n\n');
+
+    if (!content || content.trim() === '') {
         return null;
     }
 
@@ -84,7 +86,7 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
                 <div className="opacity-70 p-3 text-sm">
                     <MarkdownRenderer 
                         className="markdown" 
-                        content={part.content.replace(/^undefined/, '')}
+                        content={content.replace(/^undefined/, '')}
                         enableNoteBlocks={false}
                     />
                 </div>
