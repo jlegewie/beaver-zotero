@@ -1,6 +1,33 @@
 import { ToolCallPart } from './types';
 
 /**
+ * Get display name from a Zotero item (Author Year format).
+ * For attachments, uses the parent item's metadata.
+ */
+function getItemDisplayName(item: Zotero.Item): string {
+    // For attachments, get the parent item
+    const targetItem = item.isAttachment() ? item.parentItem || item : item;
+    
+    const firstCreator = targetItem.firstCreator || 'Unknown';
+    const year = targetItem.getField('date')?.match(/\d{4}/)?.[0] || '';
+    
+    return `${firstCreator}${year ? ` ${year}` : ''}`;
+}
+
+/**
+ * Parse attachment_id format '<library_id>-<zotero_key>' and get the Zotero item.
+ */
+function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
+    const [libraryIdStr, zoteroKey] = attachmentId.split('-');
+    if (!libraryIdStr || !zoteroKey) return null;
+    
+    const libraryId = parseInt(libraryIdStr, 10);
+    if (isNaN(libraryId)) return null;
+    
+    return Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey) || null;
+}
+
+/**
  * Base labels for tool calls (display names).
  * Maps tool_name to a human-readable base label.
  */
@@ -88,7 +115,7 @@ function formatYearFilter(yearFilter: unknown): string | null {
  * Creates human-readable labels like:
  * - "Fulltext search: social capital"
  * - "Metadata search: Smith (2020)"
- * - "Reading: p5-10"
+ * - "Reading: Smith 2020, p. 5-10"
  */
 export function getToolCallLabel(part: ToolCallPart): string {
     const toolName = part.tool_name;
@@ -154,20 +181,35 @@ export function getToolCallLabel(part: ToolCallPart): string {
 
         case 'retrieve_fulltext':
         case 'read_fulltext': {
+            const attachmentId = args.attachment_id as string | undefined;
             const startPage = args.start_page as number | undefined;
             const endPage = args.end_page as number | undefined;
 
+            // Build page range string
+            let pageRange = '';
             if (startPage !== undefined && endPage !== undefined) {
-                if (startPage === endPage) {
-                    return `${baseLabel}: p${startPage}`;
+                pageRange = startPage === endPage ? `p. ${startPage}` : `p. ${startPage}-${endPage}`;
+            } else if (startPage !== undefined) {
+                pageRange = `p. ${startPage}+`;
+            } else if (endPage !== undefined) {
+                pageRange = `p. 1-${endPage}`;
+            }
+
+            // Get item display name from attachment_id
+            if (attachmentId) {
+                const item = getItemFromAttachmentId(attachmentId);
+                if (item) {
+                    const displayName = getItemDisplayName(item);
+                    if (pageRange) {
+                        return `${baseLabel}: ${displayName}, ${pageRange}`;
+                    }
+                    return `${baseLabel}: ${displayName}`;
                 }
-                return `${baseLabel}: p${startPage}-${endPage}`;
             }
-            if (startPage !== undefined) {
-                return `${baseLabel}: p${startPage}-`;
-            }
-            if (endPage !== undefined) {
-                return `${baseLabel}: p1-${endPage}`;
+
+            // Fallback: just show page range or base label
+            if (pageRange) {
+                return `${baseLabel}: ${pageRange}`;
             }
             return baseLabel;
         }
