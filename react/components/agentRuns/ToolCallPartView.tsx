@@ -102,6 +102,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
     };
 
     const isButtonDisabled = isInProgress || (hasError && !hasResult);
+    const hasExpandedResult = isExpanded && hasResult && result.part_kind === 'tool-return';
 
     return (
         <div
@@ -109,6 +110,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
             className={`
                 rounded-md flex flex-col min-w-0
                 ${isExpanded ? 'border-popup' : 'border-transparent'}
+                ${hasExpandedResult ? 'mb-2' : ''}
             `}
         >
             <div
@@ -142,7 +144,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
             </div>
 
             {/* Expanded result view */}
-            {isExpanded && hasResult && result.part_kind === 'tool-return' && (
+            {hasExpandedResult && (
                 <ToolResultView result={result} />
             )}
         </div>
