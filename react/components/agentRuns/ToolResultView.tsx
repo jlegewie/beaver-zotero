@@ -3,11 +3,13 @@ import { ToolReturnPart } from '../../agents/types';
 import { 
     isItemSearchResult, 
     isFulltextSearchResult, 
-    isFulltextRetrievalResult 
+    isFulltextRetrievalResult,
+    isSearchExternalReferencesResult
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { FulltextRetrievalResultView } from './FulltextRetrievalResultView';
+import { ExternalReferencesSearchResultView } from './ExternalReferencesSearchResultView';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -32,6 +34,10 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
 
     if (isFulltextRetrievalResult(content)) {
         return <FulltextRetrievalResultView result={content} />;
+    }
+
+    if (isSearchExternalReferencesResult(content)) {
+        return <ExternalReferencesSearchResultView result={content} />;
     }
 
     // Fallback: generic rendering for other result types

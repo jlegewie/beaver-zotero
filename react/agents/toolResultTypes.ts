@@ -92,8 +92,11 @@ export interface SearchExternalReferencesResult {
     tool_name: "search_external_references";
     total_available: number;
     returned_count: number;
+    count_in_library: number;
+    count_not_in_library: number;
     references: ExternalReferenceResult[];
-    params: any;
+    params: Record<string, unknown>;
+    total_cost?: number;
 }
 
 
@@ -134,5 +137,16 @@ export function isFulltextRetrievalResult(content: unknown): content is Fulltext
         obj.attachment !== null &&
         typeof obj.attachment === 'object' &&
         Array.isArray(obj.chunks)
+    );
+}
+
+export function isSearchExternalReferencesResult(content: unknown): content is SearchExternalReferencesResult {
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return (
+        obj.tool_name === 'search_external_references' &&
+        typeof obj.total_available === 'number' &&
+        typeof obj.returned_count === 'number' &&
+        Array.isArray(obj.references)
     );
 }
