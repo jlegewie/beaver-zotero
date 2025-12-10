@@ -93,7 +93,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
                         ${isButtonDisabled && !hasResult ? 'disabled-but-styled' : ''}
                     `}
                     style={{ padding: '2px 6px', maxHeight: 'none' }}
-                    disabled={isButtonDisabled && !hasResult}
+                    disabled={!result || (isButtonDisabled && !hasResult) || result.part_kind === 'retry-prompt'}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 ${isExpanded ? 'font-color-primary' : ''}`}>
@@ -107,15 +107,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
                 </Button>
             </div>
 
-            {/* Error display */}
-            {hasError && result && typeof result.content === 'string' && (
-                <div className="px-4 py-1 text-sm text-red-600">
-                    {result.content}
-                </div>
-            )}
-
             {/* Expanded result view */}
-            {isExpanded && hasResult && (
+            {isExpanded && hasResult && result.part_kind === 'tool-return' && (
                 <ToolResultView result={result} />
             )}
         </div>

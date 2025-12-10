@@ -67,6 +67,13 @@ export interface ToolReturnPart {
     tool_call_id: string;
 }
 
+export interface RetryPromptPart{
+    part_kind: 'retry-prompt';
+    tool_name: string;
+    content: any;
+    tool_call_id: string;
+}
+
 export interface TextPart {
     part_kind: 'text';
     content: string;
@@ -146,7 +153,7 @@ export interface ModelRequest {
     run_id: string;
     /* The unique identifier of the agent run in which this message originated. */
 
-    parts: (UserPromptPart | ToolReturnPart)[];
+    parts: (UserPromptPart | ToolReturnPart | RetryPromptPart)[];
     /* The parts of the user message */
 
     instructions: string;

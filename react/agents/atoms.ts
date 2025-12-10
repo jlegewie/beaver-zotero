@@ -7,6 +7,7 @@ import {
     ToolCallPart,
     TextPart,
     ThinkingPart,
+    RetryPromptPart,
 } from "./types";
 import {
     WSPartEvent,
@@ -48,14 +49,14 @@ export const isStreamingAtom = atom((get) => get(activeRunAtom) !== null);
 /** Quick lookup of tool results by tool_call_id */
 export const toolResultsMapAtom = atom((get) => {
     const runs = get(allRunsAtom);
-    const map = new Map<string, ToolReturnPart>();
+    const map = new Map<string, (ToolReturnPart | RetryPromptPart)>();
 
     for (const run of runs) {
         for (const msg of run.model_messages) {
             if (msg.kind === 'request') {
                 for (const part of msg.parts) {
-                    if (part.part_kind === 'tool-return') {
-                        map.set(part.tool_call_id, part);
+                    if (part.part_kind === 'tool-return' || part.part_kind === 'retry-prompt') {
+                        map.set(part.tool_call_id, part as ToolReturnPart | RetryPromptPart);
                     }
                 }
             }
@@ -74,16 +75,13 @@ export type ToolCallStatus = 'in_progress' | 'completed' | 'error';
 /** Get the status of a tool call based on its result */
 export function getToolCallStatus(
     toolCallId: string,
-    resultsMap: Map<string, ToolReturnPart>
+    resultsMap: Map<string, (ToolReturnPart | RetryPromptPart)>
 ): ToolCallStatus {
     const result = resultsMap.get(toolCallId);
     if (!result) return 'in_progress';
 
     // Check if result indicates error
-    if (typeof result.content === 'string' && result.content.toLowerCase().includes('error')) {
-        return 'error';
-    }
-    if (typeof result.content === 'object' && result.content?.error) {
+    if (result.part_kind === 'retry-prompt') {
         return 'error';
     }
 
