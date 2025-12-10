@@ -7,8 +7,7 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { threadProposedActionsAtom, undoProposedActionAtom } from "../atoms/proposedActions";
-import { getZoteroItemReferenceFromProposedAction } from "../types/proposedActions/base";
+import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction } from "../agents/agentActions";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
@@ -225,18 +224,18 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key && syncLibraryIds.includes(libraryID)) {
-                                        // Check if this item was created by a proposed action
-                                        const proposedActions = store.get(threadProposedActionsAtom);
-                                        const matchingActions = proposedActions
+                                        // Check if this item was created by an agent action
+                                        const agentActions = store.get(threadAgentActionsAtom);
+                                        const matchingAgentActions = agentActions
                                             .filter((action) => {
-                                                const itemRef = getZoteroItemReferenceFromProposedAction(action);
+                                                const itemRef = getZoteroItemReferenceFromAgentAction(action);
                                                 return itemRef && itemRef.library_id === libraryID && itemRef.zotero_key === key;
                                             });
                                         
-                                        if (matchingActions.length > 0) {
-                                            logger(`useZoteroSync: Skipping delete event for proposed action(s), marking as undone: ${matchingActions.map(a => a.id).join(', ')}`, 3);
-                                            matchingActions.forEach(action => {
-                                                store.set(undoProposedActionAtom, action.id);
+                                        if (matchingAgentActions.length > 0) {
+                                            logger(`useZoteroSync: Skipping delete event for agent action(s), marking as undone: ${matchingAgentActions.map(a => a.id).join(', ')}`, 3);
+                                            matchingAgentActions.forEach(action => {
+                                                store.set(undoAgentActionAtom, action.id);
                                             });
                                             // Return early to avoid queueing for backend deletion
                                             return;
