@@ -1,11 +1,16 @@
 import React from 'react';
-import { ModelMessage } from '../../agents/types';
+import { ModelMessage, AgentRunStatus } from '../../agents/types';
 import { ModelResponseView } from './ModelResponseView';
+import { RunStatusIndicator } from './RunStatusIndicator';
 
 interface ModelMessagesViewProps {
     messages: ModelMessage[];
     runId: string;
     isStreaming: boolean;
+    /** Whether to show the status indicator inside this container */
+    showStatusIndicator?: boolean;
+    /** The run status (required when showStatusIndicator is true) */
+    status?: AgentRunStatus;
 }
 
 /**
@@ -17,9 +22,16 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
     messages,
     runId,
     isStreaming,
+    showStatusIndicator,
+    status,
 }) => {
+    // Don't render anything if there's no content to show
+    if (messages.length === 0 && !showStatusIndicator) {
+        return null;
+    }
+
     return (
-        <div className="model-messages-view display-flex flex-col px-4">
+        <div className="display-flex flex-col px-4">
             {messages.map((message, index) => {
                 // Only render response messages - request messages are either displayed
                 // separately (user prompts) or inline with their corresponding
@@ -38,6 +50,10 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
                 }
                 return null;
             })}
+            {/* Status indicator rendered inside the same container for smooth transitions */}
+            {showStatusIndicator && status && (
+                <RunStatusIndicator status={status} />
+            )}
         </div>
     );
 };

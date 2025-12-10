@@ -31,29 +31,33 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status }
 
     const isError = status === 'error';
 
+    // Structure matches ThinkingPartView for smooth visual transition
     return (
-        <div className={`
-            border-transparent rounded-md flex flex-col min-w-0 display-flex flex-col py-1 mb-2 px-4
-        `}>
-            <Button
-                variant="ghost-secondary"
-                className={`
-                    text-base scale-105 w-full min-w-0 align-start text-left
-                    disabled-but-styled
-                `}
-                style={{ maxHeight: '5rem', padding: '2px 6px' }}
-                disabled={true}
-            >
-                <div className="display-flex flex-row px-3 gap-2">
-                    <div className={`flex-1 display-flex mt-010 ${isError ? 'text-red-600' : ''}`}>
-                        <Icon icon={getIcon()} />
-                    </div>
-                    
-                    <div className={`display-flex ${isError ? 'text-red-600' : 'shimmer-text'}`}>
-                        {getText()}
-                    </div>
+        <div className="rounded-md flex flex-col min-w-0 border-transparent">
+            <div className="display-flex flex-row py-15">
+                <div className="display-flex flex-row flex-1">
+                    <Button
+                        variant="ghost-secondary"
+                        className={`
+                            text-base scale-105 w-full min-w-0 align-start text-left
+                            disabled-but-styled
+                        `}
+                        style={{ padding: '2px 6px', maxHeight: 'none' }}
+                        disabled={true}
+                    >
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className={`flex-1 display-flex mt-010 ${isError ? 'text-red-600' : ''}`}>
+                                <Icon icon={getIcon()} />
+                            </div>
+                            
+                            <div className={`display-flex ${isError ? 'text-red-600' : 'shimmer-text'}`}>
+                                {getText()}
+                            </div>
+                        </div>
+                    </Button>
+                    <div className="flex-1"/>
                 </div>
-            </Button>
+            </div>
         </div>
     );
 };

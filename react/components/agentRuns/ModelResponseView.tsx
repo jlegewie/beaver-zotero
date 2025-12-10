@@ -54,7 +54,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     return (
         <div
             id={`response-${responseId}`}
-            className="model-response-view hover-trigger user-select-text"
+            className="hover-trigger user-select-text"
             ref={contentRef}
             onContextMenu={handleContextMenu}
         >

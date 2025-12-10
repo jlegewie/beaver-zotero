@@ -3,7 +3,6 @@ import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
-import { RunStatusIndicator } from './RunStatusIndicator';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -44,19 +43,14 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             {/* User's message */}
             <UserRequestView userPrompt={run.user_prompt} runId={run.id} />
 
-            {/* Model responses */}
-            {run.model_messages.length > 0 && (
-                <ModelMessagesView
-                    messages={run.model_messages}
-                    runId={run.id}
-                    isStreaming={isStreaming}
-                />
-            )}
-
-            {/* Status indicator - only shown when no visible content yet or on error */}
-            {showStatusIndicator && (
-                <RunStatusIndicator status={run.status} />
-            )}
+            {/* Model responses and status indicator */}
+            <ModelMessagesView
+                messages={run.model_messages}
+                runId={run.id}
+                isStreaming={isStreaming}
+                showStatusIndicator={showStatusIndicator}
+                status={run.status}
+            />
 
             {/* Footer with sources and action buttons */}
             {/* Show full footer on completed, limited footer (only repeat) on error */}
