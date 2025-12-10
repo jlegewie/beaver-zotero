@@ -7,19 +7,18 @@ import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
-import { threadProposedActionsAtom, undoProposedActionAtom } from "./proposedActions";
+import { threadProposedActionsAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
 import { agentRunService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
-import { validateAppliedAction } from "../utils/proposedActions";
 import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
-import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction } from "../agents/agentActions";
+import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
 import { AgentRun, ToolCallPart } from "../agents/types";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
@@ -297,23 +296,12 @@ export const loadThreadAtom = atom(
                 // Validate agent actions and undo if not valid
                 if (agent_actions && agent_actions.length > 0) {
                     await Promise.all(agent_actions.map(async (action: AgentAction) => {
-                        // Only validate applied actions that have result data
-                        if (action.status === 'applied' && action.result_data?.zotero_key) {
-                            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                                action.result_data.library_id,
-                                action.result_data.zotero_key
-                            );
-                            if (!item) {
-                                logger(`loadThreadAtom: Agent action ${action.id} references missing item, marking as undone`, 1);
-                                // Update local state to reflect the missing item
-                                set(threadAgentActionsAtom, (prev: AgentAction[]) =>
-                                    prev.map(a => a.id === action.id 
-                                        ? { ...a, status: 'undone' as const, result_data: undefined }
-                                        : a
-                                    )
-                                );
-                            }
+                        const isValid = await validateAppliedAgentAction(action);
+                        if (!isValid) {
+                            logger(`loadThreadAtom: undoing agent action ${action.id} because it is not valid`, 1);
+                            set(undoAgentActionAtom, action.id);
                         }
+                        return isValid;
                     }));
                 }
                 
