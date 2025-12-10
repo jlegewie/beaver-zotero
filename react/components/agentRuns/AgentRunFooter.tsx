@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun, TextPart, ToolCallPart } from '../../agents/types';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
@@ -38,6 +38,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
+    
+    const handleMenuToggle = useCallback((isOpen: boolean) => {
+        if (isOpen) forceUpdate({});
+    }, []);
 
     // Get unique citations for this run, enriched with CitationData
     const uniqueCitations = useMemo(() => {
@@ -290,7 +294,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             ariaLabel="Share"
                             variant="ghost"
                             positionAdjustment={{ x: 0, y: 0 }}
-                            toggleCallback={(isOpen) => { if (isOpen) forceUpdate({}); }}
+                            toggleCallback={handleMenuToggle}
                         />
                     )}
                     <IconButton
