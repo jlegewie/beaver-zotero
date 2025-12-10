@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { ToolCallPart } from '../../agents/types';
-import { toolResultsMapAtom, getToolCallStatus, getToolCallLabel } from '../../agents/atoms';
+import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
+import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
 import Button from '../ui/Button';
 import {

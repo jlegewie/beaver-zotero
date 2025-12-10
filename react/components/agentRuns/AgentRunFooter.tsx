@@ -15,7 +15,8 @@ import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData, getUniqueKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
-import { toolResultsMapAtom, getToolCallLabel } from '../../agents/atoms';
+import { toolResultsMapAtom } from '../../agents/atoms';
+import { getToolCallLabel } from '../../agents/toolLabels';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
 

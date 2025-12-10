@@ -90,16 +90,6 @@ export function getToolCallStatus(
     return 'completed';
 }
 
-/** Extract display label from tool call args (if present) */
-export function getToolCallLabel(part: ToolCallPart): string {
-    if (typeof part.args === 'object' && part.args?.label) {
-        return part.args.label;
-    }
-    if (typeof part.args === 'object' && part.args?.status) {
-        return part.args.status;
-    }
-    return part.tool_name;
-}
 
 // =============================================================================
 // Run Update Helpers
