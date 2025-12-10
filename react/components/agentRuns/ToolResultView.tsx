@@ -1,8 +1,13 @@
 import React from 'react';
 import { ToolReturnPart } from '../../agents/types';
-import { isItemSearchResult } from '../../agents/toolResultTypes';
+import { 
+    isItemSearchResult, 
+    isFulltextSearchResult, 
+    isFulltextRetrievalResult 
+} from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
-import MarkdownRenderer from '../messages/MarkdownRenderer';
+import { FulltextSearchResultView } from './FulltextSearchResultView';
+import { FulltextRetrievalResultView } from './FulltextRetrievalResultView';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -19,6 +24,14 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
     // Dispatch to specialized renderers based on result type
     if (isItemSearchResult(content)) {
         return <ItemSearchResultView result={content} />;
+    }
+
+    if (isFulltextSearchResult(content)) {
+        return <FulltextSearchResultView result={content} />;
+    }
+
+    if (isFulltextRetrievalResult(content)) {
+        return <FulltextRetrievalResultView result={content} />;
     }
 
     // Fallback: generic rendering for other result types
