@@ -17,7 +17,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import {
     getAgentActionByIdAtom,
     getAgentNoteActionByRawTagAtom,
-    applyAgentActionsAtom,
+    ackAgentActionsAtom,
     setAgentActionsToErrorAtom,
     isZoteroNoteAgentAction,
 } from '../../agents/agentActions';
@@ -253,7 +253,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
     // Agent actions
     const getAgentActionById = useAtomValue(getAgentActionByIdAtom);
     const getAgentNoteActionByRawTag = useAtomValue(getAgentNoteActionByRawTagAtom);
-    const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
 
     const citationDataMap = useAtomValue(citationDataMapAtom);
@@ -360,15 +360,17 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
                  }
             }
 
-            // Update agent action state
-            applyAgentActions([{ action_id: noteAction.id, result_data: result }]);
+            // Update agent action state (UI + backend)
+            if (runId) {
+                ackAgentActions(runId, [{ action_id: noteAction.id, result_data: result }]);
+            }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to save note';
             setAgentActionsToError([noteAction.id], errorMessage);
         } finally {
             setNotePanelState({ key: panelKey, updates: { isSaving: false } });
         }
-    }, [applyAgentActions, panelKey, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setAgentActionsToError, setNotePanelState, citationDataMap, externalMapping, externalReferencesMap]);
+    }, [ackAgentActions, runId, panelKey, note.content, note.isComplete, noteAction, noteTitle, trimmedContent, setAgentActionsToError, setNotePanelState, citationDataMap, externalMapping, externalReferencesMap]);
 
     // Determine when content can be toggled
     const canToggleContent = note.isComplete;
