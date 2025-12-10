@@ -45,22 +45,11 @@ const GenericResultView: React.FC<{ content: unknown }> = ({ content }) => {
 
     const formattedContent = formatContent();
 
-    // Check if content looks like markdown
-    const looksLikeMarkdown = /[#*`\[\]]/.test(formattedContent);
-
     return (
         <div className="tool-result-view p-3 text-sm overflow-x-auto">
-            {looksLikeMarkdown ? (
-                <MarkdownRenderer
-                    className="markdown"
-                    content={formattedContent}
-                    enableNoteBlocks={false}
-                />
-            ) : (
-                <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
-                    {formattedContent}
-                </pre>
-            )}
+            <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
+                {formattedContent}
+            </pre>
         </div>
     );
 };
