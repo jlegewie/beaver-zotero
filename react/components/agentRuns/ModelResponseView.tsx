@@ -64,7 +64,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                     <ThinkingPartView
                         key={`thinking-${index}`}
                         part={part}
-                        isThinking={isStreaming && index === thinkingParts.length - 1}
+                        isThinking={isStreaming && index === thinkingParts.length - 1 && textParts.length === 0 && toolCallParts.length === 0}
                         hasFollowingContent={textParts.length > 0 || toolCallParts.length > 0}
                         thinkingId={`${responseId}-thinking-${index}`}
                     />
