@@ -112,6 +112,25 @@ export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise
     return (await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)) || null;
 };
 
+/**
+ * Validates that an applied agent action is still valid.
+ * @param action - The agent action to validate
+ * @returns True if the action is valid, false otherwise
+ */
+export const validateAppliedAgentAction = async (action: AgentAction): Promise<boolean> => {
+    // If action doesn't have an applied Zotero item, it's valid (nothing to check)
+    if (!hasAppliedZoteroItem(action)) return true;
+
+    // Get the Zotero item from the agent action
+    const item = await getZoteroItemFromAgentAction(action);
+    if (!item) return false;
+
+    // For annotation actions, verify the item is still an annotation
+    if (isAnnotationAgentAction(action) && !item.isAnnotation()) return false;
+
+    return true;
+};
+
 // =============================================================================
 // Deserialization
 // =============================================================================
