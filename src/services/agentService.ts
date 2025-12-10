@@ -26,6 +26,7 @@ import { ApiService } from './apiService';
 import {
     TextPart,
     ThinkingPart,
+    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
     RunUsage,
@@ -61,7 +62,7 @@ export interface WSToolReturnEvent extends WSBaseEvent {
     event: 'tool_return';
     run_id: string;
     message_index: number;
-    part: ToolReturnPart;
+    part: ToolReturnPart | RetryPromptPart;
 }
 
 /** Run complete event signaling the agent run finished */
