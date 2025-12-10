@@ -14,7 +14,56 @@ import {
     ViewIcon,
     Icon,
     PuzzleIcon,
+    GlobalSearchIcon,
+    HighlighterIcon,
+    PlusSignIcon,
+    TextAlignLeftIcon,
 } from '../icons/icons';
+
+type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
+
+/**
+ * Maps tool names to their appropriate icons
+ */
+const TOOL_ICONS: Record<string, IconComponent> = {
+    // Search tools - library search
+    search_by_metadata: SearchIcon,
+    search_by_topic: SearchIcon,
+    search_library_fulltext: SearchIcon,
+    search_library_fulltext_keywords: SearchIcon,
+    search_references_by_topic: SearchIcon,
+    search_references_by_metadata: SearchIcon,
+    search_fulltext: SearchIcon,
+    search_fulltext_keywords: SearchIcon,
+    search_attachments_content: SearchIcon,
+    search_attachments_content_keyword: SearchIcon,
+    rag_search: SearchIcon,
+
+    // Reading tools
+    retrieve_fulltext: TextAlignLeftIcon,
+    retrieve_passages: TextAlignLeftIcon,
+    read_passages: TextAlignLeftIcon,
+    read_fulltext: TextAlignLeftIcon,
+    view_page_images: ViewIcon,
+
+    // Annotation tools
+    add_highlight_annotations: HighlighterIcon,
+    add_note_annotations: HighlighterIcon,
+
+    // External search tools
+    search_external_references: GlobalSearchIcon,
+    external_search: GlobalSearchIcon,
+
+    // Create item tool
+    create_zotero_item: PlusSignIcon,
+};
+
+/**
+ * Get the icon for a tool based on its name
+ */
+function getToolIcon(toolName: string): IconComponent {
+    return TOOL_ICONS[toolName] ?? PuzzleIcon;
+}
 
 interface ToolCallPartViewProps {
     part: ToolCallPart;
@@ -49,12 +98,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
         if (isExpanded) return ArrowDownIcon;
         if (isHovered && hasResult) return ArrowRightIcon;
         
-        // Tool-specific icons
-        const toolName = part.tool_name.toLowerCase();
-        if (toolName.includes('search')) return SearchIcon;
-        if (toolName.includes('read') || toolName.includes('view')) return ViewIcon;
-        
-        return PuzzleIcon;
+        return getToolIcon(part.tool_name);
     };
 
     const isButtonDisabled = isInProgress || (hasError && !hasResult);
