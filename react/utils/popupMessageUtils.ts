@@ -28,10 +28,12 @@ export const addPopupMessageAtom = atom(
         };
         // Add to the beginning to show on top
         set(popupMessagesAtom, (prevMessages) => {
+            // Keep IDs unique so UI keys stay stable
+            const withoutDuplicate = prevMessages.filter((msg) => msg.id !== id);
             // if (prevMessages.length > 0 && prevMessages.some((msg) => msg.text === messageWithDefaults.text && msg.title === messageWithDefaults.title)) {
             //     return prevMessages;
             // }
-            return [messageWithDefaults, ...prevMessages];
+            return [messageWithDefaults, ...withoutDuplicate];
         });
     }
 );
