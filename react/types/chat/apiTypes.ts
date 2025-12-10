@@ -1,7 +1,7 @@
 import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 import { CitationMetadata } from "../citations";
-import { ExternalReference } from "../externalReferences";
+import { SearchExternalReferencesResult } from "../../agents/toolResultTypes";
 
 export interface ThreadModel {
     id: string;
@@ -9,19 +9,6 @@ export interface ThreadModel {
     name?: string;
     created_at: string;
     updated_at: string;
-}
-
-export interface ExternalReferenceResult extends ExternalReference {
-    rank?: number;
-    similarity?: number;
-}
-
-export interface SearchExternalReferencesResult {
-    tool_name: "search_external_references";
-    total_available: number;
-    returned_count: number;
-    references: ExternalReferenceResult[];
-    params: any;
 }
 
 export interface ToolFunction {
@@ -36,6 +23,7 @@ export interface ToolCallResponse {
     metadata?: Record<string, any>;
 }
 
+export { SearchExternalReferencesResult, ExternalReferenceResult } from "../../agents/toolResultTypes";
 export type ToolResultUnion = SearchExternalReferencesResult;
 
 export interface ToolCall {

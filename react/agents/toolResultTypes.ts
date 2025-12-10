@@ -3,6 +3,8 @@
  * These match the backend pydantic models but may be "dehydrated" versions.
  */
 
+import { ExternalReference } from "../types/externalReferences";
+
 // ============================================================================
 // Item Search Results (search_references_by_topic, search_references_by_metadata)
 // ============================================================================
@@ -76,6 +78,24 @@ export interface FulltextRetrievalResult {
     chunks: ChunkResultDehydrated[];
     params?: Record<string, unknown>;
 }
+
+// ============================================================================
+// Search External References Results
+// ============================================================================
+
+export interface ExternalReferenceResult extends ExternalReference {
+    rank?: number;
+    similarity?: number;
+}
+
+export interface SearchExternalReferencesResult {
+    tool_name: "search_external_references";
+    total_available: number;
+    returned_count: number;
+    references: ExternalReferenceResult[];
+    params: any;
+}
+
 
 // ============================================================================
 // Type Guards
