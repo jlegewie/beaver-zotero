@@ -216,12 +216,6 @@ export const loadThreadAtom = atom(
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
             
             if (runs.length > 0) {
-                // Set agent runs
-                set(threadRunsAtom, runs);
-                
-                // Set agent actions
-                set(threadAgentActionsAtom, agent_actions || []);
-                
                 // Extract citations from runs
                 const citationMetadata = runs.flatMap(run => 
                     (run.metadata?.citations || []).map(citation => ({
@@ -292,6 +286,12 @@ export const loadThreadAtom = atom(
                 // Update citation state
                 set(citationMetadataAtom, citationMetadata);
                 await set(updateCitationDataAtom);
+
+                // Set agent runs
+                set(threadRunsAtom, runs);
+                
+                // Set agent actions
+                set(threadAgentActionsAtom, agent_actions || []);
 
                 // Validate agent actions and undo if not valid
                 if (agent_actions && agent_actions.length > 0) {
