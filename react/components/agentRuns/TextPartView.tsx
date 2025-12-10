@@ -20,7 +20,7 @@ export const TextPartView: React.FC<TextPartViewProps> = ({ part, runId }) => {
 
     return (
         <MarkdownRenderer 
-            className="markdown" 
+            className="markdown mt-3"
             content={part.content}
             runId={runId}
         />

@@ -84,7 +84,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
 
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
-                <div className="display-flex flex-col py-1 gap-3 mt-1">
+                <div className="display-flex flex-col py-1 gap-3">
                     {toolCallParts.map((part, index) => (
                         part.part_kind === 'tool-call' && (
                             <ToolCallPartView
