@@ -1,4 +1,4 @@
-import { CreateItemProposedAction, CreateItemResultData } from '../types/proposedActions/items';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/proposedActions/items';
 import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
 
@@ -274,8 +274,12 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     return item;
 }
 
-export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
-    const itemData = action.proposed_data.item;
+/**
+ * Creates a Zotero item from CreateItemProposedData with full post-processing.
+ * Handles extra fields, collections, tags, and attachments.
+ */
+export async function applyCreateItemData(proposedData: CreateItemProposedData): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
     const libraryId = Zotero.Libraries.userLibraryID;
 
     // Create or Import the item
@@ -299,8 +303,8 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
         }
     }
 
-    if (action.proposed_data.reason) {
-        extraLines.push(`Beaver Reason: ${action.proposed_data.reason}`);
+    if (proposedData.reason) {
+        extraLines.push(`Beaver Reason: ${proposedData.reason}`);
     }
 
     if (extraLines.length > 0) {
@@ -310,9 +314,9 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     }
 
     // Collections
-    if (action.proposed_data.collection_keys && action.proposed_data.collection_keys.length > 0) {
+    if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
         const collectionIds: number[] = [];
-        for (const key of action.proposed_data.collection_keys) {
+        for (const key of proposedData.collection_keys) {
              const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
              if (collection) collectionIds.push(collection.id);
         }
@@ -324,8 +328,8 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     }
     
     // Tags
-    if (action.proposed_data.suggested_tags) {
-        for (const tag of action.proposed_data.suggested_tags) {
+    if (proposedData.suggested_tags) {
+        for (const tag of proposedData.suggested_tags) {
             item.addTag(tag);
         }
         await item.saveTx();
@@ -336,10 +340,10 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     const attachments = await item.getAttachments();
     let attachmentKeys = '';
     
-    if ((!attachments || attachments.length === 0) && action.proposed_data.file_available) {
-         const url = itemData.open_access_url || action.proposed_data.downloaded_url || itemData.url;
+    if ((!attachments || attachments.length === 0) && proposedData.file_available) {
+         const url = itemData.open_access_url || proposedData.downloaded_url || itemData.url;
          if (url) {
-             logger(`applyCreateItem: Attaching file from ${url} (post-creation)`, 2);
+             logger(`applyCreateItemData: Attaching file from ${url} (post-creation)`, 2);
              await attachPdfFromUrl(item, url);
          }
     }
@@ -358,6 +362,13 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
         zotero_key: item.key,
         attachment_keys: attachmentKeys
     };
+}
+
+/**
+ * @deprecated Use applyCreateItemData instead
+ */
+export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
+    return applyCreateItemData(action.proposed_data);
 }
 
 export async function deleteAddedItem(action: CreateItemProposedAction): Promise<void> {

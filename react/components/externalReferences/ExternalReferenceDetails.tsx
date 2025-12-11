@@ -1,11 +1,10 @@
 import React from 'react';
 import { ExternalReference } from '../../types/externalReferences';
-import { ExternalReferenceResult } from '../../types/chat/apiTypes';
 import { formatAuthors } from './utils';
 import ActionButtons from './actionButtons';
 
 interface ExternalReferenceDetailsProps {
-    item: ExternalReference | ExternalReferenceResult;
+    item: ExternalReference;
 }
 
 const ExternalReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ item }) => {

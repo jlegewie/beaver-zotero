@@ -12,7 +12,7 @@ import {
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
-import { createZoteroItem } from '../../utils/addItemActions';
+import { applyCreateItemData } from '../../utils/addItemActions';
 import { ensureItemSynced, ensureItemsSynced } from '../../../src/utils/sync';
 import { logger } from '../../../src/utils/logger';
 import {
@@ -227,14 +227,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
 
         try {
-            // Create the item in Zotero
-            const item = await createZoteroItem(action.proposed_data.item);
-            const libraryId = Zotero.Libraries.userLibraryID;
-
-            const result: CreateItemResultData = {
-                library_id: libraryId,
-                zotero_key: item.key,
-            };
+            // Create the item in Zotero with full post-processing
+            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
 
@@ -285,13 +279,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             const applyResults: (AckActionLink | null)[] = await Promise.all(
                 actionsToApply.map(async (action) => {
                     try {
-                        const item = await createZoteroItem(action.proposed_data.item);
-                        const libraryId = Zotero.Libraries.userLibraryID;
-
-                        const result: CreateItemResultData = {
-                            library_id: libraryId,
-                            zotero_key: item.key,
-                        };
+                        // Create the item in Zotero with full post-processing
+                        const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
                         
                         // Update external reference cache
                         if (action.proposed_data.item.source_id) {

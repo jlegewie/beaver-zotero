@@ -1,5 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { ToolCall } from '../../types/chat/apiTypes';
+import { ExternalReference } from '../../types/externalReferences';
 import {
     GlobalSearchIcon,
     ArrowDownIcon,
@@ -11,6 +12,7 @@ import {
 import Button from '../ui/Button';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
+import { extractExternalSearchData, isExternalSearchResult } from '../../agents/toolResultTypes';
 
 interface SearchExternalReferencesToolDisplayProps {
     toolCall: ToolCall;
@@ -23,8 +25,20 @@ const SearchExternalReferencesToolDisplay: React.FC<SearchExternalReferencesTool
     const [isButtonHovered, setIsButtonHovered] = useState(false);
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
-    const references = toolCall?.result?.references ?? [];
-    const totalCount = toolCall?.result?.returned_count ?? references.length;
+    // Extract references using the shared extraction logic
+    const references: ExternalReference[] = useMemo(() => {
+        const toolName = toolCall.function?.name;
+        const content = toolCall.result;
+        const metadata = toolCall.response?.metadata;
+        
+        if (toolName && isExternalSearchResult(toolName, content, metadata)) {
+            const data = extractExternalSearchData(content, metadata);
+            return data?.references ?? [];
+        }
+        return [];
+    }, [toolCall]);
+    
+    const totalCount = references.length;
     const hasReferences = totalCount > 0;
     
     const toggleResults = useCallback(() => {

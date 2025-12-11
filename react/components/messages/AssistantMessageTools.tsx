@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChatMessage } from '../../types/chat/uiTypes';
-import { SearchExternalReferencesResult, ToolCall } from '../../types/chat/apiTypes';
+import { ToolCall } from '../../types/chat/apiTypes';
 import { isAnnotationTool } from '../../types/proposedActions/base';
 import { isCreateZoteroItemTool, isSearchExternalReferencesTool } from '../../types/proposedActions/items';
 import AnnotationToolDisplay from './AnnotationToolDisplay';

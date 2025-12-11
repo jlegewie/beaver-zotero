@@ -1,11 +1,10 @@
 import React, { useCallback } from 'react';
 import { ExternalReference } from '../../types/externalReferences';
-import { ExternalReferenceResult } from '../../types/chat/apiTypes';
 import ActionButtons from './actionButtons';
 import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
 
 interface ExternalReferenceItemPListrops {
-    item: ExternalReference | ExternalReferenceResult;
+    item: ExternalReference;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;

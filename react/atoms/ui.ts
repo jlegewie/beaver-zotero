@@ -2,7 +2,6 @@ import { atom } from 'jotai';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
-import { ExternalReferenceResult } from '../types/chat/apiTypes';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -20,7 +19,7 @@ export const isSkippedFilesDialogVisibleAtom = atom(false);
 
 // External Reference Details Dialog
 export const isExternalReferenceDetailsDialogVisibleAtom = atom(false);
-export const selectedExternalReferenceAtom = atom<ExternalReference | ExternalReferenceResult | null>(null);
+export const selectedExternalReferenceAtom = atom<ExternalReference | null>(null);
 
 // Active dialog
 export type DialogType = 'errorReport' | 'skippedFiles' | 'externalReferenceDetails' | null;

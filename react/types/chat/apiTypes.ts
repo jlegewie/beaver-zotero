@@ -1,7 +1,6 @@
 import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
 import { MessageAttachment, ReaderState, SourceAttachment } from "../attachments/apiTypes";
 import { CitationMetadata } from "../citations";
-import { SearchExternalReferencesResult } from "../../agents/toolResultTypes";
 
 export interface ThreadModel {
     id: string;

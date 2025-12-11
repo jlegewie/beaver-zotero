@@ -13,7 +13,6 @@ import {
     selectedExternalReferenceAtom 
 } from '../../atoms/ui';
 import Button from '../ui/Button';
-import { ExternalReferenceResult } from '../../types/chat/apiTypes';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
@@ -36,7 +35,7 @@ export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
 interface ActionButtonsProps {
-    item: ExternalReference | ExternalReferenceResult;
+    item: ExternalReference;
     /** Button variant */
     buttonVariant?: ButtonVariant;
     /** Button size */
