@@ -3,7 +3,8 @@ import { ToolCallPart, ToolReturnPart } from '../../agents/types';
 import { 
     isItemSearchResult,
     extractItemSearchData,
-    isFulltextSearchResult, 
+    isFulltextSearchResult,
+    extractFulltextSearchData,
     isFulltextRetrievalResult,
     isSearchExternalReferencesResult
 } from '../../agents/toolResultTypes';
@@ -35,8 +36,12 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    if (isFulltextSearchResult(content)) {
-        return <FulltextSearchResultView result={content} />;
+    // Fulltext search results (search_fulltext, search_fulltext_keywords, read_passages)
+    if (isFulltextSearchResult(toolName, content, metadata)) {
+        const data = extractFulltextSearchData(content, metadata);
+        if (data) {
+            return <FulltextSearchResultView attachments={data.attachments} />;
+        }
     }
 
     if (isFulltextRetrievalResult(content)) {
