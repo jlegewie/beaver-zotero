@@ -3,8 +3,10 @@
  * These match the backend pydantic models but may be "dehydrated" versions.
  * 
  * Two data sources:
- * - `content`: Full tool result with item_id in format '<library_id>-<zotero_key>'
- * - `metadata.storage`: Dehydrated version with library_id and zotero_key as separate fields
+ * - `content`: Full tool result from LLM response
+ * - `metadata.storage`: Dehydrated version for frontend rendering
+ * 
+ * Both use the same item_id format: '<library_id>-<zotero_key>'
  */
 
 import { ExternalReference } from "../types/externalReferences";
@@ -15,9 +17,9 @@ import { ZoteroItemReference, createZoteroItemReference } from "../types/zotero"
 // ============================================================================
 
 /**
- * Item result from content (requires parsing item_id).
+ * Item result with item_id in format '<library_id>-<zotero_key>'.
  */
-export interface ItemResultFromContent {
+export interface ItemResultDehydrated {
     /** Unique Zotero identifier in the form '<library_id>-<zotero_key>' */
     item_id: string;
     /** Rank assigned by the search algorithm (lower is better) */
@@ -25,19 +27,6 @@ export interface ItemResultFromContent {
     /** Similarity score from semantic search */
     similarity?: number;
 }
-
-/**
- * Item result from storage (already has library_id and zotero_key).
- */
-export interface ItemResultFromStorage {
-    library_id: number;
-    zotero_key: string;
-    rank?: number;
-    similarity?: number;
-}
-
-/** Union type for item results from either source */
-export type ItemResultDehydrated = ItemResultFromContent | ItemResultFromStorage;
 
 /**
  * Dehydrated attachment result from the backend.
@@ -57,26 +46,6 @@ export interface ChunkResultDehydrated {
     attachment_id: string;
     /** Page number of the chunk */
     page?: number;
-}
-
-/**
- * Result from search_references_by_topic and search_references_by_metadata tools.
- * This is the content format (from LLM response).
- */
-export interface ItemSearchResult {
-    tool_name: "search_references_by_topic" | "search_references_by_metadata";
-    total_items: number;
-    items: ItemResultFromContent[];
-    params?: Record<string, unknown>;
-}
-
-/**
- * Storage format for item search results (from metadata.storage).
- * Items have library_id and zotero_key directly.
- */
-export interface ItemSearchResultStorage {
-    total_items: number;
-    items: ItemResultFromStorage[];
 }
 
 // ============================================================================
@@ -139,21 +108,12 @@ const ITEM_SEARCH_TOOL_NAMES = [
 ] as const;
 
 /**
- * Type guard to check if an item has the storage format (library_id + zotero_key).
+ * Check if an item has a valid item_id that can be parsed.
  */
-function isItemResultFromStorage(item: unknown): item is ItemResultFromStorage {
+function hasValidItemId(item: unknown): boolean {
     if (!item || typeof item !== 'object') return false;
     const obj = item as Record<string, unknown>;
-    return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
-}
-
-/**
- * Type guard to check if an item has the content format (item_id).
- */
-function isItemResultFromContent(item: unknown): item is ItemResultFromContent {
-    if (!item || typeof item !== 'object') return false;
-    const obj = item as Record<string, unknown>;
-    return typeof obj.item_id === 'string';
+    return typeof obj.item_id === 'string' && createZoteroItemReference(obj.item_id) !== null;
 }
 
 /**
@@ -168,15 +128,12 @@ export function isItemSearchResult(
     if (!ITEM_SEARCH_TOOL_NAMES.includes(toolName as typeof ITEM_SEARCH_TOOL_NAMES[number])) {
         return false;
     }
-    
+
     // Try storage first, then content
     const source = (metadata?.storage || content) as Record<string, unknown> | undefined;
     if (!source || typeof source !== 'object') return false;
 
-    return (
-        Array.isArray(source.items) &&
-        source.items.every(item => isItemResultFromStorage(item) || isItemResultFromContent(item))
-    );
+    return Array.isArray(source.items) && source.items.every(hasValidItemId);
 }
 
 export function isFulltextSearchResult(content: unknown): content is FulltextSearchResult {
@@ -222,12 +179,11 @@ export function isSearchExternalReferencesResult(content: unknown): content is S
  */
 export interface ItemSearchViewData {
     items: ZoteroItemReference[];
-    totalItems: number;
 }
 
 /**
  * Extract normalized item references from either content or metadata.storage.
- * Prefers metadata.storage if available (already parsed), falls back to content.
+ * Prefers metadata.storage if available, falls back to content.
  * 
  * @param content - The content of the tool result
  * @param metadata - Optional metadata containing storage
@@ -237,34 +193,13 @@ export function extractItemSearchData(
     content: unknown,
     metadata?: Record<string, unknown>
 ): ItemSearchViewData | null {
-    // Try storage first (already has library_id and zotero_key)
-    const storage = metadata?.storage as ItemSearchResultStorage | undefined;
-    if (storage && Array.isArray(storage.items)) {
-        const items: ZoteroItemReference[] = storage.items
-            .filter(isItemResultFromStorage)
-            .map(item => ({
-                library_id: item.library_id,
-                zotero_key: item.zotero_key
-            }));
-        
-        return {
-            items,
-            totalItems: storage.total_items ?? items.length
-        };
-    }
+    // Prefer storage, fall back to content
+    const source = (metadata?.storage || content) as { items?: ItemResultDehydrated[] } | undefined;
+    if (!source || !Array.isArray(source.items)) return null;
 
-    // Fall back to content (needs parsing)
-    const contentObj = content as ItemSearchResult | undefined;
-    if (contentObj && Array.isArray(contentObj.items)) {
-        const items: ZoteroItemReference[] = contentObj.items
-            .map(item => createZoteroItemReference(item.item_id))
-            .filter((ref): ref is ZoteroItemReference => ref !== null);
-        
-        return {
-            items,
-            totalItems: contentObj.total_items ?? items.length
-        };
-    }
+    const items = source.items
+        .map(item => createZoteroItemReference(item.item_id))
+        .filter((ref): ref is ZoteroItemReference => ref !== null);
 
-    return null;
+    return { items };
 }

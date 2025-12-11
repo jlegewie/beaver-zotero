@@ -31,7 +31,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     if (isItemSearchResult(toolName, content, metadata)) {
         const data = extractItemSearchData(content, metadata);
         if (data) {
-            return <ItemSearchResultView data={data} />;
+            return <ItemSearchResultView items={data.items} />;
         }
     }
 
