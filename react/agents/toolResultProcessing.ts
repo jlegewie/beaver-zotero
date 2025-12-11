@@ -1,5 +1,5 @@
 import { Setter } from "jotai";
-import { addExternalReferencesToMappingAtom } from "../atoms/externalReferences";
+import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { extractExternalSearchData, isExternalSearchResult } from "./toolResultTypes";
 import { ToolReturnPart } from "./types";
@@ -27,6 +27,7 @@ export async function processToolReturnResults(
         if (externalReferences) {
             logger(`processToolReturnResults: Adding ${externalReferences.length} external references to mapping`, 1);
             set(addExternalReferencesToMappingAtom, externalReferences);
+            set(checkExternalReferencesAtom, externalReferences);
         }
     }
 

@@ -16,11 +16,10 @@ import { logger } from "../../src/utils/logger";
 import { resetMessageUIStateAtom, clearMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
-import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReferencesTool } from "../types/proposedActions/items";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
 import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
-import { AgentRun, ToolCallPart } from "../agents/types";
-import { extractExternalSearchData, isExternalSearchResult } from "../agents/toolResultTypes";
+import { AgentRun } from "../agents/types";
+import { processToolReturnResults } from "../agents/toolResultProcessing";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -225,28 +224,16 @@ export const loadThreadAtom = atom(
                     }))
                 );
                 
-                // Extract external references from tool calls
+                // Process tool return results
                 const externalReferences: ExternalReference[] = [];
                 for (const run of runs) {
                     for (const message of run.model_messages) {
                         if (message.kind === 'request') {
                             for (const part of message.parts) {
-                                // Check for external references and populate cache
-                                if (part.part_kind === "tool-return" && isExternalSearchResult(part.tool_name, part.content, part.metadata)) {
-                                    const externalReferences = extractExternalSearchData(part.content, part.metadata)?.references;
-                                    if (externalReferences) {
-                                        set(addExternalReferencesToMappingAtom, externalReferences);
-                                    }
-                                }
+                                if (part.part_kind === "tool-return") await processToolReturnResults(part, set);
                             }
                         }
                     }
-                }
-                
-                if (externalReferences.length > 0) {
-                    logger(`loadThreadAtom: Adding ${externalReferences.length} external references to mapping`, 1);
-                    set(addExternalReferencesToMappingAtom, externalReferences);
-                    set(checkExternalReferencesAtom, externalReferences);
                 }
                 
                 // Load item data for citations and attachments
