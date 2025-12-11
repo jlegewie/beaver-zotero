@@ -137,7 +137,7 @@ function parseContentIntoSegments(content: string): Segment[] {
 /**
  * Construct a raw citation tag string from attributes (excluding cid which is injected)
  * This is used to match against the raw_tag from citation metadata.
- * The output will be normalized during lookup, so exact spacing doesn't matter.
+ * The output uses `>` (not `/>`) as the canonical form for normalization.
  */
 function constructCitationRawTag(attributesStr: string): string {
     // Parse attributes and filter out 'cid' (injected by backend)
@@ -149,7 +149,8 @@ function constructCitationRawTag(attributesStr: string): string {
             attrs.push(`${attrMatch[1]}="${attrMatch[2]}"`);
         }
     }
-    return attrs.length > 0 ? `<citation ${attrs.join(' ')}/>` : '<citation/>';
+    // Use `>` as canonical form (normalizeRawTag converts /> to >)
+    return attrs.length > 0 ? `<citation ${attrs.join(' ')}>` : '<citation>';
 }
 
 /**
@@ -162,8 +163,12 @@ function preprocessCitations(content: string, lastCitationIdRef: { value: string
     // Track end index locally within this segment for adjacency detection
     let lastCitationEndIndex = -1;
     
+    // Match citation tags in all formats:
+    // - Self-closing: <citation .../>
+    // - Opening only (missing /): <citation ...>
+    // - Full pair: <citation ...></citation>
     return content.replace(
-        /<citation\s+((?:[^>])+?)\s*\/>/g,
+        /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/citation>)?)/g,
         (match, attributesStr, offset, fullString) => {
             // Extract the ID from attributes
             const idMatch = attributesStr.match(/id="([^"]+)"/);
@@ -231,8 +236,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             }
         }
 
-        // Clean up backticks around complete citations
-        processed = processed.replace(/`(<citation[^>]*\/>)`/g, '$1');
+        // Clean up backticks around complete citations (handles both /> and > endings)
+        processed = processed.replace(/`(<citation[^>]*\/?>)`/g, '$1');
 
         // Filter out other partial tags
         const partialTagPatterns = [

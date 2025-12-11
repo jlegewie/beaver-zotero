@@ -12,8 +12,8 @@ import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
 
-// Regex for citation syntax
-const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
+// Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
+const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
 const attributeRegex = /(\w+)\s*=\s*"([^"]*)"/g;
 
 /**
@@ -48,8 +48,8 @@ function parseId(id: string): { libraryID: number; itemKey: string } {
  * @returns Processed markdown with note tags replaced by headers/lines
  */
 export function preprocessNoteContent(text: string): string {
-    // Clean up backticks around complete citations
-    text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
+    // Clean up backticks around complete citations (handles both /> and > endings)
+    text = text.replace(/`(<citation[^>]*\/?>)`/g, '$1');
 
     // Remove note tags (keep content), add title as markdown header if present
     return text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {

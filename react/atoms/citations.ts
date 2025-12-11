@@ -20,12 +20,13 @@ export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>(
 
 /**
  * Normalize a raw tag string for consistent matching.
- * Removes extra whitespace to ensure tags with different formatting match.
+ * Removes extra whitespace and normalizes self-closing syntax to ensure
+ * tags with different formatting match (e.g., `<citation .../>` and `<citation ...>`)
  */
 export function normalizeRawTag(rawTag: string): string {
     return rawTag
         .replace(/\s+/g, ' ')     // Collapse multiple spaces to single space
-        .replace(/\s*\/>/g, '/>') // Remove space before />
+        .replace(/\s*\/>/g, '>')  // Normalize self-closing /> to > (canonical form)
         .replace(/\s*>/g, '>')    // Remove space before >
         .replace(/<\s*/g, '<')    // Remove space after <
         .trim();
