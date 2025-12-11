@@ -233,21 +233,21 @@ export function extractItemSearchData(
 }
 
 /**
- * Attachment reference with associated page numbers from chunks.
+ * Chunk reference with ZoteroItemReference and optional page.
  */
-export interface AttachmentWithPages extends ZoteroItemReference {
-    pages: number[];
+export interface ChunkReference extends ZoteroItemReference {
+    page?: number;
 }
 
 /**
- * Normalized fulltext search data ready for rendering.
+ * Normalized fulltext search data at chunk level.
  */
 export interface FulltextSearchViewData {
-    attachments: AttachmentWithPages[];
+    chunks: ChunkReference[];
 }
 
 /**
- * Extract unique attachments with page numbers from fulltext search chunks.
+ * Extract chunk-level data from fulltext search results.
  * Prefers metadata.storage if available, falls back to content.
  */
 export function extractFulltextSearchData(
@@ -257,28 +257,13 @@ export function extractFulltextSearchData(
     const source = (metadata?.storage || content) as { chunks?: ChunkResultDehydrated[] } | undefined;
     if (!source || !Array.isArray(source.chunks)) return null;
 
-    // Group chunks by attachment_id, collecting unique pages
-    const attachmentMap = new Map<string, Set<number>>();
+    const chunks: ChunkReference[] = [];
     for (const chunk of source.chunks) {
-        if (!attachmentMap.has(chunk.attachment_id)) {
-            attachmentMap.set(chunk.attachment_id, new Set());
-        }
-        if (chunk.page != null) {
-            attachmentMap.get(chunk.attachment_id)!.add(chunk.page);
-        }
-    }
-
-    // Convert to AttachmentWithPages[], filtering invalid references
-    const attachments: AttachmentWithPages[] = [];
-    for (const [attachment_id, pageSet] of attachmentMap) {
-        const ref = createZoteroItemReference(attachment_id);
+        const ref = createZoteroItemReference(chunk.attachment_id);
         if (ref) {
-            attachments.push({
-                ...ref,
-                pages: Array.from(pageSet).sort((a, b) => a - b)
-            });
+            chunks.push({ ...ref, page: chunk.page });
         }
     }
 
-    return { attachments };
+    return { chunks };
 }

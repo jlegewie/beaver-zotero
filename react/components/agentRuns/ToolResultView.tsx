@@ -36,11 +36,11 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Fulltext search results (search_fulltext, search_fulltext_keywords, read_passages)
+    // Fulltext search results (search_fulltext, search_fulltext_keywords, etc.)
     if (isFulltextSearchResult(toolName, content, metadata)) {
         const data = extractFulltextSearchData(content, metadata);
         if (data) {
-            return <FulltextSearchResultView attachments={data.attachments} />;
+            return <FulltextSearchResultView chunks={data.chunks} />;
         }
     }
 
