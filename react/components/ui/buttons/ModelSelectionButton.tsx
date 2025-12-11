@@ -77,7 +77,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
         }
 
-        included_models.sort((a, b) => Number(b.is_default) - Number(a.is_default)).forEach((model) => {
+        included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
             items.push({
                 label: model.name,
                 onClick: () => {
@@ -124,7 +124,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 onClick: () => {},
             });
 
-            byok_models.forEach((model) => {
+            byok_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
                 items.push({
                     label: model.name,
                     onClick: () => {
@@ -148,7 +148,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 onClick: () => {},
             });
 
-            byok_models_agent.forEach((model) => {
+            byok_models_agent.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
                 items.push({
                     label: model.name,
                     onClick: () => {
