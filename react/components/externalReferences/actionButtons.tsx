@@ -28,6 +28,11 @@ import { ButtonVariant } from '../ui/Button';
 import { createZoteroItem } from '../../utils/addItemActions';
 import { logger } from '../../../src/utils/logger';
 import { ensureItemSynced } from '../../../src/utils/sync';
+import { 
+    getPendingCreateItemActionBySourceIdAtom,
+    ackAgentActionsAtom,
+} from '../../agents/agentActions';
+import { CreateItemResultData } from '../../types/proposedActions/items';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
@@ -71,6 +76,8 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
+    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
@@ -104,6 +111,22 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             // Update cache
             if (item.source_id) {
                 markExternalReferenceImported(item.source_id, newZoteroRef);
+                
+                // Check for matching pending agent action and acknowledge it
+                const matchingAction = getPendingCreateItemAction(item.source_id);
+                if (matchingAction) {
+                    logger(`ActionButtons: Found matching agent action ${matchingAction.id}, acknowledging`, 1);
+                    const resultData: CreateItemResultData = {
+                        library_id: libraryId,
+                        zotero_key: newItem.key
+                    };
+                    ackAgentActions(matchingAction.run_id, [{
+                        action_id: matchingAction.id,
+                        result_data: resultData
+                    }]).catch(err => {
+                        logger(`ActionButtons: Failed to acknowledge agent action: ${err}`, 2);
+                    });
+                }
             }
             
             // Sync the newly created item to backend immediately
@@ -134,7 +157,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, markExternalReferenceImported]);
+    }, [item, isImporting, isLoading, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
     
     // Check cache and validate on mount
     useEffect(() => {

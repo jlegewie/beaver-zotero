@@ -509,6 +509,22 @@ export const undoAgentActionAtom = atom(
 );
 
 /**
+ * Find a pending create_item agent action by source_id
+ * Used to sync imports from ExternalReferencesSearchResultView with agent actions
+ */
+export const getPendingCreateItemActionBySourceIdAtom = atom(
+    (get) => (sourceId: string): CreateItemAgentAction | null => {
+        const actions = get(threadAgentActionsAtom);
+        return actions.find(
+            (action): action is CreateItemAgentAction =>
+                isCreateItemAgentAction(action) &&
+                (action.status === 'pending' || action.status === 'undone' || action.status === 'error' || action.status === 'rejected') &&
+                action.proposed_data.item.source_id === sourceId
+        ) ?? null;
+    }
+);
+
+/**
  * Clear all agent actions (e.g., when switching threads)
  */
 export const clearAgentActionsAtom = atom(
