@@ -11,6 +11,7 @@
 
 import { ExternalReference } from "../types/externalReferences";
 import { ZoteroItemReference, createZoteroItemReference } from "../types/zotero";
+import { ToolReturnPart } from "./types";
 
 // ============================================================================
 // Item Search Results (search_references_by_topic, search_references_by_metadata)
@@ -431,4 +432,38 @@ export function extractExternalSearchData(
     });
 
     return { references };
+}
+
+// ============================================================================
+// Unified Extraction
+// ============================================================================
+
+/**
+ * Extract ZoteroItemReference list from a tool-return part.
+ * Supports item search, fulltext search, and fulltext retrieval results.
+ * @param part Tool return part to extract references from
+ * @returns Array of ZoteroItemReference, or empty array if not a supported tool result type
+ */
+export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReference[] {
+    const { tool_name, content, metadata } = part;
+
+    // Item search results
+    if (isItemSearchResult(tool_name, content, metadata)) {
+        const data = extractItemSearchData(content, metadata);
+        return data?.items ?? [];
+    }
+
+    // Fulltext search results (chunks)
+    if (isFulltextSearchResult(tool_name, content, metadata)) {
+        const data = extractFulltextSearchData(content, metadata);
+        return data?.chunks ?? [];
+    }
+
+    // Fulltext retrieval results (single attachment)
+    if (isFulltextRetrievalResult(tool_name, content, metadata)) {
+        const data = extractFulltextRetrievalData(content, metadata);
+        return data?.attachment ? [data.attachment] : [];
+    }
+
+    return [];
 }
