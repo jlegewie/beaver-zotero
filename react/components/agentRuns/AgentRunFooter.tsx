@@ -17,6 +17,7 @@ import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMe
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
+import { extractToolResultCount } from '../../agents/toolResultTypes';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
 
@@ -115,11 +116,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
         
         const result = toolResultsMap.get(part.tool_call_id);
-        const count = result?.content?.attachments?.length || result?.content?.references?.length || 0;
+        const count = result && result.part_kind === 'tool-return' ? extractToolResultCount(result) : null;
         
         let details = `[${label}`;
         if (query) details += `: "${query}"`;
-        if (result) details += ` (${count} results)`;
+        if (result && count !== null) details += ` (${count} results)`;
         details += `]`;
         return details;
     };

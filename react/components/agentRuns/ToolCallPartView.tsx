@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
+import { extractToolResultCount } from '../../agents/toolResultTypes';
 import { ToolResultView } from './ToolResultView';
 import Button from '../ui/Button';
 import {
@@ -81,7 +82,17 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
-    const label = getToolCallLabel(part, status);
+    const baseLabel = getToolCallLabel(part, status);
+
+    const resultCount =
+        result && result.part_kind === 'tool-return'
+            ? extractToolResultCount(result)
+            : null;
+
+    const label =
+        status === 'completed' && resultCount !== null
+            ? `${baseLabel} (${resultCount} result${resultCount === 1 ? '' : 's'})`
+            : baseLabel;
 
     // Use global Jotai atom for visibility state (persists across re-renders and syncs between panes)
     const visibilityKey = `${runId}:${part.tool_call_id}`;
