@@ -20,6 +20,7 @@ import {
     WSWarningEvent,
     WSCitationEvent,
     WSAgentActionEvent,
+    WSToolCallProgressEvent,
 } from '../../src/services/agentService';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
@@ -46,6 +47,7 @@ import {
     updateRunWithPart,
     updateRunWithToolReturn,
     updateRunComplete,
+    updateRunWithToolCallProgress,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
 import { citationMetadataAtom, updateCitationDataAtom } from './citations';
@@ -306,6 +308,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             // Update run with tool return
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
+        },
+
+        onToolCallProgress: (event: WSToolCallProgressEvent) => {
+            logger(`WS onToolCallProgress: ${event.run_id} - ${event.tool_call_id} - ${event.progress}`, 1);
+            set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
         },
 
         onRunComplete: (event: WSRunCompleteEvent) => {
