@@ -65,6 +65,7 @@ export interface ToolReturnPart {
     tool_name: string;
     content: any;
     tool_call_id: string;
+    metadata?: Record<string, any>;
 }
 
 export interface RetryPromptPart{

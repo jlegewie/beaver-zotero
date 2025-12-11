@@ -1,7 +1,8 @@
 import React from 'react';
-import { ToolReturnPart } from '../../agents/types';
+import { ToolCallPart, ToolReturnPart } from '../../agents/types';
 import { 
-    isItemSearchResult, 
+    isItemSearchResult,
+    extractItemSearchData,
     isFulltextSearchResult, 
     isFulltextRetrievalResult,
     isSearchExternalReferencesResult
@@ -12,6 +13,7 @@ import { FulltextRetrievalResultView } from './FulltextRetrievalResultView';
 import { ExternalReferencesSearchResultView } from './ExternalReferencesSearchResultView';
 
 interface ToolResultViewProps {
+    toolcall: ToolCallPart;
     result: ToolReturnPart;
 }
 
@@ -20,12 +22,17 @@ interface ToolResultViewProps {
  * Dispatches to specialized renderers based on the result type,
  * with a fallback to generic JSON/markdown rendering.
  */
-export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
+export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result }) => {
+    const toolName = toolcall.tool_name;
     const content = result.content;
+    const metadata = result.metadata;
 
-    // Dispatch to specialized renderers based on result type
-    if (isItemSearchResult(content)) {
-        return <ItemSearchResultView result={content} />;
+    // Item search results (search_references_by_topic, search_references_by_metadata)
+    if (isItemSearchResult(toolName, content, metadata)) {
+        const data = extractItemSearchData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView data={data} />;
+        }
     }
 
     if (isFulltextSearchResult(content)) {

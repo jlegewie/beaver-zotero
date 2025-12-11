@@ -145,7 +145,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
 
             {/* Expanded result view */}
             {hasExpandedResult && (
-                <ToolResultView result={result} />
+                <ToolResultView toolcall={part} result={result} />
             )}
         </div>
     );
