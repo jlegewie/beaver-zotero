@@ -233,8 +233,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                                 return itemRef && itemRef.library_id === libraryID && itemRef.zotero_key === key;
                                             });
                                         
+                                        // If item was created by an agent action, mark those actions as undone
                                         if (matchingAgentActions.length > 0) {
-                                            logger(`useZoteroSync: Skipping delete event for agent action(s), marking as undone: ${matchingAgentActions.map(a => a.id).join(', ')}`, 3);
+                                            logger(`useZoteroSync: Marking agent action(s) as undone: ${matchingAgentActions.map(a => a.id).join(', ')}`, 3);
                                             matchingAgentActions.forEach(action => {
                                                 store.set(undoAgentActionAtom, action.id);
                                                 
@@ -247,10 +248,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                                     }
                                                 }
                                             });
-                                            // Return early to avoid queueing for backend deletion
-                                            return;
                                         }
-                                        // Queue for backend deletion
+                                        
+                                        // Queue for backend deletion (item may have been synced before deletion)
                                         eventsRef.current.delete.set(id, { libraryID, key });
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);
