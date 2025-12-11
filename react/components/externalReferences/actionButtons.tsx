@@ -33,6 +33,8 @@ import { ensureItemSynced } from '../../../src/utils/sync';
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
 
+const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
+
 interface ActionButtonsProps {
     item: ExternalReference | ExternalReferenceResult;
     /** Button variant */
@@ -305,8 +307,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             )}
             
             {/* Citation count */}
-            {showCitationCount && (
-                <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+            {showCitationCount && item.citation_count !== undefined && item.citation_count > 0 && (
+                <a
+                    onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
+                    className="text-link-muted text-sm"
+                >
+                    Cited by {item.citation_count.toLocaleString()}
+                </a>
+            )}
+            {showCitationCount && item.citation_count !== undefined && item.citation_count === 0 && (
+                <div className="font-color-tertiary text-sm">
+                    Cited by {item.citation_count.toLocaleString()}
+                </div>
             )}
             <div className="flex-1"/>
 
