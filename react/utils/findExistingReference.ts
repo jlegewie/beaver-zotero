@@ -65,7 +65,11 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                 const rows = await Zotero.DB.queryAsync(sql, [libraryID, isbnFieldID, cleanISBN]);
                 
                 if (rows && rows.length) {
-                    return await Zotero.Items.getAsync(rows[0].itemID);
+                    const item = await Zotero.Items.getAsync(rows[0].itemID);
+                    if (item) {
+                        await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
+                    }
+                    return item;
                 }
             }
         }
@@ -86,7 +90,11 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                 const rows = await Zotero.DB.queryAsync(sql, [libraryID, doiFieldID, cleanDOI]);
                 
                 if (rows && rows.length) {
-                    return await Zotero.Items.getAsync(rows[0].itemID);
+                    const item = await Zotero.Items.getAsync(rows[0].itemID);
+                    if (item) {
+                        await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
+                    }
+                    return item;
                 }
             }
         }
@@ -114,6 +122,11 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
     }
 
     const candidates: Zotero.Item[] = await Zotero.Items.getAsync(candidateIDs);
+    
+    // Load item data for candidates (needed for getField, getCreators, and getBestAttachment later)
+    if (candidates.length > 0) {
+        await Zotero.Items.loadDataTypes(candidates, ["itemData", "creators", "childItems"]);
+    }
     
     // Prepare our input data for comparison
     let inputYear: number | null = null;
