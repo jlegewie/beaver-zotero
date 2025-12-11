@@ -7,7 +7,8 @@ import {
     extractFulltextSearchData,
     isFulltextRetrievalResult,
     extractFulltextRetrievalData,
-    isSearchExternalReferencesResult
+    isExternalSearchResult,
+    extractExternalSearchData
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -53,8 +54,12 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    if (isSearchExternalReferencesResult(content)) {
-        return <ExternalReferencesSearchResultView result={content} />;
+    // External search results (external_search, search_external_references)
+    if (isExternalSearchResult(toolName, content, metadata)) {
+        const data = extractExternalSearchData(content, metadata);
+        if (data) {
+            return <ExternalReferencesSearchResultView references={data.references} />;
+        }
     }
 
     // Fallback: generic rendering for other result types

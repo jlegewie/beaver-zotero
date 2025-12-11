@@ -1,19 +1,19 @@
 import React, { useState } from 'react';
-import { SearchExternalReferencesResult } from '../../agents/toolResultTypes';
+import { ExternalReference } from '../../types/externalReferences';
 import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
 
 interface ExternalReferencesSearchResultViewProps {
-    result: SearchExternalReferencesResult;
+    references: ExternalReference[];
 }
 
 /**
- * Renders the result of an external references search tool (search_external_references).
+ * Renders the result of an external search tool (external_search, search_external_references).
  * Uses ExternalReferenceListItem to display the references.
  */
-export const ExternalReferencesSearchResultView: React.FC<ExternalReferencesSearchResultViewProps> = ({ result }) => {
+export const ExternalReferencesSearchResultView: React.FC<ExternalReferencesSearchResultViewProps> = ({ references }) => {
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
-    if (result.references.length === 0) {
+    if (references.length === 0) {
         return (
             <div className="p-3 text-sm font-color-tertiary">
                 No external references found
@@ -23,9 +23,9 @@ export const ExternalReferencesSearchResultView: React.FC<ExternalReferencesSear
 
     return (
         <div className="display-flex flex-col">
-            {result.references.map((item, index) => (
+            {references.map((item, index) => (
                 <ExternalReferenceListItem
-                    key={index}
+                    key={item.source_id ?? index}
                     item={item}
                     isHovered={hoveredItemIndex === index}
                     onMouseEnter={() => setHoveredItemIndex(index)}

@@ -55,23 +55,63 @@ export interface ChunkResultDehydrated {
 }
 
 // ============================================================================
-// Search External References Results
+// External Search Results
 // ============================================================================
 
-export interface ExternalReferenceResult extends ExternalReference {
+/**
+ * Reference result from content (ExternalReferenceResult from backend).
+ * Contains basic bibliographic fields and external_id for matching with supplement.
+ */
+export interface ExternalReferenceResultContent {
+    external_id: string;
+    already_in_library?: boolean;
+    title?: string;
+    authors?: string[];
+    year?: number;
+    journal?: string;
+    venue?: string;
+    abstract?: string;
+    publication_types?: string;
+    fields_of_study?: string[];
+    citation_count?: number;
     rank?: number;
-    similarity?: number;
 }
 
-export interface SearchExternalReferencesResult {
-    tool_name: "search_external_references";
-    total_available: number;
-    returned_count: number;
-    count_in_library: number;
-    count_not_in_library: number;
-    references: ExternalReferenceResult[];
-    params: Record<string, unknown>;
-    total_cost?: number;
+/**
+ * Supplement data from metadata.supplemental_data (ExternalReferenceResultSupplement from backend).
+ * Contains additional fields to complete the ExternalReference.
+ */
+export interface ExternalReferenceResultSupplement {
+    external_id?: string;
+    source: "semantic_scholar" | "openalex";
+    publication_date?: string;
+    publication_url?: string;
+    url?: string;
+    identifiers?: {
+        doi?: string;
+        isbn?: string;
+        issn?: string;
+        pmid?: string;
+        pmcid?: string;
+        arXivID?: string;
+        archiveID?: string;
+    };
+    is_open_access?: boolean;
+    open_access_url?: string;
+    reference_count?: number;
+    // Full versions of truncated fields
+    authors?: string[];
+    journal?: {
+        name?: string;
+        volume?: string;
+        issue?: string;
+        pages?: string;
+    };
+    library_items?: Array<{
+        library_id: number;
+        zotero_key: string;
+        item_id: string;
+    }>;
 }
 
 
@@ -185,15 +225,49 @@ export function isFulltextRetrievalResult(
     );
 }
 
-export function isSearchExternalReferencesResult(content: unknown): content is SearchExternalReferencesResult {
+/** Valid tool names for external search results */
+const EXTERNAL_SEARCH_TOOL_NAMES = [
+    'external_search',
+    'search_external_references'
+] as const;
+
+/**
+ * Check if a reference has a valid external_id.
+ */
+function hasExternalId(ref: unknown): boolean {
+    if (!ref || typeof ref !== 'object') return false;
+    const obj = ref as Record<string, unknown>;
+    return typeof obj.external_id === 'string';
+}
+
+/**
+ * Type guard for external search results.
+ * Checks content has references array with external_id, and optionally
+ * metadata.supplemental_data has array with external_id.
+ */
+export function isExternalSearchResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!EXTERNAL_SEARCH_TOOL_NAMES.includes(toolName as typeof EXTERNAL_SEARCH_TOOL_NAMES[number])) {
+        return false;
+    }
+
+    // Validate content has references array with external_id
     if (!content || typeof content !== 'object') return false;
-    const obj = content as Record<string, unknown>;
-    return (
-        obj.tool_name === 'search_external_references' &&
-        typeof obj.total_available === 'number' &&
-        typeof obj.returned_count === 'number' &&
-        Array.isArray(obj.references)
-    );
+    const contentObj = content as Record<string, unknown>;
+    if (!Array.isArray(contentObj.references)) return false;
+    if (!contentObj.references.every(hasExternalId)) return false;
+
+    // Validate supplemental_data if present (optional but must be valid if present)
+    if (metadata?.supplemental_data != null) {
+        if (!Array.isArray(metadata.supplemental_data)) return false;
+        // Each supplement should have external_id for matching
+        if (!metadata.supplemental_data.every(hasExternalId)) return false;
+    }
+
+    return true;
 }
 
 // ============================================================================
@@ -296,4 +370,65 @@ export function extractFulltextRetrievalData(
     }
 
     return { attachment: { ...ref, page: lowestPage } };
+}
+
+/**
+ * Normalized external search data ready for rendering.
+ */
+export interface ExternalSearchViewData {
+    references: ExternalReference[];
+}
+
+/**
+ * Extract and merge external references from content and metadata.supplemental_data.
+ * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement by external_id.
+ */
+export function extractExternalSearchData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ExternalSearchViewData | null {
+    const contentObj = content as { references?: ExternalReferenceResultContent[] } | undefined;
+    if (!contentObj || !Array.isArray(contentObj.references)) return null;
+
+    // Build lookup map from supplemental data
+    const supplementMap = new Map<string, ExternalReferenceResultSupplement>();
+    if (Array.isArray(metadata?.supplemental_data)) {
+        for (const supp of metadata.supplemental_data as ExternalReferenceResultSupplement[]) {
+            if (supp.external_id) {
+                supplementMap.set(supp.external_id, supp);
+            }
+        }
+    }
+
+    // Merge content references with supplements
+    const references: ExternalReference[] = contentObj.references.map(ref => {
+        const supp = supplementMap.get(ref.external_id);
+        
+        return {
+            // From content
+            source_id: ref.external_id,
+            title: ref.title,
+            authors: supp?.authors ?? ref.authors,
+            year: ref.year,
+            venue: ref.venue,
+            abstract: ref.abstract,
+            fields_of_study: ref.fields_of_study,
+            citation_count: ref.citation_count,
+            
+            // From supplement (or defaults)
+            source: supp?.source ?? "openalex",
+            id: supp?.external_id,
+            publication_date: supp?.publication_date,
+            publication_url: supp?.publication_url,
+            url: supp?.url,
+            identifiers: supp?.identifiers,
+            is_open_access: supp?.is_open_access,
+            open_access_url: supp?.open_access_url,
+            reference_count: supp?.reference_count,
+            journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
+            library_items: supp?.library_items ?? [],
+        };
+    });
+
+    return { references };
 }
