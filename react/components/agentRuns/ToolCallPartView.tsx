@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
@@ -19,6 +19,7 @@ import {
     PlusSignIcon,
     TextAlignLeftIcon,
 } from '../icons/icons';
+import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -67,19 +68,27 @@ function getToolIcon(toolName: string): IconComponent {
 
 interface ToolCallPartViewProps {
     part: ToolCallPart;
+    /** Run ID for global UI state management */
+    runId: string;
 }
 
 /**
  * Renders a tool call with its status and result.
  * Uses toolResultsMapAtom to look up the result for this tool call.
+ * Visibility state is managed globally via searchToolVisibilityAtom.
  */
-export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
+export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
     const label = getToolCallLabel(part, status);
 
-    const [isExpanded, setIsExpanded] = useState(false);
+    // Use global Jotai atom for visibility state (persists across re-renders and syncs between panes)
+    const visibilityKey = `${runId}:${part.tool_call_id}`;
+    const searchVisibility = useAtomValue(searchToolVisibilityAtom);
+    const toggleVisibility = useSetAtom(toggleSearchToolVisibilityAtom);
+    const isExpanded = searchVisibility[visibilityKey] ?? false;
+
     const [isHovered, setIsHovered] = useState(false);
 
     const isInProgress = status === 'in_progress';
@@ -88,7 +97,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
 
     const toggleExpanded = () => {
         if (hasResult) {
-            setIsExpanded(!isExpanded);
+            toggleVisibility(visibilityKey);
         }
     };
 
