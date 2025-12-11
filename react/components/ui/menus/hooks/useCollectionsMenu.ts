@@ -24,6 +24,16 @@ export const useCollectionsMenu = ({
     const [collections, setCollections] = useState<Zotero.Collection[]>([]);
     const [activeLibraryId, setActiveLibraryId] = useState<number | null>(null);
 
+    const getEffectiveLibraryId = (libraryId: number | null): number | null => {
+        if (libraryId && syncLibraryIds.includes(libraryId)) {
+            return libraryId;
+        }
+        if (syncLibraryIds.includes(1)) {
+            return 1;
+        }
+        return null;
+    };
+
     useEffect(() => {
         if (!isActive) {
             setCollections([]);
@@ -35,10 +45,11 @@ export const useCollectionsMenu = ({
         let isCancelled = false;
 
         const fetchCollections = async () => {
-            const libraryId = getActiveZoteroLibraryId();
+            const libraryIdActive = getActiveZoteroLibraryId();
+            const libraryId = getEffectiveLibraryId(libraryIdActive);
             setActiveLibraryId(libraryId);
 
-            if (!libraryId || !syncLibraryIds.includes(libraryId)) {
+            if (!libraryId) {
                 if (!isCancelled) {
                     setCollections([]);
                 }
