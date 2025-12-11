@@ -20,7 +20,7 @@ import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { revealSource } from '../../utils/sourceUtils';
 import { 
     checkExternalReferenceAtom, 
-    getCachedReferenceForObjectAtom,
+    externalReferenceItemMappingAtom,
     isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../atoms/externalReferences';
@@ -73,11 +73,17 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
     const checkReference = useSetAtom(checkExternalReferenceAtom);
-    const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
+    const externalReferenceCache = useAtomValue(externalReferenceItemMappingAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    
+    // Get cached reference directly from the cache for this item's source_id
+    const sourceId = item.source_id;
+    const cachedRef = sourceId && sourceId in externalReferenceCache 
+        ? externalReferenceCache[sourceId] 
+        : undefined;
     
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
@@ -159,27 +165,37 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         }
     }, [item, isImporting, isLoading, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
     
+    // React to cache changes (e.g., when item is deleted and cache is invalidated)
+    useEffect(() => {
+        if (cachedRef === undefined) {
+            // Not in cache yet - will be handled by the check effect below
+            return;
+        }
+        
+        // Cache was updated (either set to a value or cleared to null)
+        setItemExists(cachedRef !== null);
+        setZoteroItemRef(cachedRef);
+        
+        // Check for best attachment if item exists
+        if (cachedRef !== null) {
+            const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
+            if (zoteroItem && zoteroItem.isRegularItem()) {
+                zoteroItem.getBestAttachment().then(attachment => {
+                    setBestAttachment(attachment || null);
+                });
+            }
+        } else {
+            // Item was deleted, clear attachment
+            setBestAttachment(null);
+        }
+    }, [cachedRef]);
+
     // Check cache and validate on mount
     useEffect(() => {
-        const refId = item.source_id;
-        if (!refId) return;
+        if (!sourceId) return;
         
-        const cached = getCachedReference(item);
-        
-        // If we have cached data, use it
-        if (cached !== undefined) {
-            setItemExists(cached !== null);
-            setZoteroItemRef(cached);
-            
-            // Check for best attachment if item exists
-            if (cached !== null) {
-                const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
-                if (zoteroItem && zoteroItem.isRegularItem()) {
-                    zoteroItem.getBestAttachment().then(attachment => {
-                        setBestAttachment(attachment || null);
-                    });
-                }
-            }
+        // If we have cached data, the above effect handles it
+        if (cachedRef !== undefined) {
             return;
         }
         
@@ -206,33 +222,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         } else {
             setIsLoading(true);
         }
-    }, [item, getCachedReference, checkReference, isChecking]);
+    }, [item, sourceId, cachedRef, checkReference, isChecking]);
     
     // Update loading state when checking state changes
     useEffect(() => {
         const checking = isChecking(item);
         if (checking) {
             setIsLoading(true);
-        } else {
-            // When checking completes, update from cache
-            const cached = getCachedReference(item);
-            if (cached !== undefined) {
-                setItemExists(cached !== null);
-                setZoteroItemRef(cached);
-                setIsLoading(false);
-                
-                // Check for best attachment if item exists
-                if (cached !== null) {
-                    const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
-                    if (zoteroItem && zoteroItem.isRegularItem()) {
-                        zoteroItem.getBestAttachment().then(attachment => {
-                            setBestAttachment(attachment || null);
-                        });
-                    }
-                }
-            }
+        } else if (cachedRef !== undefined) {
+            // Checking completed and we have cached data
+            setIsLoading(false);
         }
-    }, [isChecking(item), getCachedReference, item]);
+    }, [isChecking(item), cachedRef, item]);
 
     // Helper to render a button in different modes
     const renderButton = (

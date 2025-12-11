@@ -7,7 +7,8 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction } from "../agents/agentActions";
+import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction, isCreateItemAgentAction } from "../agents/agentActions";
+import { markExternalReferenceDeletedAtom } from "../atoms/externalReferences";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
@@ -236,6 +237,15 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                             logger(`useZoteroSync: Skipping delete event for agent action(s), marking as undone: ${matchingAgentActions.map(a => a.id).join(', ')}`, 3);
                                             matchingAgentActions.forEach(action => {
                                                 store.set(undoAgentActionAtom, action.id);
+                                                
+                                                // Also mark the external reference as deleted for create_item actions
+                                                if (isCreateItemAgentAction(action)) {
+                                                    const sourceId = action.proposed_data.item?.source_id;
+                                                    if (sourceId) {
+                                                        logger(`useZoteroSync: Marking external reference as deleted for source_id: ${sourceId}`, 3);
+                                                        store.set(markExternalReferenceDeletedAtom, sourceId);
+                                                    }
+                                                }
                                             });
                                             // Return early to avoid queueing for backend deletion
                                             return;

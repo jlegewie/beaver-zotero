@@ -241,6 +241,23 @@ export const markExternalReferenceImportedAtom = atom(
 );
 
 /**
+ * Mark external reference as deleted (no longer exists in Zotero)
+ * Sets cache to null so UI immediately updates to show Import button
+ * Uses source_id as the cache key
+ */
+export const markExternalReferenceDeletedAtom = atom(
+    null,
+    (get, set, sourceId: string) => {
+        const cache = get(externalReferenceItemMappingAtom);
+        set(externalReferenceItemMappingAtom, {
+            ...cache,
+            [sourceId]: null
+        });
+        logger(`markExternalReferenceDeleted: ${sourceId} -> null`, 1);
+    }
+);
+
+/**
  * Invalidate cache for specific external reference
  * Forces a recheck next time the reference is accessed
  * Uses source_id as the cache key
