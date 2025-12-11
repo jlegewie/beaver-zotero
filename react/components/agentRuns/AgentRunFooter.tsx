@@ -101,7 +101,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     // Extract tool call details for copy/export
     const getToolDetails = (part: ToolCallPart): string => {
-        const label = getToolCallLabel(part);
+        const label = getToolCallLabel(part, 'completed');
         let query = "";
         try {
             const args = typeof part.args === 'object' && part.args

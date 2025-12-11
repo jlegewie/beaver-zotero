@@ -1,3 +1,4 @@
+import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
 
 /**
@@ -119,12 +120,12 @@ function formatYearFilter(yearFilter: unknown): string | null {
  * 
  * If the tool has a progress message, it takes precedence over the default label.
  */
-export function getToolCallLabel(part: ToolCallPart): string {
+export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): string {
     const toolName = part.tool_name;
     const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
     
     // Progress messages take precedence when present
-    if (part.progress) {
+    if (status === 'in_progress' && part.progress) {
         return `${baseLabel}: ${part.progress}`;
     }
     

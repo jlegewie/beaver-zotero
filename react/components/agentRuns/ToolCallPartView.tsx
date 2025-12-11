@@ -77,7 +77,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
-    const label = getToolCallLabel(part);
+    const label = getToolCallLabel(part, status);
 
     const [isExpanded, setIsExpanded] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
