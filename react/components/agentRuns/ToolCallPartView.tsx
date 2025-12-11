@@ -106,8 +106,16 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
     const hasError = status === 'error';
     const hasResult = result !== undefined;
 
+    const canExpand =
+        hasResult &&
+        result?.part_kind === 'tool-return' &&
+        // If we can compute a count (search-like tools), block expansion for 0 results.
+        (resultCount === null || resultCount > 0);
+
+    const effectiveExpanded = isExpanded && canExpand;
+
     const toggleExpanded = () => {
-        if (hasResult) {
+        if (canExpand) {
             toggleVisibility(visibilityKey);
         }
     };
@@ -115,28 +123,28 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
     const getIcon = () => {
         if (isInProgress) return Spinner;
         if (hasError) return AlertIcon;
-        if (isExpanded) return ArrowDownIcon;
-        if (isHovered && hasResult) return ArrowRightIcon;
+        if (effectiveExpanded) return ArrowDownIcon;
+        if (isHovered && canExpand) return ArrowRightIcon;
         
         return getToolIcon(part.tool_name);
     };
 
     const isButtonDisabled = isInProgress || (hasError && !hasResult);
-    const hasExpandedResult = isExpanded && hasResult && result.part_kind === 'tool-return';
+    const hasExpandedResult = effectiveExpanded && canExpand;
 
     return (
         <div
             id={`tool-${part.tool_call_id}`}
             className={`
                 rounded-md flex flex-col min-w-0
-                ${isExpanded ? 'border-popup' : 'border-transparent'}
+                ${effectiveExpanded ? 'border-popup' : 'border-transparent'}
                 ${hasExpandedResult ? 'mb-2' : ''}
             `}
         >
             <div
                 className={`
                     display-flex flex-row py-15
-                    ${isExpanded ? 'border-bottom-quinary bg-senary' : ''}
+                    ${effectiveExpanded ? 'border-bottom-quinary bg-senary' : ''}
                 `}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
@@ -149,14 +157,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
                         ${isButtonDisabled && !hasResult ? 'disabled-but-styled' : ''}
                     `}
                     style={{ padding: '2px 6px', maxHeight: 'none' }}
-                    disabled={!result || (isButtonDisabled && !hasResult) || result.part_kind === 'retry-prompt'}
+                    disabled={!canExpand}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
-                        <div className={`flex-1 display-flex mt-010 ${isExpanded ? 'font-color-primary' : ''}`}>
+                        <div className={`flex-1 display-flex mt-010 ${effectiveExpanded ? 'font-color-primary' : ''}`}>
                             <Icon icon={getIcon()} />
                         </div>
                         
-                        <div className={`display-flex ${isExpanded ? 'font-color-primary' : ''} ${isInProgress ? 'shimmer-text' : ''}`}>
+                        <div className={`display-flex ${effectiveExpanded ? 'font-color-primary' : ''} ${isInProgress ? 'shimmer-text' : ''}`}>
                             {label}
                         </div>
                     </div>
