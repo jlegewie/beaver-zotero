@@ -12,4 +12,7 @@ export { ItemSearchResultView } from './ItemSearchResultView';
 export { AgentRunFooter } from './AgentRunFooter';
 export { RunStatusIndicator } from './RunStatusIndicator';
 export { TokenUsageDisplay } from './TokenUsageDisplay';
+export { AgentActionsDisplay } from './AgentActionsDisplay';
+export { default as CreateItemAgentActionDisplay } from './CreateItemAgentActionDisplay';
+export { default as AgentActionItemButtons } from './AgentActionItemButtons';
 

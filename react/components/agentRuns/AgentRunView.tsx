@@ -3,6 +3,7 @@ import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
+import { AgentActionsDisplay } from './AgentActionsDisplay';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -57,6 +58,13 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             {(run.status === 'completed' || run.status === 'error') && (
                 <div className="px-4">
                     <AgentRunFooter run={run} />
+                </div>
+            )}
+
+            {/* Agent actions (e.g., create item from citations) */}
+            {run.status === 'completed' && (
+                <div className="px-4">
+                    <AgentActionsDisplay run={run} />
                 </div>
             )}
 
