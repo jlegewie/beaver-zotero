@@ -578,12 +578,13 @@ export const sendWSMessageAtom = atom(
  * Regenerate a response from a specific run.
  * 
  * Flow:
- * 1. Find the run to regenerate from
- * 2. Optionally delete applied agent actions (annotations, notes) if user confirms
- * 3. Remove runs from that point forward
- * 4. Clear related agent actions and citations
- * 5. Create new run with the same user_prompt
- * 6. Execute via WebSocket
+ * 1. Find the run to regenerate from (in threadRuns or activeRun)
+ * 2. If active run, cancel it first
+ * 3. Optionally delete applied agent actions (annotations, notes) if user confirms
+ * 4. Remove runs from that point forward
+ * 5. Clear related agent actions and citations
+ * 6. Create new run with the same user_prompt
+ * 7. Execute via WebSocket
  */
 export const regenerateFromRunAtom = atom(
     null,
@@ -597,13 +598,6 @@ export const regenerateFromRunAtom = atom(
             return;
         }
 
-        // Get current thread ID
-        const threadId = get(currentThreadIdAtom);
-        if (!threadId) {
-            logger('regenerateFromRunAtom: No thread ID found', 1);
-            return;
-        }
-
         // Get user ID
         const userId = get(userIdAtom);
         if (!userId) {
@@ -611,16 +605,31 @@ export const regenerateFromRunAtom = atom(
             return;
         }
 
-        // Find the run index in threadRuns
+        // Find the run - check both threadRuns and activeRun
         const threadRuns = get(threadRunsAtom);
-        const runIndex = threadRuns.findIndex(r => r.id === runId);
-        if (runIndex < 0) {
-            logger(`regenerateFromRunAtom: Run ${runId} not found in threadRuns`, 1);
+        const activeRun = get(activeRunAtom);
+        
+        let targetRun: AgentRun | null = null;
+        let runIndex = threadRuns.findIndex(r => r.id === runId);
+        
+        if (runIndex >= 0) {
+            targetRun = threadRuns[runIndex];
+        } else if (activeRun?.id === runId) {
+            // The run is currently active - cancel it and resubmit
+            targetRun = activeRun;
+            runIndex = threadRuns.length;
+            agentService.close();
+            set(activeRunAtom, null);
+            set(isWSChatPendingAtom, false);
+        }
+        
+        if (!targetRun) {
+            logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
             return;
         }
 
-        // Get the run to regenerate from
-        const targetRun = threadRuns[runIndex];
+        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
+        const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
 
         // Collect run IDs that will be removed (target run and all subsequent)
         const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
