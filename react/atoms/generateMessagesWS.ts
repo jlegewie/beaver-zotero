@@ -58,6 +58,8 @@ import {
     hasAppliedZoteroItem,
     AgentAction,
 } from '../agents/agentActions';
+import { extractExternalSearchData, isExternalSearchResult } from '../agents/toolResultTypes';
+import { addExternalReferencesToMappingAtom } from './externalReferences';
 
 // =============================================================================
 // Helper Functions
@@ -299,6 +301,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 toolName: event.part.tool_name,
                 toolCallId: event.part.tool_call_id,
             });
+            // Check for external references and populate cache
+            if (event.part.part_kind === "tool-return" && isExternalSearchResult(event.part.tool_name, event.part.content, event.part.metadata)) {
+                const externalReferences = extractExternalSearchData(event.part.content, event.part.metadata)?.references;
+                if (externalReferences) {
+                    set(addExternalReferencesToMappingAtom, externalReferences);
+                }
+            }
+            // Update run with tool return
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
         },
 

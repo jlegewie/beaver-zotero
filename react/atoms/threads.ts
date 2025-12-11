@@ -20,6 +20,7 @@ import { CreateItemProposedAction, isCreateItemAction, isSearchExternalReference
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
 import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
 import { AgentRun, ToolCallPart } from "../agents/types";
+import { extractExternalSearchData, isExternalSearchResult } from "../agents/toolResultTypes";
 
 function normalizeToolCallWithExisting(toolcall: ToolCall, existing?: ToolCall): ToolCall {
     const mergedResponse = toolcall.response
@@ -228,18 +229,13 @@ export const loadThreadAtom = atom(
                 const externalReferences: ExternalReference[] = [];
                 for (const run of runs) {
                     for (const message of run.model_messages) {
-                        if (message.kind === 'response') {
+                        if (message.kind === 'request') {
                             for (const part of message.parts) {
-                                if (part.part_kind === 'tool-call') {
-                                    const toolCall = part as ToolCallPart;
-                                    // Check for search_external_references tool
-                                    if (isSearchExternalReferencesTool(toolCall.tool_name)) {
-                                        // Tool results come in the next request message
-                                        // Look for matching tool return
-                                        const toolReturn = findToolReturn(runs, toolCall.tool_call_id);
-                                        if (toolReturn?.content?.references) {
-                                            externalReferences.push(...(toolReturn.content.references as ExternalReference[]));
-                                        }
+                                // Check for external references and populate cache
+                                if (part.part_kind === "tool-return" && isExternalSearchResult(part.tool_name, part.content, part.metadata)) {
+                                    const externalReferences = extractExternalSearchData(part.content, part.metadata)?.references;
+                                    if (externalReferences) {
+                                        set(addExternalReferencesToMappingAtom, externalReferences);
                                     }
                                 }
                             }
