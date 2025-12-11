@@ -20,10 +20,15 @@ export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run })
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
 
     // Get create item actions with toolcall_id 'citations' (from citation extraction)
-    const createItemActions = getAgentActionsByRun(
+    // Sort by citation count (descending) for consistent ordering
+    const createItemActions = (getAgentActionsByRun(
         run.id,
         (action) => isCreateItemAgentAction(action) && action.toolcall_id === 'citations'
-    ) as CreateItemAgentAction[];
+    ) as CreateItemAgentAction[]).sort((a, b) => {
+        const countA = a.proposed_data.item.citation_count ?? 0;
+        const countB = b.proposed_data.item.citation_count ?? 0;
+        return countB - countA;
+    });
 
     // Don't show during streaming
     if (run.status === 'in_progress') {
