@@ -6,6 +6,7 @@ import {
     isFulltextSearchResult,
     extractFulltextSearchData,
     isFulltextRetrievalResult,
+    extractFulltextRetrievalData,
     isSearchExternalReferencesResult
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
@@ -44,8 +45,12 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    if (isFulltextRetrievalResult(content)) {
-        return <FulltextRetrievalResultView result={content} />;
+    // Fulltext retrieval results (read_fulltext, retrieve_fulltext)
+    if (isFulltextRetrievalResult(toolName, content, metadata)) {
+        const data = extractFulltextRetrievalData(content, metadata);
+        if (data) {
+            return <FulltextRetrievalResultView attachment={data.attachment} />;
+        }
     }
 
     if (isSearchExternalReferencesResult(content)) {

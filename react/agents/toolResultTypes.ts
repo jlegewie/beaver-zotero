@@ -55,32 +55,6 @@ export interface ChunkResultDehydrated {
 }
 
 // ============================================================================
-// Fulltext Search Results
-// ============================================================================
-
-/**
- * Result from fulltext search tools (search_fulltext, search_fulltext_keywords, read_passages).
- */
-export interface FulltextSearchResult {
-    tool_name: "search_fulltext" | "search_fulltext_keywords" | "read_passages";
-    total_chunks: number;
-    total_attachments: number;
-    total_items: number;
-    chunks: ChunkResultDehydrated[];
-    params?: Record<string, unknown>;
-}
-
-/**
- * Result from read_fulltext tool.
- */
-export interface FulltextRetrievalResult {
-    tool_name: "read_fulltext";
-    attachment: AttachmentResultDehydrated;
-    chunks: ChunkResultDehydrated[];
-    params?: Record<string, unknown>;
-}
-
-// ============================================================================
 // Search External References Results
 // ============================================================================
 
@@ -181,14 +155,33 @@ export function isFulltextSearchResult(
     return Array.isArray(source.chunks) && source.chunks.every(hasValidAttachmentId);
 }
 
-export function isFulltextRetrievalResult(content: unknown): content is FulltextRetrievalResult {
-    if (!content || typeof content !== 'object') return false;
-    const obj = content as Record<string, unknown>;
+/** Valid tool names for fulltext retrieval results */
+const FULLTEXT_RETRIEVAL_TOOL_NAMES = [
+    'read_fulltext',
+    'retrieve_fulltext'
+] as const;
+
+/**
+ * Type guard for fulltext retrieval results.
+ * Requires attachment_id and chunks array.
+ */
+export function isFulltextRetrievalResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName as typeof FULLTEXT_RETRIEVAL_TOOL_NAMES[number])) {
+        return false;
+    }
+
+    const source = (metadata?.storage || content) as Record<string, unknown> | undefined;
+    if (!source || typeof source !== 'object') return false;
+
+    // Require valid attachment_id and chunks array
     return (
-        obj.tool_name === 'read_fulltext' &&
-        obj.attachment !== null &&
-        typeof obj.attachment === 'object' &&
-        Array.isArray(obj.chunks)
+        typeof source.attachment_id === 'string' &&
+        createZoteroItemReference(source.attachment_id) !== null &&
+        Array.isArray(source.chunks)
     );
 }
 
@@ -266,4 +259,41 @@ export function extractFulltextSearchData(
     }
 
     return { chunks };
+}
+
+/**
+ * Normalized fulltext retrieval data - single chunk reference with lowest page.
+ */
+export interface FulltextRetrievalViewData {
+    attachment: ChunkReference;
+}
+
+/**
+ * Extract attachment reference with lowest page from fulltext retrieval results.
+ * Prefers metadata.storage if available, falls back to content.
+ */
+export function extractFulltextRetrievalData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): FulltextRetrievalViewData | null {
+    const source = (metadata?.storage || content) as { 
+        attachment_id?: string;
+        chunks?: Array<{ page?: number }>;
+    } | undefined;
+    if (!source || typeof source.attachment_id !== 'string') return null;
+
+    const ref = createZoteroItemReference(source.attachment_id);
+    if (!ref) return null;
+
+    // Find the lowest page number from chunks
+    let lowestPage: number | undefined;
+    if (Array.isArray(source.chunks)) {
+        for (const chunk of source.chunks) {
+            if (chunk.page != null && (lowestPage == null || chunk.page < lowestPage)) {
+                lowestPage = chunk.page;
+            }
+        }
+    }
+
+    return { attachment: { ...ref, page: lowestPage } };
 }
