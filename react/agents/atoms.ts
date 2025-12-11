@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { logger } from "../../src/utils/logger";
 import {
     AgentRun,
     ModelMessage,
@@ -13,6 +14,7 @@ import {
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
+    WSToolCallProgressEvent,
 } from "../../src/services/agentService";
 
 // =============================================================================
@@ -198,6 +200,40 @@ export function updateRunWithToolReturn(run: AgentRun, event: WSToolReturnEvent)
         ...run,
         model_messages: messages,
     };
+}
+
+/**
+ * Update an AgentRun with a tool call progress event.
+ * Tool call progress goes into a ToolCallPart.
+ */
+export function updateRunWithToolCallProgress(run: AgentRun, event: WSToolCallProgressEvent): AgentRun {
+    // Find the response message containing this tool call
+    for (let i = 0; i < run.model_messages.length; i++) {
+        const message = run.model_messages[i];
+        if (message.kind === 'response') {
+            const toolCallPart = message.parts.find(
+                part => part.part_kind === 'tool-call' && part.tool_call_id === event.tool_call_id
+            ) as ToolCallPart | undefined;
+            
+            if (toolCallPart) {                
+                // Create new parts array with updated tool call
+                const newParts = message.parts.map(part => 
+                    part.part_kind === 'tool-call' && part.tool_call_id === event.tool_call_id
+                        ? { ...part, progress: event.progress }
+                        : part
+                );
+                
+                // Create new messages array with updated message
+                const newMessages = [...run.model_messages];
+                newMessages[i] = { ...message, parts: newParts };
+                
+                return { ...run, model_messages: newMessages };
+            }
+        }
+    }
+    
+    logger(`updateRunWithToolCallProgress: tool call ${event.tool_call_id} not found in any message`, 1);
+    return run;
 }
 
 /**

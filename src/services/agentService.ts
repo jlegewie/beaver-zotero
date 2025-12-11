@@ -65,6 +65,14 @@ export interface WSToolReturnEvent extends WSBaseEvent {
     part: ToolReturnPart | RetryPromptPart;
 }
 
+/** Tool call progress event for tool execution progress */
+export interface WSToolCallProgressEvent extends WSBaseEvent {
+    event: 'tool_call_progress';
+    run_id: string;
+    tool_call_id: string;
+    progress: string;
+}
+
 /** Run complete event signaling the agent run finished */
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
@@ -182,6 +190,7 @@ export type WSEvent =
     | WSReadyEvent
     | WSPartEvent
     | WSToolReturnEvent
+    | WSToolCallProgressEvent
     | WSRunCompleteEvent
     | WSDoneEvent
     | WSThreadEvent
@@ -272,6 +281,12 @@ export interface WSCallbacks {
      * @param event The tool return event with run_id, message_index, and part data
      */
     onToolReturn: (event: WSToolReturnEvent) => void;
+
+    /**
+     * Called when a tool call progress event is received
+     * @param event The tool call progress event with run_id, message_index, and part data
+     */
+    onToolCallProgress: (event: WSToolCallProgressEvent) => void;
 
     /**
      * Called when the agent run completes
@@ -531,6 +546,10 @@ export class AgentService {
 
                 case 'tool_return':
                     this.callbacks.onToolReturn(event);
+                    break;
+                
+                case 'tool_call_progress':
+                    this.callbacks.onToolCallProgress(event);
                     break;
 
                 case 'run_complete':

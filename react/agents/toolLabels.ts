@@ -116,10 +116,18 @@ function formatYearFilter(yearFilter: unknown): string | null {
  * - "Fulltext search: social capital"
  * - "Metadata search: Smith (2020)"
  * - "Reading: Smith 2020, p. 5-10"
+ * 
+ * If the tool has a progress message, it takes precedence over the default label.
  */
 export function getToolCallLabel(part: ToolCallPart): string {
     const toolName = part.tool_name;
     const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
+    
+    // Progress messages take precedence when present
+    if (part.progress) {
+        return `${baseLabel}: ${part.progress}`;
+    }
+    
     const args = parseArgs(part);
 
     switch (toolName) {
