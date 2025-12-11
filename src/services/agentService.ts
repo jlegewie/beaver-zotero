@@ -18,6 +18,7 @@ import { AttachmentDataWithMimeType, ItemData, ZoteroItemReference } from '../..
 import { CustomChatModel } from '../../react/types/settings';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
 import { ApiService } from './apiService';
+import { findExistingReference, FindReferenceData } from '../../react/utils/findExistingReference';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -162,6 +163,52 @@ export interface WSAttachmentContentRequest extends WSBaseEvent {
     page_numbers?: number[] | null;
 }
 
+/**
+ * Data for a single reference to check if it exists in Zotero library.
+ * Matches the fields needed by findExistingReference.
+ */
+export interface ExternalReferenceCheckItem {
+    /** Identifier for this item in the request (e.g., source_id from the backend) */
+    id: string;
+    /** Item title for fuzzy matching */
+    title?: string;
+    /** Date string (any format, year is used for comparison) */
+    date?: string;
+    /** DOI for exact matching */
+    doi?: string;
+    /** ISBN for exact matching (books) */
+    isbn?: string;
+    /** Array of creator last names for fuzzy matching */
+    creators?: string[];
+}
+
+/** Request from backend to check if references exist in Zotero library */
+export interface WSExternalReferenceCheckRequest extends WSBaseEvent {
+    event: 'external_reference_check_request';
+    request_id: string;
+    /** Library ID to search in */
+    library_id: number;
+    /** References to check */
+    items: ExternalReferenceCheckItem[];
+}
+
+/** Result for a single external reference check */
+export interface ExternalReferenceCheckResult {
+    /** The id from the request */
+    id: string;
+    /** Whether a matching item was found */
+    exists: boolean;
+    /** Zotero item reference if found */
+    item?: ZoteroItemReference;
+}
+
+/** Response to external reference check request */
+export interface WSExternalReferenceCheckResponse {
+    type: 'external_reference_check';
+    request_id: string;
+    results: ExternalReferenceCheckResult[];
+}
+
 export interface WSItemDataResponse {
     type: 'item_data';
     request_id: string;
@@ -200,7 +247,8 @@ export type WSEvent =
     | WSAgentActionEvent
     | WSItemDataRequest
     | WSAttachmentDataRequest
-    | WSAttachmentContentRequest;
+    | WSAttachmentContentRequest
+    | WSExternalReferenceCheckRequest;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -615,6 +663,17 @@ export class AgentService {
                     });
                     break;
 
+                case 'external_reference_check_request':
+                    this.handleExternalReferenceCheckRequest(event).catch((error) => {
+                        logger(`AgentService: Failed to handle external_reference_check_request: ${error}`, 1);
+                        this.callbacks?.onError({
+                            event: 'error',
+                            type: 'external_reference_check_request_failed',
+                            message: String(error),
+                        });
+                    });
+                    break;
+
                 default:
                     logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
@@ -775,6 +834,63 @@ export class AgentService {
             pages,
             total_pages: null,
             error: 'Attachment content retrieval not implemented'
+        };
+
+        this.send(response);
+    }
+
+    /**
+     * Handle external_reference_check_request event.
+     * Checks if references exist in Zotero library using findExistingReference.
+     */
+    private async handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<void> {
+        const results: ExternalReferenceCheckResult[] = [];
+
+        // Process all items in parallel for efficiency
+        const checkPromises = request.items.map(async (item): Promise<ExternalReferenceCheckResult> => {
+            try {
+                const referenceData: FindReferenceData = {
+                    title: item.title,
+                    date: item.date,
+                    DOI: item.doi,
+                    ISBN: item.isbn,
+                    creators: item.creators
+                };
+
+                const existingItem = await findExistingReference(request.library_id, referenceData);
+
+                if (existingItem) {
+                    return {
+                        id: item.id,
+                        exists: true,
+                        item: {
+                            library_id: existingItem.libraryID,
+                            zotero_key: existingItem.key
+                        }
+                    };
+                }
+
+                return {
+                    id: item.id,
+                    exists: false
+                };
+            } catch (error) {
+                logger(`AgentService: Failed to check reference ${item.id}: ${error}`, 1);
+                // Return as not found on error
+                return {
+                    id: item.id,
+                    exists: false
+                };
+            }
+        });
+
+        const resolvedResults = await Promise.all(checkPromises);
+        results.push(...resolvedResults);
+
+        const response: WSExternalReferenceCheckResponse = {
+            type: 'external_reference_check',
+            request_id: request.request_id,
+            results
         };
 
         this.send(response);
