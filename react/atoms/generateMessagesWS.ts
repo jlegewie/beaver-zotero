@@ -634,10 +634,11 @@ export const regenerateFromRunAtom = atom(
         // Collect run IDs that will be removed (target run and all subsequent)
         const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
 
-        // Find applied agent actions for runs being removed
+        // Find applied annotation actions for runs being removed
         const allAgentActions = get(threadAgentActionsAtom);
         const actionsToDelete = allAgentActions
             .filter(a => runIdsToRemove.includes(a.run_id))
+            .filter(isAnnotationAgentAction)
             .filter(hasAppliedZoteroItem);
 
         // Prompt user to confirm deletion of applied actions
