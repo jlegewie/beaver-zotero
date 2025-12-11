@@ -12,7 +12,7 @@ import {
     normalizeSentenceIdList,
     normalizeNotePosition,
 } from '../types/proposedActions/annotations';
-import type { CreateItemProposedData } from '../types/proposedActions/items';
+import type { CreateItemProposedData, CreateItemResultData } from '../types/proposedActions/items';
 
 // =============================================================================
 // Agent Action Types
@@ -77,8 +77,17 @@ export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
 /**
  * Type guard for create item actions
  */
-export const isCreateItemAgentAction = (action: AgentAction): boolean => {
+export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
     return action.action_type === 'create_item';
+};
+
+/**
+ * Typed agent action for create_item actions
+ */
+export type CreateItemAgentAction = AgentAction & {
+    action_type: 'create_item';
+    proposed_data: CreateItemProposedData;
+    result_data?: CreateItemResultData;
 };
 
 /**
