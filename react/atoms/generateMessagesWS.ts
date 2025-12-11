@@ -685,7 +685,20 @@ export const regenerateFromRunAtom = atom(
 /**
  * Close the WebSocket connection
  */
-export const closeWSConnectionAtom = atom(null, (_get, set) => {
+export const closeWSConnectionAtom = atom(null, (get, set) => {
+    // Mark active run as canceled if it exists
+    const activeRun = get(activeRunAtom);
+    if (activeRun && activeRun.status === 'in_progress') {
+        const canceledRun: AgentRun = {
+            ...activeRun,
+            status: 'canceled',
+            completed_at: new Date().toISOString(),
+        };
+        // Move canceled run to completed runs
+        set(threadRunsAtom, (runs) => [...runs, canceledRun]);
+        set(activeRunAtom, null);
+    }
+    
     agentService.close();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
