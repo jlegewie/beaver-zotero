@@ -3,6 +3,7 @@ import { ExternalReference, extractAuthorLastName } from '../types/externalRefer
 import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
@@ -66,6 +67,7 @@ export const checkExternalReferenceAtom = atom(
         
         try {
             let result: ZoteroItemReference | null = null;
+            let foundItem: Zotero.Item | null = null;
             
             // First, validate backend data if library_items exist
             if (externalRef.library_items && externalRef.library_items.length > 0) {
@@ -82,6 +84,7 @@ export const checkExternalReferenceAtom = atom(
                             library_id: firstItem.library_id,
                             zotero_key: firstItem.zotero_key
                         };
+                        foundItem = item;
                         logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
                     } else {
                         logger(`checkExternalReference: Backend data invalid for ${refId}, item not found`, 1);
@@ -108,6 +111,7 @@ export const checkExternalReferenceAtom = atom(
                             library_id: existingItem.libraryID,
                             zotero_key: existingItem.key
                         };
+                        foundItem = existingItem;
                         logger(`checkExternalReference: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                     } else {
                         logger(`checkExternalReference: No match found for ${refId}`, 1);
@@ -115,6 +119,11 @@ export const checkExternalReferenceAtom = atom(
                 } catch (searchError) {
                     logger(`checkExternalReference: Search failed for ${refId}: ${searchError}`, 2);
                 }
+            }
+            
+            // Load full item data if found (needed for getBestAttachment and display)
+            if (foundItem) {
+                await loadFullItemDataWithAllTypes([foundItem]);
             }
             
             // Update cache (even on error, cache null to prevent repeated failed attempts)
@@ -164,6 +173,9 @@ export const checkExternalReferencesAtom = atom(
         set(checkingExternalReferencesAtom, newChecking);
         
         try {
+            // Collect found items for batch data loading
+            const foundItems: Zotero.Item[] = [];
+            
             // Check all references in parallel, with individual error handling
             const results = await Promise.all(
                 refsToCheck.map(async (ref): Promise<[string, ZoteroItemReference | null] | null> => {
@@ -187,6 +199,7 @@ export const checkExternalReferencesAtom = atom(
                                         library_id: firstItem.library_id,
                                         zotero_key: firstItem.zotero_key
                                     };
+                                    foundItems.push(item);
                                 }
                             } catch (backendError) {
                                 logger(`checkExternalReferences: Backend validation failed for ${refId}: ${backendError}`, 2);
@@ -208,6 +221,7 @@ export const checkExternalReferencesAtom = atom(
                                         library_id: existingItem.libraryID,
                                         zotero_key: existingItem.key
                                     };
+                                    foundItems.push(existingItem);
                                 }
                             } catch (searchError) {
                                 logger(`checkExternalReferences: Search failed for ${refId}: ${searchError}`, 2);
@@ -222,6 +236,11 @@ export const checkExternalReferencesAtom = atom(
                     }
                 })
             );
+            
+            // Load full item data for all found items (needed for getBestAttachment and display)
+            if (foundItems.length > 0) {
+                await loadFullItemDataWithAllTypes(foundItems);
+            }
             
             // Update cache with all results (including failed ones as null)
             const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] => r !== null));
