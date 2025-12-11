@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { ChatMessage, ErrorMessage, ThreadData, WarningMessage } from "../types/chat/uiTypes";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isPreferencePageVisibleAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
+import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
@@ -173,6 +173,7 @@ export const newThreadAtom = atom(
         set(threadMessagesAtom, []);
         set(userAttachmentsAtom, []);
         set(toolAttachmentsAtom, []);
+        set(isWebSearchEnabledAtom, false);
         
         set(currentMessageItemsAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
@@ -208,6 +209,7 @@ export const loadThreadAtom = atom(
             set(currentThreadIdAtom, threadId);
             set(isPreferencePageVisibleAtom, false);
             set(clearExternalReferenceCacheAtom);
+            set(isWebSearchEnabledAtom, false);
             
             // Clear active run when loading a different thread
             set(activeRunAtom, null);
