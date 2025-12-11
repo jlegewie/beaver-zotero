@@ -58,8 +58,7 @@ import {
     hasAppliedZoteroItem,
     AgentAction,
 } from '../agents/agentActions';
-import { extractExternalSearchData, isExternalSearchResult } from '../agents/toolResultTypes';
-import { addExternalReferencesToMappingAtom } from './externalReferences';
+import { processToolReturnResults } from '../agents/toolResultProcessing';
 
 // =============================================================================
 // Helper Functions
@@ -294,20 +293,17 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
         },
 
-        onToolReturn: (event: WSToolReturnEvent) => {
+        onToolReturn: async (event: WSToolReturnEvent) => {
             console.log('[WS] Tool return event:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
                 toolName: event.part.tool_name,
                 toolCallId: event.part.tool_call_id,
             });
-            // Check for external references and populate cache
-            if (event.part.part_kind === "tool-return" && isExternalSearchResult(event.part.tool_name, event.part.content, event.part.metadata)) {
-                const externalReferences = extractExternalSearchData(event.part.content, event.part.metadata)?.references;
-                if (externalReferences) {
-                    set(addExternalReferencesToMappingAtom, externalReferences);
-                }
-            }
+
+            // Process tool return results
+            if (event.part.part_kind === "tool-return") await processToolReturnResults(event.part, set);
+
             // Update run with tool return
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
         },
