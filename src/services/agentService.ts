@@ -80,6 +80,8 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     run_id: string;
     usage: RunUsage | null;
     cost: number | null;
+    citations: import('../../react/types/citations').CitationMetadata[] | null;
+    agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -117,13 +119,6 @@ export interface WSWarningEvent extends WSBaseEvent {
     type: WSWarningType;
     message: string;
     data?: Record<string, any>;
-}
-
-/** Citation event sent when a citation is parsed during streaming */
-export interface WSCitationEvent extends WSBaseEvent {
-    event: 'citation';
-    run_id: string;
-    citation: import('../../react/types/citations').CitationMetadata;
 }
 
 /** Agent action event sent when an action is detected during streaming */
@@ -243,7 +238,6 @@ export type WSEvent =
     | WSThreadEvent
     | WSErrorEvent
     | WSWarningEvent
-    | WSCitationEvent
     | WSAgentActionEvent
     | WSItemDataRequest
     | WSAttachmentDataRequest
@@ -365,12 +359,6 @@ export interface WSCallbacks {
      * @param event The warning event
      */
     onWarning: (event: WSWarningEvent) => void;
-
-    /**
-     * Called when a citation is parsed during streaming
-     * @param event The citation event with run_id and citation metadata
-     */
-    onCitation?: (event: WSCitationEvent) => void;
 
     /**
      * Called when an agent action is detected during streaming
@@ -620,10 +608,6 @@ export class AgentService {
 
                 case 'warning':
                     this.callbacks.onWarning(event);
-                    break;
-
-                case 'citation':
-                    this.callbacks.onCitation?.(event);
                     break;
 
                 case 'agent_action':
