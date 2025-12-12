@@ -30,7 +30,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             threshold: BOTTOM_THRESHOLD
         });
 
-        // Restore scroll position from atom
+        // Restore scroll position from atom (only for thread switching, not during streaming)
+        // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
         useLayoutEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) {
@@ -40,17 +41,21 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
             const targetScrollTop = storedScrollTop ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
-            if (delta > 1) {
+            
+            // Only restore if there's a significant difference (e.g., thread switch)
+            // Small deltas are just normal scroll position updates during streaming
+            if (delta > 50) {
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
+                
+                // Only set userScrolledAtom on actual restore (thread switch)
+                const { scrollHeight, clientHeight } = container;
+                const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
+                const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                store.set(userScrolledAtom, !isNearBottom);
             } else {
                 restoredFromAtomRef.current = false;
             }
-
-            const { scrollHeight, clientHeight } = container;
-            const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
-            const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-            store.set(userScrolledAtom, !isNearBottom);
         }, [storedScrollTop]);
 
         // Scroll to bottom when runs change
