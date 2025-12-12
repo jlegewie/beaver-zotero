@@ -364,7 +364,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
-        displayText = numericMarker;
+        // If key is missing (invalid/malformed citation), show placeholder.
+        displayText = citationKey ? numericMarker : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
