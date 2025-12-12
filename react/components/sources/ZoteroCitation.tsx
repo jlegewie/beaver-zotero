@@ -18,6 +18,26 @@ import { useFallbackCitation } from '../../hooks/useFallbackCitation';
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
 
+/**
+ * Local numeric marker assignment for citations before `citationMetadata` is available.
+ *
+ * This keeps numeric markers stable across re-renders while metadata loads, and
+ * avoids showing '?' or changing numbers mid-stream.
+ */
+const localCitationKeyToNumericMarker = new Map<string, string>();
+
+function getOrAssignLocalNumericMarker(citationKey: string): string {
+    const existing = localCitationKeyToNumericMarker.get(citationKey);
+    if (existing) return existing;
+    // Prevent unbounded growth across long-running sessions.
+    if (localCitationKeyToNumericMarker.size > 2000) {
+        localCitationKeyToNumericMarker.clear();
+    }
+    const next = (localCitationKeyToNumericMarker.size + 1).toString();
+    localCitationKeyToNumericMarker.set(citationKey, next);
+    return next;
+}
+
 // Define prop types for the component
 interface ZoteroCitationProps {
     id?: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization) - for Zotero citations
@@ -120,6 +140,24 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
 
+    // Metadata arrives later during streaming; until then, render an inactive citation marker.
+    const isInactive = !citationMetadata;
+
+    // Stable key used for local numeric marker assignment (does not depend on citationMetadata).
+    const localCitationKey = useMemo(() => {
+        if (external_id) return `external:${external_id}`;
+        if (unique_key) return `zotero:${unique_key.replace('user-content-', '')}`;
+        if (att_id) return `zotero:${att_id.replace('user-content-', '')}`;
+        if (libraryID && itemKey) return `zotero:${libraryID}-${itemKey}`;
+        if (normalizedRawTag) return `raw:${normalizedRawTag}`;
+        if (citationId) return `cid:${citationId}`;
+        return 'unknown';
+    }, [external_id, unique_key, att_id, libraryID, itemKey, normalizedRawTag, citationId]);
+
+    const localNumericMarker = useMemo(() => {
+        return getOrAssignLocalNumericMarker(localCitationKey);
+    }, [localCitationKey]);
+
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {
         return () => {
@@ -186,18 +224,20 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }, [citationMetadata, fallbackCitation]);
 
 
-    // Zotero citations need either id/cid or raw_tag match; external citations intentionally omit the Zotero id
-    const hasValidZoteroId = unique_key || att_id || citationId;
-    const hasRawTagMatch = normalizedRawTag && citationMetadata;
-    if (!hasValidZoteroId && !hasRawTagMatch && !isExternal) return null;
-
-    // Hide adjacent fallback citations (identical and immediately next to each other)
-    if (adjacent && !citationMetadata) return null;
+    // Render as soon as we have an identifier; citationMetadata may arrive later.
+    const hasAnyIdentifier = !!(unique_key || att_id || citationId || normalizedRawTag || external_id);
+    if (!hasAnyIdentifier) return null;
 
     // Enhanced click handler with bounding box support
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
         logger('ZoteroCitation: Handle citation click');
+
+        if (isInactive) {
+            // We intentionally do not open tooltips or navigate anywhere until metadata arrives.
+            logger('ZoteroCitation: Citation metadata not available yet - inactive');
+            return;
+        }
         
         // Check if this is an external citation without a Zotero mapping
         if (isExternal && !mappedZoteroItem) {
@@ -337,11 +377,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
-        displayText = consecutive
-            ? (pages.length > 0 ? `p.${formatNumberRanges(pages)}` : 'Ibid')
-            : (pages.length > 0 ? `${citation}, p.${formatNumberRanges(pages)}` : citation);
+        if (isInactive) {
+            // We don't know the author/year string yet. Render a subtle placeholder.
+            displayText = '?';
+        } else {
+            displayText = consecutive
+                ? (pages.length > 0 ? `p.${formatNumberRanges(pages)}` : 'Ibid')
+                : (pages.length > 0 ? `${citation}, p.${formatNumberRanges(pages)}` : citation);
+        }
     } else {
-        displayText = citationMetadata?.numericCitation || citation;
+        // Numeric markers should be stable and independent of citationMetadata.
+        displayText = localNumericMarker;
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
@@ -396,13 +442,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Determine the CSS class based on citation type
-    const citationClass = isExternal && !mappedZoteroItem
+    const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : "zotero-citation";
+    const citationClass = isInactive
+        ? `${citationClassBase} inactive`
+        : citationClassBase;
 
     const citationElement = (
         <span 
-            onClick={handleClick} 
+            onClick={isInactive ? undefined : handleClick}
             className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
@@ -440,15 +489,19 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             {exportRendering ?
                 citationElement
             :
-                // <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
-                <Tooltip
-                    content={previewText}
-                    customContent={citationPreview}
-                    width={TOOLTIP_WIDTH}
-                    padding={false}
-                >
-                    {citationElement}
-                </Tooltip>
+                (isInactive ?
+                    citationElement
+                :
+                    // <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
+                    <Tooltip
+                        content={previewText}
+                        customContent={citationPreview}
+                        width={TOOLTIP_WIDTH}
+                        padding={false}
+                    >
+                        {citationElement}
+                    </Tooltip>
+                )
             }
         </>
     );

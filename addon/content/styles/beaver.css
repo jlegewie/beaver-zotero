@@ -691,6 +691,15 @@
     /* border: 1px solid var(--fill-quarternary); */
 }
 
+[id^="beaver-pane-"] .markdown span.zotero-citation.inactive {
+    cursor: default;
+    opacity: 0.4;
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.inactive:hover {
+    color: var(--fill-secondary);
+}
+
 /* External citation styling - slightly different color for distinction */
 [id^="beaver-pane-"] .markdown span.zotero-citation.external-citation {
     background: var(--tag-blue-quinary);
@@ -701,6 +710,11 @@
 [id^="beaver-pane-"] .markdown span.zotero-citation.external-citation:hover {
     background: var(--tag-blue-quarternary);
     color: var(--tag-blue-primary);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.external-citation.inactive:hover {
+    background: var(--tag-blue-quinary);
+    color: var(--tag-blue);
 }
 
 [id^="beaver-pane-"] .markdown h1,
