@@ -406,7 +406,17 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger(`WS onError: ${event.type} - ${event.message}`, 1);
             console.error('[WS] Error event:', event);
             set(wsErrorAtom, event);
-            set(activeRunAtom, (prev) => prev ? { ...prev, status: 'error' } : prev);
+            set(activeRunAtom, (prev) => prev ? {
+                ...prev,
+                status: 'error',
+                error: {
+                    type: event.type,
+                    message: event.message,
+                    details: event.details,
+                    is_retryable: event.is_retryable,
+                    retry_after: event.retry_after,
+                }
+            } : prev);
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
@@ -477,12 +487,22 @@ async function executeWSRequest(
     } catch (error) {
         logger(`WS connection error: ${error}`, 1);
         console.error('[WS] Connection failed:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
-            message: error instanceof Error ? error.message : 'Connection failed',
+            message: errorMessage,
+            is_retryable: true,
         });
-        set(activeRunAtom, (prev) => prev ? { ...prev, status: 'error' } : prev);
+        set(activeRunAtom, (prev) => prev ? {
+            ...prev,
+            status: 'error',
+            error: {
+                type: 'connection_error',
+                message: errorMessage,
+                is_retryable: true,
+            }
+        } : prev);
         set(isWSChatPendingAtom, false);
     }
 }

@@ -256,9 +256,8 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         await regenerateFromRun(run.id);
     };
 
-    // Determine if we should show the footer (hide during streaming)
+    // Hide during streaming
     const isStreaming = run.status === 'in_progress';
-    const hasError = run.status === 'error';
 
     return (
         <>
@@ -290,30 +289,26 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     {Zotero.Beaver.data.env === "development" && run.status === 'completed' && run.total_usage && run.total_cost && (
                         <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
                     )}
-                    {!hasError && (
-                        <MenuButton
-                            icon={ShareIcon}
-                            menuItems={getShareMenuItems()}
-                            className="scale-11"
-                            ariaLabel="Share"
-                            variant="ghost"
-                            positionAdjustment={{ x: 0, y: 0 }}
-                            toggleCallback={handleMenuToggle}
-                        />
-                    )}
+                    <MenuButton
+                        icon={ShareIcon}
+                        menuItems={getShareMenuItems()}
+                        className="scale-11"
+                        ariaLabel="Share"
+                        variant="ghost"
+                        positionAdjustment={{ x: 0, y: 0 }}
+                        toggleCallback={handleMenuToggle}
+                    />
                     <IconButton
                         icon={RepeatIcon}
                         onClick={handleRegenerate}
                         className="scale-11"
                         ariaLabel="Regenerate response"
                     />
-                    {!hasError && (
-                        <CopyButton
-                            content={combinedContent}
-                            formatContent={renderToMarkdown}
-                            className="scale-11"
-                        />
-                    )}
+                    <CopyButton
+                        content={combinedContent}
+                        formatContent={renderToMarkdown}
+                        className="scale-11"
+                    />
                 </div>
             </div>
 

@@ -4,6 +4,7 @@ import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
 import { AgentActionsDisplay } from './AgentActionsDisplay';
+import { RunErrorDisplay } from './RunErrorDisplay';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -34,10 +35,8 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
     
-    // Only show spinner when streaming AND no visible content yet
-    const showStatusIndicator = isLastRun && (
-        hasError || (isStreaming && !hasVisibleContent(run))
-    );
+    // Only show spinner when streaming AND no visible content yet (not for errors)
+    const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run);
 
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
@@ -53,9 +52,15 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                 status={run.status}
             />
 
-            {/* Footer with sources and action buttons */}
-            {/* Show full footer on completed, limited footer (only repeat) on error */}
-            {(run.status === 'completed' || run.status === 'error') && (
+            {/* Error display (includes retry button) */}
+            {hasError && run.error && (
+                <div className="px-4">
+                    <RunErrorDisplay runId={run.id} error={run.error} />
+                </div>
+            )}
+
+            {/* Footer with sources and action buttons (only for completed runs) */}
+            {run.status === 'completed' && (
                 <div className="px-4">
                     <AgentRunFooter run={run} />
                 </div>

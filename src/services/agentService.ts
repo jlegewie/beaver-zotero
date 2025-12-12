@@ -104,10 +104,18 @@ export interface WSThreadEvent extends WSBaseEvent {
 /** Error event for communicating failures */
 export interface WSErrorEvent extends WSBaseEvent {
     event: 'error';
+    /** Error type identifier (e.g., 'llm_rate_limit', 'llm_auth_error') */
     type: string;
+    /** User-friendly message (may contain HTML links for billing/settings) */
     message: string;
+    /** The run ID this error relates to (if applicable) */
     run_id?: string;
+    /** Technical details for debugging/logging */
     details?: string;
+    /** Whether a retry button should be shown */
+    is_retryable?: boolean;
+    /** Seconds to wait before retrying (optional) */
+    retry_after?: number;
 }
 
 /** Warning event types */

@@ -124,7 +124,14 @@ export interface AgentRun {
 
     /** Status */
     status: AgentRunStatus;
-    error_message?: string;
+    /** Error details when status is 'error' */
+    error?: {
+        type: string;
+        message: string;
+        details?: string;
+        is_retryable?: boolean;
+        retry_after?: number;
+    };
 
     /** The model messages (built incrementally during streaming) */
     model_messages: ModelMessage[];
