@@ -45,6 +45,7 @@ export function useAutoScroll(
     forwardedRef?: ForwardedRef<HTMLDivElement>,
     options: UseAutoScrollOptions = {}
 ): UseAutoScrollReturn {
+    const win = Zotero.getMainWindow();
     const {
         threshold = BOTTOM_THRESHOLD,
         debounceDelay = 150,
@@ -83,6 +84,14 @@ export function useAutoScroll(
             return;
         }
 
+        const clearDebounceTimer = () => {
+            if (scrollDebounceTimer.current === null) {
+                return;
+            }
+            win.clearTimeout(scrollDebounceTimer.current);
+            scrollDebounceTimer.current = null;
+        };
+
         const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
@@ -95,9 +104,7 @@ export function useAutoScroll(
         // This prevents layout shifts from streaming content from being detected as user scrolls
         if (scrollDirection === 'up' && Math.abs(scrollTop - lastScrollTopRef.current) > upScrollThreshold) {
             // Clear any existing debounce timer
-            if (scrollDebounceTimer.current !== null) {
-                clearTimeout(scrollDebounceTimer.current);
-            }
+            clearDebounceTimer();
             
             // User deliberately scrolled up
             store.set(userScrolledAtom, true);
@@ -105,11 +112,9 @@ export function useAutoScroll(
         } else if (distanceFromBottom > threshold) {
             // Only set userScrolled after a debounce delay to avoid false positives
             // from rapid layout shifts during streaming
-            if (scrollDebounceTimer.current !== null) {
-                clearTimeout(scrollDebounceTimer.current);
-            }
+            clearDebounceTimer();
             
-            scrollDebounceTimer.current = Zotero.getMainWindow().setTimeout(() => {
+            scrollDebounceTimer.current = win.setTimeout(() => {
                 // Double-check after debounce
                 if (scrollContainerRef.current) {
                     const { scrollTop: currentScrollTop, scrollHeight: currentScrollHeight, clientHeight: currentClientHeight } = scrollContainerRef.current;
@@ -127,16 +132,18 @@ export function useAutoScroll(
 
         store.set(currentThreadScrollPositionAtom, scrollTop);
         lastScrollTopRef.current = scrollTop;
-    }, [threshold, debounceDelay, upScrollThreshold]);
+    }, [threshold, debounceDelay, upScrollThreshold, win]);
 
     // Cleanup debounce timer on unmount
     useEffect(() => {
         return () => {
-            if (scrollDebounceTimer.current !== null) {
-                clearTimeout(scrollDebounceTimer.current);
+            if (scrollDebounceTimer.current === null) {
+                return;
             }
+            win.clearTimeout(scrollDebounceTimer.current);
+            scrollDebounceTimer.current = null;
         };
-    }, []);
+    }, [win]);
 
     return {
         scrollContainerRef,
