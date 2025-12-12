@@ -1,6 +1,6 @@
-import { useLayoutEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '../atoms/citations';
+import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
 
 /**
  * Hook to get or assign a numeric citation marker for a given citation key.
@@ -34,7 +34,9 @@ export function useCitationMarker(citationKey: string): string {
     
     // Use layout effect to assign marker synchronously after render (before paint)
     // This ensures no visual flicker - the assignment happens before the browser paints
-    useLayoutEffect(() => {
+    // Uses isomorphic version to avoid SSR warnings during renderToStaticMarkup
+    // Note: Effects don't run during SSR; the fallback prediction below handles this
+    useIsomorphicLayoutEffect(() => {
         if (!existingMarker && citationKey && citationKey !== 'unknown') {
             assignMarker(citationKey);
         }
