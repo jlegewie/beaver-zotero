@@ -469,6 +469,41 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
 }
 
 // ============================================================================
+// Annotation Tool Results
+// ============================================================================
+
+/** Valid tool names for annotation results */
+const ANNOTATION_TOOL_NAMES = [
+    'add_highlight_annotations',
+    'add_note_annotations',
+    'add_annotations'
+] as const;
+
+/**
+ * Type guard for annotation tool results.
+ * Annotation tools don't return structured data through content/metadata.storage,
+ * they create AgentActions that are stored separately.
+ */
+export function isAnnotationToolResult(toolName: string): boolean {
+    return ANNOTATION_TOOL_NAMES.includes(toolName as typeof ANNOTATION_TOOL_NAMES[number]);
+}
+
+/**
+ * Extract attachment_id from annotation tool call arguments.
+ * Returns null if not found or not parseable.
+ */
+export function extractAnnotationAttachmentId(args: string | Record<string, any> | null): string | null {
+    if (!args) return null;
+    
+    try {
+        const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+        return parsedArgs?.attachment_id ?? null;
+    } catch {
+        return null;
+    }
+}
+
+// ============================================================================
 // Result Counts
 // ============================================================================
 
