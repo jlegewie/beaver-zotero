@@ -6,7 +6,7 @@ import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { getPref } from '../../../src/utils/prefs';
-import { CitationData, getUniqueKey, isExternalCitation } from '../../types/citations';
+import { CitationData, getCitationKey, isExternalCitation } from '../../types/citations';
 import Tooltip from '../ui/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
 import ActionButtons from '../externalReferences/actionButtons';
@@ -57,7 +57,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     const mappedItemType = isExternal && mappedZoteroItem ? getMappedItemType() : undefined;
                     
                     return (
-                        <div key={getUniqueKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
+                        <div key={getCitationKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">

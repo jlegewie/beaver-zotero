@@ -8,13 +8,25 @@ import ZoteroCitation from '../sources/ZoteroCitation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
+import { 
+    preprocessCitations, 
+    createPreprocessState 
+} from '../../utils/citationPreprocessing';
 
 // Create a custom schema that extends GitHub's defaults but allows citation tags
+// Supported citation formats:
+//   <citation item_id="..."/>           - parent item reference
+//   <citation att_id="..."/>            - attachment reference  
+//   <citation att_id="..." sid="..."/>  - attachment with sentence ID
+//   <citation external_id="..."/>       - external reference
 const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id', 'raw_tag', 'att_id', 'item_id']
+        // Note: We allow extra attributes that get passed through but ignored
+        // attachment_id is normalized to att_id during preprocessing
+        // citation_key is used for metadata lookup (replaces raw_tag)
+        citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'external_id', 'consecutive', 'adjacent', 'citation_key']
     }
 });
 
@@ -35,12 +47,15 @@ type MarkdownRendererProps = {
 
 /**
  * Construct a raw tag string from attributes (excluding id which is injected)
- * This is used to match against the raw_tag from agent actions
+ * This is used to match against the raw_tag from agent actions.
+ * 
+ * IMPORTANT: Attributes are sorted alphabetically to ensure consistent matching.
  */
 function constructRawTag(tagName: string, attributes: Record<string, string>): string {
-    // Filter out 'id' attribute as it's injected by the backend
+    // Filter out 'id' attribute as it's injected by the backend, then sort
     const attrs = Object.entries(attributes)
         .filter(([key]) => key !== 'id')
+        .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([key, value]) => `${key}="${value}"`)
         .join(' ');
     return attrs ? `<${tagName} ${attrs}>` : `<${tagName}>`;
@@ -134,73 +149,6 @@ function parseContentIntoSegments(content: string): Segment[] {
     return segments;
 }
 
-/**
- * Construct a raw citation tag string from attributes (excluding cid which is injected)
- * This is used to match against the raw_tag from citation metadata.
- * The output uses `>` (not `/>`) as the canonical form for normalization.
- */
-function constructCitationRawTag(attributesStr: string): string {
-    // Parse attributes and filter out 'cid' (injected by backend)
-    const attrs: string[] = [];
-    const attrRegex = /(\w+)="([^"]*)"/g;
-    let attrMatch: RegExpExecArray | null;
-    while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
-        if (attrMatch[1] !== 'cid') {
-            attrs.push(`${attrMatch[1]}="${attrMatch[2]}"`);
-        }
-    }
-    // Use `>` as canonical form (normalizeRawTag converts /> to >)
-    return attrs.length > 0 ? `<citation ${attrs.join(' ')}>` : '<citation>';
-}
-
-/**
- * Preprocess citations in markdown content
- * @param content Markdown content with citation tags
- * @param lastCitationIdRef Reference to the last citation ID (for consecutive tracking across segments)
- * @returns Preprocessed content with citations formatted
- */
-function preprocessCitations(content: string, lastCitationIdRef: { value: string }): string {
-    // Track end index locally within this segment for adjacency detection
-    let lastCitationEndIndex = -1;
-    
-    // Match citation tags in all formats:
-    // - Self-closing: <citation .../>
-    // - Opening only (missing /): <citation ...>
-    // - Full pair: <citation ...></citation>
-    return content.replace(
-        /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/citation>)?)/g,
-        (match, attributesStr, offset, fullString) => {
-            // Extract the ID from attributes
-            const idMatch = attributesStr.match(/id="([^"]+)"/);
-            const id = idMatch ? idMatch[1] : "";
-            
-            // Check if this citation has the same ID as the previous one
-            const isConsecutive = id && id === lastCitationIdRef.value;
-            
-            // Check if adjacent (only whitespace between this and previous citation)
-            const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
-                fullString.substring(lastCitationEndIndex, offset).trim() === '';
-            
-            // Update tracking for next iteration
-            lastCitationIdRef.value = id;
-            lastCitationEndIndex = offset + match.length;
-            
-            // Construct raw_tag for matching (excludes 'cid' attribute)
-            const rawTag = constructCitationRawTag(attributesStr);
-            const rawTagAttr = `raw_tag="${encodeURIComponent(rawTag)}"`;
-            
-            // Add attributes as needed
-            if (isAdjacent) {
-                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true" adjacent="true"></citation>`;
-            }
-            if (isConsecutive) {
-                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true"></citation>`;
-            }
-            
-            return `<citation ${attributesStr} ${rawTagAttr}></citation>`;
-        }
-    );
-}
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
@@ -268,8 +216,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         ? parseContentIntoSegments(processedContent)
         : [{ type: 'markdown' as const, content: processedContent }];
     
-    // Track last citation ID across all markdown segments for consecutive detection
-    const lastCitationIdRef = { value: "" };
+    // Track citation state across all markdown segments for consecutive detection
+    const preprocessState = createPreprocessState();
     
     // Process each segment
     const processedSegments = segments.map((segment, index) => {
@@ -280,8 +228,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         // Apply citation preprocessing to markdown segments
         let markdownContent = segment.content;
         
-        // Preprocess citations
-        markdownContent = preprocessCitations(markdownContent, lastCitationIdRef);
+        // Preprocess citations (state is mutated to track consecutive citations)
+        markdownContent = preprocessCitations(markdownContent, preprocessState);
         
         // Apply other markdown preprocessing
         markdownContent = markdownContent

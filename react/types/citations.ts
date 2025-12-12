@@ -107,15 +107,144 @@ export const isZoteroCitation = (citation: CitationMetadata): boolean => {
     return !!(citation.library_id && citation.zotero_key);
 };
 
-export const getUniqueKey = (citation: CitationMetadata): string => {
-    if (citation.library_id && citation.zotero_key) {
-        return `${citation.library_id}-${citation.zotero_key}`;
+/**
+ * Parameters for generating a citation key.
+ * Accepts either CitationMetadata fields or component props.
+ */
+export interface CitationKeyParams {
+    // Zotero reference (from metadata or parsed from props)
+    library_id?: number;
+    zotero_key?: string;
+    // External reference
+    external_source_id?: string;
+}
+
+/**
+ * Generate a unique key for a citation that can be used for marker assignment
+ * and metadata lookup.
+ * 
+ * This is the SINGLE SOURCE OF TRUTH for citation key generation.
+ * Used by:
+ * - MarkdownRenderer (preprocessing to inject citation_key prop)
+ * - ZoteroCitation component (lookup in citationDataByCitationKeyAtom)
+ * - updateCitationDataAtom (when metadata arrives)
+ * 
+ * Key format:
+ * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - External citations: "external:{external_source_id}"
+ * - Unknown: "" (empty string)
+ * 
+ * @param params Citation key parameters
+ * @returns Unique citation key string
+ */
+export function getCitationKey(params: CitationKeyParams): string {
+    if (params.library_id && params.zotero_key) {
+        return `zotero:${params.library_id}-${params.zotero_key}`;
     }
-    if (citation.external_source_id) {
-        return citation.external_source_id;
+    if (params.external_source_id) {
+        return `external:${params.external_source_id}`;
     }
     return '';
-};
+}
+
+/**
+ * Parse a "libraryID-itemKey" reference string.
+ * Handles optional 'user-content-' prefix added by rehype-sanitize.
+ * 
+ * @param ref Reference string in format "libraryID-itemKey"
+ * @returns Parsed reference or null if invalid
+ */
+export function parseItemReference(ref: string | undefined): { libraryID: number; itemKey: string } | null {
+    if (!ref) return null;
+    const clean = ref.replace('user-content-', '');
+    const dashIndex = clean.indexOf('-');
+    if (dashIndex > 0) {
+        const libraryID = parseInt(clean.substring(0, dashIndex), 10);
+        const itemKey = clean.substring(dashIndex + 1);
+        if (libraryID > 0 && itemKey) {
+            return { libraryID, itemKey };
+        }
+    }
+    return null;
+}
+
+/**
+ * Normalized citation attributes from LLM output.
+ * All attribute names are normalized (e.g., attachment_id → att_id).
+ */
+export interface NormalizedCitationAttrs {
+    item_id?: string;      // Format: "libraryID-itemKey"
+    att_id?: string;       // Format: "libraryID-itemKey"
+    external_id?: string;  // External source ID
+    sid?: string;          // Sentence ID
+}
+
+/**
+ * Parse and normalize citation attributes from a raw attribute string.
+ * 
+ * Normalizations:
+ * - attachment_id → att_id
+ * - Only keeps recognized attributes (item_id, att_id, external_id, sid)
+ * 
+ * @param attributesStr Raw attribute string from citation tag
+ * @returns Normalized attributes object
+ */
+export function parseCitationAttributes(attributesStr: string): NormalizedCitationAttrs {
+    const attrs: NormalizedCitationAttrs = {};
+    const attrRegex = /(\w+)="([^"]*)"/g;
+    let match: RegExpExecArray | null;
+    
+    while ((match = attrRegex.exec(attributesStr)) !== null) {
+        let name = match[1];
+        const value = match[2];
+        
+        // Normalize attribute names
+        if (name === 'attachment_id') {
+            name = 'att_id';
+        }
+        
+        // Only keep recognized citation attributes
+        if (name === 'item_id') attrs.item_id = value;
+        else if (name === 'att_id') attrs.att_id = value;
+        else if (name === 'external_id') attrs.external_id = value;
+        else if (name === 'sid') attrs.sid = value;
+    }
+    
+    return attrs;
+}
+
+/**
+ * Compute a citation key from normalized citation attributes.
+ * Priority: att_id > item_id > external_id
+ * 
+ * @param attrs Normalized citation attributes
+ * @returns Citation key or empty string if no valid identifier
+ */
+export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
+    // att_id takes priority (attachment reference)
+    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
+    
+    if (zoteroRef) {
+        return getCitationKey({
+            library_id: zoteroRef.libraryID,
+            zotero_key: zoteroRef.itemKey
+        });
+    }
+    
+    if (attrs.external_id) {
+        return getCitationKey({ external_source_id: attrs.external_id });
+    }
+    
+    return '';
+}
+
+/**
+ * Get the identity key for consecutive citation detection.
+ * Uses the primary identifier (att_id > item_id > external_id).
+ */
+export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
+    return attrs.att_id || attrs.item_id || attrs.external_id || '';
+}
 
 export interface CitationData extends CitationMetadata {
     type: "item" | "attachment" | "note" | "annotation" | "external";

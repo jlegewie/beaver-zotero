@@ -2,35 +2,59 @@ import { atom } from 'jotai';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
-import { CitationMetadata, CitationData, isExternalCitation, getUniqueKey } from '../types/citations';
+import { CitationMetadata, CitationData, isExternalCitation, getCitationKey } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 
 /**
- * Fallback citation cache for citations not in citationDataMapAtom
- * Keyed by "libraryID-itemKey" (cleanKey)
+ * Thread-scoped citation marker assignment.
+ * 
+ * Maps citation keys to numeric markers (e.g., "1", "2", "3").
+ * This ensures consistent markers across streaming and post-metadata states:
+ * - Markers are assigned in render order during streaming (first appearance = "1")
+ * - Same citation key always gets the same marker
+ * - Resets when thread changes (via resetCitationMarkersAtom)
  */
-export interface FallbackCitation {
-    formatted_citation: string;
-    citation: string;
-    url: string;
-}
-export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>({});
-
+export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
 
 /**
- * Normalize a raw tag string for consistent matching.
- * Removes extra whitespace and normalizes self-closing syntax to ensure
- * tags with different formatting match (e.g., `<citation .../>` and `<citation ...>`)
+ * Get or assign a numeric marker for a citation key.
+ * Returns the existing marker if already assigned, otherwise assigns the next number.
  */
-export function normalizeRawTag(rawTag: string): string {
-    return rawTag
-        .replace(/\s+/g, ' ')     // Collapse multiple spaces to single space
-        .replace(/\s*\/>/g, '>')  // Normalize self-closing /> to > (canonical form)
-        .replace(/\s*>/g, '>')    // Remove space before >
-        .replace(/<\s*/g, '<')    // Remove space after <
-        .trim();
-}
+export const getOrAssignCitationMarkerAtom = atom(
+    null,
+    (get, set, citationKey: string): string => {
+        const current = get(citationKeyToMarkerAtom);
+        if (current[citationKey]) {
+            return current[citationKey];
+        }
+        // Assign next number based on how many unique citations we've seen
+        const nextMarker = (Object.keys(current).length + 1).toString();
+        set(citationKeyToMarkerAtom, { ...current, [citationKey]: nextMarker });
+        return nextMarker;
+    }
+);
+
+/**
+ * Lookup a citation marker without assigning (read-only).
+ * Returns undefined if the citation key hasn't been assigned a marker yet.
+ */
+export const getCitationMarkerAtom = atom(
+    (get) => (citationKey: string): string | undefined => {
+        return get(citationKeyToMarkerAtom)[citationKey];
+    }
+);
+
+/**
+ * Reset citation markers. Called when creating a new thread or loading an existing one.
+ */
+export const resetCitationMarkersAtom = atom(
+    null,
+    (_get, set) => {
+        set(citationKeyToMarkerAtom, {});
+    }
+);
+
 
 /*
  * Citation metadata
@@ -76,22 +100,33 @@ export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 
 /**
- * Citation data mapped by normalized raw_tag for matching during streaming
- * This enables matching citations when cid is not present in the text
+ * Citation data mapped by citation key for lookup.
+ * 
+ * This is the primary lookup mechanism for ZoteroCitation components:
+ * - MarkdownRenderer injects citation_key prop during preprocessing
+ * - ZoteroCitation looks up metadata using this key
+ * - Key is computed via getCitationKey() from library_id/zotero_key or external_source_id
+ * 
+ * Key format:
+ * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - External citations: "external:{external_source_id}"
  */
-export const citationDataByRawTagAtom = atom<Record<string, CitationData>>((get) => {
+export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
     const dataMap = get(citationDataMapAtom);
-    const byRawTag: Record<string, CitationData> = {};
+    const byKey: Record<string, CitationData> = {};
     
     for (const citation of Object.values(dataMap)) {
-        if (citation.raw_tag) {
-            // Normalize the key for consistent matching
-            const normalizedKey = normalizeRawTag(citation.raw_tag);
-            byRawTag[normalizedKey] = citation;
+        const key = getCitationKey({
+            library_id: citation.library_id,
+            zotero_key: citation.zotero_key,
+            external_source_id: citation.external_source_id
+        });
+        if (key) {
+            byKey[key] = citation;
         }
     }
     
-    return byRawTag;
+    return byKey;
 });
 
 /**
@@ -101,32 +136,41 @@ export const citationDataListAtom = atom(
     (get) => Object.values(get(citationDataMapAtom))
 );
 
-// Track the most recent async update so stale computations don't override newer data
-let citationDataUpdateVersion = 0;
+/**
+ * Tracks the current pending update promise for race condition handling.
+ * This replaces the module-level version counter with a cleaner pattern.
+ */
+const pendingUpdateRef = { current: null as Promise<void> | null };
 
 export const updateCitationDataAtom = atom(
     null,
     async (get, set) => {
-        const updateVersion = ++citationDataUpdateVersion;
         const metadata = get(citationMetadataAtom);
         const prevMap = get(citationDataMapAtom);
         const externalReferenceMap = get(externalReferenceMappingAtom);
         const newCitationDataMap: Record<string, CitationData> = {};
-        const citationKeyToNumeric = new Map<string, string>();
         logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
+        
+        // Create a unique reference for this update
+        const thisUpdate = {} as Promise<void>;
+        pendingUpdateRef.current = thisUpdate;
 
         // Extend the citation metadata with the attachment citation data
         for (const citation of metadata) {
 
             // Get unique key (works for both Zotero and external citations)
-            const citationKey = getUniqueKey(citation);
+            // Uses getCitationKey to match key generation in ZoteroCitation component
+            const citationKey = getCitationKey({
+                library_id: citation.library_id,
+                zotero_key: citation.zotero_key,
+                external_source_id: citation.external_source_id
+            });
             const prevCitation = prevMap[citation.citation_id];
 
-            // Get or assign numeric citation for this citationKey
-            if (!citationKeyToNumeric.has(citationKey)) {
-                citationKeyToNumeric.set(citationKey, (citationKeyToNumeric.size + 1).toString());
-            }
-            const numericCitation = citationKeyToNumeric.get(citationKey)!;
+            // Get or assign numeric citation using the shared thread-scoped atom.
+            // This ensures markers assigned during streaming are preserved.
+            set(getOrAssignCitationMarkerAtom, citationKey);
+            const numericCitation = get(citationKeyToMarkerAtom)[citationKey] || null;
 
             // Use existing extended metadata if available
             if (prevCitation) {
@@ -202,8 +246,10 @@ export const updateCitationDataAtom = atom(
             }
         }
 
-        if (updateVersion !== citationDataUpdateVersion) {
-            logger(`updateCitationDataAtom: Skipping stale update version ${updateVersion}`, 3);
+        // Check if this update is still the most recent one
+        // If a newer update started, skip applying this stale result
+        if (pendingUpdateRef.current !== thisUpdate) {
+            logger(`updateCitationDataAtom: Skipping stale update`, 3);
             return;
         }
 

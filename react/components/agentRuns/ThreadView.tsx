@@ -30,7 +30,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             threshold: BOTTOM_THRESHOLD
         });
 
-        // Restore scroll position from atom
+        // Restore scroll position from atom (only for thread switching, not during streaming)
+        // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
         useLayoutEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) {
@@ -40,17 +41,32 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
             const targetScrollTop = storedScrollTop ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
-            if (delta > 1) {
+            
+            // Only restore if there's a significant difference (e.g., thread switch)
+            // Small deltas are just normal scroll position updates during streaming
+            if (delta > 50) {
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
+                
+                // Set userScrolledAtom based on position after restore
+                const { scrollHeight, clientHeight } = container;
+                const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
+                const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                store.set(userScrolledAtom, !isNearBottom);
             } else {
                 restoredFromAtomRef.current = false;
+                
+                // For small deltas (thread switch with similar position or streaming updates),
+                // ensure userScrolledAtom is false if we're near the bottom.
+                // This prevents stale userScrolled=true from a previous thread from blocking auto-scroll.
+                // We only set to false (never true) to avoid the original regression where
+                // content growth during streaming would incorrectly disable auto-scroll.
+                const { scrollHeight, clientHeight } = container;
+                const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
+                if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+                    store.set(userScrolledAtom, false);
+                }
             }
-
-            const { scrollHeight, clientHeight } = container;
-            const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
-            const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-            store.set(userScrolledAtom, !isNearBottom);
         }, [storedScrollTop]);
 
         // Scroll to bottom when runs change

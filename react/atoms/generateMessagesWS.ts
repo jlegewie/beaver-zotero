@@ -18,7 +18,6 @@ import {
     WSRunCompleteEvent,
     WSErrorEvent,
     WSWarningEvent,
-    WSCitationEvent,
     WSAgentActionEvent,
     WSToolCallProgressEvent,
 } from '../../src/services/agentService';
@@ -50,7 +49,7 @@ import {
     updateRunWithToolCallProgress,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
 import {
     addAgentActionsAtom,
     toAgentAction,
@@ -321,8 +320,27 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 runId: event.run_id,
                 usage: event.usage,
                 cost: event.cost,
+                citationsCount: event.citations?.length ?? 0,
+                actionsCount: event.agent_actions?.length ?? 0,
             });
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+
+            // Process citations from run complete event
+            if (event.citations && event.citations.length > 0) {
+                logger(`WS onRunComplete: Processing ${event.citations.length} citations`, 1);
+                set(citationMetadataAtom, (prev) => [
+                    ...prev,
+                    ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
+                ]);
+                set(updateCitationDataAtom);
+            }
+
+            // Process agent actions from run complete event
+            if (event.agent_actions && event.agent_actions.length > 0) {
+                logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
+                const actions = event.agent_actions.map(toAgentAction);
+                set(addAgentActionsAtom, actions);
+            }
         },
 
         onThread: (newThreadId: string) => {
@@ -365,17 +383,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger(`WS onWarning: ${event.type} - ${event.message}`, 1);
             console.warn('[WS] Warning event:', event);
             set(wsWarningAtom, event);
-        },
-
-        onCitation: (event: WSCitationEvent) => {
-            logger(`WS onCitation: ${event.citation.citation_id} for run ${event.run_id}`, 1);
-            console.log('[WS] Citation event:', {
-                runId: event.run_id,
-                citationId: event.citation.citation_id,
-                authorYear: event.citation.author_year,
-            });
-            set(citationMetadataAtom, (prev) => [...prev, { ...event.citation, run_id: event.run_id }]);
-            set(updateCitationDataAtom);
         },
 
         onAgentAction: (event: WSAgentActionEvent) => {
@@ -726,4 +733,5 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear agent actions and citations for the thread
     set(clearAgentActionsAtom);
     set(citationMetadataAtom, []);
+    set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
 });

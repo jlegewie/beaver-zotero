@@ -10,10 +10,10 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataListAtom, citationDataMapAtom } from '../../atoms/citations';
+import { citationDataListAtom, citationDataMapAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
-import { CitationData, getUniqueKey } from '../../types/citations';
+import { CitationData, getCitationKey } from '../../types/citations';
 import { store } from '../../store';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
@@ -31,6 +31,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
     const citationDataMap = useAtomValue(citationDataMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
+    const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     const lastMessage = messages[messages.length - 1];
 
     // Find all messages in the current assistant turn
@@ -50,25 +51,27 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         return messages.map(message => message.id);
     }, [messages]);
 
-    // Uniqiue citations for messages in message group
+    // Unique citations for messages in message group
     const uniqueCitations = useMemo(() => {
         const seen = new Set<string>();
         const unique: CitationData[] = [];
         const messageCitations = citations.filter(citation => messageIds.includes(citation.message_id));
         
         for (const citation of messageCitations) {
-            const key = getUniqueKey(citation);
+            const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
+                // Look up the correct marker from the thread-scoped atom
+                const numericCitation = citationMarkerMap[key] || citation.numericCitation;
                 unique.push({
                     ...citation,
-                    numericCitation: (unique.length + 1).toString()
+                    numericCitation
                 });
             }
         }
         
         return unique;
-    }, [citations, messageIds]);
+    }, [citations, messageIds, citationMarkerMap]);
 
     const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);
     const sourcesVisible = sourcesVisibilityMap[lastMessage.id] ?? false;

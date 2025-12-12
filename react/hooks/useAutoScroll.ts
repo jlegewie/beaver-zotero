@@ -18,9 +18,14 @@ interface UseAutoScrollOptions {
     debounceDelay?: number;
     /**
      * Minimum scroll distance (in pixels) to detect upward user scroll
-     * @default 10
+     * @default 50
      */
     upScrollThreshold?: number;
+    /**
+     * Number of consecutive upward scroll events required to confirm user scroll
+     * @default 3
+     */
+    upScrollConsecutiveRequired?: number;
 }
 
 interface UseAutoScrollReturn {
@@ -49,13 +54,15 @@ export function useAutoScroll(
     const {
         threshold = BOTTOM_THRESHOLD,
         debounceDelay = 150,
-        upScrollThreshold = 10
+        upScrollThreshold = 50,
+        upScrollConsecutiveRequired = 3
     } = options;
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const lastScrollTopRef = useRef(0);
     const scrollDebounceTimer = useRef<number | null>(null);
     const lastScrollDirectionRef = useRef<'up' | 'down' | null>(null);
+    const consecutiveUpScrollsRef = useRef(0);
 
     const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
         scrollContainerRef.current = node;
@@ -96,20 +103,26 @@ export function useAutoScroll(
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
         // Detect scroll direction
+        const scrollDelta = scrollTop - lastScrollTopRef.current;
         const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' : 
                                scrollTop < lastScrollTopRef.current ? 'up' : null;
         
-        // Only consider it a "user scroll" if they scroll UP significantly
+        // Only consider it a "user scroll" if they scroll UP significantly AND consistently
         // or if they scroll down but stop far from the bottom
         // This prevents layout shifts from streaming content from being detected as user scrolls
-        if (scrollDirection === 'up' && Math.abs(scrollTop - lastScrollTopRef.current) > upScrollThreshold) {
-            // Clear any existing debounce timer
-            clearDebounceTimer();
+        if (scrollDirection === 'up' && Math.abs(scrollDelta) > upScrollThreshold) {
+            consecutiveUpScrollsRef.current++;
             
-            // User deliberately scrolled up
-            store.set(userScrolledAtom, true);
-            lastScrollDirectionRef.current = 'up';
+            // Only mark as user scrolled after multiple consecutive upward scrolls
+            // This filters out layout-induced scroll jumps during streaming
+            if (consecutiveUpScrollsRef.current >= upScrollConsecutiveRequired) {
+                clearDebounceTimer();
+                store.set(userScrolledAtom, true);
+                lastScrollDirectionRef.current = 'up';
+            }
         } else if (distanceFromBottom > threshold) {
+            // Reset consecutive counter on non-upward scroll
+            consecutiveUpScrollsRef.current = 0;
             // Only set userScrolled after a debounce delay to avoid false positives
             // from rapid layout shifts during streaming
             clearDebounceTimer();
@@ -126,13 +139,15 @@ export function useAutoScroll(
             }, debounceDelay);
         } else {
             // Near the bottom - user hasn't scrolled
+            // Reset consecutive counter when near bottom
+            consecutiveUpScrollsRef.current = 0;
             store.set(userScrolledAtom, false);
             lastScrollDirectionRef.current = 'down';
         }
 
         store.set(currentThreadScrollPositionAtom, scrollTop);
         lastScrollTopRef.current = scrollTop;
-    }, [threshold, debounceDelay, upScrollThreshold, win]);
+    }, [threshold, debounceDelay, upScrollThreshold, upScrollConsecutiveRequired, win]);
 
     // Cleanup debounce timer on unmount
     useEffect(() => {
