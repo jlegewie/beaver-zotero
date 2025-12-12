@@ -249,6 +249,22 @@ export type WSEvent =
 // =============================================================================
 
 /**
+ * Authentication message sent immediately after WebSocket connection opens.
+ * Must be the first message sent by the client.
+ */
+export interface WSAuthMessage {
+    type: 'auth';
+    /** JWT authentication token */
+    token: string;
+    /** User's model provider API key (optional) */
+    api_key?: string;
+    /** UUID of plan_model_access entry (optional) */
+    access_id?: string;
+    /** Set to true for custom model mode (optional, default false) */
+    custom_model?: boolean;
+}
+
+/**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
@@ -431,11 +447,12 @@ export class AgentService {
      * Connect to the WebSocket endpoint and send an agent run request
      * 
      * Protocol flow:
-     * 1. Client connects with token (and optionally access_id, api_key) in query params
-     * 2. Server authenticates, fetches profile, validates model
-     * 3. Server sends "ready" event
-     * 4. Client sends agent run request
-     * 5. Server streams delta events and sends complete event
+     * 1. Client connects with clean URL (no sensitive data in params)
+     * 2. Client sends WSAuthMessage with token and options
+     * 3. Server authenticates, fetches profile, validates model
+     * 4. Server sends "ready" event
+     * 5. Client sends agent run request
+     * 6. Server streams delta events and sends complete event
      * 
      * @param request The agent run request to send
      * @param callbacks Event callbacks
@@ -452,20 +469,21 @@ export class AgentService {
             const token = await this.getAuthToken();
             const useCustomModel = !!request.custom_model;
 
-            // Build URL with query parameters
-            const params = new URLSearchParams();
-            params.set('token', token);
-            if (useCustomModel) {
-                params.set('custom_model', 'true');
-            } else if (options?.accessId) {
-                params.set('access_id', options.accessId);
-            }
-            if (options?.apiKey) {
-                params.set('api_key', options.apiKey);
-            }
-            const wsUrl = `${this.getWebSocketUrl()}?${params.toString()}`;
+            // Build auth message to send after connection opens
+            const authMessage: WSAuthMessage = {
+                type: 'auth',
+                token,
+                ...(options?.apiKey && { api_key: options.apiKey }),
+                ...(useCustomModel 
+                    ? { custom_model: true }
+                    : options?.accessId && { access_id: options.accessId }
+                ),
+            };
 
-            logger(`AgentService: Connecting to ${this.getWebSocketUrl()}`, 1);
+            // Connect with clean URL (no sensitive data in params)
+            const wsUrl = this.getWebSocketUrl();
+
+            logger(`AgentService: Connecting to ${wsUrl}`, 1);
 
             return new Promise<void>((resolve, reject) => {
                 let hasResolved = false;
@@ -500,7 +518,9 @@ export class AgentService {
                 this.ws = new WebSocket(wsUrl);
 
                 this.ws.onopen = () => {
-                    logger('AgentService: Connection established, waiting for ready event', 1);
+                    logger('AgentService: Connection established, sending auth message', 1);
+                    // Send auth message immediately after connection opens
+                    this.ws?.send(JSON.stringify(authMessage));
                     callbacks.onOpen?.();
                     // Note: Don't resolve here - wait for ready event
                 };
