@@ -611,8 +611,29 @@ export class AgentService {
     private handleMessage(rawData: string): void {
         if (!this.callbacks) return;
 
+        // Guard against invalid data during close handshake
+        if (typeof rawData !== 'string' || !rawData) {
+            logger('AgentService: Received invalid message data (likely during close)', 1);
+            return;
+        }
+
+        let event: WSEvent;
         try {
-            const event = JSON.parse(rawData) as WSEvent;
+            event = JSON.parse(rawData) as WSEvent;
+        } catch (error) {
+            logger(`AgentService: Failed to parse message: ${error}`, 1);
+            // Only report parse errors if we're still actively listening
+            if (this.callbacks) {
+                this.callbacks.onError({
+                    event: 'error',
+                    type: 'parse_error',
+                    message: 'Failed to parse server message',
+                });
+            }
+            return;
+        }
+
+        try {
             logger(`AgentService: Received event: ${event.event}`, 1);
 
             switch (event.event) {
@@ -664,8 +685,10 @@ export class AgentService {
                     break;
 
                 case 'error':
+                    // Call onError first, then clear callbacks before closing
+                    // to prevent race conditions during close handshake
                     this.callbacks.onError(event);
-                    // Close the connection after an error
+                    this.callbacks = null;
                     this.close(1011, `Server error: ${event.type}`);
                     break;
 
@@ -729,12 +752,16 @@ export class AgentService {
                     logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
         } catch (error) {
-            logger(`AgentService: Failed to parse message: ${error}`, 1);
-            this.callbacks.onError({
-                event: 'error',
-                type: 'parse_error',
-                message: 'Failed to parse server message',
-            });
+            logger(`AgentService: Error handling event: ${error}`, 1);
+            // Only report handling errors if we're still actively listening
+            if (this.callbacks) {
+                this.callbacks.onError({
+                    event: 'error',
+                    type: 'event_handling_error',
+                    message: 'Failed to handle server event',
+                    details: String(error),
+                });
+            }
         }
     }
 
