@@ -180,18 +180,24 @@ export const citationDataListAtom = atom(
     (get) => Object.values(get(citationDataMapAtom))
 );
 
-// Track the most recent async update so stale computations don't override newer data
-let citationDataUpdateVersion = 0;
+/**
+ * Tracks the current pending update promise for race condition handling.
+ * This replaces the module-level version counter with a cleaner pattern.
+ */
+const pendingUpdateRef = { current: null as Promise<void> | null };
 
 export const updateCitationDataAtom = atom(
     null,
     async (get, set) => {
-        const updateVersion = ++citationDataUpdateVersion;
         const metadata = get(citationMetadataAtom);
         const prevMap = get(citationDataMapAtom);
         const externalReferenceMap = get(externalReferenceMappingAtom);
         const newCitationDataMap: Record<string, CitationData> = {};
         logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
+        
+        // Create a unique reference for this update
+        const thisUpdate = {} as Promise<void>;
+        pendingUpdateRef.current = thisUpdate;
 
         // Extend the citation metadata with the attachment citation data
         for (const citation of metadata) {
@@ -283,8 +289,10 @@ export const updateCitationDataAtom = atom(
             }
         }
 
-        if (updateVersion !== citationDataUpdateVersion) {
-            logger(`updateCitationDataAtom: Skipping stale update version ${updateVersion}`, 3);
+        // Check if this update is still the most recent one
+        // If a newer update started, skip applying this stale result
+        if (pendingUpdateRef.current !== thisUpdate) {
+            logger(`updateCitationDataAtom: Skipping stale update`, 3);
             return;
         }
 
