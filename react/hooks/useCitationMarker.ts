@@ -5,10 +5,23 @@ import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '../atoms
 /**
  * Hook to get or assign a numeric citation marker for a given citation key.
  * 
- * This ensures consistent markers across streaming and post-metadata states:
- * - First render: Returns a stable prediction based on current map size
- * - After layout effect: Returns the actual assigned marker
- * - Same citation key always gets the same marker
+ * Marker assignment is thread-scoped and consistent across all scenarios:
+ * 
+ * **During streaming:**
+ * - Citations render as they appear in text
+ * - Markers are assigned in render order (first citation = "1")
+ * - When metadata arrives, updateCitationDataAtom uses the SAME markers
+ * 
+ * **When loading existing threads:**
+ * - resetCitationMarkersAtom clears markers
+ * - updateCitationDataAtom assigns markers based on citationMetadataAtom order
+ * - Components then retrieve existing markers (no re-assignment)
+ * - Order depends on backend: runs are processed chronologically,
+ *   citations within runs use backend order (typically text-appearance order)
+ * 
+ * **Key guarantees:**
+ * - Same citation key always gets the same marker within a thread
+ * - Markers reset when thread changes (new thread, load thread, clear thread)
  * 
  * @param citationKey Unique key for the citation (e.g., "zotero:1-ABC123" or "external:xyz")
  * @returns Numeric marker string (e.g., "1", "2", "3")

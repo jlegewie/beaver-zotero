@@ -107,12 +107,17 @@ export const isZoteroCitation = (citation: CitationMetadata): boolean => {
     return !!(citation.library_id && citation.zotero_key);
 };
 
+/**
+ * Get a unique key for a citation that can be used for marker assignment.
+ * The key format matches what ZoteroCitation component uses to ensure
+ * consistent marker assignment between streaming and post-metadata states.
+ */
 export const getUniqueKey = (citation: CitationMetadata): string => {
     if (citation.library_id && citation.zotero_key) {
-        return `${citation.library_id}-${citation.zotero_key}`;
+        return `zotero:${citation.library_id}-${citation.zotero_key}`;
     }
     if (citation.external_source_id) {
-        return citation.external_source_id;
+        return `external:${citation.external_source_id}`;
     }
     return '';
 };
