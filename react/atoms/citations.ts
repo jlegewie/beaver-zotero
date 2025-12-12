@@ -169,7 +169,8 @@ export const updateCitationDataAtom = atom(
 
             // Get or assign numeric citation using the shared thread-scoped atom.
             // This ensures markers assigned during streaming are preserved.
-            const numericCitation = set(getOrAssignCitationMarkerAtom, citationKey);
+            set(getOrAssignCitationMarkerAtom, citationKey);
+            const numericCitation = get(citationKeyToMarkerAtom)[citationKey] || null;
 
             // Use existing extended metadata if available
             if (prevCitation) {
