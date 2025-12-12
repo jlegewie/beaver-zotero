@@ -48,6 +48,7 @@ import {
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
+    allUserAttachmentKeysAtom,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
 import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
@@ -555,13 +556,21 @@ export const sendWSMessageAtom = atom(
                 .filter((attachment): attachment is MessageAttachment => attachment !== null);
         attachments = await processImageAnnotations(attachments);
 
-        // Add current reader attachment as source if not already present
+        // Add current reader attachment as source if not already present in thread
         const readerState = getReaderState(get);
         const readerAttachment = get(currentReaderAttachmentAtom);
         if (readerAttachment && readerState) {
-            const existingKeys = new Set(attachments.map(att => `${att.library_id}-${att.zotero_key}`));
+            const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
+            console.log('reader att: allUserAttachmentKeys', allUserAttachmentKeys);
+            const existingKeys = new Set([
+                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...allUserAttachmentKeys
+            ]);
+            console.log('reader att: existingKeys', existingKeys);
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
-            if (!existingKeys.has(readerKey)) {
+            console.log('reader att: readerKey', readerKey);
+            if (!existingKeys.has(readerAttachment.key)) {
+                console.log('reader att: adding readerKey', readerKey);
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
