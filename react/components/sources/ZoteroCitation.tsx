@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { citationDataMapAtom, citationDataByRawTagAtom, normalizeRawTag } from '../../atoms/citations';
+import { citationDataByRawTagAtom, normalizeRawTag } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { parseZoteroURI } from '../../utils/zoteroURI';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCitationPages, getCitationBoundingBoxes, isExternalCitation, isZoteroCitation } from '../../types/citations';
+import { getCitationPages, getCitationBoundingBoxes, isExternalCitation, isZoteroCitation, getCitationKey } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
@@ -19,33 +19,48 @@ import { useCitationMarker } from '../../hooks/useCitationMarker';
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
 
-// Define prop types for the component
+/**
+ * Props for ZoteroCitation component.
+ * 
+ * Supported citation tag formats from LLM:
+ *   <citation item_id="libraryID-itemKey"/>      - parent item reference
+ *   <citation att_id="libraryID-itemKey"/>       - attachment reference
+ *   <citation att_id="..." sid="..."/>           - attachment with sentence ID
+ *   <citation external_id="..."/>                - external reference
+ * 
+ * Note: Props are passed from HTML attributes after sanitization,
+ * so values may have 'user-content-' prefix added by rehype-sanitize.
+ */
 interface ZoteroCitationProps {
-    id?: string;           // Format: "libraryID-itemKey" (and 'user-content-' from sanitization) - for Zotero citations
-    cid?: string;          // Citation ID (may be absent during streaming)
-    external_id?: string;  // External source ID for external reference citations
-    raw_tag?: string;      // Raw tag for matching (URL-encoded) when cid is not present
-    att_id?: string;       // Attachment ID attribute from raw tag
-    pages?: string;        // Format: "3-6,19"
-    consecutive?: boolean;
-    adjacent?: boolean;   // True when consecutive AND only whitespace between citations
-    children?: React.ReactNode;
+    // Primary identifiers (mutually exclusive, one should be present)
+    item_id?: string;      // Format: "libraryID-itemKey" - parent item reference
+    att_id?: string;       // Format: "libraryID-itemKey" - attachment reference
+    external_id?: string;  // External source ID for external references
+    
+    // Optional modifiers
+    sid?: string;          // Sentence ID for location within attachment
+    raw_tag?: string;      // Normalized raw tag for metadata matching (URL-encoded)
+    
+    // Display modifiers (set by preprocessCitations)
+    consecutive?: boolean; // True when same item cited multiple times in sequence
+    adjacent?: boolean;    // True when consecutive AND only whitespace between
+    
+    // Rendering options
     exportRendering?: boolean;
+    children?: React.ReactNode;
 }
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
-    id: unique_key,
-    cid: citationId,
-    external_id,
-    raw_tag: rawTagProp,
+    item_id,
     att_id,
+    external_id,
+    sid,
+    raw_tag: rawTagProp,
     consecutive = false,
     adjacent = false,
-    children,
     exportRendering = false
 }) => {
     // Get citation data maps
-    const citationDataMap = useAtomValue(citationDataMapAtom);
     const citationDataByRawTag = useAtomValue(citationDataByRawTagAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
@@ -55,51 +70,47 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         ? normalizeRawTag(decodeURIComponent(rawTagProp)) 
         : undefined;
 
-    // Parse the id to get libraryID and itemKey (memoized to avoid recalculation)
+    // Parse item reference from props to get libraryID and itemKey
+    // Priority: att_id > item_id (att_id is more specific - points to attachment)
     const { libraryID, itemKey, cleanKey } = useMemo(() => {
-        // Try to get from unique_key first
-        if (unique_key) {
-            const cleanKey = unique_key.replace('user-content-', '');
-            const [libraryIDString, itemKey] = cleanKey.includes('-') 
-                ? cleanKey.split('-') 
-                : [cleanKey, cleanKey];
-            return { 
-                libraryID: parseInt(libraryIDString) || 1, 
-                itemKey, 
-                cleanKey 
-            };
-        }
+        // Helper to parse "libraryID-itemKey" format
+        const parseReference = (ref: string): { libraryID: number; itemKey: string; cleanKey: string } => {
+            const cleanKey = ref.replace('user-content-', '');
+            const dashIndex = cleanKey.indexOf('-');
+            if (dashIndex > 0) {
+                const libraryIDString = cleanKey.substring(0, dashIndex);
+                const itemKey = cleanKey.substring(dashIndex + 1);
+                return { 
+                    libraryID: parseInt(libraryIDString) || 1, 
+                    itemKey, 
+                    cleanKey 
+                };
+            }
+            // Fallback for malformed reference
+            return { libraryID: 1, itemKey: cleanKey, cleanKey };
+        };
         
-        // Fallback: try to parse from att_id attribute (format: "libraryID-itemKey")
+        // Try att_id first (attachment reference - most specific)
         if (att_id) {
-            const cleanKey = att_id.replace('user-content-', '');
-            const [libraryIDString, itemKey] = cleanKey.includes('-') 
-                ? cleanKey.split('-') 
-                : [cleanKey, cleanKey];
-            return { 
-                libraryID: parseInt(libraryIDString) || 1, 
-                itemKey, 
-                cleanKey 
-            };
+            return parseReference(att_id);
         }
         
-        return { libraryID: 1, itemKey: '', cleanKey: '' };
-    }, [unique_key, att_id]);
+        // Fall back to item_id (parent item reference)
+        if (item_id) {
+            return parseReference(item_id);
+        }
+        
+        return { libraryID: 0, itemKey: '', cleanKey: '' };
+    }, [att_id, item_id]);
 
-    // Get citation metadata - try cid first, then fallback to raw_tag
+    // Get citation metadata via raw_tag matching
+    // During streaming: raw_tag matches against backend-provided citation metadata
     const citationMetadata = useMemo(() => {
-        // Try cid match first (for historical data with injected IDs)
-        if (citationId && citationDataMap[citationId]) {
-            return citationDataMap[citationId];
-        }
-        
-        // Fallback to raw_tag match (for streaming or unprocessed content)
         if (normalizedRawTag && citationDataByRawTag[normalizedRawTag]) {
             return citationDataByRawTag[normalizedRawTag];
         }
-        
         return undefined;
-    }, [citationId, normalizedRawTag, citationDataMap, citationDataByRawTag]);
+    }, [normalizedRawTag, citationDataByRawTag]);
     
     // Load fallback citation data when citation metadata is not available
     const fallbackCitation = useFallbackCitation({
@@ -127,15 +138,34 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Stable key used for numeric marker assignment (does not depend on citationMetadata).
     // This key is used by the thread-scoped citation marker atom to ensure consistent
     // numbering across streaming and post-metadata states.
+    // 
+    // IMPORTANT: Uses getCitationKey() to match the key generation in updateCitationDataAtom.
+    // This ensures markers assigned during streaming are preserved when metadata arrives.
     const citationKey = useMemo(() => {
-        if (external_id) return `external:${external_id}`;
-        if (unique_key) return `zotero:${unique_key.replace('user-content-', '')}`;
-        if (att_id) return `zotero:${att_id.replace('user-content-', '')}`;
-        if (libraryID && itemKey) return `zotero:${libraryID}-${itemKey}`;
-        if (normalizedRawTag) return `raw:${normalizedRawTag}`;
-        if (citationId) return `cid:${citationId}`;
-        return 'unknown';
-    }, [external_id, unique_key, att_id, libraryID, itemKey, normalizedRawTag, citationId]);
+        // Try to generate key from metadata first (most reliable)
+        if (citationMetadata) {
+            const metadataKey = getCitationKey({
+                library_id: citationMetadata.library_id,
+                zotero_key: citationMetadata.zotero_key,
+                external_source_id: citationMetadata.external_source_id
+            });
+            if (metadataKey) return metadataKey;
+        }
+        
+        // During streaming (before metadata arrives), use parsed props
+        // The external_id prop maps to external_source_id
+        if (external_id) {
+            return getCitationKey({ external_source_id: external_id });
+        }
+        
+        // Use libraryID and itemKey parsed from id/att_id props
+        // This matches the format used by the backend's CitationMetadata
+        if (libraryID && itemKey) {
+            return getCitationKey({ library_id: libraryID, zotero_key: itemKey });
+        }
+        
+        return '';
+    }, [citationMetadata, external_id, libraryID, itemKey]);
 
     // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
     const numericMarker = useCitationMarker(citationKey);
@@ -149,7 +179,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 BeaverTemporaryAnnotations.cleanupAll().catch(logger);
             }
         };
-    }, [citationId]);
+    }, [citationKey]);
 
     // Memoize derived citation data to avoid recalculation on every render
     const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
@@ -207,7 +237,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
-    const hasAnyIdentifier = !!(unique_key || att_id || citationId || normalizedRawTag || external_id);
+    const hasAnyIdentifier = !!(att_id || item_id || external_id || normalizedRawTag);
     if (!hasAnyIdentifier) return null;
 
     // Enhanced click handler with bounding box support

@@ -10,11 +10,18 @@ import deepmerge from 'deepmerge';
 import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
 
 // Create a custom schema that extends GitHub's defaults but allows citation tags
+// Supported citation formats:
+//   <citation item_id="..."/>           - parent item reference
+//   <citation att_id="..."/>            - attachment reference  
+//   <citation att_id="..." sid="..."/>  - attachment with sentence ID
+//   <citation external_id="..."/>       - external reference
 const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        citation: ['id', 'cid', 'sid', 'consecutive', 'adjacent', 'external_id', 'raw_tag', 'att_id', 'item_id']
+        // Note: We allow extra attributes that get passed through but ignored
+        // attachment_id is normalized to att_id during preprocessing
+        citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'external_id', 'consecutive', 'adjacent', 'raw_tag']
     }
 });
 
@@ -35,12 +42,15 @@ type MarkdownRendererProps = {
 
 /**
  * Construct a raw tag string from attributes (excluding id which is injected)
- * This is used to match against the raw_tag from agent actions
+ * This is used to match against the raw_tag from agent actions.
+ * 
+ * IMPORTANT: Attributes are sorted alphabetically to ensure consistent matching.
  */
 function constructRawTag(tagName: string, attributes: Record<string, string>): string {
-    // Filter out 'id' attribute as it's injected by the backend
+    // Filter out 'id' attribute as it's injected by the backend, then sort
     const attrs = Object.entries(attributes)
         .filter(([key]) => key !== 'id')
+        .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([key, value]) => `${key}="${value}"`)
         .join(' ');
     return attrs ? `<${tagName} ${attrs}>` : `<${tagName}>`;
@@ -135,69 +145,118 @@ function parseContentIntoSegments(content: string): Segment[] {
 }
 
 /**
- * Construct a raw citation tag string from attributes (excluding cid which is injected)
- * This is used to match against the raw_tag from citation metadata.
- * The output uses `>` (not `/>`) as the canonical form for normalization.
+ * Normalize citation attributes from the raw LLM output.
+ * Handles variations like attachment_id → att_id.
+ * Returns normalized [name, value] pairs, sorted alphabetically.
  */
-function constructCitationRawTag(attributesStr: string): string {
-    // Parse attributes and filter out 'cid' (injected by backend)
-    const attrs: string[] = [];
+function normalizeCitationAttributes(attributesStr: string): [string, string][] {
+    const attrs: [string, string][] = [];
     const attrRegex = /(\w+)="([^"]*)"/g;
-    let attrMatch: RegExpExecArray | null;
-    while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
-        if (attrMatch[1] !== 'cid') {
-            attrs.push(`${attrMatch[1]}="${attrMatch[2]}"`);
+    let match: RegExpExecArray | null;
+    
+    while ((match = attrRegex.exec(attributesStr)) !== null) {
+        let name = match[1];
+        const value = match[2];
+        
+        // Normalize attribute names
+        if (name === 'attachment_id') {
+            name = 'att_id';
         }
+        
+        // Only keep recognized citation attributes
+        if (['item_id', 'att_id', 'sid', 'external_id'].includes(name)) {
+            attrs.push([name, value]);
+        }
+        // Silently ignore unknown attributes
     }
-    // Use `>` as canonical form (normalizeRawTag converts /> to >)
-    return attrs.length > 0 ? `<citation ${attrs.join(' ')}>` : '<citation>';
+    
+    // Sort alphabetically for consistent raw_tag matching
+    attrs.sort((a, b) => a[0].localeCompare(b[0]));
+    return attrs;
 }
 
 /**
- * Preprocess citations in markdown content
- * @param content Markdown content with citation tags
- * @param lastCitationIdRef Reference to the last citation ID (for consecutive tracking across segments)
- * @returns Preprocessed content with citations formatted
+ * Construct a raw citation tag string from normalized attributes.
+ * This is used to match against the raw_tag from citation metadata.
+ * 
+ * IMPORTANT: Uses normalizeCitationAttributes() which sorts alphabetically
+ * to ensure consistent matching with normalizeRawTag() in citations.ts.
+ * 
+ * The output uses `>` (not `/>`) as the canonical form.
  */
-function preprocessCitations(content: string, lastCitationIdRef: { value: string }): string {
-    // Track end index locally within this segment for adjacency detection
+function constructCitationRawTag(attributesStr: string): string {
+    const attrs = normalizeCitationAttributes(attributesStr);
+    const attrStr = attrs.map(([name, value]) => `${name}="${value}"`).join(' ');
+    return attrStr ? `<citation ${attrStr}>` : '<citation>';
+}
+
+/**
+ * Get the citation identity key from normalized attributes.
+ * Used for consecutive citation detection (same item cited multiple times).
+ * Priority: att_id > item_id > external_id
+ */
+function getCitationIdentityKey(attrs: [string, string][]): string {
+    const attrMap = Object.fromEntries(attrs);
+    return attrMap['att_id'] || attrMap['item_id'] || attrMap['external_id'] || '';
+}
+
+/**
+ * Preprocess citations in markdown content.
+ * 
+ * Handles various LLM output formats gracefully:
+ * - Self-closing: <citation att_id="..."/>
+ * - Opening only (missing /): <citation att_id="...">
+ * - Full pair: <citation att_id="..."></citation>
+ * - Attribute variations: attachment_id → att_id
+ * 
+ * @param content Markdown content with citation tags
+ * @param lastCitationKeyRef Reference to the last citation key (for consecutive tracking)
+ * @returns Preprocessed content with normalized citations
+ */
+function preprocessCitations(content: string, lastCitationKeyRef: { value: string }): string {
     let lastCitationEndIndex = -1;
     
-    // Match citation tags in all formats:
-    // - Self-closing: <citation .../>
-    // - Opening only (missing /): <citation ...>
-    // - Full pair: <citation ...></citation>
+    // Match citation tags in all formats
     return content.replace(
         /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/citation>)?)/g,
         (match, attributesStr, offset, fullString) => {
-            // Extract the ID from attributes
-            const idMatch = attributesStr.match(/id="([^"]+)"/);
-            const id = idMatch ? idMatch[1] : "";
+            // Normalize attributes (handles attachment_id → att_id, sorts alphabetically)
+            const normalizedAttrs = normalizeCitationAttributes(attributesStr);
             
-            // Check if this citation has the same ID as the previous one
-            const isConsecutive = id && id === lastCitationIdRef.value;
+            // Get identity key for consecutive detection
+            const identityKey = getCitationIdentityKey(normalizedAttrs);
+            
+            // Check if this citation references the same item as the previous one
+            const isConsecutive = identityKey && identityKey === lastCitationKeyRef.value;
             
             // Check if adjacent (only whitespace between this and previous citation)
             const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
                 fullString.substring(lastCitationEndIndex, offset).trim() === '';
             
             // Update tracking for next iteration
-            lastCitationIdRef.value = id;
+            lastCitationKeyRef.value = identityKey;
             lastCitationEndIndex = offset + match.length;
             
-            // Construct raw_tag for matching (excludes 'cid' attribute)
-            const rawTag = constructCitationRawTag(attributesStr);
+            // Build normalized attribute string
+            const normalizedAttrStr = normalizedAttrs
+                .map(([name, value]) => `${name}="${value}"`)
+                .join(' ');
+            
+            // Construct raw_tag for metadata matching
+            const rawTag = normalizedAttrs.length > 0 
+                ? `<citation ${normalizedAttrStr}>`
+                : '<citation>';
             const rawTagAttr = `raw_tag="${encodeURIComponent(rawTag)}"`;
             
-            // Add attributes as needed
+            // Build final tag with normalized attributes
             if (isAdjacent) {
-                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true" adjacent="true"></citation>`;
+                return `<citation ${normalizedAttrStr} ${rawTagAttr} consecutive="true" adjacent="true"></citation>`;
             }
             if (isConsecutive) {
-                return `<citation ${attributesStr} ${rawTagAttr} consecutive="true"></citation>`;
+                return `<citation ${normalizedAttrStr} ${rawTagAttr} consecutive="true"></citation>`;
             }
             
-            return `<citation ${attributesStr} ${rawTagAttr}></citation>`;
+            return `<citation ${normalizedAttrStr} ${rawTagAttr}></citation>`;
         }
     );
 }
@@ -268,8 +327,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         ? parseContentIntoSegments(processedContent)
         : [{ type: 'markdown' as const, content: processedContent }];
     
-    // Track last citation ID across all markdown segments for consecutive detection
-    const lastCitationIdRef = { value: "" };
+    // Track last citation key across all markdown segments for consecutive detection
+    const lastCitationKeyRef = { value: "" };
     
     // Process each segment
     const processedSegments = segments.map((segment, index) => {
@@ -281,7 +340,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         let markdownContent = segment.content;
         
         // Preprocess citations
-        markdownContent = preprocessCitations(markdownContent, lastCitationIdRef);
+        markdownContent = preprocessCitations(markdownContent, lastCitationKeyRef);
         
         // Apply other markdown preprocessing
         markdownContent = markdownContent

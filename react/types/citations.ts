@@ -108,18 +108,54 @@ export const isZoteroCitation = (citation: CitationMetadata): boolean => {
 };
 
 /**
- * Get a unique key for a citation that can be used for marker assignment.
- * The key format matches what ZoteroCitation component uses to ensure
- * consistent marker assignment between streaming and post-metadata states.
+ * Parameters for generating a citation key.
+ * Accepts either CitationMetadata fields or component props.
  */
-export const getUniqueKey = (citation: CitationMetadata): string => {
-    if (citation.library_id && citation.zotero_key) {
-        return `zotero:${citation.library_id}-${citation.zotero_key}`;
+export interface CitationKeyParams {
+    // Zotero reference (from metadata or parsed from props)
+    library_id?: number;
+    zotero_key?: string;
+    // External reference
+    external_source_id?: string;
+}
+
+/**
+ * Generate a unique key for a citation that can be used for marker assignment.
+ * 
+ * This is the SINGLE SOURCE OF TRUTH for citation key generation.
+ * Used by both ZoteroCitation component (during streaming) and 
+ * updateCitationDataAtom (when metadata arrives) to ensure consistent
+ * marker assignment.
+ * 
+ * Key format:
+ * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - External citations: "external:{external_source_id}"
+ * - Unknown: "" (empty string)
+ * 
+ * @param params Citation key parameters
+ * @returns Unique citation key string
+ */
+export function getCitationKey(params: CitationKeyParams): string {
+    if (params.library_id && params.zotero_key) {
+        return `zotero:${params.library_id}-${params.zotero_key}`;
     }
-    if (citation.external_source_id) {
-        return `external:${citation.external_source_id}`;
+    if (params.external_source_id) {
+        return `external:${params.external_source_id}`;
     }
     return '';
+}
+
+/**
+ * Get a unique key for a citation from CitationMetadata.
+ * Convenience wrapper around getCitationKey for metadata objects.
+ * @deprecated Use getCitationKey directly for consistency
+ */
+export const getUniqueKey = (citation: CitationMetadata): string => {
+    return getCitationKey({
+        library_id: citation.library_id,
+        zotero_key: citation.zotero_key,
+        external_source_id: citation.external_source_id
+    });
 };
 
 export interface CitationData extends CitationMetadata {

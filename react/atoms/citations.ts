@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
-import { CitationMetadata, CitationData, isExternalCitation, getUniqueKey } from '../types/citations';
+import { CitationMetadata, CitationData, isExternalCitation, getCitationKey } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 
@@ -70,16 +70,42 @@ export const resetCitationMarkersAtom = atom(
 
 /**
  * Normalize a raw tag string for consistent matching.
- * Removes extra whitespace and normalizes self-closing syntax to ensure
- * tags with different formatting match (e.g., `<citation .../>` and `<citation ...>`)
+ * 
+ * Performs the following normalizations:
+ * 1. Extracts and sorts attributes alphabetically by name
+ * 2. Removes extra whitespace
+ * 3. Normalizes self-closing syntax (`/>` → `>`)
+ * 
+ * This ensures tags with different attribute orders or formatting match:
+ * - `<citation id="1" att_id="2"/>` matches `<citation att_id="2" id="1">`
+ * - `<citation  id="1" />` matches `<citation id="1">`
+ * 
+ * @param rawTag The raw tag string to normalize
+ * @returns Normalized tag string with sorted attributes
  */
 export function normalizeRawTag(rawTag: string): string {
-    return rawTag
-        .replace(/\s+/g, ' ')     // Collapse multiple spaces to single space
-        .replace(/\s*\/>/g, '>')  // Normalize self-closing /> to > (canonical form)
-        .replace(/\s*>/g, '>')    // Remove space before >
-        .replace(/<\s*/g, '<')    // Remove space after <
-        .trim();
+    // Extract the tag name
+    const tagNameMatch = rawTag.match(/<(\w+)/);
+    if (!tagNameMatch) {
+        // Not a valid tag, return trimmed
+        return rawTag.trim();
+    }
+    const tagName = tagNameMatch[1];
+    
+    // Extract all attributes as [name, value] pairs
+    const attrs: [string, string][] = [];
+    const attrRegex = /(\w+)="([^"]*)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = attrRegex.exec(rawTag)) !== null) {
+        attrs.push([match[1], match[2]]);
+    }
+    
+    // Sort attributes alphabetically by name for consistent matching
+    attrs.sort((a, b) => a[0].localeCompare(b[0]));
+    
+    // Reconstruct the tag with sorted attributes
+    const attrStr = attrs.map(([name, value]) => `${name}="${value}"`).join(' ');
+    return attrStr ? `<${tagName} ${attrStr}>` : `<${tagName}>`;
 }
 
 /*
@@ -126,8 +152,11 @@ export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 
 /**
- * Citation data mapped by normalized raw_tag for matching during streaming
- * This enables matching citations when cid is not present in the text
+ * Citation data mapped by normalized raw_tag for matching.
+ * 
+ * This is the primary lookup mechanism for ZoteroCitation components:
+ * - During streaming: citations in text match against this via raw_tag
+ * - After metadata arrives: same raw_tag matches enriched CitationData
  */
 export const citationDataByRawTagAtom = atom<Record<string, CitationData>>((get) => {
     const dataMap = get(citationDataMapAtom);
@@ -168,7 +197,12 @@ export const updateCitationDataAtom = atom(
         for (const citation of metadata) {
 
             // Get unique key (works for both Zotero and external citations)
-            const citationKey = getUniqueKey(citation);
+            // Uses getCitationKey to match key generation in ZoteroCitation component
+            const citationKey = getCitationKey({
+                library_id: citation.library_id,
+                zotero_key: citation.zotero_key,
+                external_source_id: citation.external_source_id
+            });
             const prevCitation = prevMap[citation.citation_id];
 
             // Get or assign numeric citation using the shared thread-scoped atom.
