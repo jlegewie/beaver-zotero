@@ -15,7 +15,7 @@ import {
 import { AckActionLink } from '../../../src/services/agentActionsService';
 import { AnnotationResultData } from '../../types/proposedActions/annotations';
 import { applyAnnotation, deleteAnnotationFromReader } from '../../utils/annotationActions';
-import { getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
+import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { isLibraryEditable, shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { ZoteroReader } from '../../utils/annotationUtils';
@@ -85,6 +85,75 @@ function getHighlightPageIndexes(annotation: AnnotationAgentAction): number[] {
 function getNotePageIndex(annotation: AnnotationAgentAction): number | undefined {
     const pos = annotation.proposed_data.note_position;
     return toPageIndex(pos?.page_index ?? pos?.page_idx ?? pos?.pageIndex);
+}
+
+async function delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function navigateToNewlyAppliedAnnotation(
+    reader: ZoteroReader | undefined,
+    annotation: AnnotationAgentAction,
+    result: { zotero_key: string; library_id: number }
+): Promise<void> {
+    try {
+        if (reader) {
+            const pageIndexes = isNoteAnnotationAgentAction(annotation)
+                ? [getNotePageIndex(annotation)]
+                : getHighlightPageIndexes(annotation);
+            const targetPageIndex = pageIndexes.find((idx): idx is number => typeof idx === 'number');
+            const currentPageNumber = getCurrentPage(reader as any);
+            const currentPageIndex = typeof currentPageNumber === 'number' ? currentPageNumber - 1 : null;
+            const shouldPreNavigateToPage = typeof targetPageIndex === 'number'
+                && (currentPageIndex === null || Math.abs(currentPageIndex - targetPageIndex) > 1);
+
+            // Retry a few times to allow the internal reader to render/register the new annotation.
+            for (let attempt = 0; attempt < 5; attempt++) {
+                // Pre-navigate when we're far from the target page
+                if (attempt === 1 && shouldPreNavigateToPage && typeof targetPageIndex === 'number') {
+                    try {
+                        (reader as any).navigate?.({ pageIndex: targetPageIndex });
+                    } catch {
+                        // Best-effort only
+                    }
+                }
+
+                try {
+                    await (reader as any)?.navigate?.({ annotationID: result.zotero_key });
+                    return;
+                } catch {
+                    // fall through
+                }
+                try {
+                    await (reader as any)?._internalReader?.navigate?.({ annotationID: result.zotero_key });
+                    return;
+                } catch {
+                    // fall through
+                }
+                try {
+                    await (reader as any)?._internalReader?.navigate?.({ annotationId: result.zotero_key });
+                    return;
+                } catch {
+                    await delay(100);
+                }
+            }
+        }
+    } catch {
+        // Fall back to DB-based navigation below
+    }
+
+    // Fallback: look up the annotation item and navigate using the existing helper
+    try {
+        const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+            result.library_id,
+            result.zotero_key
+        );
+        if (annotationItem) {
+            await navigateToAnnotation(annotationItem);
+        }
+    } catch {
+        // No-op: navigation is best-effort
+    }
 }
 
 // =============================================================================
@@ -371,6 +440,8 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
         setAnnotationPanelState({ key: toolCallId, updates: { isApplying: true } });
 
         try {
+            const isSingleApply = Boolean(annotationId);
+
             // Open attachment if not already open
             if (!isAttachmentOpen) {
                 const firstAnnotation = annotations[0];
@@ -438,16 +509,20 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             // Show results and mark complete
             setAnnotationPanelState({ key: toolCallId, updates: { resultsVisible: true, isApplying: false } });
 
-            // Navigate to first successful annotation
+            // Navigate to the newly applied annotation(s)
             if (successful.length > 0) {
-                await new Promise((resolve) => setTimeout(resolve, 250));
-                const firstSuccess = successful[0];
-                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstSuccess.result_data.library_id,
-                    firstSuccess.result_data.zotero_key
-                );
-                if (annotationItem) {
-                    await navigateToAnnotation(annotationItem);
+                if (isSingleApply && annotationId) {
+                    const ack = successful.find((s) => s.action_id === annotationId);
+                    const targetAnnotation = annotations.find((a) => a.id === annotationId);
+                    if (ack?.result_data && targetAnnotation) {
+                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, ack.result_data);
+                    }
+                } else {
+                    const firstSuccess = successful[0];
+                    const targetAnnotation = annotations.find((a) => a.id === firstSuccess.action_id);
+                    if (firstSuccess?.result_data && targetAnnotation) {
+                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, firstSuccess.result_data);
+                    }
                 }
             }
         } catch (error) {
