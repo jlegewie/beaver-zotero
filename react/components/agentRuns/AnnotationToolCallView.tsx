@@ -113,7 +113,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
     );
 
     const icon = isNoteAnnotationAgentAction(annotation)
-        ? ZOTERO_ICONS.ANNOTATE_NOTE
+        ? ZOTERO_ICONS.ANNOTATION
         : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
 
     const hasNoApplicationError = annotation.status !== 'error';
