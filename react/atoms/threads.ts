@@ -5,7 +5,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, 
 import { getResultAttachmentsFromToolcall } from "../types/chat/converters";
 import { chatService } from "../../src/services/chatService";
 import { ToolCall } from "../types/chat/apiTypes";
-import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom } from "./citations";
+import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
 import { threadProposedActionsAtom } from "./proposedActions";
 import { MessageAttachmentWithId } from "../types/attachments/uiTypes";
@@ -178,6 +178,7 @@ export const newThreadAtom = atom(
         set(currentMessageItemsAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
+        set(resetCitationMarkersAtom);
         set(threadProposedActionsAtom, []);
         set(citationDataMapAtom, {});
         set(currentMessageContentAtom, '');
@@ -210,6 +211,7 @@ export const loadThreadAtom = atom(
             set(isPreferencePageVisibleAtom, false);
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
+            set(resetCitationMarkersAtom);
             
             // Clear active run when loading a different thread
             set(activeRunAtom, null);

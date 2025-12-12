@@ -14,29 +14,10 @@ import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useFallbackCitation } from '../../hooks/useFallbackCitation';
+import { useCitationMarker } from '../../hooks/useCitationMarker';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
-
-/**
- * Local numeric marker assignment for citations before `citationMetadata` is available.
- *
- * This keeps numeric markers stable across re-renders while metadata loads, and
- * avoids showing '?' or changing numbers mid-stream.
- */
-const localCitationKeyToNumericMarker = new Map<string, string>();
-
-function getOrAssignLocalNumericMarker(citationKey: string): string {
-    const existing = localCitationKeyToNumericMarker.get(citationKey);
-    if (existing) return existing;
-    // Prevent unbounded growth across long-running sessions.
-    if (localCitationKeyToNumericMarker.size > 2000) {
-        localCitationKeyToNumericMarker.clear();
-    }
-    const next = (localCitationKeyToNumericMarker.size + 1).toString();
-    localCitationKeyToNumericMarker.set(citationKey, next);
-    return next;
-}
 
 // Define prop types for the component
 interface ZoteroCitationProps {
@@ -143,8 +124,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Metadata arrives later during streaming; until then, render an inactive citation marker.
     const isInactive = !citationMetadata;
 
-    // Stable key used for local numeric marker assignment (does not depend on citationMetadata).
-    const localCitationKey = useMemo(() => {
+    // Stable key used for numeric marker assignment (does not depend on citationMetadata).
+    // This key is used by the thread-scoped citation marker atom to ensure consistent
+    // numbering across streaming and post-metadata states.
+    const citationKey = useMemo(() => {
         if (external_id) return `external:${external_id}`;
         if (unique_key) return `zotero:${unique_key.replace('user-content-', '')}`;
         if (att_id) return `zotero:${att_id.replace('user-content-', '')}`;
@@ -154,9 +137,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         return 'unknown';
     }, [external_id, unique_key, att_id, libraryID, itemKey, normalizedRawTag, citationId]);
 
-    const localNumericMarker = useMemo(() => {
-        return getOrAssignLocalNumericMarker(localCitationKey);
-    }, [localCitationKey]);
+    // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
+    const numericMarker = useCitationMarker(citationKey);
 
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {
@@ -387,7 +369,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
-        displayText = localNumericMarker;
+        displayText = numericMarker;
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)

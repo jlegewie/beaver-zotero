@@ -19,6 +19,56 @@ export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>(
 
 
 /**
+ * Thread-scoped citation marker assignment.
+ * 
+ * Maps citation keys to numeric markers (e.g., "1", "2", "3").
+ * This ensures consistent markers across streaming and post-metadata states:
+ * - Markers are assigned in render order during streaming (first appearance = "1")
+ * - Same citation key always gets the same marker
+ * - Resets when thread changes (via resetCitationMarkersAtom)
+ */
+export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
+
+/**
+ * Get or assign a numeric marker for a citation key.
+ * Returns the existing marker if already assigned, otherwise assigns the next number.
+ */
+export const getOrAssignCitationMarkerAtom = atom(
+    null,
+    (get, set, citationKey: string): string => {
+        const current = get(citationKeyToMarkerAtom);
+        if (current[citationKey]) {
+            return current[citationKey];
+        }
+        // Assign next number based on how many unique citations we've seen
+        const nextMarker = (Object.keys(current).length + 1).toString();
+        set(citationKeyToMarkerAtom, { ...current, [citationKey]: nextMarker });
+        return nextMarker;
+    }
+);
+
+/**
+ * Lookup a citation marker without assigning (read-only).
+ * Returns undefined if the citation key hasn't been assigned a marker yet.
+ */
+export const getCitationMarkerAtom = atom(
+    (get) => (citationKey: string): string | undefined => {
+        return get(citationKeyToMarkerAtom)[citationKey];
+    }
+);
+
+/**
+ * Reset citation markers. Called when creating a new thread or loading an existing one.
+ */
+export const resetCitationMarkersAtom = atom(
+    null,
+    (_get, set) => {
+        set(citationKeyToMarkerAtom, {});
+    }
+);
+
+
+/**
  * Normalize a raw tag string for consistent matching.
  * Removes extra whitespace and normalizes self-closing syntax to ensure
  * tags with different formatting match (e.g., `<citation .../>` and `<citation ...>`)
@@ -112,7 +162,6 @@ export const updateCitationDataAtom = atom(
         const prevMap = get(citationDataMapAtom);
         const externalReferenceMap = get(externalReferenceMappingAtom);
         const newCitationDataMap: Record<string, CitationData> = {};
-        const citationKeyToNumeric = new Map<string, string>();
         logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
 
         // Extend the citation metadata with the attachment citation data
@@ -122,11 +171,9 @@ export const updateCitationDataAtom = atom(
             const citationKey = getUniqueKey(citation);
             const prevCitation = prevMap[citation.citation_id];
 
-            // Get or assign numeric citation for this citationKey
-            if (!citationKeyToNumeric.has(citationKey)) {
-                citationKeyToNumeric.set(citationKey, (citationKeyToNumeric.size + 1).toString());
-            }
-            const numericCitation = citationKeyToNumeric.get(citationKey)!;
+            // Get or assign numeric citation using the shared thread-scoped atom.
+            // This ensures markers assigned during streaming are preserved.
+            const numericCitation = set(getOrAssignCitationMarkerAtom, citationKey);
 
             // Use existing extended metadata if available
             if (prevCitation) {

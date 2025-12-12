@@ -49,7 +49,7 @@ import {
     updateRunWithToolCallProgress,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
 import {
     addAgentActionsAtom,
     toAgentAction,
@@ -733,4 +733,5 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear agent actions and citations for the thread
     set(clearAgentActionsAtom);
     set(citationMetadataAtom, []);
+    set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
 });
