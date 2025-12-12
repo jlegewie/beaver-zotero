@@ -3,6 +3,8 @@ import { ModelResponse } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
+import { AnnotationToolCallView } from './AnnotationToolCallView';
+import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 
@@ -83,15 +85,29 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
                 <div className="display-flex flex-col py-1 gap-3">
-                    {toolCallParts.map((part, index) => (
-                        part.part_kind === 'tool-call' && (
+                    {toolCallParts.map((part) => {
+                        if (part.part_kind !== 'tool-call') return null;
+                        
+                        // Use specialized view for annotation tools
+                        if (isAnnotationToolResult(part.tool_name)) {
+                            return (
+                                <AnnotationToolCallView
+                                    key={`tool-${part.tool_call_id}`}
+                                    part={part}
+                                    runId={runId}
+                                />
+                            );
+                        }
+                        
+                        // Default view for other tools
+                        return (
                             <ToolCallPartView
                                 key={`tool-${part.tool_call_id}`}
                                 part={part}
                                 runId={runId}
                             />
-                        )
-                    ))}
+                        );
+                    })}
                 </div>
             )}
 

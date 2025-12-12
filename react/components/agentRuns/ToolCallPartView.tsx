@@ -16,7 +16,6 @@ import {
     Icon,
     PuzzleIcon,
     GlobalSearchIcon,
-    HighlighterIcon,
     PlusSignIcon,
     TextAlignLeftIcon,
 } from '../icons/icons';
@@ -47,10 +46,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     read_passages: TextAlignLeftIcon,
     read_fulltext: TextAlignLeftIcon,
     view_page_images: ViewIcon,
-
-    // Annotation tools
-    add_highlight_annotations: HighlighterIcon,
-    add_note_annotations: HighlighterIcon,
 
     // External search tools
     search_external_references: GlobalSearchIcon,
@@ -173,7 +168,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
 
             {/* Expanded result view */}
             {hasExpandedResult && (
-                <ToolResultView toolcall={part} result={result} runId={runId} />
+                <ToolResultView toolcall={part} result={result} />
             )}
         </div>
     );
