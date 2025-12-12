@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { citationDataByRawTagAtom, normalizeRawTag } from '../../atoms/citations';
+import { citationDataByCitationKeyAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCitationPages, getCitationBoundingBoxes, isExternalCitation, isZoteroCitation, getCitationKey } from '../../types/citations';
+import { 
+    getCitationPages, 
+    getCitationBoundingBoxes, 
+    isExternalCitation, 
+    isZoteroCitation, 
+    parseItemReference 
+} from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
@@ -37,7 +43,10 @@ interface ZoteroCitationProps {
     
     // Optional modifiers
     sid?: string;          // Sentence ID for location within attachment
-    raw_tag?: string;      // Normalized raw tag for metadata matching (URL-encoded)
+    
+    // Citation key for metadata lookup (injected by preprocessCitations)
+    // Format: "zotero:{library_id}-{zotero_key}" or "external:{external_source_id}"
+    citation_key?: string;
     
     // Display modifiers (set by preprocessCitations)
     consecutive?: boolean; // True when same item cited multiple times in sequence
@@ -48,94 +57,56 @@ interface ZoteroCitationProps {
     children?: React.ReactNode;
 }
 
-/**
- * Parse a "libraryID-itemKey" reference string.
- * Handles 'user-content-' prefix added by rehype-sanitize.
- */
-function parseItemReference(ref: string | undefined): { libraryID: number; itemKey: string } | null {
-    if (!ref) return null;
-    const clean = ref.replace('user-content-', '');
-    const dashIndex = clean.indexOf('-');
-    if (dashIndex > 0) {
-        const libraryID = parseInt(clean.substring(0, dashIndex), 10);
-        const itemKey = clean.substring(dashIndex + 1);
-        if (libraryID > 0 && itemKey) {
-            return { libraryID, itemKey };
-        }
-    }
-    return null;
-}
-
 const ZoteroCitation: React.FC<ZoteroCitationProps> = ({ 
     item_id,
     att_id,
     external_id,
-    raw_tag: rawTagProp,
+    citation_key: citationKeyProp,
     consecutive = false,
     adjacent = false,
     exportRendering = false
 }) => {
     // Get citation data maps
-    const citationDataByRawTag = useAtomValue(citationDataByRawTagAtom);
+    const citationDataByCitationKey = useAtomValue(citationDataByCitationKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
 
     // =========================================================================
-    // IDENTITY RESOLUTION - Single source of truth for this citation's identity
+    // IDENTITY RESOLUTION - Simplified using citation_key
     // =========================================================================
     // 
-    // Consolidates all identity-related data into one memoized object.
-    // Priority: att_id > item_id > external_id
+    // citation_key is injected by preprocessCitations and serves as the
+    // single source of truth for both metadata lookup and marker assignment.
     //
     const identity = useMemo(() => {
-        // Normalize raw_tag (URL-encoded in props)
-        const normalizedRawTag = rawTagProp 
-            ? normalizeRawTag(decodeURIComponent(rawTagProp)) 
-            : undefined;
+        // citation_key is the canonical identifier (e.g., "zotero:1-ABC123" or "external:xyz")
+        const citationKey = citationKeyProp || '';
         
-        // Look up citation metadata via raw_tag
-        const metadata = normalizedRawTag 
-            ? citationDataByRawTag[normalizedRawTag] 
+        // Look up citation metadata via citation_key
+        const metadata = citationKey 
+            ? citationDataByCitationKey[citationKey] 
             : undefined;
         
         // Parse Zotero reference from props (att_id takes priority)
+        // Used for click handling and display even before metadata arrives
         const zoteroRef = parseItemReference(att_id) || parseItemReference(item_id);
         
         // Determine citation type
         const isExternal = metadata 
             ? isExternalCitation(metadata) 
-            : !!external_id && !zoteroRef;
-        
-        // Generate stable citation key for marker assignment
-        // Uses getCitationKey() to match updateCitationDataAtom
-        let citationKey = '';
-        if (metadata) {
-            citationKey = getCitationKey({
-                library_id: metadata.library_id,
-                zotero_key: metadata.zotero_key,
-                external_source_id: metadata.external_source_id
-            });
-        } else if (external_id) {
-            citationKey = getCitationKey({ external_source_id: external_id });
-        } else if (zoteroRef) {
-            citationKey = getCitationKey({ 
-                library_id: zoteroRef.libraryID, 
-                zotero_key: zoteroRef.itemKey 
-            });
-        }
+            : (!!external_id && !zoteroRef) || citationKey.startsWith('external:');
         
         return {
-            normalizedRawTag,
             metadata,
             zoteroRef,
             isExternal,
             citationKey,
             // Convenience accessors
-            libraryID: zoteroRef?.libraryID ?? 0,
-            itemKey: zoteroRef?.itemKey ?? '',
-            hasIdentifier: !!(zoteroRef || external_id || normalizedRawTag)
+            libraryID: zoteroRef?.libraryID ?? metadata?.library_id ?? 0,
+            itemKey: zoteroRef?.itemKey ?? metadata?.zotero_key ?? '',
+            hasIdentifier: !!(citationKey || zoteroRef || external_id)
         };
-    }, [rawTagProp, citationDataByRawTag, att_id, item_id, external_id]);
+    }, [citationKeyProp, citationDataByCitationKey, att_id, item_id, external_id]);
 
     // Destructure for easier access
     const { 

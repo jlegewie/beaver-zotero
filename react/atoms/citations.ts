@@ -56,46 +56,6 @@ export const resetCitationMarkersAtom = atom(
 );
 
 
-/**
- * Normalize a raw tag string for consistent matching.
- * 
- * Performs the following normalizations:
- * 1. Extracts and sorts attributes alphabetically by name
- * 2. Removes extra whitespace
- * 3. Normalizes self-closing syntax (`/>` → `>`)
- * 
- * This ensures tags with different attribute orders or formatting match:
- * - `<citation id="1" att_id="2"/>` matches `<citation att_id="2" id="1">`
- * - `<citation  id="1" />` matches `<citation id="1">`
- * 
- * @param rawTag The raw tag string to normalize
- * @returns Normalized tag string with sorted attributes
- */
-export function normalizeRawTag(rawTag: string): string {
-    // Extract the tag name
-    const tagNameMatch = rawTag.match(/<(\w+)/);
-    if (!tagNameMatch) {
-        // Not a valid tag, return trimmed
-        return rawTag.trim();
-    }
-    const tagName = tagNameMatch[1];
-    
-    // Extract all attributes as [name, value] pairs
-    const attrs: [string, string][] = [];
-    const attrRegex = /(\w+)="([^"]*)"/g;
-    let match: RegExpExecArray | null;
-    while ((match = attrRegex.exec(rawTag)) !== null) {
-        attrs.push([match[1], match[2]]);
-    }
-    
-    // Sort attributes alphabetically by name for consistent matching
-    attrs.sort((a, b) => a[0].localeCompare(b[0]));
-    
-    // Reconstruct the tag with sorted attributes
-    const attrStr = attrs.map(([name, value]) => `${name}="${value}"`).join(' ');
-    return attrStr ? `<${tagName} ${attrStr}>` : `<${tagName}>`;
-}
-
 /*
  * Citation metadata
  *
@@ -140,25 +100,33 @@ export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 
 /**
- * Citation data mapped by normalized raw_tag for matching.
+ * Citation data mapped by citation key for lookup.
  * 
  * This is the primary lookup mechanism for ZoteroCitation components:
- * - During streaming: citations in text match against this via raw_tag
- * - After metadata arrives: same raw_tag matches enriched CitationData
+ * - MarkdownRenderer injects citation_key prop during preprocessing
+ * - ZoteroCitation looks up metadata using this key
+ * - Key is computed via getCitationKey() from library_id/zotero_key or external_source_id
+ * 
+ * Key format:
+ * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - External citations: "external:{external_source_id}"
  */
-export const citationDataByRawTagAtom = atom<Record<string, CitationData>>((get) => {
+export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
     const dataMap = get(citationDataMapAtom);
-    const byRawTag: Record<string, CitationData> = {};
+    const byKey: Record<string, CitationData> = {};
     
     for (const citation of Object.values(dataMap)) {
-        if (citation.raw_tag) {
-            // Normalize the key for consistent matching
-            const normalizedKey = normalizeRawTag(citation.raw_tag);
-            byRawTag[normalizedKey] = citation;
+        const key = getCitationKey({
+            library_id: citation.library_id,
+            zotero_key: citation.zotero_key,
+            external_source_id: citation.external_source_id
+        });
+        if (key) {
+            byKey[key] = citation;
         }
     }
     
-    return byRawTag;
+    return byKey;
 });
 
 /**

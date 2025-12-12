@@ -12,7 +12,7 @@ import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataMapAtom, citationsByRunIdAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
-import { CitationData, getUniqueKey } from '../../types/citations';
+import { CitationData, getCitationKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom } from '../../agents/atoms';
@@ -50,7 +50,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const unique: CitationData[] = [];
         
         for (const citation of runCitations) {
-            const key = getUniqueKey(citation);
+            const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
                 // Look up enriched data from citationDataMapAtom

@@ -13,7 +13,7 @@ import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataListAtom, citationDataMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
-import { CitationData, getUniqueKey } from '../../types/citations';
+import { CitationData, getCitationKey } from '../../types/citations';
 import { store } from '../../store';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
@@ -57,7 +57,7 @@ const AssistantMessageFooter: React.FC<AssistantMessageFooterProps> = ({
         const messageCitations = citations.filter(citation => messageIds.includes(citation.message_id));
         
         for (const citation of messageCitations) {
-            const key = getUniqueKey(citation);
+            const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
                 unique.push({
