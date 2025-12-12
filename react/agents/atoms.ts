@@ -16,6 +16,7 @@ import {
     WSRunCompleteEvent,
     WSToolCallProgressEvent,
 } from "../../src/services/agentService";
+import { MessageAttachment } from "../types/attachments/apiTypes";
 
 // =============================================================================
 // Core Atoms
@@ -67,6 +68,34 @@ export const toolResultsMapAtom = atom((get) => {
 
     return map;
 });
+
+/** 
+ * Map of user attachments in all runs, keyed by library_id-zotero_key.
+ * Uses Map for proper deduplication (Set with objects uses reference equality).
+ */
+export const allUserAttachmentsAtom = atom((get) => {
+    const runs = get(allRunsAtom);
+    const attachmentsMap = new Map<string, MessageAttachment>();
+
+    for (const run of runs) {
+        const runAttachments = run.user_prompt.attachments || [];
+        for (const attachment of runAttachments) {
+            const key = `${attachment.library_id}-${attachment.zotero_key}`;
+            if (!attachmentsMap.has(key)) {
+                attachmentsMap.set(key, attachment);
+            }
+        }
+    }   
+
+    return attachmentsMap;
+});
+
+/** Set of zotero_keys for all user attachments in the thread */
+export const allUserAttachmentKeysAtom = atom((get) => {
+    const attachmentsMap = get(allUserAttachmentsAtom);
+    return new Set(Array.from(attachmentsMap.values()).map(a => a.zotero_key));
+});
+
 
 // =============================================================================
 // Helper Functions

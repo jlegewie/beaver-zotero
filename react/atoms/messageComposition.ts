@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { truncateText } from "../utils/stringUtils";
 import { userAttachmentKeysAtom } from "./threads";
+import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
@@ -414,14 +415,20 @@ async function validateItemsInBackground(
 
 /**
 * Update sources based on Zotero selection
+* Filters out items that are already in the thread (by zotero_key)
 */
 export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment());
-        if (!limit || itemsFiltered.length <= limit) {
-            await set(addItemsToCurrentMessageItemsAtom, itemsFiltered.slice(0, limit));
+        
+        // Filter out items already in the thread
+        const existingKeys = get(allUserAttachmentKeysAtom);
+        const newItems = itemsFiltered.filter((item) => !existingKeys.has(item.key));
+        
+        if (!limit || newItems.length <= limit) {
+            await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));
         }
     }
 );
