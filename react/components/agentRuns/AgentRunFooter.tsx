@@ -9,7 +9,7 @@ import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataMapAtom, citationsByRunIdAtom } from '../../atoms/citations';
+import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem } from '../../../src/utils/selectItem';
 import { CitationData, getCitationKey } from '../../types/citations';
@@ -36,6 +36,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
+    const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
@@ -53,12 +54,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
+                // Look up the correct marker from the thread-scoped atom
+                const numericCitation = citationMarkerMap[key] || null;
                 // Look up enriched data from citationDataMapAtom
                 const enrichedData = citationDataMap[citation.citation_id];
                 if (enrichedData) {
                     unique.push({
                         ...enrichedData,
-                        numericCitation: (unique.length + 1).toString()
+                        numericCitation
                     });
                 } else {
                     // Fallback: create minimal CitationData from CitationMetadata
@@ -72,7 +75,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         citation: citation.author_year || null,
                         formatted_citation: null,
                         url: null,
-                        numericCitation: (unique.length + 1).toString(),
+                        numericCitation,
                         message_id: run.id, // Use run ID as message ID for compatibility
                     } as CitationData);
                 }
@@ -80,7 +83,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
         
         return unique;
-    }, [runCitations, citationDataMap]);
+    }, [runCitations, citationDataMap, citationMarkerMap]);
 
     // Sources visibility state
     const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);
