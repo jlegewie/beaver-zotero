@@ -10,8 +10,7 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
-import { threadProposedActionsAtom } from '../atoms/proposedActions';
-import { getZoteroItemReferenceFromProposedAction } from '../types/proposedActions/base';
+import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction } from '../agents/agentActions';
 import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**
@@ -38,7 +37,7 @@ export function useReaderTabSelection() {
     const currentReaderRef = useRef<ZoteroReader | null>(null);
 
     // Define main window
-    const window = Zotero.getMainWindow();
+    const mainWindow = Zotero.getMainWindow();
 
     // Function to poll for reader._internalReader readiness
     const waitForInternalReader = useCallback((reader: any, callback: () => void, maxTime = 2000) => {
@@ -163,7 +162,7 @@ export function useReaderTabSelection() {
 
         // Initial setup: Get the current reader and set it up
         const initializeReader = async () => {
-            const initialReader = getCurrentReader(window);
+            const initialReader = getCurrentReader(mainWindow);
             if (initialReader) {
                 logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
                 await setupReader(initialReader);
@@ -181,7 +180,7 @@ export function useReaderTabSelection() {
             notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
                 // Tab change event
                 if (type === 'tab' && event === 'select') {
-                    const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
+                    const selectedTab = mainWindow.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
 
                     if (selectedTab.type === 'reader') {
@@ -226,13 +225,13 @@ export function useReaderTabSelection() {
                     if (event === 'add') {
                         const item = Zotero.Items.get(ids[0]);
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
-                        // Check if this annotation was created by a proposed action
-                        const proposedActions = store.get(threadProposedActionsAtom);
-                        const isFromProposedAction = proposedActions.some((action) => 
-                            getZoteroItemReferenceFromProposedAction(action)?.zotero_key === item.key &&
-                            getZoteroItemReferenceFromProposedAction(action)?.library_id === item.libraryID
-                        );
-                        if (isFromProposedAction) return;
+                        // Check if this annotation was created by an agent action
+                        const agentActions = store.get(threadAgentActionsAtom);
+                        const isFromAgentAction = agentActions.some((action) => {
+                            const ref = getZoteroItemReferenceFromAgentAction(action);
+                            return ref?.zotero_key === item.key && ref?.library_id === item.libraryID;
+                        });
+                        if (isFromAgentAction) return;
                         if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                         await addItemToCurrentMessageItems(item);
                     }
@@ -291,6 +290,6 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, window, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
+    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
 
 }
