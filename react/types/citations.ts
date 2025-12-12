@@ -51,7 +51,7 @@ export function toZoteroRectFromBBox(
 
 export interface PageLocation {
     /** Physical or logical location inside an attachment. */
-    page_idx: number; // 1-based page number
+    page_idx: number; // 0-based page index
     boxes?: BoundingBox[];
 }
 

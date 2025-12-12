@@ -39,6 +39,31 @@ import {
 } from '../../atoms/messageUIState';
 import { getAttachmentIdFromToolCall } from './AssistantMessageTools';
 
+function toPageIndex(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function getHighlightPageIndexes(annotation: AnnotationProposedAction): number[] {
+    const locations: any[] | undefined = (annotation as any)?.proposed_data?.highlight_locations;
+    if (!Array.isArray(locations) || locations.length === 0) return [];
+
+    return locations
+        .map((loc) => toPageIndex(loc?.page_idx ?? loc?.page_index ?? loc?.pageIdx ?? loc?.pageIndex))
+        .filter((idx): idx is number => typeof idx === 'number');
+}
+
+function getNotePageIndex(annotation: AnnotationProposedAction): number | undefined {
+    const pos: any = (annotation as any)?.proposed_data?.note_position;
+    return toPageIndex(pos?.page_index ?? pos?.page_idx ?? pos?.pageIndex);
+}
+
 interface AnnotationListItemProps {
     annotation: AnnotationProposedAction;
     isBusy: boolean;
@@ -323,14 +348,10 @@ const AnnotationToolDisplay: React.FC<AnnotationToolDisplayProps> = ({ messageId
                 }
 
                 // Calculate the page to navigate to (find the minimum page index across all annotations)
-                const pageIndexes = annotations.map((a) => (
-                    isNoteAnnotationAction(a)
-                        ? a.proposed_data.note_position?.page_index
-                        : a.proposed_data.highlight_locations?.[0]?.page_index
-                ));
-                const minPageIndex = pageIndexes.length > 0
-                    ? Math.min(...pageIndexes.filter((idx) => typeof idx === 'number'))
-                    : 0;
+                const pageIndexes = annotations
+                    .flatMap((a) => (isNoteAnnotationAction(a) ? [getNotePageIndex(a)] : getHighlightPageIndexes(a)))
+                    .filter((idx): idx is number => typeof idx === 'number');
+                const minPageIndex = pageIndexes.length > 0 ? Math.min(...pageIndexes) : 0;
 
                 // Open the PDF and navigate to the calculated page
                 await navigateToPage(attachmentItem.id, minPageIndex + 1);

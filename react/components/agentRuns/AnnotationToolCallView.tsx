@@ -62,6 +62,31 @@ type AnnotationAgentAction = AgentAction & {
     result_data?: AnnotationResultData;
 };
 
+function toPageIndex(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function getHighlightPageIndexes(annotation: AnnotationAgentAction): number[] {
+    const locations = annotation.proposed_data.highlight_locations;
+    if (!Array.isArray(locations) || locations.length === 0) return [];
+
+    return locations
+        .map((loc) => toPageIndex(loc?.page_idx ?? loc?.page_index ?? loc?.pageIdx ?? loc?.pageIndex))
+        .filter((idx): idx is number => typeof idx === 'number');
+}
+
+function getNotePageIndex(annotation: AnnotationAgentAction): number | undefined {
+    const pos = annotation.proposed_data.note_position;
+    return toPageIndex(pos?.page_index ?? pos?.page_idx ?? pos?.pageIndex);
+}
+
 // =============================================================================
 // AnnotationListItem Component
 // =============================================================================
@@ -361,11 +386,9 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                 }
 
                 // Calculate the page to navigate to
-                const pageIndexes = annotations.map((a) =>
-                    isNoteAnnotationAgentAction(a)
-                        ? a.proposed_data.note_position?.page_index
-                        : a.proposed_data.highlight_locations?.[0]?.page_index
-                ).filter((idx): idx is number => typeof idx === 'number');
+                const pageIndexes = annotations
+                    .flatMap((a) => (isNoteAnnotationAgentAction(a) ? [getNotePageIndex(a)] : getHighlightPageIndexes(a)))
+                    .filter((idx): idx is number => typeof idx === 'number');
                 const minPageIndex = pageIndexes.length > 0 ? Math.min(...pageIndexes) : 0;
 
                 await navigateToPage(attachmentItem.id, minPageIndex + 1);
