@@ -9,10 +9,9 @@ import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
 import { 
-    parseCitationAttributes, 
-    computeCitationKeyFromAttrs, 
-    getCitationIdentityKey 
-} from '../../types/citations';
+    preprocessCitations, 
+    createPreprocessState 
+} from '../../utils/citationPreprocessing';
 
 // Create a custom schema that extends GitHub's defaults but allows citation tags
 // Supported citation formats:
@@ -150,71 +149,6 @@ function parseContentIntoSegments(content: string): Segment[] {
     return segments;
 }
 
-/**
- * Preprocess citations in markdown content.
- * 
- * Handles various LLM output formats gracefully:
- * - Self-closing: <citation att_id="..."/>
- * - Opening only (missing /): <citation att_id="...">
- * - Full pair: <citation att_id="..."></citation>
- * - Attribute variations: attachment_id → att_id
- * 
- * Injects citation_key for metadata lookup (e.g., "zotero:1-ABC123" or "external:xyz")
- * 
- * @param content Markdown content with citation tags
- * @param lastCitationKeyRef Reference to the last citation key (for consecutive tracking)
- * @returns Preprocessed content with normalized citations
- */
-function preprocessCitations(content: string, lastCitationKeyRef: { value: string }): string {
-    let lastCitationEndIndex = -1;
-    
-    // Match citation tags in all formats
-    return content.replace(
-        /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/citation>)?)/g,
-        (match, attributesStr, offset, fullString) => {
-            // Parse and normalize attributes using shared utility
-            const normalizedAttrs = parseCitationAttributes(attributesStr);
-            
-            // Get identity key for consecutive detection
-            const identityKey = getCitationIdentityKey(normalizedAttrs);
-            
-            // Check if this citation references the same item as the previous one
-            const isConsecutive = identityKey && identityKey === lastCitationKeyRef.value;
-            
-            // Check if adjacent (only whitespace between this and previous citation)
-            const isAdjacent = isConsecutive && lastCitationEndIndex >= 0 && 
-                fullString.substring(lastCitationEndIndex, offset).trim() === '';
-            
-            // Update tracking for next iteration
-            lastCitationKeyRef.value = identityKey;
-            lastCitationEndIndex = offset + match.length;
-            
-            // Build normalized attribute string for HTML output
-            const attrParts: string[] = [];
-            if (normalizedAttrs.item_id) attrParts.push(`item_id="${normalizedAttrs.item_id}"`);
-            if (normalizedAttrs.att_id) attrParts.push(`att_id="${normalizedAttrs.att_id}"`);
-            if (normalizedAttrs.external_id) attrParts.push(`external_id="${normalizedAttrs.external_id}"`);
-            if (normalizedAttrs.sid) attrParts.push(`sid="${normalizedAttrs.sid}"`);
-            const normalizedAttrStr = attrParts.join(' ');
-            
-            // Compute citation_key for metadata lookup (single source of truth)
-            const citationKey = computeCitationKeyFromAttrs(normalizedAttrs);
-            const citationKeyAttr = citationKey ? `citation_key="${citationKey}"` : '';
-            
-            // Build final tag with normalized attributes
-            const baseAttrs = [normalizedAttrStr, citationKeyAttr].filter(Boolean).join(' ');
-            
-            if (isAdjacent) {
-                return `<citation ${baseAttrs} consecutive="true" adjacent="true"></citation>`;
-            }
-            if (isConsecutive) {
-                return `<citation ${baseAttrs} consecutive="true"></citation>`;
-            }
-            
-            return `<citation ${baseAttrs}></citation>`;
-        }
-    );
-}
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content, 
@@ -282,8 +216,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         ? parseContentIntoSegments(processedContent)
         : [{ type: 'markdown' as const, content: processedContent }];
     
-    // Track last citation key across all markdown segments for consecutive detection
-    const lastCitationKeyRef = { value: "" };
+    // Track citation state across all markdown segments for consecutive detection
+    const preprocessState = createPreprocessState();
     
     // Process each segment
     const processedSegments = segments.map((segment, index) => {
@@ -294,8 +228,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         // Apply citation preprocessing to markdown segments
         let markdownContent = segment.content;
         
-        // Preprocess citations
-        markdownContent = preprocessCitations(markdownContent, lastCitationKeyRef);
+        // Preprocess citations (state is mutated to track consecutive citations)
+        markdownContent = preprocessCitations(markdownContent, preprocessState);
         
         // Apply other markdown preprocessing
         markdownContent = markdownContent

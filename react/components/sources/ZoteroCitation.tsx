@@ -24,6 +24,16 @@ const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
 
 /**
+ * Citation display state - explicit FSM for citation lifecycle.
+ * 
+ * States:
+ * - 'streaming': Tag parsed, waiting for metadata (shows "?")
+ * - 'ready': Metadata available, fully rendered
+ * - 'error': No identifier found (returns null)
+ */
+type CitationDisplayState = 'streaming' | 'ready' | 'error';
+
+/**
  * Props for ZoteroCitation component.
  * 
  * Supported citation tag formats from LLM:
@@ -87,6 +97,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             ? citationDataByCitationKey[citationKey] 
             : undefined;
         
+        // Debug logging for citation matching (level 5 = verbose/trace)
+        if (citationKey && !metadata) {
+            logger(`ZoteroCitation: No metadata for key "${citationKey}" (available: ${Object.keys(citationDataByCitationKey).length} keys)`, 5);
+        } else if (!citationKey) {
+            logger(`ZoteroCitation: No citation_key (att_id=${att_id}, item_id=${item_id}, external_id=${external_id})`, 5);
+        }
+        
         // Parse Zotero reference from props (att_id takes priority)
         // Used for click handling and display even before metadata arrives
         const zoteroRef = parseItemReference(att_id) || parseItemReference(item_id);
@@ -96,15 +113,27 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             ? isExternalCitation(metadata) 
             : (!!external_id && !zoteroRef) || citationKey.startsWith('external:');
         
+        // Determine display state (FSM)
+        const hasIdentifier = !!(citationKey || zoteroRef || external_id);
+        let displayState: CitationDisplayState;
+        if (!hasIdentifier) {
+            displayState = 'error';
+        } else if (!metadata) {
+            displayState = 'streaming';
+        } else {
+            displayState = 'ready';
+        }
+        
         return {
             metadata,
             zoteroRef,
             isExternal,
             citationKey,
+            displayState,
             // Convenience accessors
             libraryID: zoteroRef?.libraryID ?? metadata?.library_id ?? 0,
             itemKey: zoteroRef?.itemKey ?? metadata?.zotero_key ?? '',
-            hasIdentifier: !!(citationKey || zoteroRef || external_id)
+            hasIdentifier
         };
     }, [citationKeyProp, citationDataByCitationKey, att_id, item_id, external_id]);
 
@@ -113,9 +142,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         metadata: citationMetadata, 
         isExternal, 
         citationKey,
+        displayState,
         libraryID,
-        itemKey,
-        hasIdentifier 
+        itemKey
     } = identity;
 
     // For external citations, check if they map to a Zotero item
@@ -126,8 +155,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
 
-    // Metadata arrives later during streaming; until then, render an inactive citation marker.
-    const isInactive = !citationMetadata;
+    // Use display state for rendering decisions
+    const isStreaming = displayState === 'streaming';
 
     // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
     const numericMarker = useCitationMarker(citationKey);
@@ -190,15 +219,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
-    if (!hasIdentifier) return null;
+    // 'error' state means no valid identifier was found - don't render.
+    if (displayState === 'error') return null;
 
     // Click handler for navigating to the cited item/location
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
         logger('ZoteroCitation: Handle citation click');
 
-        if (isInactive) {
-            logger('ZoteroCitation: Citation metadata not available yet - inactive');
+        if (isStreaming) {
+            logger('ZoteroCitation: Citation metadata not available yet - streaming');
             return;
         }
         
@@ -325,7 +355,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
-        if (isInactive) {
+        if (isStreaming) {
             // We don't know the author/year string yet. Render a subtle placeholder.
             displayText = '?';
         } else {
@@ -390,17 +420,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         );
     }
 
-    // Determine the CSS class based on citation type
+    // Determine the CSS class based on citation type and state
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : "zotero-citation";
-    const citationClass = isInactive
-        ? `${citationClassBase} inactive`
+    const citationClass = isStreaming
+        ? `${citationClassBase} streaming`
         : citationClassBase;
 
     const citationElement = (
         <span 
-            onClick={isInactive ? undefined : handleClick}
+            onClick={isStreaming ? undefined : handleClick}
             className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
@@ -433,15 +463,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     )
 
     // Return the citation with tooltip and click handler
+    // - Streaming state: no tooltip (metadata not available yet)
+    // - Ready state: show tooltip with preview
     return (
         <>
             {exportRendering ?
                 citationElement
             :
-                (isInactive ?
+                (isStreaming ?
                     citationElement
                 :
-                    // <Tooltip content={formatted_citation} width={TOOLTIP_WIDTH}>
                     <Tooltip
                         content={previewText}
                         customContent={citationPreview}
