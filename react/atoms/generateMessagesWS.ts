@@ -18,6 +18,7 @@ import {
     WSRunCompleteEvent,
     WSErrorEvent,
     WSWarningEvent,
+    WSRetryEvent,
     WSAgentActionEvent,
     WSToolCallProgressEvent,
 } from '../../src/services/agentService';
@@ -264,6 +265,16 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
+/** Retry state from WebSocket (when backend is retrying a failed request) */
+export interface RetryState {
+    runId: string;
+    attempt: number;
+    maxAttempts: number;
+    reason: string;
+    waitSeconds?: number | null;
+}
+export const wsRetryAtom = atom<RetryState | null>(null);
+
 // =============================================================================
 // Action Atoms
 // =============================================================================
@@ -279,6 +290,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsRequestAckDataAtom, null);
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
+    set(wsRetryAtom, null);
 });
 
 /**
@@ -341,6 +353,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionsCount: event.agent_actions?.length ?? 0,
             });
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+            // Clear retry state when run completes
+            set(wsRetryAtom, null);
 
             // Process citations from run complete event
             if (event.citations && event.citations.length > 0) {
@@ -394,12 +408,26 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(wsErrorAtom, event);
             set(activeRunAtom, (prev) => prev ? { ...prev, status: 'error' } : prev);
             set(isWSChatPendingAtom, false);
+            // Clear retry state on error
+            set(wsRetryAtom, null);
         },
 
         onWarning: (event: WSWarningEvent) => {
             logger(`WS onWarning: ${event.type} - ${event.message}`, 1);
             console.warn('[WS] Warning event:', event);
             set(wsWarningAtom, event);
+        },
+
+        onRetry: (event: WSRetryEvent) => {
+            logger(`WS onRetry: attempt ${event.attempt}/${event.max_attempts} - ${event.reason}`, 1);
+            console.log('[WS] Retry event:', event);
+            set(wsRetryAtom, {
+                runId: event.run_id,
+                attempt: event.attempt,
+                maxAttempts: event.max_attempts,
+                reason: event.reason,
+                waitSeconds: event.wait_seconds,
+            });
         },
 
         onAgentAction: (event: WSAgentActionEvent) => {
