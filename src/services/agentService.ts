@@ -41,12 +41,18 @@ interface WSBaseEvent {
 /** Ready event sent after connection validation completes */
 export interface WSReadyEvent extends WSBaseEvent {
     event: 'ready';
-    model_id: string | null;
-    model_name: string | null;
     subscription_status: SubscriptionStatus;
-    charge_type: ChargeType;
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
+}
+
+/** Request acknowledgment event sent after chat request is validated */
+export interface WSRequestAckEvent extends WSBaseEvent {
+    event: 'request_ack';
+    run_id: string;
+    model_id: string | null;
+    model_name: string | null;
+    charge_type: ChargeType;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -230,6 +236,7 @@ export interface WSAttachmentContentResponse {
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
+    | WSRequestAckEvent
     | WSPartEvent
     | WSToolReturnEvent
     | WSToolCallProgressEvent
@@ -256,12 +263,6 @@ export interface WSAuthMessage {
     type: 'auth';
     /** JWT authentication token */
     token: string;
-    /** User's model provider API key (optional) */
-    api_key?: string;
-    /** UUID of plan_model_access entry (optional) */
-    access_id?: string;
-    /** Set to true for custom model mode (optional, default false) */
-    custom_model?: boolean;
 }
 
 /**
@@ -279,7 +280,7 @@ export interface ApplicationStateInput {
 
 /**
  * Agent run request sent by the client after receiving the 'ready' event.
- * Model selection and API key are passed as query parameters during connection.
+ * Model selection is included in this request (moved from auth message).
  */
 export interface AgentRunRequest {
     /** Request type discriminator */
@@ -290,21 +291,20 @@ export interface AgentRunRequest {
     thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
+    /** UUID of plan_model_access entry (mutually exclusive with custom_model) */
+    access_id?: string;
+    /** User's API key for plan models that require BYOK */
+    api_key?: string;
+    /** Custom model configuration (mutually exclusive with access_id) */
+    custom_model?: CustomChatModel;
     /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
     retry_run_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
-    /** Custom model configuration */
-    custom_model?: CustomChatModel;
+    /** Pre-generated assistant message ID (optional) */
+    assistant_message_id?: string;
 }
 
-/** Options for agent run connection */
-export interface AgentRunOptions {
-    /** Access ID from PlanModelAccess (optional, backend will use plan default if not provided) */
-    accessId?: string;
-    /** User's own API key for the model provider (optional) */
-    apiKey?: string;
-}
 
 // =============================================================================
 // Callback Types
@@ -312,21 +312,33 @@ export interface AgentRunOptions {
 
 /** Data received in the ready event */
 export interface WSReadyData {
-    modelId: string | null;
-    modelName: string | null;
     subscriptionStatus: SubscriptionStatus;
-    chargeType: ChargeType;
     processingMode: ProcessingMode;
     indexingComplete: boolean;
+}
+
+/** Data received in the request_ack event */
+export interface WSRequestAckData {
+    runId: string;
+    modelId: string | null;
+    modelName: string | null;
+    chargeType: ChargeType;
 }
 
 export interface WSCallbacks {
     /**
      * Called when the server is ready to accept chat requests.
-     * This is sent after connection validation (auth, profile, model validation) completes.
-     * @param data Ready event data containing model/subscription info
+     * This is sent after connection authentication completes.
+     * @param data Ready event data containing subscription info
      */
     onReady: (data: WSReadyData) => void;
+
+    /**
+     * Called when a chat request is acknowledged and model is validated.
+     * This is sent after the chat request is received and validated.
+     * @param data Request ack data containing model and charge info
+     */
+    onRequestAck?: (data: WSRequestAckData) => void;
 
     /**
      * Called when a part event is received (text, thinking, or tool_call)
@@ -448,18 +460,17 @@ export class AgentService {
      * 
      * Protocol flow:
      * 1. Client connects with clean URL (no sensitive data in params)
-     * 2. Client sends WSAuthMessage with token and options
-     * 3. Server authenticates, fetches profile, validates model
-     * 4. Server sends "ready" event
-     * 5. Client sends agent run request
+     * 2. Client sends WSAuthMessage with token only
+     * 3. Server authenticates and sends "ready" event
+     * 4. Client sends agent run request (with model selection: access_id/api_key or custom_model)
+     * 5. Server validates model and sends "request_ack" event
      * 6. Server streams delta events and sends complete event
      * 
-     * @param request The agent run request to send
+     * @param request The agent run request to send (should include access_id/api_key or custom_model)
      * @param callbacks Event callbacks
-     * @param options Optional connection options (accessId, apiKey)
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks, options?: AgentRunOptions): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks): Promise<void> {
         // Close existing connection if any
         this.close();
 
@@ -467,17 +478,11 @@ export class AgentService {
 
         try {
             const token = await this.getAuthToken();
-            const useCustomModel = !!request.custom_model;
 
-            // Build auth message to send after connection opens
+            // Auth message now only contains token - model selection is in chat request
             const authMessage: WSAuthMessage = {
                 type: 'auth',
                 token,
-                ...(options?.apiKey && { api_key: options.apiKey }),
-                ...(useCustomModel 
-                    ? { custom_model: true }
-                    : options?.accessId && { access_id: options.accessId }
-                ),
             };
 
             // Connect with clean URL (no sensitive data in params)
@@ -585,14 +590,23 @@ export class AgentService {
                 case 'ready': {
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
-                        modelId: event.model_id,
-                        modelName: event.model_name,
                         subscriptionStatus: event.subscription_status,
-                        chargeType: event.charge_type,
                         processingMode: event.processing_mode,
                         indexingComplete: event.indexing_complete,
                     };
                     this.callbacks.onReady(readyData);
+                    break;
+                }
+
+                case 'request_ack': {
+                    // Request acknowledged with model info
+                    const ackData: WSRequestAckData = {
+                        runId: event.run_id,
+                        modelId: event.model_id,
+                        modelName: event.model_name,
+                        chargeType: event.charge_type,
+                    };
+                    this.callbacks.onRequestAck?.(ackData);
                     break;
                 }
 

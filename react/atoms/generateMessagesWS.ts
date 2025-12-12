@@ -12,7 +12,7 @@ import {
     WSCallbacks,
     AgentRunRequest,
     WSReadyData,
-    AgentRunOptions,
+    WSRequestAckData,
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
@@ -93,28 +93,32 @@ function getUserApiKey(model: FullModelConfig): string | undefined {
     return undefined;
 }
 
+/** Model selection options to be included in the AgentRunRequest */
+interface ModelSelectionOptions {
+    access_id?: string;
+    api_key?: string;
+}
+
 /**
- * Build connection options for WebSocket based on the selected model.
- * - Custom models: no access_id/api_key in query params (use custom_model payload)
- * - Non-custom models: access_id from plan, api_key for user-key models
+ * Build model selection options to include in the AgentRunRequest.
+ * - Custom models: Use the custom_model field in the request (no access_id/api_key)
+ * - Non-custom models: access_id from plan, api_key for BYOK models
  */
-function buildConnectOptions(model: FullModelConfig | null): AgentRunOptions {
+function buildModelSelectionOptions(model: FullModelConfig | null): ModelSelectionOptions {
     if (!model) return {};
 
-    // Custom models rely on the payload, not query params
+    // Custom models use the custom_model field in the request, not access_id/api_key
     if (model.is_custom) return {};
 
-    const options: AgentRunOptions = {};
+    const options: ModelSelectionOptions = {};
 
     // Include access_id for non-custom models
-    if (!model.is_custom) {
-        options.accessId = model.access_id;
-    }
+    options.access_id = model.access_id;
 
-    // Include api_key for user-key models
+    // Include api_key for user-key models (BYOK)
     const apiKey = getUserApiKey(model);
     if (apiKey) {
-        options.apiKey = apiKey;
+        options.api_key = apiKey;
     }
 
     return options;
@@ -145,6 +149,7 @@ function createAgentRunShell(
     threadId: string | null,
     userId: string,
     modelName: string,
+    modelSelectionOptions: ModelSelectionOptions,
     providerName?: string,
     customInstructions?: string,
     customModel?: FullModelConfig['custom_model'],
@@ -154,14 +159,17 @@ function createAgentRunShell(
 
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
+    // Model selection is included in the request (access_id/api_key for plan models, custom_model for custom)
     const request: AgentRunRequest = {
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
         user_prompt: userPrompt,
+        ...(modelSelectionOptions.access_id ? { access_id: modelSelectionOptions.access_id } : {}),
+        ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
+        ...(customModel ? { custom_model: customModel } : {}),
         ...(rewriteFromRunId ? { retry_run_id: rewriteFromRunId } : {}),
-        custom_instructions: customInstructions,
-        custom_model: customModel,
+        ...(customInstructions ? { custom_instructions: customInstructions } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -244,8 +252,11 @@ export const isWSConnectedAtom = atom(false);
 /** Whether the server has sent the ready event (validation complete) */
 export const isWSReadyAtom = atom(false);
 
-/** Ready event data from server (model, subscription, processing info) */
+/** Ready event data from server (subscription, processing info) */
 export const wsReadyDataAtom = atom<WSReadyData | null>(null);
+
+/** Request acknowledgment data from server (model, charge type info) */
+export const wsRequestAckDataAtom = atom<WSRequestAckData | null>(null);
 
 /** Last error from WebSocket */
 export const wsErrorAtom = atom<WSErrorEvent | null>(null);
@@ -265,6 +276,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
     set(wsReadyDataAtom, null);
+    set(wsRequestAckDataAtom, null);
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
 });
@@ -276,11 +288,16 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 function createWSCallbacks(set: Setter): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
-            logger(`WS onReady: model=${data.modelName}, charge=${data.chargeType}, ` +
-                   `mode=${data.processingMode}, indexing=${data.indexingComplete}`, 1);
+            logger(`WS onReady: mode=${data.processingMode}, indexing=${data.indexingComplete}`, 1);
             console.log('[WS] Ready event received:', data);
             set(isWSReadyAtom, true);
             set(wsReadyDataAtom, data);
+        },
+
+        onRequestAck: (data: WSRequestAckData) => {
+            logger(`WS onRequestAck: runId=${data.runId}, model=${data.modelName}, charge=${data.chargeType}`, 1);
+            console.log('[WS] Request acknowledged:', data);
+            set(wsRequestAckDataAtom, data);
         },
 
         onPart: (event: WSPartEvent) => {
@@ -416,18 +433,18 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 /**
  * Execute a WebSocket request with the given run and request.
  * Handles connection, callbacks, and error handling.
+ * Model selection options are included in the request itself.
  */
 async function executeWSRequest(
     run: AgentRun,
     request: AgentRunRequest,
-    connectOptions: AgentRunOptions,
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
 
     try {
         console.log('[WS] Starting connection for run:', run.id);
-        await agentService.connect(request, callbacks, connectOptions);
+        await agentService.connect(request, callbacks);
         console.log('[WS] Connection established and ready');
     } catch (error) {
         logger(`WS connection error: ${error}`, 1);
@@ -461,11 +478,11 @@ export const sendWSMessageAtom = atom(
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);
 
-        // Get current model and build connection options
+        // Get current model and build model selection options for the request
         const model = get(selectedModelAtom);
-        const connectOptions = buildConnectOptions(model);
+        const modelOptions = buildModelSelectionOptions(model);
 
-        // Log model and connection info
+        // Log model and model selection info
         console.log('[WS] Selected model:', model ? {
             id: model.id,
             access_id: model.access_id,
@@ -474,9 +491,9 @@ export const sendWSMessageAtom = atom(
             is_custom: model.is_custom,
             use_app_key: model.use_app_key,
         } : null);
-        console.log('[WS] Connection options:', {
-            accessId: connectOptions.accessId || '(not set - will use plan default)',
-            hasApiKey: !!connectOptions.apiKey,
+        console.log('[WS] Model selection options:', {
+            access_id: modelOptions.access_id || '(not set - using custom model or plan default)',
+            hasApiKey: !!modelOptions.api_key,
         });
 
         // Custom instructions (if any)
@@ -563,6 +580,7 @@ export const sendWSMessageAtom = atom(
             threadId,
             userId,
             model?.name ?? 'unknown',
+            modelOptions,
             model?.provider,
             customInstructions,
             model?.is_custom ? model.custom_model : undefined,
@@ -577,7 +595,7 @@ export const sendWSMessageAtom = atom(
         set(currentMessageItemsAtom, []);
 
         // Execute the WebSocket request
-        await executeWSRequest(run, request, connectOptions, set);
+        await executeWSRequest(run, request, set);
     }
 );
 
@@ -675,8 +693,8 @@ export const regenerateFromRunAtom = atom(
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);
 
-        // Build connection options
-        const connectOptions = buildConnectOptions(model);
+        // Build model selection options
+        const modelOptions = buildModelSelectionOptions(model);
         const customInstructions = getPref('customInstructions') || undefined;
 
         // Create new AgentRun shell with the same user_prompt
@@ -685,6 +703,7 @@ export const regenerateFromRunAtom = atom(
             threadId,
             userId,
             model.name,
+            modelOptions,
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
@@ -695,7 +714,7 @@ export const regenerateFromRunAtom = atom(
         set(activeRunAtom, newRun);
 
         // Execute the WebSocket request
-        await executeWSRequest(newRun, request, connectOptions, set);
+        await executeWSRequest(newRun, request, set);
     }
 );
 

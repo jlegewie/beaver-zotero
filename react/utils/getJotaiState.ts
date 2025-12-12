@@ -12,7 +12,7 @@ import { store } from "../store"
 // Agent-related atoms
 import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "../agents/atoms"
 import { threadAgentActionsAtom, agentActionsByToolcallAtom, agentActionsByRunAtom } from "../agents/agentActions"
-import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/generateMessagesWS"
+import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsRequestAckDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/generateMessagesWS"
 
 export const atomRegistry = {
     // Auth
@@ -37,6 +37,7 @@ export const atomRegistry = {
     isWSConnected: isWSConnectedAtom,
     isWSReady: isWSReadyAtom,
     wsReadyData: wsReadyDataAtom,
+    wsRequestAckData: wsRequestAckDataAtom,
     wsError: wsErrorAtom,
     wsWarning: wsWarningAtom,
 
