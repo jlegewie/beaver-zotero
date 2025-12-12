@@ -8,16 +8,19 @@ import {
     isFulltextRetrievalResult,
     extractFulltextRetrievalData,
     isExternalSearchResult,
-    extractExternalSearchData
+    extractExternalSearchData,
+    isAnnotationToolResult
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { FulltextRetrievalResultView } from './FulltextRetrievalResultView';
 import { ExternalReferencesSearchResultView } from './ExternalReferencesSearchResultView';
+import { AnnotationResultView } from './AnnotationResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
     result: ToolReturnPart;
+    runId: string;
 }
 
 /**
@@ -25,10 +28,17 @@ interface ToolResultViewProps {
  * Dispatches to specialized renderers based on the result type,
  * with a fallback to generic JSON/markdown rendering.
  */
-export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result }) => {
+export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result, runId }) => {
     const toolName = toolcall.tool_name;
+    const toolCallId = toolcall.tool_call_id;
     const content = result.content;
     const metadata = result.metadata;
+
+    // Annotation tool results (add_highlight_annotations, add_note_annotations)
+    // Annotation data comes from AgentActions, not from the tool return content
+    if (isAnnotationToolResult(toolName)) {
+        return <AnnotationResultView runId={runId} toolCallId={toolCallId} />;
+    }
 
     // Item search results (search_references_by_topic, search_references_by_metadata)
     if (isItemSearchResult(toolName, content, metadata)) {
