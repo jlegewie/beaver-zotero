@@ -12,7 +12,6 @@ import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { useFallbackCitation } from '../../hooks/useFallbackCitation';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 
 const TOOLTIP_WIDTH = '250px';
@@ -141,21 +140,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Destructure for easier access
     const { 
         metadata: citationMetadata, 
-        zoteroRef, 
         isExternal, 
         citationKey,
         libraryID,
         itemKey,
         hasIdentifier 
     } = identity;
-
-    // Load fallback citation data when metadata is not available
-    const fallbackCitation = useFallbackCitation({
-        cleanKey: zoteroRef ? `${zoteroRef.libraryID}-${zoteroRef.itemKey}` : '',
-        libraryID,
-        itemKey,
-        citationMetadataId: citationMetadata?.citation_id
-    });
 
     // For external citations, check if they map to a Zotero item
     const mappedZoteroItem = isExternal && citationMetadata && isExternalCitation(citationMetadata)
@@ -182,51 +172,42 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         };
     }, [citationKey]);
 
-    // Memoize derived citation data to avoid recalculation on every render
+    // Derive citation display data from metadata
+    // When metadata is not available (streaming), values are empty and component shows inactive "?"
     const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
+        // No metadata yet - return empty values (component will show inactive state)
+        if (!citationMetadata) {
+            return { formatted_citation: '', citation: '', url: '', previewText: '', pages: [] };
+        }
+
         let formatted_citation = '';
         let citation = '';
         let url = '';
         let previewText = '';
 
-        if (citationMetadata) {
-            if (isExternalCitation(citationMetadata)) {
-                // External citation - use metadata directly
-                citation = citationMetadata.author_year || '';
-                formatted_citation = citationMetadata.formatted_citation || citation;
-                previewText = citationMetadata.preview
-                    ? `"${citationMetadata.preview}"`
-                    : formatted_citation;
-                
-                // If mapped to Zotero item, try to get URL
-                if (mappedZoteroItem) {
-                    const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                    if (item) {
-                        url = createZoteroURI(item);
-                    }
+        if (isExternalCitation(citationMetadata)) {
+            // External citation - use metadata directly
+            citation = citationMetadata.author_year || '';
+            formatted_citation = citationMetadata.formatted_citation || citation;
+            previewText = citationMetadata.preview
+                ? `"${citationMetadata.preview}"`
+                : formatted_citation;
+            
+            // If mapped to Zotero item, try to get URL
+            if (mappedZoteroItem) {
+                const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                if (item) {
+                    url = createZoteroURI(item);
                 }
-            } else if (isZoteroCitation(citationMetadata)) {
-                // Zotero citation with metadata
-                formatted_citation = citationMetadata.formatted_citation || '';
-                citation = citationMetadata.citation || '';
-                url = citationMetadata.url || '';
-                previewText = citationMetadata.preview
-                    ? `"${citationMetadata.preview}"`
-                    : formatted_citation || '';
             }
-        } else if (fallbackCitation) {
-            if (fallbackCitation.loading) {
-                // Show loading state
-                formatted_citation = '?';
-                citation = '?';
-                url = '';
-                previewText = 'Loading citation data...';
-            } else {
-                formatted_citation = fallbackCitation.formatted_citation;
-                citation = fallbackCitation.citation;
-                url = fallbackCitation.url;
-                previewText = formatted_citation;
-            }
+        } else if (isZoteroCitation(citationMetadata)) {
+            // Zotero citation with metadata
+            formatted_citation = citationMetadata.formatted_citation || '';
+            citation = citationMetadata.citation || '';
+            url = citationMetadata.url || '';
+            previewText = citationMetadata.preview
+                ? `"${citationMetadata.preview}"`
+                : formatted_citation || '';
         }
         
         const pages = [...new Set(getCitationPages(citationMetadata))];
@@ -234,7 +215,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
 
         return { formatted_citation, citation, url: finalUrl, previewText, pages };
-    }, [citationMetadata, fallbackCitation]);
+    }, [citationMetadata, mappedZoteroItem]);
 
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.

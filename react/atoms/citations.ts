@@ -7,18 +7,6 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 
 /**
- * Fallback citation cache for citations not in citationDataMapAtom
- * Keyed by "libraryID-itemKey" (cleanKey)
- */
-export interface FallbackCitation {
-    formatted_citation: string;
-    citation: string;
-    url: string;
-}
-export const fallbackCitationCacheAtom = atom<Record<string, FallbackCitation>>({});
-
-
-/**
  * Thread-scoped citation marker assignment.
  * 
  * Maps citation keys to numeric markers (e.g., "1", "2", "3").
