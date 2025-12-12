@@ -127,6 +127,20 @@ export interface WSWarningEvent extends WSBaseEvent {
     data?: Record<string, any>;
 }
 
+/** Retry event sent when the backend is retrying a failed request */
+export interface WSRetryEvent extends WSBaseEvent {
+    event: 'retry';
+    run_id: string;
+    /** Current attempt number (1-indexed) */
+    attempt: number;
+    /** Maximum number of attempts */
+    max_attempts: number;
+    /** Brief explanation of why retry is needed */
+    reason: string;
+    /** How long we're waiting before retry (if known) */
+    wait_seconds?: number | null;
+}
+
 /** Agent action event sent when an action is detected during streaming */
 export interface WSAgentActionEvent extends WSBaseEvent {
     event: 'agent_action';
@@ -245,6 +259,7 @@ export type WSEvent =
     | WSThreadEvent
     | WSErrorEvent
     | WSWarningEvent
+    | WSRetryEvent
     | WSAgentActionEvent
     | WSItemDataRequest
     | WSAttachmentDataRequest
@@ -393,6 +408,12 @@ export interface WSCallbacks {
      * @param event The agent action event with run_id and action data
      */
     onAgentAction?: (event: WSAgentActionEvent) => void;
+
+    /**
+     * Called when the backend is retrying a failed request
+     * @param event The retry event with attempt info and reason
+     */
+    onRetry?: (event: WSRetryEvent) => void;
 
     /**
      * Called when the WebSocket connection is established
@@ -646,6 +667,10 @@ export class AgentService {
 
                 case 'agent_action':
                     this.callbacks.onAgentAction?.(event);
+                    break;
+
+                case 'retry':
+                    this.callbacks.onRetry?.(event);
                     break;
 
                 case 'item_data_request':

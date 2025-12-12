@@ -52,7 +52,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
             })}
             {/* Status indicator rendered inside the same container for smooth transitions */}
             {showStatusIndicator && status && (
-                <RunStatusIndicator status={status} />
+                <RunStatusIndicator status={status} runId={runId} />
             )}
         </div>
     );
