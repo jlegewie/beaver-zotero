@@ -116,6 +116,8 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
         ? ZOTERO_ICONS.ANNOTATE_NOTE
         : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT;
 
+    const hasNoApplicationError = annotation.status !== 'error';
+
     // Determine icon color based on status and annotation color
     const getIconColor = () => {
         const isInactive = annotation.status === 'rejected' || 
@@ -165,11 +167,18 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
             onMouseLeave={onMouseLeave}
         >
             <div className="display-flex flex-row items-start gap-3">
-                <ZoteroIcon
-                    icon={icon}
-                    size={13}
-                    className={`flex-shrink-0 mt-020 ${getIconColor()}`}
-                />
+                {hasNoApplicationError ? (
+                    <ZoteroIcon
+                        icon={icon}
+                        size={13}
+                        className={`flex-shrink-0 mt-020 ${getIconColor()}`}
+                    />
+                ) : (
+                    <Icon
+                        icon={AlertIcon}
+                        className={`flex-shrink-0 mt-020 ${getIconColor()}`}
+                    />
+                )}
                 <div className="flex-1 min-w-0">
                     <div className={getTextClasses()}>
                         {annotation.proposed_data.title || 'Annotation'}
