@@ -228,6 +228,10 @@ export interface WSExternalReferenceCheckResponse {
 export interface WSZoteroDataRequest extends WSBaseEvent {
     event: 'zotero_data_request';
     request_id: string;
+    /** Whether to include attachments of the items */
+    include_attachments: boolean;
+    /** Whether to include parents of the items */
+    include_parents: boolean;
     /** References to fetch data for */
     items: ZoteroItemReference[];
 }
@@ -1003,12 +1007,22 @@ export class AgentService {
     /**
      * Handle zotero_data_request event.
      * Fetches item/attachment metadata for the requested references.
+     * Optionally includes attachments of items and/or parents of attachments.
      */
     private async handleZoteroDataRequest(request: WSZoteroDataRequest): Promise<void> {
-        const items: ItemData[] = [];
-        const attachments: AttachmentDataWithMimeType[] = [];
         const errors: WSDataError[] = [];
 
+        // Track keys to avoid duplicates when including parents/attachments
+        const itemKeys = new Set<string>();
+        const attachmentKeys = new Set<string>();
+
+        // Collect Zotero items to serialize
+        const itemsToSerialize: Zotero.Item[] = [];
+        const attachmentsToSerialize: Zotero.Item[] = [];
+
+        const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
+
+        // Phase 1: Collect all items and attachments to process
         for (const reference of request.items) {
             try {
                 const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
@@ -1021,36 +1035,87 @@ export class AgentService {
                     continue;
                 }
 
-                try {
-                    await zoteroItem.loadAllData();
-                } catch (e) {
-                    // Ignore benign load errors
-                }
-
                 if (zoteroItem.isAttachment()) {
-                    const serialized = await serializeAttachment(zoteroItem, undefined);
-                    if (serialized) {
-                        attachments.push(serialized);
-                    } else {
-                        errors.push({
-                            reference,
-                            error: 'Attachment not available locally or on server',
-                            error_code: 'not_available'
-                        });
+                    const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
+                    if (!attachmentKeys.has(key)) {
+                        attachmentKeys.add(key);
+                        attachmentsToSerialize.push(zoteroItem);
                     }
-                } else {
-                    const serialized = await serializeItem(zoteroItem, undefined);
-                    items.push(serialized);
+
+                    // Include parent item if requested
+                    if (request.include_parents && zoteroItem.parentID) {
+                        const parentItem = await Zotero.Items.getAsync(zoteroItem.parentID);
+                        if (parentItem && !parentItem.isAttachment()) {
+                            const parentKey = makeKey(parentItem.libraryID, parentItem.key);
+                            if (!itemKeys.has(parentKey)) {
+                                itemKeys.add(parentKey);
+                                itemsToSerialize.push(parentItem);
+                            }
+                        }
+                    }
+                } else if (zoteroItem.isRegularItem()) {
+                    const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
+                    if (!itemKeys.has(key)) {
+                        itemKeys.add(key);
+                        itemsToSerialize.push(zoteroItem);
+                    }
+
+                    // Include attachments if requested
+                    if (request.include_attachments) {
+                        const attachmentIds = zoteroItem.getAttachments();
+                        for (const attachmentId of attachmentIds) {
+                            const attachment = await Zotero.Items.getAsync(attachmentId);
+                            if (attachment) {
+                                const attKey = makeKey(attachment.libraryID, attachment.key);
+                                if (!attachmentKeys.has(attKey)) {
+                                    attachmentKeys.add(attKey);
+                                    attachmentsToSerialize.push(attachment);
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (error: any) {
-                logger(`AgentService: Failed to serialize zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                logger(`AgentService: Failed to collect zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 errors.push({
                     reference,
-                    error: 'Failed to load item/attachment metadata',
-                    error_code: 'serialization_failed'
+                    error: 'Failed to load item/attachment',
+                    error_code: 'load_failed'
                 });
             }
         }
+
+        // Phase 2: Serialize all items and attachments in parallel
+        const [itemResults, attachmentResults] = await Promise.all([
+            Promise.all(itemsToSerialize.map(async (item) => {
+                try {
+                    await item.loadAllData();
+                } catch (e) {
+                    // Ignore benign load errors
+                }
+                return serializeItem(item, undefined);
+            })),
+            Promise.all(attachmentsToSerialize.map(async (attachment) => {
+                try {
+                    await attachment.loadAllData();
+                } catch (e) {
+                    // Ignore benign load errors
+                }
+                const serialized = await serializeAttachment(attachment, undefined);
+                if (!serialized) {
+                    errors.push({
+                        reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                        error: 'Attachment not available locally',
+                        error_code: 'not_available'
+                    });
+                }
+                return serialized;
+            }))
+        ]);
+
+        // Filter out null attachments
+        const items = itemResults;
+        const attachments = attachmentResults.filter((a): a is AttachmentDataWithMimeType => a !== null);
 
         const response: WSZoteroDataResponse = {
             type: 'zotero_data',
