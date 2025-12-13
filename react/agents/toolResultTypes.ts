@@ -489,6 +489,21 @@ export function isAnnotationToolResult(toolName: string): boolean {
 }
 
 /**
+ * Type guard for highlight annotation tool results.
+ */
+export function isHighlightAnnotationToolResult(toolName: string): boolean {
+    return toolName === 'add_highlight_annotations';
+}
+
+/**
+ * Type guard for note annotation tool results.
+ */
+export function isNoteAnnotationToolResult(toolName: string): boolean {
+    return toolName === 'add_note_annotations';
+}
+
+
+/**
  * Extract attachment_id from annotation tool call arguments.
  * Returns null if not found or not parseable.
  */

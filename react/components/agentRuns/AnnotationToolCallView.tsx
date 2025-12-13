@@ -44,6 +44,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../atoms/messageUIState';
+import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '../../agents/toolResultTypes';
 
 // =============================================================================
 // Types
@@ -349,7 +350,9 @@ interface AnnotationToolCallViewProps {
  */
 export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ part, runId }) => {
     const toolCallId = part.tool_call_id;
-    
+    const isHighlightAnnotationPart = isHighlightAnnotationToolResult(part.tool_name);
+    const isNoteAnnotationPart = isNoteAnnotationToolResult(part.tool_name);
+
     // Get tool call status from results
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const status = getToolCallStatus(toolCallId, resultsMap);
@@ -600,6 +603,8 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
     // Button text
     const getButtonText = () => {
+        if (isHighlightAnnotationPart) return isError ? 'Highlights: Error' : `${totalAnnotations} Highlight${totalAnnotations === 1 ? '' : 's'}`;
+        if (isNoteAnnotationPart) return isError ? 'Notes: Error' : `${totalAnnotations} Note${totalAnnotations === 1 ? '' : 's'}`;
         if (isError) return 'Annotations: Error';
         return 'Annotations';
     };
@@ -642,9 +647,6 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                                 )}
                                 {rejectedCount > 0 && (
                                     <div className="font-color-tertiary text-sm">-{rejectedCount}</div>
-                                )}
-                                {rejectedCount === 0 && appliedCount === 0 && (
-                                    <div className="font-color-tertiary text-sm">({totalAnnotations})</div>
                                 )}
                             </div>
                         )}
