@@ -4,7 +4,6 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, 
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
-import { threadProposedActionsAtom } from "./proposedActions";
 import { agentRunService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
@@ -85,7 +84,6 @@ export const newThreadAtom = atom(
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(citationMetadataAtom, []);
         set(resetCitationMarkersAtom);
-        set(threadProposedActionsAtom, []);
         set(citationDataMapAtom, {});
         set(currentMessageContentAtom, '');
         set(resetMessageUIStateAtom);
