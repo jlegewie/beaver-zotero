@@ -224,6 +224,26 @@ export interface WSExternalReferenceCheckResponse {
     results: ExternalReferenceCheckResult[];
 }
 
+/** Request from backend to fetch Zotero item/attachment data */
+export interface WSZoteroDataRequest extends WSBaseEvent {
+    event: 'zotero_data_request';
+    request_id: string;
+    /** References to fetch data for */
+    items: ZoteroItemReference[];
+}
+
+/** Response to zotero data request */
+export interface WSZoteroDataResponse {
+    type: 'zotero_data';
+    request_id: string;
+    /** Item metadata for references that are regular items */
+    items: ItemData[];
+    /** Attachment metadata for references that are attachments */
+    attachments: AttachmentDataWithMimeType[];
+    /** Optional errors for references that couldn't be retrieved */
+    errors?: WSDataError[];
+}
+
 export interface WSItemDataResponse {
     type: 'item_data';
     request_id: string;
@@ -264,7 +284,8 @@ export type WSEvent =
     | WSItemDataRequest
     | WSAttachmentDataRequest
     | WSAttachmentContentRequest
-    | WSExternalReferenceCheckRequest;
+    | WSExternalReferenceCheckRequest
+    | WSZoteroDataRequest;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -742,6 +763,17 @@ export class AgentService {
                     });
                     break;
 
+                case 'zotero_data_request':
+                    this.handleZoteroDataRequest(event).catch((error) => {
+                        logger(`AgentService: Failed to handle zotero_data_request: ${error}`, 1);
+                        this.callbacks?.onError({
+                            event: 'error',
+                            type: 'zotero_data_request_failed',
+                            message: String(error),
+                        });
+                    });
+                    break;
+
                 default:
                     logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
@@ -963,6 +995,69 @@ export class AgentService {
             type: 'external_reference_check',
             request_id: request.request_id,
             results
+        };
+
+        this.send(response);
+    }
+
+    /**
+     * Handle zotero_data_request event.
+     * Fetches item/attachment metadata for the requested references.
+     */
+    private async handleZoteroDataRequest(request: WSZoteroDataRequest): Promise<void> {
+        const items: ItemData[] = [];
+        const attachments: AttachmentDataWithMimeType[] = [];
+        const errors: WSDataError[] = [];
+
+        for (const reference of request.items) {
+            try {
+                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                if (!zoteroItem) {
+                    errors.push({
+                        reference,
+                        error: 'Item not found in local database',
+                        error_code: 'not_found'
+                    });
+                    continue;
+                }
+
+                try {
+                    await zoteroItem.loadAllData();
+                } catch (e) {
+                    // Ignore benign load errors
+                }
+
+                if (zoteroItem.isAttachment()) {
+                    const serialized = await serializeAttachment(zoteroItem, undefined);
+                    if (serialized) {
+                        attachments.push(serialized);
+                    } else {
+                        errors.push({
+                            reference,
+                            error: 'Attachment not available locally or on server',
+                            error_code: 'not_available'
+                        });
+                    }
+                } else {
+                    const serialized = await serializeItem(zoteroItem, undefined);
+                    items.push(serialized);
+                }
+            } catch (error: any) {
+                logger(`AgentService: Failed to serialize zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                errors.push({
+                    reference,
+                    error: 'Failed to load item/attachment metadata',
+                    error_code: 'serialization_failed'
+                });
+            }
+        }
+
+        const response: WSZoteroDataResponse = {
+            type: 'zotero_data',
+            request_id: request.request_id,
+            items,
+            attachments,
+            errors: errors.length > 0 ? errors : undefined
         };
 
         this.send(response);
