@@ -63,6 +63,7 @@ import {
 } from '../agents/agentActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
+import { loadItemDataForAgentActions } from '../utils/agentActionUtils';
 
 // =============================================================================
 // Helper Functions
@@ -423,6 +424,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
+                // Load item data for agent actions (fire and forget)
+                loadItemDataForAgentActions(actions).catch(err => 
+                    logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
+                );
             }
         },
 
@@ -507,6 +512,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
             const actions = event.actions.map(toAgentAction);
             set(addAgentActionsAtom, actions);
+            // Load item data for agent actions (fire and forget)
+            loadItemDataForAgentActions(actions).catch(err => 
+                logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
+            );
         },
 
         onOpen: () => {

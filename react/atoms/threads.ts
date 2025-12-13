@@ -14,6 +14,7 @@ import { ExternalReference } from "../types/externalReferences";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
 import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
+import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 
 // Thread types
 export interface ThreadData {
@@ -189,6 +190,11 @@ export const loadThreadAtom = atom(
                 
                 // Set agent actions
                 set(threadAgentActionsAtom, agent_actions || []);
+
+                // Load item data for agent actions
+                if (agent_actions && agent_actions.length > 0) {
+                    await loadItemDataForAgentActions(agent_actions);
+                }
 
                 // Validate agent actions and undo if not valid
                 if (agent_actions && agent_actions.length > 0) {
