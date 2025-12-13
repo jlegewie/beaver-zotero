@@ -142,10 +142,10 @@ export interface WSRetryEvent extends WSBaseEvent {
 }
 
 /** Agent action event sent when an action is detected during streaming */
-export interface WSAgentActionEvent extends WSBaseEvent {
-    event: 'agent_action';
+export interface WSAgentActionsEvent extends WSBaseEvent {
+    event: 'agent_actions';
     run_id: string;
-    action: import('../../react/agents/agentActions').AgentAction;
+    actions: import('../../react/agents/agentActions').AgentAction[];
 }
 
 export interface WSDataError {
@@ -258,7 +258,7 @@ export type WSEvent =
     | WSErrorEvent
     | WSWarningEvent
     | WSRetryEvent
-    | WSAgentActionEvent
+    | WSAgentActionsEvent
     | WSAttachmentContentRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest;
@@ -406,7 +406,7 @@ export interface WSCallbacks {
      * Called when an agent action is detected during streaming
      * @param event The agent action event with run_id and action data
      */
-    onAgentAction?: (event: WSAgentActionEvent) => void;
+    onAgentActions?: (event: WSAgentActionsEvent) => void;
 
     /**
      * Called when the backend is retrying a failed request
@@ -687,8 +687,8 @@ export class AgentService {
                     this.callbacks.onWarning(event);
                     break;
 
-                case 'agent_action':
-                    this.callbacks.onAgentAction?.(event);
+                case 'agent_actions':
+                    this.callbacks.onAgentActions?.(event);
                     break;
 
                 case 'retry':

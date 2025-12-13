@@ -19,7 +19,7 @@ import {
     WSErrorEvent,
     WSWarningEvent,
     WSRetryEvent,
-    WSAgentActionEvent,
+    WSAgentActionsEvent,
     WSToolCallProgressEvent,
 } from '../../src/services/agentService';
 import { logger } from '../../src/utils/logger';
@@ -499,16 +499,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
         },
 
-        onAgentAction: (event: WSAgentActionEvent) => {
-            logger(`WS onAgentAction: ${event.action.id} (${event.action.action_type}) for run ${event.run_id}`, 1);
-            console.log('[WS] Agent action event:', {
+        onAgentActions: (event: WSAgentActionsEvent) => {
+            logger(`WS onAgentActions: ${event.actions.length} actions for run ${event.run_id}`, 1);
+            console.log('[WS] Agent actions event:', {
                 runId: event.run_id,
-                actionId: event.action.id,
-                actionType: event.action.action_type,
-                status: event.action.status,
+                actionsCount: event.actions.length,
             });
-            const agentAction = toAgentAction(event.action);
-            set(addAgentActionsAtom, [agentAction]);
+            const actions = event.actions.map(toAgentAction);
+            set(addAgentActionsAtom, actions);
         },
 
         onOpen: () => {
