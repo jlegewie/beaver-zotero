@@ -159,18 +159,6 @@ export interface WSPageContent {
     content: string;
 }
 
-export interface WSItemDataRequest extends WSBaseEvent {
-    event: 'item_data_request';
-    request_id: string;
-    items: ZoteroItemReference[];
-}
-
-export interface WSAttachmentDataRequest extends WSBaseEvent {
-    event: 'attachment_data_request';
-    request_id: string;
-    attachments: ZoteroItemReference[];
-}
-
 export interface WSAttachmentContentRequest extends WSBaseEvent {
     event: 'attachment_content_request';
     request_id: string;
@@ -248,20 +236,6 @@ export interface WSZoteroDataResponse {
     errors?: WSDataError[];
 }
 
-export interface WSItemDataResponse {
-    type: 'item_data';
-    request_id: string;
-    items: ItemData[];
-    errors?: WSDataError[];
-}
-
-export interface WSAttachmentDataResponse {
-    type: 'attachment_data';
-    request_id: string;
-    attachments: AttachmentDataWithMimeType[];
-    errors?: WSDataError[];
-}
-
 export interface WSAttachmentContentResponse {
     type: 'attachment_content';
     request_id: string;
@@ -285,8 +259,6 @@ export type WSEvent =
     | WSWarningEvent
     | WSRetryEvent
     | WSAgentActionEvent
-    | WSItemDataRequest
-    | WSAttachmentDataRequest
     | WSAttachmentContentRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest;
@@ -723,28 +695,6 @@ export class AgentService {
                     this.callbacks.onRetry?.(event);
                     break;
 
-                case 'item_data_request':
-                    this.handleItemDataRequest(event).catch((error) => {
-                        logger(`AgentService: Failed to handle item_data_request: ${error}`, 1);
-                        this.callbacks?.onError({
-                            event: 'error',
-                            type: 'item_data_request_failed',
-                            message: String(error),
-                        });
-                    });
-                    break;
-
-                case 'attachment_data_request':
-                    this.handleAttachmentDataRequest(event).catch((error) => {
-                        logger(`AgentService: Failed to handle attachment_data_request: ${error}`, 1);
-                        this.callbacks?.onError({
-                            event: 'error',
-                            type: 'attachment_data_request_failed',
-                            message: String(error),
-                        });
-                    });
-                    break;
-
                 case 'attachment_content_request':
                     this.handleAttachmentContentRequest(event).catch((error) => {
                         logger(`AgentService: Failed to handle attachment_content_request: ${error}`, 1);
@@ -807,118 +757,6 @@ export class AgentService {
             this.ws = null;
         }
         this.callbacks = null;
-    }
-
-    /**
-     * Handle item_data_request event by serializing requested items.
-     */
-    private async handleItemDataRequest(request: WSItemDataRequest): Promise<void> {
-        const items: ItemData[] = [];
-        const errors: WSDataError[] = [];
-
-        for (const reference of request.items) {
-            try {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
-                if (!item) {
-                    errors.push({
-                        reference,
-                        error: 'Item not found in local database',
-                        error_code: 'not_found'
-                    });
-                    continue;
-                }
-
-                try {
-                    // Ensure all data is available for serialization
-                    await item.loadAllData();
-                } catch (e) {
-                    // Ignore benign load errors
-                }
-
-                const serialized = await serializeItem(item, undefined);
-                items.push(serialized);
-            } catch (error: any) {
-                logger(`AgentService: Failed to serialize item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
-                errors.push({
-                    reference,
-                    error: 'Failed to load item metadata',
-                    error_code: 'serialization_failed'
-                });
-            }
-        }
-
-        const response: WSItemDataResponse = {
-            type: 'item_data',
-            request_id: request.request_id,
-            items,
-            errors: errors.length > 0 ? errors : undefined
-        };
-
-        this.send(response);
-    }
-
-    /**
-     * Handle attachment_data_request event by serializing requested attachments.
-     */
-    private async handleAttachmentDataRequest(request: WSAttachmentDataRequest): Promise<void> {
-        const attachments: AttachmentDataWithMimeType[] = [];
-        const errors: WSDataError[] = [];
-
-        for (const reference of request.attachments) {
-            try {
-                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
-                if (!attachment) {
-                    errors.push({
-                        reference,
-                        error: 'Attachment not found in local database',
-                        error_code: 'not_found'
-                    });
-                    continue;
-                }
-
-                if (!attachment.isAttachment()) {
-                    errors.push({
-                        reference,
-                        error: 'Requested item is not an attachment',
-                        error_code: 'invalid_type'
-                    });
-                    continue;
-                }
-
-                try {
-                    await attachment.loadAllData();
-                } catch (e) {
-                    // Ignore benign load errors
-                }
-
-                const serialized = await serializeAttachment(attachment, undefined);
-                if (serialized) {
-                    attachments.push(serialized);
-                } else {
-                    errors.push({
-                        reference,
-                        error: 'Attachment not available locally or on server',
-                        error_code: 'not_available'
-                    });
-                }
-            } catch (error: any) {
-                logger(`AgentService: Failed to serialize attachment ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
-                errors.push({
-                    reference,
-                    error: 'Failed to load attachment metadata',
-                    error_code: 'serialization_failed'
-                });
-            }
-        }
-
-        const response: WSAttachmentDataResponse = {
-            type: 'attachment_data',
-            request_id: request.request_id,
-            attachments,
-            errors: errors.length > 0 ? errors : undefined
-        };
-
-        this.send(response);
     }
 
     /**
