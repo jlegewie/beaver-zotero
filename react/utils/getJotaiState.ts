@@ -1,11 +1,11 @@
 import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
-import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom } from "../atoms/messageComposition"
+import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
-import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
+import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
 
@@ -61,7 +61,6 @@ export const atomRegistry = {
     currentMessageContent: currentMessageContentAtom,
     currentReaderAttachment: currentReaderAttachmentAtom,
     currentReaderAttachmentKey: currentReaderAttachmentKeyAtom,
-    inputAttachmentCount: inputAttachmentCountAtom,
     readerTextSelection: readerTextSelectionAtom,
 
     // Models
@@ -88,17 +87,9 @@ export const atomRegistry = {
     syncStatusSummary: syncStatusSummaryAtom,
     overallSyncStatus: overallSyncStatusAtom,
 
-    // Threads (Legacy - will be deprecated)
-    userAttachments: userAttachmentsAtom,
-    toolAttachments: toolAttachmentsAtom,
-    isChatRequestPending: isChatRequestPendingAtom,
-    isStreaming: isStreamingAtom,
-    isCancellable: isCancellableAtom,
-    isCancelling: isCancellingAtom,
+    // Threads
     recentThreads: recentThreadsAtom,
-    threadMessages: threadMessagesAtom,
     currentThreadId: currentThreadIdAtom,
-    currentAssistantMessageId: currentAssistantMessageIdAtom,
 
     // UI
     isSidebarVisible: isSidebarVisibleAtom,

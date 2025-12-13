@@ -251,20 +251,3 @@ export const resetMessageUIStateAtom = atom(
         set(notePanelStateAtom, {});
     }
 );
-
-/**
- * Clear UI state for a specific message (used when deleting a message)
- */
-export const clearMessageUIStateAtom = atom(
-    null,
-    (get, set, messageId: string) => {
-        const prefix = `${messageId}:`;
-        set(searchToolVisibilityAtom, removeEntriesWithPrefix(get(searchToolVisibilityAtom), prefix));
-        set(annotationPanelStateAtom, removeEntriesWithPrefix(get(annotationPanelStateAtom), prefix));
-        set(annotationBusyAtom, removeEntriesWithPrefix(get(annotationBusyAtom), prefix));
-        set(annotationAttachmentTitlesAtom, removeEntriesWithPrefix(get(annotationAttachmentTitlesAtom), prefix));
-        set(notePanelStateAtom, removeEntriesWithPrefix(get(notePanelStateAtom), prefix));
-        set(messageSourcesVisibilityAtom, removeEntry(get(messageSourcesVisibilityAtom), messageId));
-        set(thinkingVisibilityAtom, removeEntry(get(thinkingVisibilityAtom), messageId));
-    }
-);

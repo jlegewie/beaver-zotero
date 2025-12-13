@@ -34,18 +34,3 @@ export type CreateItemProposedAction = ProposedAction & {
     proposed_data: CreateItemProposedData;
     result_data?: CreateItemResultData;
 };
-
-export function isCreateItemAction(action: ProposedAction): action is CreateItemProposedAction {
-    return action.action_type === 'create_item';
-}
-
-export function isSearchExternalReferencesTool(functionName: string | undefined): boolean {
-    if (!functionName) return false;
-    return functionName === 'search_external_references' || functionName === 'external_search';
-}
-
-export function isCreateZoteroItemTool(functionName: string | undefined): boolean {
-    if (!functionName) return false;
-    return functionName === 'create_zotero_item';
-}
-

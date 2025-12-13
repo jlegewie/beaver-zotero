@@ -5,7 +5,7 @@ import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { isStreamingAtom } from '../../atoms/threads';
+import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom } from '../../atoms/generateMessagesWS';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";

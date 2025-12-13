@@ -1,7 +1,6 @@
 import { truncateText } from './stringUtils';
 import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
-import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
@@ -54,7 +53,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;

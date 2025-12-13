@@ -1,7 +1,7 @@
 import { ApplicationStateInput } from "../../src/services/agentService";
 import { CitationMetadata } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
-import { MessageSearchFilters, ToolRequest } from "src/services/chatService";
+import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
 
 /**
  * LLM usage associated with an agent run.
@@ -32,6 +32,24 @@ export interface RunUsage {
     /** Total number of output/completion tokens. */
 
     details?: Record<string, number>;
+}
+
+/** Tool request interface for agent runs */
+export interface ToolRequest {
+    function: "rag_search" | "search_external_references";
+    /** The function to call (rag_search or search_external_references) */
+    parameters: Record<string, any>;
+    /** The parameters to pass to the function */
+}
+
+/** Search filters interface for agent runs */
+export interface MessageSearchFilters {
+    /** The libraries to search in */
+    libraries: ZoteroLibrary[] | null;
+    /** The collections to search in */
+    collections: ZoteroCollection[] | null;
+    /** The tags to search in */
+    tags: ZoteroTag[] | null;
 }
 
 /**

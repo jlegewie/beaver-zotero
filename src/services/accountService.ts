@@ -111,7 +111,7 @@ export class AccountService extends ApiService {
             
             return response.response as FullModelConfig[];
         } catch (error) {
-            Zotero.debug(`ChatService: getModelList error - ${error}`, 1);
+            Zotero.debug(`getModelList: getModelList error - ${error}`, 1);
             // Return empty array on error
             return [];
         }

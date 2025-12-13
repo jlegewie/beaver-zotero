@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { recentThreadsAtom } from '../atoms/threads';
-import { ThreadData } from '../types/chat/uiTypes';
+import { ThreadData } from '../atoms/threads';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 

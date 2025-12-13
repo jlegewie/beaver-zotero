@@ -141,10 +141,6 @@ export {
     isAnnotationTool
 } from './annotations';
 
-export {
-    isCreateItemAction
-} from './items';
-
 /**
  * Deserializes and normalizes a raw proposed action object from the backend
  * into a typed ProposedAction object.

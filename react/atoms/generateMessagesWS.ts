@@ -27,7 +27,6 @@ import { selectedModelAtom, FullModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
-import { search_external_references_request, MessageSearchFilters } from '../../src/services/chatService';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import {
     currentMessageItemsAtom,
@@ -37,9 +36,10 @@ import {
     currentMessageContentAtom,
 } from './messageComposition';
 import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
-import { processImageAnnotations } from './generateMessages';
+import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
-import { AgentRun, BeaverAgentPrompt } from '../agents/types';
+import { uint8ArrayToBase64 } from '../utils/fileUtils';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -67,6 +67,55 @@ import { addWarningAtom, clearWarningsAtom } from './warnings';
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/**
+ * Processes annotation attachments of type image to add base64 data.
+ * 
+ * @param attachments - Array of MessageAttachment objects to process
+ * @returns Array of MessageAttachment objects with base64 data
+ */
+export async function processImageAnnotations(attachments: MessageAttachment[]): Promise<MessageAttachment[]> {
+    // Process image annotations to add base64 data
+    const processedAttachments = await Promise.all(
+        attachments.map(async (attachment) => {
+            // Only process AnnotationAttachment of type image
+            if (!isAnnotationAttachment(attachment)) return attachment;
+            if (attachment.annotation_type !== 'image') return attachment;
+
+            // Create a reference to the Zotero item
+            const item = {
+                libraryID: attachment.library_id,
+                key: attachment.zotero_key
+            };
+
+            // Check if image exists in cache
+            const hasCachedImage = await Zotero.Annotations.hasCacheImage(item);
+            if (!hasCachedImage) {
+                logger(`processImageAnnotations: No cached image found for attachment ${attachment.zotero_key}`);
+                return attachment;
+            }
+
+            try {
+                // Get image path
+                const imagePath = Zotero.Annotations.getCacheImagePath(item);
+                
+                // Read the image file and convert to base64
+                const imageData = await IOUtils.read(imagePath);
+                const image_base64 = uint8ArrayToBase64(imageData);
+                
+                // Return attachment with image data
+                return {
+                    ...attachment,
+                    image_base64: image_base64
+                };
+            } catch (error) {
+                logger(`processImageAnnotations: Failed to process image for attachment ${attachment.zotero_key}: ${error}`);
+                return attachment;
+            }
+        })
+    );
+    return processedAttachments;
+}
 
 /**
  * Get the user's API key for a model.
@@ -611,7 +660,7 @@ export const sendWSMessageAtom = atom(
 
         // Tool requests (web search)
         const toolRequests = get(isWebSearchEnabledAtom)
-            ? [search_external_references_request]
+            ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 
         // Application state

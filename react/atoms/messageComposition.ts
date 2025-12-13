@@ -1,6 +1,5 @@
 import { atom } from "jotai";
 import { truncateText } from "../utils/stringUtils";
-import { userAttachmentKeysAtom } from "./threads";
 import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
@@ -111,30 +110,6 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
  * Current reader text selection
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
-
-/**
-* Count of input attachments
-* 
-* Counts the number of attachments in the current sources and reader attachment.
-* The reader attachment is only counted if it's not already in the user-added sources.
-* 
-*/
-export const inputAttachmentCountAtom = atom<number>((get) => {
-    // Input attachments
-    const itemKeys = get(currentMessageItemsAtom)
-        .filter((item => item.isRegularItem() || item.isAttachment()))
-        .map((item) => item.key);
-    // Reader attachment
-    const readerAttachmentKey = get(currentReaderAttachmentKeyAtom);
-    if (readerAttachmentKey) {
-        itemKeys.push(readerAttachmentKey);
-    }
-    // Exclude user-added sources already in thread
-    const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
-    const filteredInputAttachmentKeys = itemKeys.filter((key) => !userAddedAttachmentKeys.includes(key));
-    // Return total of attachments
-    return [...new Set(filteredInputAttachmentKeys)].length;
-});
 
 /**
 * Remove a library from the current selection
