@@ -20,6 +20,8 @@ import { getToolCallLabel } from '../../agents/toolLabels';
 import { extractToolResultCount } from '../../agents/toolResultTypes';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
+import { currentThreadIdAtom } from '../../atoms/threads';
+import { store } from '../../store';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -186,6 +188,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
         if (Zotero.Beaver.data.env === "development") {
             items.push({
+                label: 'Copy Thread ID',
+                onClick: () => copyThreadId()
+            });
+            items.push({
                 label: 'Copy Citation Metadata',
                 onClick: () => copyCitationMetadata()
             });
@@ -248,6 +254,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     const copyCitationMetadata = async () => {
         await copyToClipboard(JSON.stringify(runCitations, null, 2));
+    };
+
+    const copyThreadId = async () => {
+        await copyToClipboard(store.get(currentThreadIdAtom ) || '');
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
