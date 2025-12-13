@@ -318,6 +318,8 @@ export interface AgentRunRequest {
     custom_instructions?: string;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
+    /** frontend version */
+    frontend_version?: string;
 }
 
 

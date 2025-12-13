@@ -173,6 +173,7 @@ function createAgentRunShell(
         ...(customModel ? { custom_model: customModel } : {}),
         ...(rewriteFromRunId ? { retry_run_id: rewriteFromRunId } : {}),
         ...(customInstructions ? { custom_instructions: customInstructions } : {}),
+        frontend_version: Zotero.Beaver.pluginVersion || '',
     };
 
     // Create the shell AgentRun for immediate UI rendering
