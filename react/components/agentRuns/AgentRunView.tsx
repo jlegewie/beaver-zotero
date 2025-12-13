@@ -1,10 +1,13 @@
 import React from 'react';
+import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
 import { AgentActionsDisplay } from './AgentActionsDisplay';
 import { RunErrorDisplay } from './RunErrorDisplay';
+import { RunWarningDisplay } from './RunWarningDisplay';
+import { threadWarningsAtom } from '../../atoms/warnings';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -34,6 +37,8 @@ const hasVisibleContent = (run: AgentRun): boolean => {
 export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) => {
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
+    const allWarnings = useAtomValue(threadWarningsAtom);
+    const runWarnings = allWarnings.filter((w) => w.run_id === run.id);
     
     // Only show spinner when streaming AND no visible content yet (not for errors)
     const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run);
@@ -42,6 +47,15 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
             {/* User's message */}
             <UserRequestView userPrompt={run.user_prompt} runId={run.id} />
+
+            {/* Warning display (dismissable, non-persistent) */}
+            {runWarnings.length > 0 && (
+                <div className="px-4 display-flex flex-col gap-2">
+                    {runWarnings.map((warning) => (
+                        <RunWarningDisplay key={warning.id} warning={warning} />
+                    ))}
+                </div>
+            )}
 
             {/* Model responses and status indicator */}
             <ModelMessagesView

@@ -118,19 +118,11 @@ export interface WSErrorEvent extends WSBaseEvent {
     retry_after?: number;
 }
 
-/** Warning event types */
-export type WSWarningType =
-    | 'user_key_failed'
-    | 'user_key_rate_limit_exceeded'
-    | 'user_key_failed_unexpected'
-    | 'missing_attachments'
-    | 'low_credits';
-
 /** Warning event for non-fatal issues */
 export interface WSWarningEvent extends WSBaseEvent {
     event: 'warning';
     run_id: string;
-    type: WSWarningType;
+    type: string;
     message: string;
     data?: Record<string, any>;
 }

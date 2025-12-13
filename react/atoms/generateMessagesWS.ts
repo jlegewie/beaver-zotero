@@ -62,6 +62,7 @@ import {
     AgentAction,
 } from '../agents/agentActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
+import { addWarningAtom, clearWarningsAtom } from './warnings';
 
 // =============================================================================
 // Helper Functions
@@ -427,6 +428,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger(`WS onWarning: ${event.type} - ${event.message}`, 1);
             console.warn('[WS] Warning event:', event);
             set(wsWarningAtom, event);
+            // Add to dismissable warnings
+            set(addWarningAtom, {
+                run_id: event.run_id,
+                type: event.type,
+                message: event.message,
+                data: event.data,
+            });
         },
 
         onRetry: (event: WSRetryEvent) => {
@@ -806,8 +814,9 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(activeRunAtom, null);
     set(currentThreadIdAtom, null);
     set(resetWSStateAtom);
-    // Clear agent actions and citations for the thread
+    // Clear agent actions, citations, and warnings for the thread
     set(clearAgentActionsAtom);
     set(citationMetadataAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
+    set(clearWarningsAtom);
 });
