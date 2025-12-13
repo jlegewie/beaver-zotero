@@ -6,7 +6,7 @@ import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../atoms/threads';
-import { generateResponseAtom } from '../../atoms/generateMessages';
+import { sendWSMessageAtom } from '../../atoms/generateMessagesWS';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
@@ -18,7 +18,7 @@ const HomePage: React.FC = () => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const generateResponse = useSetAtom(generateResponseAtom);
+    const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
 
     // Realtime listening for file status updates
@@ -31,13 +31,8 @@ const HomePage: React.FC = () => {
         if (isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0) return;
 
-        // Generate response
-        generateResponse({
-            content: prompt.text,
-            items: currentMessageItems
-        });
-
-        // console.log('Chat completion:', prompt.text);
+        // Send message via WebSocket
+        await sendWSMessage(prompt.text);
     };
 
     const prompts: CustomPrompt[] = getCustomPromptsFromPreferences();
