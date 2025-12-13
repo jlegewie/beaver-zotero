@@ -63,7 +63,7 @@ import {
 } from '../agents/agentActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { loadItemDataForAgentActions } from '../utils/agentActionUtils';
+import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 
 // =============================================================================
 // Helper Functions
@@ -428,6 +428,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 loadItemDataForAgentActions(actions).catch(err => 
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
                 );
+                // Auto-apply annotations if enabled
+                autoApplyAnnotationAgentActions(event.run_id, actions);
             }
         },
 
@@ -516,6 +518,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             loadItemDataForAgentActions(actions).catch(err => 
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
             );
+            // Auto-apply annotations if enabled
+            autoApplyAnnotationAgentActions(event.run_id, actions);
         },
 
         onOpen: () => {
