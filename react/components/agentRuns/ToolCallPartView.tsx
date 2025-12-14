@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
-import { extractToolResultCount } from '../../agents/toolResultTypes';
 import { ToolResultView } from './ToolResultView';
 import Button from '../ui/Button';
 import {
@@ -81,7 +80,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
 
     const resultCount =
         result && result.part_kind === 'tool-return'
-            ? extractToolResultCount(result)
+            ? result?.metadata?.summary?.result_count ?? null
             : null;
 
     const label =
