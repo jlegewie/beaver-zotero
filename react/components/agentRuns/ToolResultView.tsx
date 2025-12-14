@@ -7,6 +7,8 @@ import {
     extractFulltextSearchData,
     isFulltextRetrievalResult,
     extractFulltextRetrievalData,
+    isPassageRetrievalResult,
+    extractPassageRetrievalData,
     isExternalSearchResult,
     extractExternalSearchData,
 } from '../../agents/toolResultTypes';
@@ -54,6 +56,14 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractFulltextRetrievalData(content, metadata);
         if (data) {
             return <FulltextRetrievalResultView attachment={data.attachment} />;
+        }
+    }
+
+    // Passage retrieval results (read_passages, retrieve_passages)
+    if (isPassageRetrievalResult(toolName, content, metadata)) {
+        const data = extractPassageRetrievalData(content, metadata);
+        if (data) {
+            return <FulltextSearchResultView chunks={data.chunks} />;
         }
     }
 

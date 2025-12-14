@@ -1,63 +1,73 @@
 /**
  * Types for tool result payloads from the agent.
- * These match the backend pydantic models but may be "dehydrated" versions.
+ * These match the backend pydantic models.
  * 
- * Two data sources:
- * - `content`: Full tool result from LLM response
- * - `metadata.storage`: Dehydrated version for frontend rendering
- * 
- * Both use the same item_id format: '<library_id>-<zotero_key>'
+ * Data source:
+ * - `metadata.summary`: Summary data for frontend rendering (required)
  */
 
 import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference, createZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 
 // ============================================================================
-// Item Search Results (search_references_by_topic, search_references_by_metadata)
+// Summary Types (from backend)
 // ============================================================================
 
 /**
- * Item result with item_id in format '<library_id>-<zotero_key>'.
+ * Chunk reference with ZoteroItemReference fields and optional page.
+ * Matches ChunkReference from backend.
  */
-export interface ItemResultDehydrated {
-    /** Unique Zotero identifier in the form '<library_id>-<zotero_key>' */
-    item_id: string;
-    /** Rank assigned by the search algorithm (lower is better) */
-    rank?: number;
-    /** Similarity score from semantic search */
-    similarity?: number;
-}
-
-/**
- * Dehydrated attachment result from the backend.
- * Contains attachment_id in format '<library_id>-<zotero_key>'.
- */
-export interface AttachmentResultDehydrated {
-    /** Unique Zotero identifier in the form '<library_id>-<zotero_key>' */
-    attachment_id: string;
-}
-
-/**
- * Dehydrated chunk result from the backend.
- * Contains attachment_id and optional page number.
- */
-export interface ChunkResultDehydrated {
-    /** Chunk id in format 'CHUNK_<seq_number + 1>' */
-    chunk_id: string;
-    /** Attachment id in format '<library_id>-<zotero_key>' */
-    attachment_id: string;
-    /** Page number of the chunk */
+export interface ChunkReference {
+    library_id: number;
+    zotero_key: string;
     page?: number;
-    /** Rank assigned by the search algorithm (lower is better) */
-    rank?: number;
-    /** Similarity score from semantic search */
-    similarity?: number;
+    sequence?: number;
 }
 
-// ============================================================================
-// External Search Results
-// ============================================================================
+/**
+ * Item search result summary.
+ * Matches ItemSearchResultSummary from backend.
+ */
+export interface ItemSearchResultSummary {
+    tool_name: string;
+    result_count: number;
+    items: ZoteroItemReference[];
+}
+
+/**
+ * Fulltext search result summary.
+ * Matches FulltextSearchResultSummary from backend.
+ */
+export interface FulltextSearchResultSummary {
+    tool_name: string;
+    result_count: number;
+    chunks: ChunkReference[];
+}
+
+/**
+ * Fulltext retrieval result summary.
+ * Matches FulltextRetrievalResultSummary from backend.
+ */
+export interface FulltextRetrievalResultSummary {
+    tool_name: string;
+    result_count: number;
+    chunks: ChunkReference[];
+}
+
+/**
+ * Passage retrieval result summary.
+ * Matches PassageRetrievalResultSummary from backend.
+ */
+export interface PassageRetrievalResultSummary {
+    tool_name: string;
+    result_count: number;
+    chunks: ChunkReference[];
+}
+
+// ========================
+// External Search Results 
+// ========================
 
 /**
  * Reference result from content (ExternalReferenceResult from backend).
@@ -120,125 +130,158 @@ export interface ExternalReferenceResultSupplement {
 // Type Guards
 // ============================================================================
 
-/** Valid tool names for item search results */
-const ITEM_SEARCH_TOOL_NAMES = [
-    'search_references_by_topic',
-    'search_references_by_metadata',
-    'search_by_topic',
-    'search_by_metadata'
+/** Valid tool names for chunk-based fulltext search results */
+const FULLTEXT_SEARCH_TOOL_NAMES: readonly string[] = [
+    // New pydantic-ai agent tools
+    'search_library_fulltext',
+    'search_library_fulltext_keywords',
+
+    // Legacy tools (backwards compatibility)
+    'search_fulltext',
+    'search_fulltext_keywords',
+    'search_attachments_content',
+    'search_attachments_content_keyword',
+    'rag_search',
 ] as const;
 
-/**
- * Check if an item has a valid item_id that can be parsed.
- */
-function hasValidItemId(item: unknown): boolean {
-    if (!item || typeof item !== 'object') return false;
-    const obj = item as Record<string, unknown>;
-    return typeof obj.item_id === 'string' && createZoteroItemReference(obj.item_id) !== null;
-}
+/** Valid tool names for chunk-based fulltext retrieval results */
+const FULLTEXT_RETRIEVAL_TOOL_NAMES: readonly string[] = [
+    'retrieve_fulltext',
+    'read_fulltext',
+] as const;
+
+/** Valid tool names for chunk-based passage retrieval results */
+const PASSAGE_RETRIEVAL_TOOL_NAMES: readonly string[] = [
+    'retrieve_passages',
+    'read_passages',
+] as const;
 
 /**
  * Type guard for item search results.
- * Checks if we can render from either metadata.storage or content.
+ * Checks if metadata.summary is ItemSearchResultSummary.
  */
 export function isItemSearchResult(
-    toolName: string,
-    content: unknown,
+    _toolName: string,
+    _content: unknown,
     metadata?: Record<string, unknown>
-): boolean {
-    if (!ITEM_SEARCH_TOOL_NAMES.includes(toolName as typeof ITEM_SEARCH_TOOL_NAMES[number])) {
-        return false;
-    }
-
-    // Try storage first, then content
-    const source = (metadata?.storage || content) as Record<string, unknown> | undefined;
-    if (!source || typeof source !== 'object') return false;
-
-    return Array.isArray(source.items) && source.items.every(hasValidItemId);
-}
-
-/** Valid tool names for fulltext search results */
-const FULLTEXT_SEARCH_TOOL_NAMES = [
-    'search_fulltext',
-    'search_fulltext_keywords',
-    'search_library_fulltext',
-    'search_library_fulltext_keywords',
-    'read_passages',
-    'retrieve_passages'
-] as const;
-
-/**
- * Check if a chunk has a valid attachment_id that can be parsed.
- */
-function hasValidAttachmentId(chunk: unknown): boolean {
-    if (!chunk || typeof chunk !== 'object') return false;
-    const obj = chunk as Record<string, unknown>;
-    return typeof obj.attachment_id === 'string' && createZoteroItemReference(obj.attachment_id) !== null;
+): metadata is { summary: ItemSearchResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.items) &&
+        summary.items.every((item: unknown) => {
+            if (!item || typeof item !== 'object') return false;
+            const obj = item as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
+    );
 }
 
 /**
  * Type guard for fulltext search results.
- * Checks if we can render from either metadata.storage or content.
+ * Checks if metadata.summary is FulltextSearchResultSummary.
  */
 export function isFulltextSearchResult(
     toolName: string,
-    content: unknown,
+    _content: unknown,
     metadata?: Record<string, unknown>
-): boolean {
-    if (!FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName as typeof FULLTEXT_SEARCH_TOOL_NAMES[number])) {
-        return false;
+): metadata is { summary: FulltextSearchResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    // These chunk-based summaries share the same shape across search/retrieval,
+    // so we disambiguate by tool name.
+    const toolNameIsSearch = FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName);
+    const toolNameIsOtherKnownChunkTool =
+        FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName) ||
+        PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsSearch) {
+        if (toolNameIsOtherKnownChunkTool) return false;
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !FULLTEXT_SEARCH_TOOL_NAMES.includes(summaryToolName)) return false;
     }
-
-    // Try storage first, then content
-    const source = (metadata?.storage || content) as Record<string, unknown> | undefined;
-    if (!source || typeof source !== 'object') return false;
-
-    return Array.isArray(source.chunks) && source.chunks.every(hasValidAttachmentId);
-}
-
-/** Valid tool names for fulltext retrieval results */
-const FULLTEXT_RETRIEVAL_TOOL_NAMES = [
-    'read_fulltext',
-    'retrieve_fulltext'
-] as const;
-
-/**
- * Type guard for fulltext retrieval results.
- * Requires attachment_id and chunks array.
- */
-export function isFulltextRetrievalResult(
-    toolName: string,
-    content: unknown,
-    metadata?: Record<string, unknown>
-): boolean {
-    if (!FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName as typeof FULLTEXT_RETRIEVAL_TOOL_NAMES[number])) {
-        return false;
-    }
-
-    const source = (metadata?.storage || content) as Record<string, unknown> | undefined;
-    if (!source || typeof source !== 'object') return false;
-
-    // Require valid attachment_id and chunks array
+    
     return (
-        typeof source.attachment_id === 'string' &&
-        createZoteroItemReference(source.attachment_id) !== null &&
-        Array.isArray(source.chunks)
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.chunks) &&
+        summary.chunks.every((chunk: unknown) => {
+            if (!chunk || typeof chunk !== 'object') return false;
+            const obj = chunk as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
     );
 }
 
-/** Valid tool names for external search results */
-const EXTERNAL_SEARCH_TOOL_NAMES = [
-    'external_search',
-    'search_external_references'
-] as const;
+/**
+ * Type guard for fulltext retrieval results.
+ * Checks if metadata.summary is FulltextRetrievalResultSummary.
+ */
+export function isFulltextRetrievalResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: FulltextRetrievalResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsRetrieval = FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    const toolNameIsOtherKnownChunkTool =
+        FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
+        PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsRetrieval) {
+        if (toolNameIsOtherKnownChunkTool) return false;
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.chunks) &&
+        summary.chunks.every((chunk: unknown) => {
+            if (!chunk || typeof chunk !== 'object') return false;
+            const obj = chunk as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
+    );
+}
 
 /**
- * Check if a reference has a valid external_id.
+ * Type guard for passage retrieval results.
+ * Checks if metadata.summary is PassageRetrievalResultSummary.
  */
-function hasExternalId(ref: unknown): boolean {
-    if (!ref || typeof ref !== 'object') return false;
-    const obj = ref as Record<string, unknown>;
-    return typeof obj.external_id === 'string';
+export function isPassageRetrievalResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: PassageRetrievalResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsPassageRetrieval = PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    const toolNameIsOtherKnownChunkTool =
+        FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
+        FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsPassageRetrieval) {
+        if (toolNameIsOtherKnownChunkTool) return false;
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !PASSAGE_RETRIEVAL_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.chunks) &&
+        summary.chunks.every((chunk: unknown) => {
+            if (!chunk || typeof chunk !== 'object') return false;
+            const obj = chunk as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
+    );
 }
 
 /**
@@ -247,25 +290,29 @@ function hasExternalId(ref: unknown): boolean {
  * metadata.supplemental_data has array with external_id.
  */
 export function isExternalSearchResult(
-    toolName: string,
+    _toolName: string,
     content: unknown,
     metadata?: Record<string, unknown>
 ): boolean {
-    if (!EXTERNAL_SEARCH_TOOL_NAMES.includes(toolName as typeof EXTERNAL_SEARCH_TOOL_NAMES[number])) {
-        return false;
-    }
-
     // Validate content has references array with external_id
     if (!content || typeof content !== 'object') return false;
     const contentObj = content as Record<string, unknown>;
     if (!Array.isArray(contentObj.references)) return false;
-    if (!contentObj.references.every(hasExternalId)) return false;
+    if (!contentObj.references.every((ref: unknown) => {
+        if (!ref || typeof ref !== 'object') return false;
+        const obj = ref as Record<string, unknown>;
+        return typeof obj.external_id === 'string';
+    })) return false;
 
     // Validate supplemental_data if present (optional but must be valid if present)
     if (metadata?.supplemental_data != null) {
         if (!Array.isArray(metadata.supplemental_data)) return false;
         // Each supplement should have external_id for matching
-        if (!metadata.supplemental_data.every(hasExternalId)) return false;
+        if (!metadata.supplemental_data.every((supp: unknown) => {
+            if (!supp || typeof supp !== 'object') return false;
+            const obj = supp as Record<string, unknown>;
+            return typeof obj.external_id === 'string';
+        })) return false;
     }
 
     return true;
@@ -283,28 +330,24 @@ export interface ItemSearchViewData {
 }
 
 /**
- * Extract normalized item references from either content or metadata.storage.
- * Prefers metadata.storage if available, falls back to content.
+ * Extract normalized item references from metadata.summary.
+ * @returns ItemSearchViewData or null if summary is not available
  */
 export function extractItemSearchData(
-    content: unknown,
+    _content: unknown,
     metadata?: Record<string, unknown>
 ): ItemSearchViewData | null {
-    const source = (metadata?.storage || content) as { items?: ItemResultDehydrated[] } | undefined;
-    if (!source || !Array.isArray(source.items)) return null;
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ItemSearchResultSummary;
+    
+    if (!Array.isArray(summary.items)) return null;
 
-    const items = source.items
-        .map(item => createZoteroItemReference(item.item_id))
-        .filter((ref): ref is ZoteroItemReference => ref !== null);
+    const items: ZoteroItemReference[] = summary.items.map(item => ({
+        library_id: item.library_id,
+        zotero_key: item.zotero_key,
+    }));
 
     return { items };
-}
-
-/**
- * Chunk reference with ZoteroItemReference and optional page.
- */
-export interface ChunkReference extends ZoteroItemReference {
-    page?: number;
 }
 
 /**
@@ -315,25 +358,19 @@ export interface FulltextSearchViewData {
 }
 
 /**
- * Extract chunk-level data from fulltext search results.
- * Prefers metadata.storage if available, falls back to content.
+ * Extract chunk-level data from metadata.summary.
+ * @returns FulltextSearchViewData or null if summary is not available
  */
 export function extractFulltextSearchData(
-    content: unknown,
+    _content: unknown,
     metadata?: Record<string, unknown>
 ): FulltextSearchViewData | null {
-    const source = (metadata?.storage || content) as { chunks?: ChunkResultDehydrated[] } | undefined;
-    if (!source || !Array.isArray(source.chunks)) return null;
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as FulltextSearchResultSummary;
+    
+    if (!Array.isArray(summary.chunks)) return null;
 
-    const chunks: ChunkReference[] = [];
-    for (const chunk of source.chunks) {
-        const ref = createZoteroItemReference(chunk.attachment_id);
-        if (ref) {
-            chunks.push({ ...ref, page: chunk.page });
-        }
-    }
-
-    return { chunks };
+    return { chunks: summary.chunks };
 }
 
 /**
@@ -344,33 +381,51 @@ export interface FulltextRetrievalViewData {
 }
 
 /**
- * Extract attachment reference with lowest page from fulltext retrieval results.
- * Prefers metadata.storage if available, falls back to content.
+ * Extract attachment reference with lowest page from metadata.summary.
+ * @returns FulltextRetrievalViewData or null if summary is not available
  */
 export function extractFulltextRetrievalData(
-    content: unknown,
+    _content: unknown,
     metadata?: Record<string, unknown>
 ): FulltextRetrievalViewData | null {
-    const source = (metadata?.storage || content) as { 
-        attachment_id?: string;
-        chunks?: Array<{ page?: number }>;
-    } | undefined;
-    if (!source || typeof source.attachment_id !== 'string') return null;
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as FulltextRetrievalResultSummary;
+    
+    if (!Array.isArray(summary.chunks) || summary.chunks.length === 0) return null;
 
-    const ref = createZoteroItemReference(source.attachment_id);
-    if (!ref) return null;
-
-    // Find the lowest page number from chunks
-    let lowestPage: number | undefined;
-    if (Array.isArray(source.chunks)) {
-        for (const chunk of source.chunks) {
-            if (chunk.page != null && (lowestPage == null || chunk.page < lowestPage)) {
-                lowestPage = chunk.page;
-            }
+    // Find chunk with lowest page number
+    let attachmentChunk = summary.chunks[0];
+    
+    for (const chunk of summary.chunks) {
+        if (chunk.page != null && (attachmentChunk.page == null || chunk.page < attachmentChunk.page)) {
+            attachmentChunk = chunk;
         }
     }
 
-    return { attachment: { ...ref, page: lowestPage } };
+    return { attachment: attachmentChunk };
+}
+
+/**
+ * Normalized passage retrieval data.
+ */
+export interface PassageRetrievalViewData {
+    chunks: ChunkReference[];
+}
+
+/**
+ * Extract chunk-level data from metadata.summary for passage retrieval.
+ * @returns PassageRetrievalViewData or null if summary is not available
+ */
+export function extractPassageRetrievalData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): PassageRetrievalViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as PassageRetrievalResultSummary;
+    
+    if (!Array.isArray(summary.chunks)) return null;
+
+    return { chunks: summary.chunks };
 }
 
 /**
@@ -440,7 +495,7 @@ export function extractExternalSearchData(
 
 /**
  * Extract ZoteroItemReference list from a tool-return part.
- * Supports item search, fulltext search, and fulltext retrieval results.
+ * Supports item search, fulltext search, fulltext retrieval, and passage retrieval results.
  * @param part Tool return part to extract references from
  * @returns Array of ZoteroItemReference, or empty array if not a supported tool result type
  */
@@ -465,6 +520,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.attachment ? [data.attachment] : [];
     }
 
+    // Passage retrieval results (chunks)
+    if (isPassageRetrievalResult(tool_name, content, metadata)) {
+        const data = extractPassageRetrievalData(content, metadata);
+        return data?.chunks ?? [];
+    }
+
     return [];
 }
 
@@ -481,7 +542,7 @@ const ANNOTATION_TOOL_NAMES = [
 
 /**
  * Type guard for annotation tool results.
- * Annotation tools don't return structured data through content/metadata.storage,
+ * Annotation tools don't return structured data through content/metadata.summary,
  * they create AgentActions that are stored separately.
  */
 export function isAnnotationToolResult(toolName: string): boolean {
@@ -541,6 +602,13 @@ export function extractToolResultCount(part: ToolReturnPart): number | null {
     // Fulltext search tools -> unique attachments count (not chunk count)
     if (isFulltextSearchResult(tool_name, content, metadata)) {
         const chunks = extractFulltextSearchData(content, metadata)?.chunks ?? [];
+        const uniqueAttachments = new Set(chunks.map((c) => `${c.library_id}-${c.zotero_key}`));
+        return uniqueAttachments.size;
+    }
+
+    // Passage retrieval tools -> unique attachments count
+    if (isPassageRetrievalResult(tool_name, content, metadata)) {
+        const chunks = extractPassageRetrievalData(content, metadata)?.chunks ?? [];
         const uniqueAttachments = new Set(chunks.map((c) => `${c.library_id}-${c.zotero_key}`));
         return uniqueAttachments.size;
     }
