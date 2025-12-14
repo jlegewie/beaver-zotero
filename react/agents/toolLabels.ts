@@ -187,6 +187,9 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             }
             return baseLabel;
         }
+        
+        case 'read_tool_result':
+            return 'Reading previous context';
 
         case 'retrieve_fulltext':
         case 'read_fulltext': {

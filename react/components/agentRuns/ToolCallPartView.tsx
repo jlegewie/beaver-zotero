@@ -15,8 +15,8 @@ import {
     Icon,
     PuzzleIcon,
     GlobalSearchIcon,
-    PlusSignIcon,
     TextAlignLeftIcon,
+    DocumentValidationIcon,
 } from '../icons/icons';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
@@ -51,7 +51,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     external_search: GlobalSearchIcon,
 
     // Create item tool
-    create_zotero_item: PlusSignIcon,
+    create_zotero_item: DocumentValidationIcon,
+
+    // Read tool result
+    read_tool_result: TextAlignLeftIcon,
 };
 
 /**
@@ -104,7 +107,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
         hasResult &&
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
-        (resultCount === null || resultCount > 0);
+        (resultCount === null || resultCount > 0) &&
+        part.tool_name !== 'read_tool_result';
 
     const effectiveExpanded = isExpanded && canExpand;
 
