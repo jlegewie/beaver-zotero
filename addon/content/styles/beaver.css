@@ -41,6 +41,11 @@
     --webapp-ring: #111729;
 }
 
+/* Separate window: inherit Zotero's font size from UIProperties */
+#beaver-window {
+    font-size: var(--zotero-font-size, 12px);
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");

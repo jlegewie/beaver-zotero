@@ -18,9 +18,10 @@ import Button from './ui/Button';
 interface HeaderProps {
     onClose?: () => void;
     settingsPage?: boolean;
+    isWindow?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
+const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false }) => {
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -41,13 +42,25 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
             <div className="flex-1 display-flex gap-4">
 
-                {/* Close chat */}
-                <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
+                {/* Close chat / Close window */}
+                <Tooltip 
+                    content={isWindow ? "Close window" : "Close chat"} 
+                    secondaryContent={isWindow ? undefined : closeChatShortcut} 
+                    showArrow 
+                    singleLine
+                >
                     <IconButton
                         icon={CancelIcon}
-                        onClick={() => triggerToggleChat(Zotero.getMainWindow())}
+                        onClick={() => {
+                            if (isWindow) {
+                                // eslint-disable-next-line no-restricted-globals -- Intentionally closing the separate window, not the main window
+                                window.close();
+                            } else {
+                                triggerToggleChat(Zotero.getMainWindow());
+                            }
+                        }}
                         className="scale-14"
-                        ariaLabel="Close chat"
+                        ariaLabel={isWindow ? "Close window" : "Close chat"}
                     />
                 </Tooltip>
 
@@ -74,14 +87,17 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             {/* Database status and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    <Tooltip content="Open in Separate Window" showArrow singleLine>
-                        <IconButton
-                            icon={Share05Icon}
-                            onClick={openBeaverWindow}
-                            className="scale-14"
-                            ariaLabel="Open in Separate Window"
-                        />
-                    </Tooltip>
+                    {/* Only show "Open in Separate Window" button when not already in a separate window */}
+                    {!isWindow && (
+                        <Tooltip content="Open in Separate Window" showArrow singleLine>
+                            <IconButton
+                                icon={Share05Icon}
+                                onClick={openBeaverWindow}
+                                className="scale-14"
+                                ariaLabel="Open in Separate Window"
+                            />
+                        </Tooltip>
+                    )}
                     {/* {planFeatures.databaseSync && hasCompletedOnboarding &&
                         <Tooltip content="Sync with Beaver" showArrow singleLine>
                             <DatabaseStatusButton />
