@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
@@ -68,6 +68,8 @@ interface ToolCallPartViewProps {
     part: ToolCallPart;
     /** Run ID for global UI state management */
     runId: string;
+    /** Run status */
+    runStatus: AgentRunStatus;
 }
 
 /**
@@ -75,7 +77,7 @@ interface ToolCallPartViewProps {
  * Uses toolResultsMapAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
  */
-export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId }) => {
+export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
@@ -119,6 +121,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId 
     };
 
     const getIcon = () => {
+        if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
         if (isInProgress) return Spinner;
         if (hasError) return AlertIcon;
         if (effectiveExpanded) return ArrowDownIcon;

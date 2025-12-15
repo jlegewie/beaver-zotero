@@ -11,7 +11,7 @@ interface ModelMessagesViewProps {
     /** Whether to show the status indicator inside this container */
     showStatusIndicator?: boolean;
     /** The run status (required when showStatusIndicator is true) */
-    status?: AgentRunStatus;
+    status: AgentRunStatus;
 }
 
 /**
@@ -51,6 +51,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
                             isStreaming={isStreaming && isLastMessage}
                             runId={runId}
                             responseIndex={index}
+                            runStatus={status}
                         />
                     );
                 }

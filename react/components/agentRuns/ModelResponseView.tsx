@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ModelResponse } from '../../agents/types';
+import { AgentRunStatus, ModelResponse } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
@@ -15,6 +15,8 @@ interface ModelResponseViewProps {
     runId: string;
     /** Index of this response within the run (for unique DOM IDs) */
     responseIndex: number;
+    /** Run status */
+    runStatus: AgentRunStatus;
 }
 
 /**
@@ -26,6 +28,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     isStreaming,
     runId,
     responseIndex,
+    runStatus,
 }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
     
@@ -105,6 +108,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                 key={`tool-${part.tool_call_id}`}
                                 part={part}
                                 runId={runId}
+                                runStatus={runStatus}
                             />
                         );
                     })}
