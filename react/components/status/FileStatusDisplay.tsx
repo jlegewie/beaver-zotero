@@ -8,7 +8,6 @@ import { fileUploaderBackoffUntilAtom } from "../../atoms/sync";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedFilesSummary } from "./SkippedFilesSummary";
-import PaginatedFailedUploadsList from "./PaginatedFailedUploadsList";
 import { ConnectionStatus } from "../../hooks/useFileStatus";
 import Button from "../ui/Button";
 import { zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from "../../atoms/ui";
