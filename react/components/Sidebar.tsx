@@ -123,7 +123,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             {runs.length > 0 ? (
                 <ThreadView ref={messagesContainerRef} />
             ) : (
-                <HomePage />
+                <HomePage isWindow={isWindow} />
             )}
 
             {/* Prompt area (footer) with floating elements */}
