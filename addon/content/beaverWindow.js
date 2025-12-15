@@ -10,6 +10,10 @@ async function onLoad() {
     await Zotero.initializationPromise;
     await Zotero.uiReadyPromise;
 
+    // Register UI properties for font size and UI density (same as main Zotero windows)
+    // This applies the user's preferred font size and UI density settings
+    Zotero.UIProperties.registerRoot(document.documentElement);
+
     // Use the main window's BeaverReact instance to ensure shared state (Jotai store)
     // This allows the separate window to share the same Atom instances and Store as the main window
     const mainWindow = Zotero.getMainWindow();
