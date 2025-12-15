@@ -555,12 +555,12 @@ export class AgentService {
                 };
 
                 this.ws.onerror = (event) => {
-                    logger(`AgentService: WebSocket error`, 1);
+                    logger(`AgentService: Connecting to Beaver failed`, 1);
                     // Note: The error event doesn't contain useful info in browsers
                     // The actual error will come through onclose
                     if (!hasResolved) {
                         hasResolved = true;
-                        reject(new Error('WebSocket connection failed'));
+                        reject(new Error('Connecting to Beaver failed'));
                     }
                 };
 
