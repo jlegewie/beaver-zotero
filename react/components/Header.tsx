@@ -82,33 +82,36 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                             disabled={runsCount === 0 && !isPreferencePageVisible}
                         />
                     </Tooltip>
-                    <ThreadsMenu
-                        className="scale-14"
-                        ariaLabel="Show chat history"
-                    />
                     </>
+                )}
+
+                {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
+                {!isWindow && isAuthenticated && hasCompletedOnboarding && (
+                    <Tooltip content="Open in Separate Window" showArrow singleLine>
+                        <IconButton
+                            icon={Share05Icon}
+                            onClick={openBeaverWindow}
+                            className="scale-13"
+                            ariaLabel="Open in Separate Window"
+                        />
+                    </Tooltip>
                 )}
             </div>
 
             {/* Database status and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {/* Only show "Open in Separate Window" button when not already in a separate window */}
-                    {!isWindow && (
-                        <Tooltip content="Open in Separate Window" showArrow singleLine>
-                            <IconButton
-                                icon={Share05Icon}
-                                onClick={openBeaverWindow}
-                                className="scale-14"
-                                ariaLabel="Open in Separate Window"
-                            />
-                        </Tooltip>
-                    )}
-                    {/* {planFeatures.databaseSync && hasCompletedOnboarding &&
-                        <Tooltip content="Sync with Beaver" showArrow singleLine>
+                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                        <Tooltip content="Sync Error" secondaryContent="Click to retry Beaver sync" showArrow >
                             <DatabaseStatusButton />
                         </Tooltip>
-                    } */}
+                    }
+                    {isAuthenticated && hasCompletedOnboarding && (
+                        <ThreadsMenu
+                            className="scale-14"
+                            ariaLabel="Show chat history"
+                        />
+                    )}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
