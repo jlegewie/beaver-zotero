@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
@@ -14,6 +14,7 @@ import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
+import { getWindowFromElement } from '../utils/windowContext';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -29,10 +30,21 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
         await newThread();
     }
+
+    const handleClose = useCallback(() => {
+        if (isWindow) {
+            // Get the actual window where the button is rendered, not the main window
+            const currentWindow = getWindowFromElement(closeButtonRef.current);
+            currentWindow.close();
+        } else {
+            triggerToggleChat(Zotero.getMainWindow());
+        }
+    }, [isWindow]);
 
     // Get platform-specific shortcut text
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
@@ -50,15 +62,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                     singleLine
                 >
                     <IconButton
+                        ref={closeButtonRef}
                         icon={CancelIcon}
-                        onClick={() => {
-                            if (isWindow) {
-                                // eslint-disable-next-line no-restricted-globals -- Intentionally closing the separate window, not the main window
-                                window.close();
-                            } else {
-                                triggerToggleChat(Zotero.getMainWindow());
-                            }
-                        }}
+                        onClick={handleClose}
                         className="scale-14"
                         ariaLabel={isWindow ? "Close window" : "Close chat"}
                     />

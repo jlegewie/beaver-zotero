@@ -41,12 +41,15 @@
     --webapp-ring: #111729;
 }
 
-/* Separate window: inherit Zotero's font size from UIProperties */
+/* Separate window: sizing and constraints */
 #beaver-window {
-    /* font-size: var(--zotero-font-size, 12px); */
     min-width: 400px;
     min-height: 600px;
-    font-size: 0.9rem;
+}
+
+/* Match the sidebar's effective font size in the separate window container. */
+#beaver-pane-window {
+    font-size: 13px;
 }
 
 /* Toolbar Button */
