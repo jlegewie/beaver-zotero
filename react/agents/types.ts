@@ -187,6 +187,9 @@ export interface ModelRequest {
 
     instructions: string;
     /* The instructions for the model. Unused and should be empty. */
+
+    metadata?: Record<string, any>;
+    /* Metadata associated with the model request */
 }
 
 export interface ModelResponse {
@@ -207,4 +210,7 @@ export interface ModelResponse {
 
     parts: (TextPart | ThinkingPart | ToolCallPart)[];
     /* The parts of the model message */
+
+    metadata?: Record<string, any>;
+    /* Metadata associated with the model response */
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { ModelMessage, AgentRunStatus } from '../../agents/types';
 import { ModelResponseView } from './ModelResponseView';
 import { RunStatusIndicator } from './RunStatusIndicator';
+import { ContextCompressionIndicator } from './ContextCompressionIndicator';
 
 interface ModelMessagesViewProps {
     messages: ModelMessage[];
@@ -33,6 +34,11 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
     return (
         <div className="display-flex flex-col px-4">
             {messages.map((message, index) => {
+                // Render context compression indicator for request messages with compressed context
+                // if (message.kind === 'request' && message.metadata?.context_compression?.compressed_count > 0) {
+                //     return <ContextCompressionIndicator key={`${runId}-context-compression-${index}`} message={message} />;
+                // }
+
                 // Only render response messages - request messages are either displayed
                 // separately (user prompts) or inline with their corresponding
                 // tool calls (tool returns)
