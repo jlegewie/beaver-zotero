@@ -74,7 +74,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Footer with sources and action buttons (only for completed runs) */}
-            {run.status === 'completed' && (
+            {run.status === 'completed' || run.status === 'canceled' && (
                 <div className="px-4">
                     <AgentRunFooter run={run} />
                 </div>
