@@ -6,6 +6,7 @@ import IconButton from "../IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
 import { syncLibraryIdsAtom } from "../../../atoms/profile";
 import { logger } from '../../../../src/utils/logger';
+import Tooltip from "../Tooltip";
 
 
 const DatabaseStatusButton: React.FC = () => {
@@ -24,7 +25,7 @@ const DatabaseStatusButton: React.FC = () => {
         }
     };
     
-    if (hasError) return null;
+    if (!isSyncing && !hasError) return null;
     
     // Determine which icon to show
     const icon = isSyncing ? SyncIcon : (isHovered ? SyncIcon : AlertIcon);
@@ -33,19 +34,25 @@ const DatabaseStatusButton: React.FC = () => {
         : (isHovered ? "" : "font-color-red");
     
     return (
-        <div
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
+        <Tooltip
+            content={isSyncing ? "Syncing..." : hasError ? "Sync Error" : "Sync Database"}
+            secondaryContent={hasError && !isSyncing ? "Click to retry Beaver sync" : undefined}
+            showArrow
         >
-            <IconButton
-                icon={icon}
-                onClick={handleSyncClick}
-                className="scale-13"
-                iconClassName={iconClassName}
-                ariaLabel={isSyncing ? "Syncing..." : "Sync Database"}
-                disabled={isSyncing}
-            />
-        </div>
+            <div
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+            >
+                <IconButton
+                    icon={icon}
+                    onClick={handleSyncClick}
+                    className="scale-13"
+                    iconClassName={iconClassName}
+                    ariaLabel={isSyncing ? "Syncing..." : "Sync Database"}
+                    disabled={isSyncing}
+                />
+            </div>
+        </Tooltip>
     );
 };
 

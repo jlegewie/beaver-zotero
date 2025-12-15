@@ -102,9 +102,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
                     {planFeatures.databaseSync && hasCompletedOnboarding &&
-                        <Tooltip content="Sync Error" secondaryContent="Click to retry Beaver sync" showArrow >
-                            <DatabaseStatusButton />
-                        </Tooltip>
+                        <DatabaseStatusButton />
                     }
                     {isAuthenticated && hasCompletedOnboarding && (
                         <ThreadsMenu
