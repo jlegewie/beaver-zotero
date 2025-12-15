@@ -55,21 +55,23 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             <div className="flex-1 display-flex gap-4">
 
                 {/* Close chat / Close window */}
-                <Tooltip 
-                    content={isWindow ? "Close window" : "Close chat"} 
-                    secondaryContent={isWindow ? undefined : closeChatShortcut} 
-                    showArrow 
-                    singleLine
-                >
-                    <IconButton
-                        ref={closeButtonRef}
-                        icon={CancelIcon}
-                        onClick={handleClose}
-                        className="scale-14"
-                        ariaLabel={isWindow ? "Close window" : "Close chat"}
-                    />
-                </Tooltip>
-
+                {!isWindow && (
+                    <Tooltip 
+                        content={isWindow ? "Close window" : "Close chat"} 
+                        secondaryContent={isWindow ? undefined : closeChatShortcut} 
+                        showArrow 
+                        singleLine
+                    >
+                        <IconButton
+                            ref={closeButtonRef}
+                            icon={CancelIcon}
+                            onClick={handleClose}
+                            className="scale-14"
+                            ariaLabel={isWindow ? "Close window" : "Close chat"}
+                        />
+                    </Tooltip>
+                )}
+                
                 {/* New chat and chat history */}
                 {isAuthenticated && hasCompletedOnboarding && (
                     <>
