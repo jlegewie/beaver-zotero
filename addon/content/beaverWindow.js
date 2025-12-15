@@ -45,15 +45,23 @@ async function onLoad() {
 
 function onUnload() {
     // Use the stored BeaverReact reference (which points to Main Window's instance)
-    if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
-        const container = document.getElementById("beaver-pane-window");
-        if (container) {
-            BeaverReact.unmountFromElement(container);
-            Zotero.debug("Beaver: Separate window React component unmounted");
+    try {
+        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
+            const container = document.getElementById("beaver-pane-window");
+            if (container) {
+                BeaverReact.unmountFromElement(container);
+                Zotero.debug("Beaver: Separate window React component unmounted");
+            }
         }
+    } catch (e) {
+        Zotero.debug("Beaver: Error unmounting separate window: " + e);
     }
+    
+    // Clear references to help garbage collection
+    BeaverReact = null;
+    root = null;
 }
 
 // Set up event listeners
-window.addEventListener("load", onLoad);
-window.addEventListener("unload", onUnload);
+window.addEventListener("load", onLoad, { once: true });
+window.addEventListener("unload", onUnload, { once: true });
