@@ -1,78 +1,51 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useAtomValue } from "jotai";
 import { syncingAtom, syncErrorAtom } from "../../../atoms/sync";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
-import { DatabaseStatusIcon } from "../../icons/icons";
+import { AlertIcon, SyncIcon } from "../../icons/icons";
 import { syncLibraryIdsAtom } from "../../../atoms/profile";
 import { logger } from '../../../../src/utils/logger';
 
-// Possible icon states
-type IconState = {
-    color: "green" | "yellow" | "red";
-    fading: boolean;
-};
 
 const DatabaseStatusButton: React.FC = () => {
-        
+    const [isHovered, setIsHovered] = useState(false);
+    
     // Combined atoms
     const isSyncing = useAtomValue(syncingAtom);
     const hasError = useAtomValue(syncErrorAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     
-    // Determine the icon state based on current sync status
-    const getIconState = (): IconState => {
-        // Error state takes precedence
-        if (hasError) {
-            return { color: "red", fading: false };
-        }
-                        
-        // Check if incremental sync or small file upload is in progress
-        if (isSyncing) {
-            return { color: "green", fading: true };
-        }
-        
-        // All good, no ongoing operations (both 'idle' and 'completed' render the same)
-        return { color: "green", fading: false };
-    };
-    
-    // Get current icon state
-    const iconState = getIconState();
-        
     // Handle manual sync button click
     const handleSyncClick = () => {
-        if(!isSyncing) {
-            logger(`Beaver Sync: User-initiated database sync`)
+        if (!isSyncing) {
+            logger(`Beaver Sync: User-initiated database sync`);
             syncZoteroDatabase(syncLibraryIds, { resetSyncStatus: true });
         }
     };
     
-    const [isHovering, setIsHovering] = useState(false);
+    if (hasError) return null;
     
-    // Memoize the icon component to prevent recreation on each render
-    const memoizedIcon = useMemo(() => {
-        return (props: React.SVGProps<SVGSVGElement>) => (
-            <DatabaseStatusIcon
-                dotColor={iconState.color}
-                fading={iconState.fading}
-                fadeDuration={1000}
-                hover={isHovering && !isSyncing}
-                {...props}
-            />
-        );
-    }, [iconState.color, iconState.fading, isHovering, isSyncing]);
-
-    if (!hasError) return null;
+    // Determine which icon to show
+    const icon = isSyncing ? SyncIcon : (isHovered ? SyncIcon : AlertIcon);
+    const iconClassName = isSyncing 
+        ? "animate-spin" 
+        : (isHovered ? "" : "font-color-red");
     
     return (
-        <IconButton
-            icon={memoizedIcon}
-            onClick={handleSyncClick}
-            className="scale-12"
-            ariaLabel="Sync status"
-            onMouseEnter={() => setIsHovering(true)}
-            onMouseLeave={() => setIsHovering(false)}
-        />
+        <div
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            <IconButton
+                icon={icon}
+                onClick={handleSyncClick}
+                className="scale-13"
+                iconClassName={iconClassName}
+                ariaLabel={isSyncing ? "Syncing..." : "Sync Database"}
+                disabled={isSyncing}
+            />
+        </div>
     );
 };
 
