@@ -263,6 +263,9 @@ async function onShutdown(): Promise<void> {
 	
 	// Unregister keyboard shortcuts
 	BeaverUIFactory.unregisterShortcuts();
+
+    // Close separate window if open
+    BeaverUIFactory.closeBeaverWindow();
 	
 	// Unload stylesheets
 	unloadKatexStylesheet();

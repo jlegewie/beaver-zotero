@@ -12,8 +12,11 @@ import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/setti
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 
+interface HomePageProps {
+    isWindow?: boolean;
+}
 
-const HomePage: React.FC = () => {
+const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
@@ -78,23 +81,25 @@ const HomePage: React.FC = () => {
             )}
             
             {/* File Processing Status */}
-            <div className="display-flex flex-row justify-between items-center mt-4">
-                <Button
-                    variant="ghost-secondary"
-                    onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
-                    rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                    iconClassName="mr-0 scale-14"
-                >
-                    <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
-                        File Status
-                    </span>
-                </Button>
-                {!showFileStatusDetails && (
-                    <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
-                )}
-            </div>
+            {!isWindow && (
+                <div className="display-flex flex-row justify-between items-center mt-4">
+                    <Button
+                        variant="ghost-secondary"
+                        onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
+                        rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
+                        iconClassName="mr-0 scale-14"
+                    >
+                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
+                            File Status
+                        </span>
+                    </Button>
+                    {!showFileStatusDetails && (
+                        <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
+                    )}
+                </div>
+            )}
             
-            {showFileStatusDetails && (
+            {!isWindow && showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">
                     <FileStatusDisplay connectionStatus={connectionStatus}/>
                 </div>

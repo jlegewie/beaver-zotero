@@ -22,7 +22,12 @@ import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
 import PreviewAndPopupContainer from './PreviewAndPopupContainer';
 
-const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
+interface SidebarProps {
+    location: 'library' | 'reader';
+    isWindow?: boolean;
+}
+
+const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
     const runs = useAtomValue(allRunsAtom);
@@ -52,7 +57,7 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     if (isLoadingThread) {
         return (
             <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
-                <Header />
+                <Header isWindow={isWindow} />
                 <div className="display-flex flex-1 items-center justify-center">
                     <div className="display-flex flex-col items-center gap-3">
                         <Spinner size={22}/>
@@ -66,8 +71,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Login page */}
     if (!isAuthenticated || !isProfileLoaded) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
-                <Header />
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
                 <LoginPage emailInputRef={loginEmailRef} />
                 <DialogContainer />
             </div>
@@ -77,8 +82,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Onboarding page */}
     if(!hasAuthorizedAccess || !hasCompletedOnboarding) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
-                <Header />
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
                 <OnboardingPage />
                 <DialogContainer />
             </div>
@@ -88,8 +93,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Device authorization page */}
     if (!isDeviceAuthorized) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
-                <Header />
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
                 <DeviceAuthorizationPage />
                 <DialogContainer />
             </div>
@@ -99,8 +104,8 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
     {/* Preference page */}
     if (isPreferencePageVisible) {
         return (
-            <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
-                <Header settingsPage={true}/>
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header settingsPage={true} isWindow={isWindow} />
                 <PreferencePage />
                 <DialogContainer />
             </div>
@@ -109,16 +114,16 @@ const Sidebar = ({ location }: { location: 'library' | 'reader' }) => {
 
     {/* Main page */}
     return (
-        <div className="bg-sidepane h-full display-flex flex-col min-w-0 relative">
+        <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
             
             {/* Header */}
-            <Header />
+            <Header isWindow={isWindow} />
 
             {/* Thread view with agent runs */}
             {runs.length > 0 ? (
                 <ThreadView ref={messagesContainerRef} />
             ) : (
-                <HomePage />
+                <HomePage isWindow={isWindow} />
             )}
 
             {/* Prompt area (footer) with floating elements */}

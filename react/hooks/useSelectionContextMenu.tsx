@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MenuPosition } from '../components/ui/menu/ContextMenu';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
 
 interface UseSelectionContextMenuOptions {
     onCopy?: (selectedText: string) => void;
@@ -35,8 +36,11 @@ export default function useSelectionContextMenu(
     
     // Handler for right-click context menu
     const handleContextMenu = (e: React.MouseEvent) => {
+        // Get the correct window context from the element ref
+        const win = getWindowFromElement(elementRef.current);
+        
         // Check if there's selected text
-        const selection = Zotero.getMainWindow().getSelection();
+        const selection = win.getSelection();
         const text = selection?.toString() || '';
         
         // Only show menu if text is selected
@@ -50,8 +54,12 @@ export default function useSelectionContextMenu(
     
     // Close the menu when selection changes or is removed
     useEffect(() => {
+        // Get the correct document context from the element ref
+        const win = getWindowFromElement(elementRef.current);
+        const doc = getDocumentFromElement(elementRef.current);
+        
         const handleSelectionChange = () => {
-            const selection = Zotero.getMainWindow().getSelection();
+            const selection = win.getSelection();
             const text = selection?.toString() || '';
             
             if (text.trim().length === 0 && isMenuOpen) {
@@ -59,11 +67,11 @@ export default function useSelectionContextMenu(
             }
         };
         
-        Zotero.getMainWindow().document.addEventListener('selectionchange', handleSelectionChange);
+        doc.addEventListener('selectionchange', handleSelectionChange);
         return () => {
-            Zotero.getMainWindow().document.removeEventListener('selectionchange', handleSelectionChange);
+            doc.removeEventListener('selectionchange', handleSelectionChange);
         };
-    }, [isMenuOpen]);
+    }, [isMenuOpen, elementRef]);
     
     // Default copy handler
     const defaultCopyHandler = () => {

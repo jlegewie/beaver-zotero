@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, RefObject } from 'react';
 import { useSetAtom, useAtom } from 'jotai';
 import { activePreviewAtom, previewCloseTimeoutAtom, ActivePreview } from '../atoms/ui';
+import { getWindowFromElement } from '../utils/windowContext';
 
 // Define default delays, matching the original components
 const DEFAULT_SHOW_DELAY = 100;
@@ -10,6 +11,7 @@ interface UsePreviewHoverOptions {
     showDelay?: number;
     hideDelay?: number;
     isEnabled?: boolean; // Option to disable the hover effect
+    elementRef?: RefObject<HTMLElement | null>; // Optional element ref for correct window context
 }
 
 /**
@@ -26,7 +28,13 @@ export function usePreviewHover(
         showDelay = DEFAULT_SHOW_DELAY,
         hideDelay = DEFAULT_HIDE_DELAY,
         isEnabled = true,
+        elementRef,
     } = options;
+
+    // Helper to get window context from optional element ref
+    const getWin = useCallback(() => {
+        return getWindowFromElement(elementRef?.current ?? null);
+    }, [elementRef]);
 
     const [isHovered, setIsHovered] = useState(false);
     const setActivePreview = useSetAtom(activePreviewAtom);
@@ -35,26 +43,29 @@ export function usePreviewHover(
 
     const cancelCloseTimer = useCallback(() => {
         if (previewCloseTimeout) {
-            Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+            const win = getWin();
+            win.clearTimeout(previewCloseTimeout);
             setPreviewCloseTimeout(null);
         }
-    }, [previewCloseTimeout, setPreviewCloseTimeout]);
+    }, [previewCloseTimeout, setPreviewCloseTimeout, getWin]);
 
     const startCloseTimer = useCallback(() => {
         cancelCloseTimer();
-        const newTimeout = Zotero.getMainWindow().setTimeout(() => {
+        const win = getWin();
+        const newTimeout = win.setTimeout(() => {
             setActivePreview(null);
             setPreviewCloseTimeout(null); // Clear the timeout ID itself
         }, hideDelay);
         setPreviewCloseTimeout(newTimeout);
-    }, [cancelCloseTimer, hideDelay, setActivePreview, setPreviewCloseTimeout]);
+    }, [cancelCloseTimer, hideDelay, setActivePreview, setPreviewCloseTimeout, getWin]);
 
     const cancelShowPreviewTimer = useCallback(() => {
         if (showPreviewTimerRef.current) {
-            Zotero.getMainWindow().clearTimeout(showPreviewTimerRef.current);
+            const win = getWin();
+            win.clearTimeout(showPreviewTimerRef.current);
             showPreviewTimerRef.current = null;
         }
-    }, []);
+    }, [getWin]);
 
     const handleMouseEnter = useCallback(() => {
         setIsHovered(true);
@@ -62,14 +73,15 @@ export function usePreviewHover(
         cancelCloseTimer();
         cancelShowPreviewTimer();
 
-        showPreviewTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
+        const win = getWin();
+        showPreviewTimerRef.current = win.setTimeout(() => {
             // Double-check isEnabled and previewContent in case they changed during the timeout
             if (isEnabled && previewContent) {
                 setActivePreview(previewContent);
             }
             showPreviewTimerRef.current = null;
         }, showDelay);
-    }, [isEnabled, previewContent, cancelCloseTimer, cancelShowPreviewTimer, setActivePreview, showDelay]);
+    }, [isEnabled, previewContent, cancelCloseTimer, cancelShowPreviewTimer, setActivePreview, showDelay, getWin]);
 
     const handleMouseLeave = useCallback(() => {
         setIsHovered(false);

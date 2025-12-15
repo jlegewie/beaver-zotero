@@ -61,6 +61,8 @@ const DatabaseStatusButton: React.FC = () => {
             />
         );
     }, [iconState.color, iconState.fading, isHovering, isSyncing]);
+
+    if (!hasError) return null;
     
     return (
         <IconButton

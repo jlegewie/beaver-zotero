@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import ReactDOM from 'react-dom';
+import { getWindowFromElement, getDocumentFromElement } from '../../utils/windowContext';
 
 /**
 * Props for the Tooltip component
@@ -72,7 +73,8 @@ const Tooltip: React.FC<TooltipProps> = ({
     const calculatePosition = () => {
         if (!anchorRef.current || !tooltipRef.current) return;
         
-        const mainWindow = Zotero.getMainWindow();
+        // Get the correct window context for this component
+        const win = getWindowFromElement(anchorRef.current);
         const anchorRect = anchorRef.current.getBoundingClientRect();
         const tooltipRect = tooltipRef.current.getBoundingClientRect();
         
@@ -80,7 +82,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         const centerX = anchorRect.left + (anchorRect.width / 2);
         
         // Check if tooltip should be displayed below or above the anchor
-        const spaceBelow = mainWindow.innerHeight - anchorRect.bottom;
+        const spaceBelow = win.innerHeight - anchorRect.bottom;
         const spaceAbove = anchorRect.top;
         
         let placement: 'top' | 'bottom' = preferredPlacement || 'bottom';
@@ -100,9 +102,9 @@ const Tooltip: React.FC<TooltipProps> = ({
         
         // Adjust if tooltip would overflow right or left edge
         const rightEdge = posX + (tooltipRect.width / 2);
-        if (rightEdge > mainWindow.innerWidth - 8) {
+        if (rightEdge > win.innerWidth - 8) {
             // Shift left to avoid right overflow
-            const adjustment = rightEdge - (mainWindow.innerWidth - 8);
+            const adjustment = rightEdge - (win.innerWidth - 8);
             posX -= adjustment;
         }
         
@@ -130,15 +132,16 @@ const Tooltip: React.FC<TooltipProps> = ({
             calculatePosition();
         }, 10);
         
-        const mainWindow = Zotero.getMainWindow();
+        // Get the correct window context for this component
+        const win = getWindowFromElement(anchorRef.current);
         
         // Handle window resize
         const handleResize = () => calculatePosition();
-        mainWindow.addEventListener('resize', handleResize);
+        win.addEventListener('resize', handleResize);
         
         // Handle scroll events to close the tooltip
         const handleScroll = () => setIsOpen(false);
-        mainWindow.addEventListener('scroll', handleScroll, true);
+        win.addEventListener('scroll', handleScroll, true);
         
         // Handle click events to close the tooltip
         const handleClick = (e: MouseEvent) => {
@@ -149,13 +152,13 @@ const Tooltip: React.FC<TooltipProps> = ({
             }
             setIsOpen(false);
         };
-        mainWindow.addEventListener('click', handleClick);
+        win.addEventListener('click', handleClick);
         
         return () => {
             clearTimeout(initialPositionTimer);
-            mainWindow.removeEventListener('resize', handleResize);
-            mainWindow.removeEventListener('scroll', handleScroll, true);
-            mainWindow.removeEventListener('click', handleClick);
+            win.removeEventListener('resize', handleResize);
+            win.removeEventListener('scroll', handleScroll, true);
+            win.removeEventListener('click', handleClick);
         };
     }, [isOpen, stayOpenOnAnchorClick]);
     
@@ -278,12 +281,14 @@ const Tooltip: React.FC<TooltipProps> = ({
     // Use portal if requested - this helps when the tooltip needs to 
     // break out of a container with overflow:hidden or similar
     if (usePortal && isOpen) {
+        // Use the correct document context for this component
+        const doc = getDocumentFromElement(anchorRef.current);
         return (
             <>
             {wrappedChildren}
             {ReactDOM.createPortal(
                 tooltipElement,
-                Zotero.getMainWindow().document.body
+                doc.body
             )}
             </>
         );

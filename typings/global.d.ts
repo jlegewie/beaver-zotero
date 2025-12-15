@@ -318,4 +318,9 @@ declare namespace _ZoteroTypes {
         TimeoutException: new (...args: any[]) => Error;
         SecurityException: new (...args: any[]) => Error;
     }
+
+    interface Zotero {
+        /** Shared Jotai store for Beaver plugin across all windows */
+        __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
+    }
 }
