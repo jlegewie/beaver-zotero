@@ -44,6 +44,7 @@
 /* Separate window: inherit Zotero's font size from UIProperties */
 #beaver-window {
     font-size: var(--zotero-font-size, 12px);
+    min-width: 400px;
 }
 
 /* Toolbar Button */
