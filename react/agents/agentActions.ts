@@ -19,7 +19,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/prop
 // =============================================================================
 
 /**
- * Agent action model - parallel to ProposedAction but uses run_id instead of message_id.
+ * Agent action model
  * Created during agent runs via WebSocket streaming.
  */
 export interface AgentAction {
