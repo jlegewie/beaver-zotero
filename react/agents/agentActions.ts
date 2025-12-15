@@ -6,13 +6,13 @@ import {
     ActionStatus,
     ActionType,
     NoteProposedData,
-} from '../types/proposedActions/base';
+} from '../types/agentActions/base';
 import {
     normalizePageLocations,
     normalizeSentenceIdList,
     normalizeNotePosition,
-} from '../types/proposedActions/annotations';
-import type { CreateItemProposedData, CreateItemResultData } from '../types/proposedActions/items';
+} from '../types/agentActions/annotations';
+import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 
 // =============================================================================
 // Agent Action Types

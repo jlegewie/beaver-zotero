@@ -2,7 +2,7 @@ import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { logger } from '../../src/utils/logger';
-import { AnnotationResultData } from '../types/proposedActions/base';
+import { AnnotationResultData } from '../types/agentActions/base';
 import { updateAgentActionsAtom, AgentAction, AgentActionUpdate, isAnnotationAgentAction } from '../agents/agentActions';
 import { applyAnnotation } from './annotationActions';
 

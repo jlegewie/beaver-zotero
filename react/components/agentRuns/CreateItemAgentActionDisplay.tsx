@@ -23,7 +23,7 @@ import {
     undoAgentActionAtom,
 } from '../../agents/agentActions';
 import { AckActionLink } from '../../../src/services/agentActionsService';
-import { CreateItemResultData } from '../../types/proposedActions/items';
+import { CreateItemResultData } from '../../types/agentActions/items';
 import {
     annotationBusyAtom,
     annotationPanelStateAtom,

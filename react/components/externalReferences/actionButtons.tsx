@@ -32,7 +32,7 @@ import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
 } from '../../agents/agentActions';
-import { CreateItemResultData } from '../../types/proposedActions/items';
+import { CreateItemResultData } from '../../types/agentActions/items';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';

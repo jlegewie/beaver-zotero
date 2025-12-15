@@ -1,4 +1,4 @@
-import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/proposedActions/items';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
 

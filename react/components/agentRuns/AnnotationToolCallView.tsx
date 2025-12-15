@@ -13,7 +13,7 @@ import {
     undoAgentActionAtom,
 } from '../../agents/agentActions';
 import { AckActionLink } from '../../../src/services/agentActionsService';
-import { AnnotationResultData } from '../../types/proposedActions/annotations';
+import { AnnotationResultData } from '../../types/agentActions/annotations';
 import { applyAnnotation, deleteAnnotationFromReader } from '../../utils/annotationActions';
 import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';

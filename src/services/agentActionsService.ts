@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ActionStatus, ActionResultDataType } from '../../react/types/proposedActions/base';
+import { ActionStatus, ActionResultDataType } from '../../react/types/agentActions/base';
 import { logger } from '../utils/logger';
 
 // ============================================================================
