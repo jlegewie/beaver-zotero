@@ -769,7 +769,7 @@ export const regenerateFromRunAtom = atom(
             // The run is currently active - cancel it and resubmit
             targetRun = activeRun;
             runIndex = threadRuns.length;
-            agentService.close();
+            await agentService.cancel();
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
@@ -845,9 +845,10 @@ export const regenerateFromRunAtom = atom(
 );
 
 /**
- * Close the WebSocket connection
+ * Close the WebSocket connection with proper cancellation.
+ * Sends a cancel message to the backend before closing to ensure proper cleanup.
  */
-export const closeWSConnectionAtom = atom(null, (get, set) => {
+export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
     if (activeRun && activeRun.status === 'in_progress') {
@@ -861,7 +862,8 @@ export const closeWSConnectionAtom = atom(null, (get, set) => {
         set(activeRunAtom, null);
     }
     
-    agentService.close();
+    // Send cancel message and close connection
+    await agentService.cancel();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
     set(isWSChatPendingAtom, false);

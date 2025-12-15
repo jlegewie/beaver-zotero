@@ -760,6 +760,29 @@ export class AgentService {
     }
 
     /**
+     * Cancel the current run and close the connection.
+     * Sends a cancel message to the backend before closing to ensure proper cleanup.
+     * @param waitMs Time to wait after sending cancel before closing (default: 50ms)
+     */
+    async cancel(waitMs: number = 50): Promise<void> {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            logger('AgentService: Cannot cancel - WebSocket not connected', 1);
+            this.close();
+            return;
+        }
+
+        // Send cancel message to backend
+        logger('AgentService: Sending cancel message', 1);
+        this.ws.send(JSON.stringify({ type: 'cancel' }));
+
+        // Wait briefly to allow the message to be flushed
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+
+        // Close the connection
+        this.close(1000, 'User cancelled');
+    }
+
+    /**
      * Handle attachment_content_request event.
      * Currently returns placeholder content until full extraction is implemented.
      */
