@@ -2,6 +2,7 @@ import React, { useState, useRef, ReactNode, useEffect } from 'react';
 import ContextMenu, { MenuItem, MenuPosition } from './menu/ContextMenu';
 import { Icon } from '../icons/icons';
 import Tooltip from './Tooltip';
+import { getDocumentFromElement } from '../../utils/windowContext';
 
 interface MenuButtonProps {
     menuItems: MenuItem[];
@@ -86,8 +87,9 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             buttonRef.current.blur();
             
             // Force any active tooltip to close by triggering a mousedown event on document
-            const mainWindow = Zotero.getMainWindow();
-            mainWindow.document.dispatchEvent(new MouseEvent('click'));
+            // Use the correct document context for this component
+            const doc = getDocumentFromElement(buttonRef.current);
+            doc.dispatchEvent(new MouseEvent('click'));
         }
     };
 

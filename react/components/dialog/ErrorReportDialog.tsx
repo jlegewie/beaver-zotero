@@ -11,6 +11,7 @@ import IconButton from '../ui/IconButton';
 import { getJotaiState } from '../../utils/getJotaiState';
 import { accountService } from '../../../src/services/accountService';
 import { getPref } from '../../../src/utils/prefs';
+import { getDocumentFromElement } from '../../utils/windowContext';
 
 /**
  * Get all plugin preferences for debugging
@@ -53,6 +54,7 @@ const ErrorReportDialog: React.FC = () => {
     const [errorText, setErrorText] = useAtom(errorReportTextAtom);
     const [isSending, setIsSending] = useAtom(isErrorReportSendingAtom);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     // Focus textarea when dialog opens
     useEffect(() => {
@@ -70,8 +72,10 @@ const ErrorReportDialog: React.FC = () => {
         };
 
         if (isVisible) {
-            Zotero.getMainWindow().document.addEventListener('keydown', handleKeyDown);
-            return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyDown);
+            // Get the correct document context for this component
+            const doc = getDocumentFromElement(containerRef.current);
+            doc.addEventListener('keydown', handleKeyDown);
+            return () => doc.removeEventListener('keydown', handleKeyDown);
         }
     }, [isVisible, isSending]);
 
@@ -124,6 +128,7 @@ const ErrorReportDialog: React.FC = () => {
 
     return (
         <div
+            ref={containerRef}
             className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full pointer-events-auto"
             style={{
                 background: 'var(--material-mix-quarternary)',
