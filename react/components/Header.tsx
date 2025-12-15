@@ -1,7 +1,8 @@
 import React from 'react';
-import { CancelIcon, PlusSignIcon, SettingsIcon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
+import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
 import { runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -73,11 +74,19 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             {/* Database status and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                    <Tooltip content="Open in Separate Window" showArrow singleLine>
+                        <IconButton
+                            icon={Share05Icon}
+                            onClick={openBeaverWindow}
+                            className="scale-14"
+                            ariaLabel="Open in Separate Window"
+                        />
+                    </Tooltip>
+                    {/* {planFeatures.databaseSync && hasCompletedOnboarding &&
                         <Tooltip content="Sync with Beaver" showArrow singleLine>
                             <DatabaseStatusButton />
                         </Tooltip>
-                    }
+                    } */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
