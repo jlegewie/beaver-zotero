@@ -1,4 +1,4 @@
-/* eslint-disable no-undef */
+/* eslint-disable no-undef, no-restricted-globals */
 // Get Zotero using the modern ES module import (same as Zotero's note window)
 var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs");
 
