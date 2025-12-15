@@ -41,14 +41,12 @@
     --webapp-ring: #111729;
 }
 
-/* Separate window: sizing and constraints */
+/* Separate window: sizing and constraints.
+ * Set font-size on the root window element so rem units match the sidebar.
+ * XUL windows default to 16px; Zotero sidepanes use ~13px. */
 #beaver-window {
     min-width: 400px;
     min-height: 600px;
-}
-
-/* Match the sidebar's effective font size in the separate window container. */
-#beaver-pane-window {
     font-size: 13px;
 }
 
