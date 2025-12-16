@@ -391,12 +391,12 @@ const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
     'filtered_from_sync': 'Item type not supported',
     'pending_sync': 'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
     'file_unavailable_locally_and_on_server': 'File is unavailable',
-    'unknown': 'Item is not available in Beaver',
+    'unknown': `Unexpected error. Please read about <a href="${process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync'}" className="text-link">sync issues</a> in the documentation and contact support if the issue persists.`,
 };
 
 /**
  * Process missing Zotero data event and generate a warning message.
- * Determines the most common reason and creates a single warning.
+ * Determines reasons for all items and creates a warning with a list of reasons and counts.
  */
 async function handleMissingZoteroData(
     event: WSMissingZoteroDataEvent,
@@ -414,26 +414,35 @@ async function handleMissingZoteroData(
     );
     console.log('handleMissingZoteroData: reasons', reasons);
 
-    // Count reasons to find the most common one
+    // Count reasons
     const reasonCounts = new Map<MissingItemReason, number>();
     for (const { reason } of reasons) {
         reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
     }
 
-    // Find the most common reason
-    let primaryReason: MissingItemReason = 'unknown';
-    let maxCount = 0;
-    for (const [reason, count] of reasonCounts.entries()) {
-        if (count > maxCount) {
-            maxCount = count;
-            primaryReason = reason;
-        }
-    }
+    // Sort reasons by count (descending) for better readability
+    const sortedReasons = Array.from(reasonCounts.entries())
+        .sort((a, b) => b[1] - a[1]);
 
-    // Build the warning message
+    // Check if any reasons are sync-related
+    const syncRelatedReasons: MissingItemReason[] = ['library_not_synced', 'filtered_from_sync', 'pending_sync'];
+    const hasSyncRelatedReason = sortedReasons.some(([reason]) => syncRelatedReasons.includes(reason));
+
+    // Build the warning message with list of reasons and counts
     const itemCount = event.items.length;
     const itemWord = itemCount === 1 ? 'attachment' : 'attachments';
-    const message = `Unable to process ${itemCount} ${itemWord} due to the following reason:\n\n- ${MISSING_REASON_MESSAGES[primaryReason]}`;
+    const reasonLines = sortedReasons.map(([reason, count]) => {
+        const countText = `${count}x`;
+        return `-  ${MISSING_REASON_MESSAGES[reason]} (${countText})`;
+    });
+    
+    let message = `Unable to process ${itemCount} ${itemWord} due to the following reasons:\n\n${reasonLines.join('\n')}`;
+    
+    // Add sync documentation link if any sync-related reasons are present
+    if (hasSyncRelatedReason) {
+        const syncDocUrl = process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync';
+        message += `\n\n<a href="${syncDocUrl}" className="text-link">Learn more</a> about fixing sync issues.`;
+    }
 
     // Add warning
     addWarning({
@@ -442,7 +451,6 @@ async function handleMissingZoteroData(
         message,
         data: {
             items: event.items,
-            primary_reason: primaryReason,
             reason_counts: Object.fromEntries(reasonCounts),
         },
     });
