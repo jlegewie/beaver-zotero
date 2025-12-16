@@ -351,16 +351,16 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
             return 'in_trash';
         }
 
-        // Check if available locally or on server
-        const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
-        if (!availableLocallyOrOnServer) {
-            return 'file_unavailable_locally_and_on_server';
-        }
-
         // Check if passes sync filters
         const passesSyncFilters = await syncingItemFilterAsync(item);
         if (!passesSyncFilters) {
             return 'filtered_from_sync';
+        }
+
+        // Check if available locally or on server
+        const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
+        if (!availableLocallyOrOnServer) {
+            return 'file_unavailable_locally_and_on_server';
         }
 
         // Check if pending sync (added after last sync)
@@ -447,7 +447,7 @@ async function handleMissingZoteroData(
     }
     
     // Add sync documentation link if any sync-related reasons are present
-    const syncRelatedReasons: MissingItemReason[] = ['library_not_synced', 'filtered_from_sync', 'pending_sync'];
+    const syncRelatedReasons: MissingItemReason[] = ['pending_sync'];
     const hasSyncRelatedReason = sortedReasons.some(([reason]) => syncRelatedReasons.includes(reason));
     if (hasSyncRelatedReason) {
         const syncDocUrl = process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync';
@@ -879,7 +879,7 @@ export const sendWSMessageAtom = atom(
             ...(attachments.length > 0 ? { attachments } : {}),
             // TESTING ATTACHMENTS
             // attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
-            // attachments: [{library_id: 1, zotero_key: 'DYKH3FLH', type: 'source', include: 'fulltext'}], // TRASH ITEM
+            // attachments: [{library_id: 1, zotero_key: 'B3ISAGTY', type: 'source', include: 'fulltext'}], // TRASH ITEM
             // attachments: [{library_id: 3, zotero_key: 'FR35E8GK', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ITEM
             // attachments: [{library_id: 3, zotero_key: 'V4W5CH8S', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ATTACHMENT
             // attachments: [{library_id: 1, zotero_key: 'SUEAB6YR', type: 'source', include: 'fulltext'}], // ZOTERO NOTE
