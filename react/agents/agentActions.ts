@@ -510,7 +510,7 @@ export const undoAgentActionAtom = atom(
 
 /**
  * Find a pending create_item agent action by source_id
- * Used to sync imports from ExternalReferencesSearchResultView with agent actions
+ * Used to sync imports from ExternalSearchResultView with agent actions
  */
 export const getPendingCreateItemActionBySourceIdAtom = atom(
     (get) => (sourceId: string): CreateItemAgentAction | null => {

@@ -47,9 +47,9 @@ export interface FulltextSearchResultSummary {
 
 /**
  * Fulltext retrieval result summary.
- * Matches FulltextRetrievalResultSummary from backend.
+ * Matches ReadPagesToolResultSummary from backend.
  */
-export interface FulltextRetrievalResultSummary {
+export interface ReadPagesToolResultSummary {
     tool_name: string;
     result_count: number;
     chunks: ChunkReference[];
@@ -57,9 +57,9 @@ export interface FulltextRetrievalResultSummary {
 
 /**
  * Passage retrieval result summary.
- * Matches PassageRetrievalResultSummary from backend.
+ * Matches SearchInDocumentsToolResultSummary from backend.
  */
-export interface PassageRetrievalResultSummary {
+export interface SearchInDocumentsToolResultSummary {
     tool_name: string;
     result_count: number;
     chunks: ChunkReference[];
@@ -133,27 +133,18 @@ export interface ExternalReferenceResultSupplement {
 /** Valid tool names for chunk-based fulltext search results */
 const FULLTEXT_SEARCH_TOOL_NAMES: readonly string[] = [
     // New pydantic-ai agent tools
-    'search_library_fulltext',
-    'search_library_fulltext_keywords',
-
-    // Legacy tools (backwards compatibility)
-    'search_fulltext',
-    'search_fulltext_keywords',
-    'search_attachments_content',
-    'search_attachments_content_keyword',
-    'rag_search',
+    'fulltext_search',
+    'fulltext_search_keywords',
 ] as const;
 
 /** Valid tool names for chunk-based fulltext retrieval results */
-const FULLTEXT_RETRIEVAL_TOOL_NAMES: readonly string[] = [
-    'retrieve_fulltext',
-    'read_fulltext',
+const READ_PAGES_TOOL_NAMES: readonly string[] = [
+    'read_pages',
 ] as const;
 
 /** Valid tool names for chunk-based passage retrieval results */
-const PASSAGE_RETRIEVAL_TOOL_NAMES: readonly string[] = [
-    'retrieve_passages',
-    'read_passages',
+const SEARCH_IN_DOCUMENTS_TOOL_NAMES: readonly string[] = [
+    'search_in_documents',
 ] as const;
 
 /**
@@ -196,8 +187,8 @@ export function isFulltextSearchResult(
     // so we disambiguate by tool name.
     const toolNameIsSearch = FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName);
     const toolNameIsOtherKnownChunkTool =
-        FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName) ||
-        PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+        READ_PAGES_TOOL_NAMES.includes(toolName) ||
+        SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
     if (!toolNameIsSearch) {
         if (toolNameIsOtherKnownChunkTool) return false;
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
@@ -218,24 +209,24 @@ export function isFulltextSearchResult(
 
 /**
  * Type guard for fulltext retrieval results.
- * Checks if metadata.summary is FulltextRetrievalResultSummary.
+ * Checks if metadata.summary is ReadPagesToolResultSummary.
  */
-export function isFulltextRetrievalResult(
+export function isReadPagesResult(
     toolName: string,
     _content: unknown,
     metadata?: Record<string, unknown>
-): metadata is { summary: FulltextRetrievalResultSummary } {
+): metadata is { summary: ReadPagesToolResultSummary } {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
 
-    const toolNameIsRetrieval = FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    const toolNameIsRetrieval = READ_PAGES_TOOL_NAMES.includes(toolName);
     const toolNameIsOtherKnownChunkTool =
         FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
-        PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+        SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
     if (!toolNameIsRetrieval) {
         if (toolNameIsOtherKnownChunkTool) return false;
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(summaryToolName)) return false;
+        if (!summaryToolName || !READ_PAGES_TOOL_NAMES.includes(summaryToolName)) return false;
     }
     
     return (
@@ -252,24 +243,24 @@ export function isFulltextRetrievalResult(
 
 /**
  * Type guard for passage retrieval results.
- * Checks if metadata.summary is PassageRetrievalResultSummary.
+ * Checks if metadata.summary is SearchInDocumentsToolResultSummary.
  */
-export function isPassageRetrievalResult(
+export function isSearchInDocumentsResult(
     toolName: string,
     _content: unknown,
     metadata?: Record<string, unknown>
-): metadata is { summary: PassageRetrievalResultSummary } {
+): metadata is { summary: SearchInDocumentsToolResultSummary } {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
 
-    const toolNameIsPassageRetrieval = PASSAGE_RETRIEVAL_TOOL_NAMES.includes(toolName);
+    const toolNameIsPassageRetrieval = SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
     const toolNameIsOtherKnownChunkTool =
         FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
-        FULLTEXT_RETRIEVAL_TOOL_NAMES.includes(toolName);
+        READ_PAGES_TOOL_NAMES.includes(toolName);
     if (!toolNameIsPassageRetrieval) {
         if (toolNameIsOtherKnownChunkTool) return false;
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !PASSAGE_RETRIEVAL_TOOL_NAMES.includes(summaryToolName)) return false;
+        if (!summaryToolName || !SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(summaryToolName)) return false;
     }
     
     return (
@@ -384,12 +375,12 @@ export interface FulltextRetrievalViewData {
  * Extract attachment reference with lowest page from metadata.summary.
  * @returns FulltextRetrievalViewData or null if summary is not available
  */
-export function extractFulltextRetrievalData(
+export function extractReadPagesData(
     _content: unknown,
     metadata?: Record<string, unknown>
 ): FulltextRetrievalViewData | null {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as FulltextRetrievalResultSummary;
+    const summary = metadata.summary as ReadPagesToolResultSummary;
     
     if (!Array.isArray(summary.chunks) || summary.chunks.length === 0) return null;
 
@@ -416,12 +407,12 @@ export interface PassageRetrievalViewData {
  * Extract chunk-level data from metadata.summary for passage retrieval.
  * @returns PassageRetrievalViewData or null if summary is not available
  */
-export function extractPassageRetrievalData(
+export function extractSearchInDocumentsData(
     _content: unknown,
     metadata?: Record<string, unknown>
 ): PassageRetrievalViewData | null {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as PassageRetrievalResultSummary;
+    const summary = metadata.summary as SearchInDocumentsToolResultSummary;
     
     if (!Array.isArray(summary.chunks)) return null;
 
@@ -515,14 +506,14 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     }
 
     // Fulltext retrieval results (single attachment)
-    if (isFulltextRetrievalResult(tool_name, content, metadata)) {
-        const data = extractFulltextRetrievalData(content, metadata);
+    if (isReadPagesResult(tool_name, content, metadata)) {
+        const data = extractReadPagesData(content, metadata);
         return data?.attachment ? [data.attachment] : [];
     }
 
     // Passage retrieval results (chunks)
-    if (isPassageRetrievalResult(tool_name, content, metadata)) {
-        const data = extractPassageRetrievalData(content, metadata);
+    if (isSearchInDocumentsResult(tool_name, content, metadata)) {
+        const data = extractSearchInDocumentsData(content, metadata);
         return data?.chunks ?? [];
     }
 

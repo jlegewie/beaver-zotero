@@ -27,27 +27,18 @@ type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
  */
 const TOOL_ICONS: Record<string, IconComponent> = {
     // Search tools - library search
-    search_by_metadata: SearchIcon,
-    search_by_topic: SearchIcon,
-    search_library_fulltext: SearchIcon,
-    search_library_fulltext_keywords: SearchIcon,
-    search_references_by_topic: SearchIcon,
-    search_references_by_metadata: SearchIcon,
-    search_fulltext: SearchIcon,
-    search_fulltext_keywords: SearchIcon,
-    search_attachments_content: SearchIcon,
-    search_attachments_content_keyword: SearchIcon,
-    rag_search: SearchIcon,
+    item_search: SearchIcon,
+    item_search_by_topic: SearchIcon,
+    item_search_by_metadata: SearchIcon,
+    fulltext_search: SearchIcon,
+    fulltext_search_keywords: SearchIcon,
 
     // Reading tools
-    retrieve_fulltext: TextAlignLeftIcon,
-    retrieve_passages: TextAlignLeftIcon,
-    read_passages: TextAlignLeftIcon,
-    read_fulltext: TextAlignLeftIcon,
+    search_in_documents: TextAlignLeftIcon,
+    read_pages: TextAlignLeftIcon,
     view_page_images: ViewIcon,
 
     // External search tools
-    search_external_references: GlobalSearchIcon,
     external_search: GlobalSearchIcon,
 
     // Create item tool

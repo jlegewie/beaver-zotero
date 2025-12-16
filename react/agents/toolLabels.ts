@@ -33,24 +33,16 @@ function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
  * Maps tool_name to a human-readable base label.
  */
 const TOOL_BASE_LABELS: Record<string, string> = {
-    // New pydantic-ai agent tools
-    search_by_metadata: 'Metadata search',
-    search_by_topic: 'Item search',
-    search_library_fulltext: 'Fulltext search',
-    search_library_fulltext_keywords: 'Keyword search',
-    retrieve_fulltext: 'Reading',
-    retrieve_passages: 'Reading',
+    // Search tools
+    item_search: 'Item search',
+    item_search_by_topic: 'Item search',
+    item_search_by_metadata: 'Item search',
+    fulltext_search: 'Fulltext search',
+    fulltext_search_keywords: 'Keyword search',
 
-    // Legacy tools (for backwards compatibility)
-    search_references_by_topic: 'Item search',
-    search_references_by_metadata: 'Metadata search',
-    search_fulltext: 'Fulltext search',
-    search_fulltext_keywords: 'Keyword search',
-    read_passages: 'Reading',
-    read_fulltext: 'Reading',
-    search_attachments_content: 'Document search',
-    search_attachments_content_keyword: 'Document search',
-    view_page_images: 'View page images',
+    // Reading tools
+    read_pages: 'Reading',
+    search_in_documents: 'Document search',
 
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
@@ -60,9 +52,6 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',
     external_search: 'Web search',
-
-    // Obsolete
-    rag_search: 'Fulltext search',
 };
 
 /**
@@ -133,8 +122,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
     switch (toolName) {
         // === Fulltext search tools ===
-        case 'search_library_fulltext':
-        case 'search_fulltext': {
+        case 'fulltext_search': {
             const query = args.query_semantic as string | undefined;
             if (query) {
                 return `${baseLabel}: "${truncate(query, 40)}"`;
@@ -142,8 +130,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
-        case 'search_library_fulltext_keywords':
-        case 'search_fulltext_keywords': {
+        case 'fulltext_search_keywords': {
             const queries = args.query_primary as string[] | undefined;
             if (queries && queries.length > 0) {
                 return `${baseLabel}: "${truncate(queries[0], 40)}"`;
@@ -152,8 +139,8 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         }
 
         // === Item search tools ===
-        case 'search_by_topic':
-        case 'search_references_by_topic': {
+        case 'item_search':
+        case 'item_search_by_topic': {
             const topic = args.topic_query as string | undefined;
             if (topic) {
                 return `${baseLabel}: "${truncate(topic, 40)}"`;
@@ -161,8 +148,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
-        case 'search_by_metadata':
-        case 'search_references_by_metadata': {
+        case 'item_search_by_metadata': {
             const parts: string[] = [];
             if (args.author_query) parts.push(args.author_query as string);
             if (args.title_query) parts.push(args.title_query as string);
@@ -177,8 +163,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         }
 
         // === Reading tools ===
-        case 'retrieve_passages':
-        case 'read_passages': {
+        case 'search_in_documents': {
             const description = args.description as string | undefined;
             const query = args.query as string | undefined;
             const label = description || (query ? truncate(query, 50) : null);
@@ -191,8 +176,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         case 'read_tool_result':
             return 'Reading previous context';
 
-        case 'retrieve_fulltext':
-        case 'read_fulltext': {
+        case 'read_pages': {
             const attachmentId = args.attachment_id as string | undefined;
             const startPage = args.start_page as number | undefined;
             const endPage = args.end_page as number | undefined;
@@ -226,17 +210,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
-        // === Document content search ===
-        case 'search_attachments_content': {
-            const query = args.search_query as string | undefined;
-            if (query) {
-                return `${baseLabel}: "${truncate(query, 40)}"`;
-            }
-            return baseLabel;
-        }
-
         // === External search tools ===
-        case 'search_external_references':
         case 'external_search': {
             const searchLabel = args.search_label as string | undefined;
             const query = args.query as string | undefined;

@@ -2,15 +2,15 @@ import React from 'react';
 import { ChunkReference } from '../../agents/toolResultTypes';
 import ZoteroItemsList from '../ui/ZoteroItemsList';
 
-interface FulltextRetrievalResultViewProps {
+interface ReadPagesResultViewProps {
     attachment: ChunkReference;
 }
 
 /**
- * Renders the result of a fulltext retrieval tool (read_fulltext, retrieve_fulltext).
+ * Renders the result of a fulltext retrieval tool (read_pages).
  * Shows the attachment that was retrieved with optional page info.
  */
-export const FulltextRetrievalResultView: React.FC<FulltextRetrievalResultViewProps> = ({ attachment }) => {
+export const ReadPagesResultView: React.FC<ReadPagesResultViewProps> = ({ attachment }) => {
     return (
         <div className="display-flex flex-col">
             <ZoteroItemsList messageAttachments={[attachment]} />
@@ -18,5 +18,5 @@ export const FulltextRetrievalResultView: React.FC<FulltextRetrievalResultViewPr
     );
 };
 
-export default FulltextRetrievalResultView;
+export default ReadPagesResultView;
 

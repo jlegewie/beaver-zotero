@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ExternalReference } from '../../types/externalReferences';
 import ExternalReferenceListItem from '../externalReferences/ExternalReferenceListItem';
 
-interface ExternalReferencesSearchResultViewProps {
+interface ExternalSearchResultViewProps {
     references: ExternalReference[];
 }
 
@@ -10,7 +10,7 @@ interface ExternalReferencesSearchResultViewProps {
  * Renders the result of an external search tool (external_search, search_external_references).
  * Uses ExternalReferenceListItem to display the references.
  */
-export const ExternalReferencesSearchResultView: React.FC<ExternalReferencesSearchResultViewProps> = ({ references }) => {
+export const ExternalSearchResultView: React.FC<ExternalSearchResultViewProps> = ({ references }) => {
     const [hoveredItemIndex, setHoveredItemIndex] = useState<number | null>(null);
 
     if (references.length === 0) {
@@ -36,5 +36,5 @@ export const ExternalReferencesSearchResultView: React.FC<ExternalReferencesSear
     );
 };
 
-export default ExternalReferencesSearchResultView;
+export default ExternalSearchResultView;
 

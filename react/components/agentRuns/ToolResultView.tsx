@@ -5,17 +5,17 @@ import {
     extractItemSearchData,
     isFulltextSearchResult,
     extractFulltextSearchData,
-    isFulltextRetrievalResult,
-    extractFulltextRetrievalData,
-    isPassageRetrievalResult,
-    extractPassageRetrievalData,
+    isReadPagesResult,
+    extractReadPagesData,
+    isSearchInDocumentsResult,
+    extractSearchInDocumentsData,
     isExternalSearchResult,
     extractExternalSearchData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
-import { FulltextRetrievalResultView } from './FulltextRetrievalResultView';
-import { ExternalReferencesSearchResultView } from './ExternalReferencesSearchResultView';
+import { ReadPagesResultView } from './ReadPagesResultView';
+import { ExternalSearchResultView } from './ExternalSearchResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -51,17 +51,17 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Fulltext retrieval results (read_fulltext, retrieve_fulltext)
-    if (isFulltextRetrievalResult(toolName, content, metadata)) {
-        const data = extractFulltextRetrievalData(content, metadata);
+    // Fulltext retrieval results (read_pages)
+    if (isReadPagesResult(toolName, content, metadata)) {
+        const data = extractReadPagesData(content, metadata);
         if (data) {
-            return <FulltextRetrievalResultView attachment={data.attachment} />;
+            return <ReadPagesResultView attachment={data.attachment} />;
         }
     }
 
-    // Passage retrieval results (read_passages, retrieve_passages)
-    if (isPassageRetrievalResult(toolName, content, metadata)) {
-        const data = extractPassageRetrievalData(content, metadata);
+    // Passage retrieval results (search_in_documents)
+    if (isSearchInDocumentsResult(toolName, content, metadata)) {
+        const data = extractSearchInDocumentsData(content, metadata);
         if (data) {
             return <FulltextSearchResultView chunks={data.chunks} />;
         }
@@ -71,7 +71,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     if (isExternalSearchResult(toolName, content, metadata)) {
         const data = extractExternalSearchData(content, metadata);
         if (data) {
-            return <ExternalReferencesSearchResultView references={data.references} />;
+            return <ExternalSearchResultView references={data.references} />;
         }
     }
 
