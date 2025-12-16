@@ -1,6 +1,21 @@
 import { logger } from "./logger";
 
 /**
+ * Storage mode for a library - either Zotero File Storage or WebDAV
+ */
+export type StorageMode = 'zfs' | 'webdav';
+
+/**
+ * Gets the storage mode (ZFS or WebDAV) for a library.
+ * @param libraryID The library ID
+ * @returns The storage mode ('zfs' or 'webdav')
+ */
+export function getStorageModeForLibrary(libraryID: number): StorageMode {
+    const mode = Zotero.Sync.Storage.Local.getModeForLibrary(libraryID);
+    return mode === 'webdav' ? 'webdav' : 'zfs';
+}
+
+/**
  * Checks if an attachment is on the server.
  * @param item Zotero item
  * @returns true if the attachment is on the server
