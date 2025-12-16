@@ -175,7 +175,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         
-        // (c) Use comprehensive syncing filter
+        // (c) Check if file exists locally or on server
         if (!(await item.fileExists()) && !isAttachmentOnServer(item)) {
             return {valid: false, error: "File unavailable locally and on server"};
         }
