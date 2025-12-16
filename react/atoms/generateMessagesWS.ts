@@ -424,21 +424,31 @@ async function handleMissingZoteroData(
     const sortedReasons = Array.from(reasonCounts.entries())
         .sort((a, b) => b[1] - a[1]);
 
-    // Check if any reasons are sync-related
-    const syncRelatedReasons: MissingItemReason[] = ['library_not_synced', 'filtered_from_sync', 'pending_sync'];
-    const hasSyncRelatedReason = sortedReasons.some(([reason]) => syncRelatedReasons.includes(reason));
-
-    // Build the warning message with list of reasons and counts
+    // Determine the primary reason to show
+    // Prioritize 'unknown' as it's most severe, otherwise show the most common reason
+    const unknownEntry = sortedReasons.find(([reason]) => reason === 'unknown');
+    const [primaryReason, primaryCount] = unknownEntry || sortedReasons[0];
+    
+    // Build user-friendly message
     const itemCount = event.items.length;
     const itemWord = itemCount === 1 ? 'attachment' : 'attachments';
-    const reasonLines = sortedReasons.map(([reason, count]) => {
-        const countText = `${count}x`;
-        return `-  ${MISSING_REASON_MESSAGES[reason]} (${countText})`;
-    });
+    const otherCount = itemCount - primaryCount;
     
-    let message = `Unable to process ${itemCount} ${itemWord} due to the following reasons:\n\n${reasonLines.join('\n')}`;
+    let message = `Unable to process ${itemCount} ${itemWord}: ${MISSING_REASON_MESSAGES[primaryReason]}`;
+    
+    // Add count if not all items have the same reason
+    if (primaryCount < itemCount) {
+        message += ` (${primaryCount}/${itemCount})`;
+    }
+    
+    // Mention other reasons exist without listing them all
+    if (otherCount > 0) {
+        message += `\n\n${otherCount} other ${itemWord} ${otherCount === 1 ? 'has a' : 'have'} different reason.`;
+    }
     
     // Add sync documentation link if any sync-related reasons are present
+    const syncRelatedReasons: MissingItemReason[] = ['library_not_synced', 'filtered_from_sync', 'pending_sync'];
+    const hasSyncRelatedReason = sortedReasons.some(([reason]) => syncRelatedReasons.includes(reason));
     if (hasSyncRelatedReason) {
         const syncDocUrl = process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync';
         message += `\n\n<a href="${syncDocUrl}" className="text-link">Learn more</a> about fixing sync issues.`;
@@ -866,9 +876,9 @@ export const sendWSMessageAtom = atom(
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
-            // ...(attachments.length > 0 ? { attachments } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
             // TESTING ATTACHMENTS
-            attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
+            // attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
             // attachments: [{library_id: 1, zotero_key: 'DYKH3FLH', type: 'source', include: 'fulltext'}], // TRASH ITEM
             // attachments: [{library_id: 3, zotero_key: 'FR35E8GK', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ITEM
             // attachments: [{library_id: 3, zotero_key: 'V4W5CH8S', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ATTACHMENT
