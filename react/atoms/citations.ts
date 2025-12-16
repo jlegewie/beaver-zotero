@@ -109,7 +109,10 @@ export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 function getInvalidCitationFallbackKey(rawTag: string): string | null {
     // Match att_id, attachment_id, item_id, or external_id attribute values
     const match = rawTag.match(/(?:att_id|attachment_id|item_id|external_id)\s*=\s*"([^"]*)"/);
-    return match ? `invalid:${match[1]}` : null;
+    if (!match) return null;
+    // Normalize by stripping user-content- prefix to match lookup in ZoteroCitation
+    const normalizedId = match[1].replace('user-content-', '');
+    return `invalid:${normalizedId}`;
 }
 
 /**
