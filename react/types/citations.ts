@@ -94,6 +94,8 @@ export interface CitationMetadata {
     run_id: string;
     /** The original citation tag from the LLM response. */
     raw_tag?: string;
+    /** True when the citation could not be resolved (attachment/item not found, invalid key format). */
+    invalid?: boolean;
 }
 
 /**

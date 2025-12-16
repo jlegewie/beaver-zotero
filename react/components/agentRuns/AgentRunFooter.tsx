@@ -52,6 +52,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const unique: CitationData[] = [];
         
         for (const citation of runCitations) {
+            if (citation.invalid) continue;
             const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);

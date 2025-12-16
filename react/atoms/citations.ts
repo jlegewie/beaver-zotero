@@ -100,6 +100,19 @@ export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
 export const citationDataMapAtom = atom<Record<string, CitationData>>({});
 
 /**
+ * Extract the identifier value from a raw citation tag for fallback lookup.
+ * This is used for invalid citations where library_id/zotero_key couldn't be parsed.
+ * 
+ * @param rawTag The original citation tag, e.g., '<citation att_id="garbage"/>'
+ * @returns Fallback key like "invalid:garbage" or null if no ID found
+ */
+function getInvalidCitationFallbackKey(rawTag: string): string | null {
+    // Match att_id, attachment_id, item_id, or external_id attribute values
+    const match = rawTag.match(/(?:att_id|attachment_id|item_id|external_id)\s*=\s*"([^"]*)"/);
+    return match ? `invalid:${match[1]}` : null;
+}
+
+/**
  * Citation data mapped by citation key for lookup.
  * 
  * This is the primary lookup mechanism for ZoteroCitation components:
@@ -110,6 +123,7 @@ export const citationDataMapAtom = atom<Record<string, CitationData>>({});
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}"
  * - External citations: "external:{external_source_id}"
+ * - Invalid citations (fallback): "invalid:{raw_id_value}"
  */
 export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
     const dataMap = get(citationDataMapAtom);
@@ -123,6 +137,15 @@ export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>(
         });
         if (key) {
             byKey[key] = citation;
+        }
+        
+        // For invalid citations without a valid key, also store under fallback key
+        // This allows ZoteroCitation to find them even when identifiers couldn't be parsed
+        if (citation.invalid && !key && citation.raw_tag) {
+            const fallbackKey = getInvalidCitationFallbackKey(citation.raw_tag);
+            if (fallbackKey) {
+                byKey[fallbackKey] = citation;
+            }
         }
     }
     
@@ -179,6 +202,22 @@ export const updateCitationDataAtom = atom(
             }
 
             logger(`updateCitationDataAtom: Computing citation ${citation.author_year} (${citation.citation_id})`);
+
+            // Handle invalid citations - create minimal entry without Zotero lookup
+            if (citation.invalid) {
+                newCitationDataMap[citation.citation_id] = {
+                    ...citation,
+                    type: "item",
+                    parentKey: null,
+                    icon: null,
+                    name: citation.author_year || null,
+                    citation: citation.author_year || null,
+                    formatted_citation: null,
+                    url: null,
+                    numericCitation
+                };
+                continue;
+            }
 
             // Handle external citations differently
             if (isExternalCitation(citation)) {

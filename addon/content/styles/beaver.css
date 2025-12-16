@@ -710,6 +710,16 @@
     color: var(--fill-secondary);
 }
 
+/* Invalid citation styling - similar to streaming but with cursor help to indicate tooltip */
+[id^="beaver-pane-"] .markdown span.zotero-citation.invalid {
+    cursor: help;
+    opacity: 0.4;
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.invalid:hover {
+    color: var(--fill-secondary);
+}
+
 /* External citation styling - slightly different color for distinction */
 [id^="beaver-pane-"] .markdown span.zotero-citation.external-citation {
     background: var(--tag-blue-quinary);

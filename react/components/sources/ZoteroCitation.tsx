@@ -29,9 +29,10 @@ export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
  * States:
  * - 'streaming': Tag parsed, waiting for metadata (shows "?")
  * - 'ready': Metadata available, fully rendered
+ * - 'invalid': Citation could not be resolved (shows "?" with error tooltip)
  * - 'error': No identifier found (returns null)
  */
-type CitationDisplayState = 'streaming' | 'ready' | 'error';
+type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
 
 /**
  * Props for ZoteroCitation component.
@@ -93,9 +94,19 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const citationKey = citationKeyProp || '';
         
         // Look up citation metadata via citation_key
-        const metadata = citationKey 
+        let metadata = citationKey 
             ? citationDataByCitationKey[citationKey] 
             : undefined;
+        
+        // Fallback lookup for invalid citations with unparseable identifiers
+        // These are stored under "invalid:{raw_id_value}" in citationDataByCitationKeyAtom
+        if (!metadata) {
+            const rawIdValue = (att_id || item_id || external_id || '').replace('user-content-', '');
+            if (rawIdValue) {
+                const fallbackKey = `invalid:${rawIdValue}`;
+                metadata = citationDataByCitationKey[fallbackKey];
+            }
+        }
         
         // Debug logging for citation matching (level 5 = verbose/trace)
         if (citationKey && !metadata) {
@@ -120,6 +131,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             displayState = 'error';
         } else if (!metadata) {
             displayState = 'streaming';
+        } else if (metadata.invalid) {
+            displayState = 'invalid';
         } else {
             displayState = 'ready';
         }
@@ -157,6 +170,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // Use display state for rendering decisions
     const isStreaming = displayState === 'streaming';
+    const isInvalid = displayState === 'invalid';
 
     // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
     const numericMarker = useCitationMarker(citationKey);
@@ -229,6 +243,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
         if (isStreaming) {
             logger('ZoteroCitation: Citation metadata not available yet - streaming');
+            return;
+        }
+        
+        if (isInvalid) {
+            logger('ZoteroCitation: Citation is invalid - cannot navigate');
             return;
         }
         
@@ -355,8 +374,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Format for display
     let displayText = '';
     if (authorYearFormat) {
-        if (isStreaming) {
-            // We don't know the author/year string yet. Render a subtle placeholder.
+        if (isStreaming || isInvalid) {
+            // We don't know the author/year string yet, or citation is invalid. Render a subtle placeholder.
             displayText = '?';
         } else {
             displayText = consecutive
@@ -365,8 +384,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
-        // If key is missing (invalid/malformed citation), show placeholder.
-        displayText = citationKey ? numericMarker : '?';
+        // If key is missing (invalid/malformed citation) or invalid, show placeholder.
+        displayText = (citationKey && !isInvalid) ? numericMarker : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
@@ -426,11 +445,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         : "zotero-citation";
     const citationClass = isStreaming
         ? `${citationClassBase} streaming`
+        : isInvalid
+        ? `${citationClassBase} invalid`
         : citationClassBase;
 
     const citationElement = (
         <span 
-            onClick={isStreaming ? undefined : handleClick}
+            onClick={(isStreaming || isInvalid) ? undefined : handleClick}
             className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
@@ -464,14 +485,24 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
     // Return the citation with tooltip and click handler
     // - Streaming state: no tooltip (metadata not available yet)
+    // - Invalid state: simple error tooltip
     // - Ready state: show tooltip with preview
     return (
         <>
             {exportRendering ?
                 citationElement
             :
-                (isStreaming ?
+                isStreaming ?
                     citationElement
+                :
+                isInvalid ?
+                    <Tooltip
+                        content="Citation could not be resolved"
+                        width={TOOLTIP_WIDTH}
+                        singleLine
+                    >
+                        {citationElement}
+                    </Tooltip>
                 :
                     <Tooltip
                         content={previewText}
@@ -481,7 +512,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     >
                         {citationElement}
                     </Tooltip>
-                )
             }
         </>
     );

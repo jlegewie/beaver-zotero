@@ -37,10 +37,13 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         return mapping ?? undefined; // Convert null to undefined
     };
     
+    // Filter out invalid citations
+    const validCitations = citations.filter(citation => !citation.invalid);
+
     return (
         <div className="mt-2 rounded-md border border-popup">
             <div className="space-y-3">
-                {citations.map((citation, index) => {
+                {validCitations.map((citation, index) => {
                     const isExternal = isExternalCitation(citation);
                     const externalRef = getExternalReference(citation);
                     const mappedZoteroItem = getMappedZoteroItem(citation);
