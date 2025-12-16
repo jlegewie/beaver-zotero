@@ -203,6 +203,8 @@ export interface ZoteroItemStatus {
     is_synced_library: boolean;
     /** Whether the item is in Zotero trash (filtered out of sync) */
     is_in_trash: boolean;
+    /** Whether the item is available locally or on server */
+    available_locally_or_on_server: boolean;
     /** Whether item passes all sync filters (library synced, not in trash, is PDF, etc.) */
     passes_sync_filters: boolean;
     /**

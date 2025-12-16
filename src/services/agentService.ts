@@ -25,6 +25,7 @@ import { safeIsInTrash } from '../utils/zoteroUtils';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
 import { store } from '../../react/store';
+import { isAttachmentOnServer } from '../utils/webAPI';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -988,9 +989,8 @@ export class AgentService {
             const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
             const trashState = safeIsInTrash(item);
             const isInTrash = trashState === true;
-            
-            // Compute passes_sync_filters using the async filter
-            const passesSyncFilters = await syncingItemFilterAsync(item);
+            const availableLocallyOrOnServer = (await item.fileExists()) || isAttachmentOnServer(item);
+            const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
             
             // Compute is_pending_sync only if we have a userId
             let isPendingSync: boolean | null = null;
@@ -1008,6 +1008,7 @@ export class AgentService {
                 is_synced_library: isSyncedLibrary,
                 is_in_trash: isInTrash,
                 passes_sync_filters: passesSyncFilters,
+                available_locally_or_on_server: availableLocallyOrOnServer,
                 is_pending_sync: isPendingSync
             };
         };
