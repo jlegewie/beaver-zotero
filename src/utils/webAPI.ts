@@ -1,5 +1,11 @@
 import { logger } from "./logger";
 
+function redactUrlCredentials(message: string): string {
+    if (!message) return message;
+    // Redact user:pass@ in URLs (e.g. WebDAV URIs can embed credentials)
+    return message.replace(/(https?:\/\/)([^/\s@]+)@/g, "$1***@");
+}
+
 /**
  * Storage mode for a library - either Zotero File Storage or WebDAV
  */
@@ -307,6 +313,8 @@ async function extractFileFromZip(zipData: Uint8Array, item: Zotero.Item): Promi
  * Handles download errors with consistent error messages
  */
 function handleDownloadError(e: any, source: 'ZFS' | 'WebDAV'): never {
+    const safeMessage = redactUrlCredentials(String(e?.message || ''));
+
     // Handle specific Zotero exception types
     if (e instanceof Zotero.HTTP.BrowserOfflineException) {
         logger(`download: ${Zotero.appName} is offline`);
@@ -314,19 +322,19 @@ function handleDownloadError(e: any, source: 'ZFS' | 'WebDAV'): never {
     }
     
     if (e instanceof Zotero.HTTP.TimeoutException) {
-        logger(`download: Download timeout: ${e.message}`);
-        throw new Error(`Download timeout: ${e.message}`);
+        logger(`download: Download timeout: ${safeMessage}`);
+        throw new Error(`Download timeout: ${safeMessage}`);
     }
     
     if (e instanceof Zotero.HTTP.SecurityException) {
-        logger(`download: Security error downloading from ${source}: ${e.message}`);
-        throw new Error(`Security error downloading from ${source}: ${e.message}`);
+        logger(`download: Security error downloading from ${source}: ${safeMessage}`);
+        throw new Error(`Security error downloading from ${source}: ${safeMessage}`);
     }
 
     // Check if it's a Zotero HTTP exception with status info
     if (e.xmlhttp) {
         const status = e.xmlhttp.status;
-        const statusText = e.xmlhttp.statusText;
+        const statusText = redactUrlCredentials(String(e.xmlhttp.statusText || ''));
         
         if (status === 401 || status === 403) {
             const message = source === 'WebDAV' 
@@ -343,22 +351,22 @@ function handleDownloadError(e: any, source: 'ZFS' | 'WebDAV'): never {
         } else if (status >= 500) {
             throw new Error(`${source} server error (${status}): ${statusText || 'Server error after retries'}`);
         } else {
-            throw new Error(`${source} error (${status}): ${statusText || e.message || 'Unknown error'}`);
+            throw new Error(`${source} error (${status}): ${statusText || safeMessage || 'Unknown error'}`);
         }
     }
     
     // Check for network/connection errors
-    if (e.message?.includes('NS_ERROR') || e.message?.includes('network')) {
-        throw new Error(`Network error downloading from ${source}: ${e.message}`);
+    if (safeMessage.includes('NS_ERROR') || safeMessage.includes('network')) {
+        throw new Error(`Network error downloading from ${source}: ${safeMessage}`);
     }
     
     // Re-throw with original message if it's already descriptive
-    if (e.message) {
-        throw new Error(`Failed to download from ${source}: ${e.message}`);
+    if (safeMessage) {
+        throw new Error(`Failed to download from ${source}: ${safeMessage}`);
     }
     
     // Fallback
-    throw new Error(`Failed to download from ${source}: ${String(e)}`);
+    throw new Error(`Failed to download from ${source}: ${redactUrlCredentials(String(e))}`);
 }
 
 interface SignedDownloadInfo {
