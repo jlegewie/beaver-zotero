@@ -16,18 +16,15 @@ export function getStorageModeForLibrary(libraryID: number): StorageMode {
 }
 
 /**
- * Checks if an attachment is on the server.
+ * Checks if an attachment is on the server
  * @param item Zotero item
  * @returns true if the attachment is on the server
  */
 export function isAttachmentOnServer(item: Zotero.Item): boolean {
-	if (!item?.isStoredFileAttachment()) return false;
+	if (!item || !item.isStoredFileAttachment()) return false;
 	
-	const state = item.attachmentSyncState;
-	
-	// File is on server if it's in any state other than to_upload
-	// to_upload means either: (1) never uploaded, or (2) local changes pending
-	return state !== Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
+	// File is on server if it has a server hash
+	return item.attachmentSyncedHash !== null;
 }
 
 /**
