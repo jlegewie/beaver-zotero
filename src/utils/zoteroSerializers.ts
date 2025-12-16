@@ -295,8 +295,11 @@ export async function serializeAttachment(
     const skipFileHash = options?.skipFileHash || false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) {
-        if(item.isAttachment()) skippedItemsManager.upsert(item, 'not available locally or on server');
+    if (!item.isAttachment() || !((await syncingItemFilterAsync(item)) || skipSyncingFilter)) {
+        if(item.isAttachment()) {
+            logger(`serializeAttachment: Attachment ${item.key} not available locally or on server. Skipping.`, 1);
+            skippedItemsManager.upsert(item, 'not available locally or on server');
+        }
         return null;
     }
     
@@ -315,7 +318,7 @@ export async function serializeAttachment(
 
         if (!file_hash) {
             logger(`Beaver Sync: Attachment ${item.key} has no file hash available. Skipping.`, 1);
-            skippedItemsManager.upsert(item, 'no file hash available');
+            skippedItemsManager.upsert(item, 'no file hash available locally or on server');
             return null;
         }
     }
