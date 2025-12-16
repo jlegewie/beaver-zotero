@@ -125,7 +125,7 @@ export const useUpgradeHandler = () => {
             logger(`useUpgradeHandler: Running retry uploads for WebDAV primary library after upgrade to ${version}.`);
 
             try {
-                await retryUploads();
+                await retryUploads(true);
                 logger("useUpgradeHandler: Retry uploads completed for WebDAV primary library.");
             } catch (error) {
                 logger(`useUpgradeHandler: Could not run retry uploads for WebDAV on upgrade: ${error}`, 1);
