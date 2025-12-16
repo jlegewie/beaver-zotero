@@ -14,11 +14,17 @@ import { SubscriptionStatus, ChargeType, ProcessingMode } from '../../react/type
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { AgentRun, BeaverAgentPrompt } from '../../react/agents/types';
 import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
-import { AttachmentDataWithMimeType, ItemData, ZoteroItemReference } from '../../react/types/zotero';
+import { ZoteroItemReference, ZoteroItemStatus, ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
 import { CustomChatModel } from '../../react/types/settings';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
 import { ApiService } from './apiService';
 import { findExistingReference, FindReferenceData } from '../../react/utils/findExistingReference';
+import { wasItemAddedBeforeLastSync } from '../../react/utils/sourceUtils';
+import { syncingItemFilterAsync } from '../utils/sync';
+import { safeIsInTrash } from '../utils/zoteroUtils';
+import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
+import { userIdAtom } from '../../react/atoms/auth';
+import { store } from '../../react/store';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -228,10 +234,10 @@ export interface WSZoteroDataRequest extends WSBaseEvent {
 export interface WSZoteroDataResponse {
     type: 'zotero_data';
     request_id: string;
-    /** Item metadata for references that are regular items */
-    items: ItemData[];
-    /** Attachment metadata for references that are attachments */
-    attachments: AttachmentDataWithMimeType[];
+    /** Item metadata with status for successfully retrieved items */
+    items: ItemDataWithStatus[];
+    /** Attachment metadata with status for successfully retrieved attachments */
+    attachments: AttachmentDataWithStatus[];
     /** Optional errors for references that couldn't be retrieved */
     errors?: WSDataError[];
 }
@@ -873,6 +879,11 @@ export class AgentService {
     private async handleZoteroDataRequest(request: WSZoteroDataRequest): Promise<void> {
         const errors: WSDataError[] = [];
 
+        // Get sync configuration from store
+        const syncLibraryIds = store.get(syncLibraryIdsAtom);
+        const syncWithZotero = store.get(syncWithZoteroAtom);
+        const userId = store.get(userIdAtom);
+
         // Track keys to avoid duplicates when including parents/attachments
         const itemKeys = new Set<string>();
         const attachmentKeys = new Set<string>();
@@ -946,22 +957,63 @@ export class AgentService {
             }
         }
 
-        // Phase 2: Serialize all items and attachments in parallel
+        // Phase 2: Load all data and parent data for trash status checks
+        const allItems = [...itemsToSerialize, ...attachmentsToSerialize];
+        if (allItems.length > 0) {
+            // Load all item data in bulk
+            await Zotero.Items.loadDataTypes(allItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
+            
+            // Load parent items for attachments (needed for isInTrash() to check parent trash status)
+            const parentIds = [...new Set(
+                allItems
+                    .filter(item => item.parentID)
+                    .map(item => item.parentID as number)
+            )];
+            if (parentIds.length > 0) {
+                const parentItems = await Zotero.Items.getAsync(parentIds);
+                if (parentItems.length > 0) {
+                    await Zotero.Items.loadDataTypes(parentItems, ["primaryData"]);
+                }
+            }
+        }
+
+        // Helper function to compute status for an item
+        const computeStatus = async (item: Zotero.Item): Promise<ZoteroItemStatus> => {
+            const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
+            const trashState = safeIsInTrash(item);
+            const isInTrash = trashState === true;
+            
+            // Compute passes_sync_filters using the async filter
+            const passesSyncFilters = await syncingItemFilterAsync(item);
+            
+            // Compute is_pending_sync only if we have a userId
+            let isPendingSync: boolean | null = null;
+            if (userId) {
+                try {
+                    const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
+                    isPendingSync = !wasAddedBeforeSync;
+                } catch (e) {
+                    // Unable to determine pending status
+                    isPendingSync = null;
+                }
+            }
+
+            return {
+                is_synced_library: isSyncedLibrary,
+                is_in_trash: isInTrash,
+                passes_sync_filters: passesSyncFilters,
+                is_pending_sync: isPendingSync
+            };
+        };
+
+        // Phase 3: Serialize all items and attachments with status
         const [itemResults, attachmentResults] = await Promise.all([
-            Promise.all(itemsToSerialize.map(async (item) => {
-                try {
-                    await item.loadAllData();
-                } catch (e) {
-                    // Ignore benign load errors
-                }
-                return serializeItem(item, undefined);
+            Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
+                const serialized = await serializeItem(item, undefined);
+                const status = await computeStatus(item);
+                return { item: serialized, status };
             })),
-            Promise.all(attachmentsToSerialize.map(async (attachment) => {
-                try {
-                    await attachment.loadAllData();
-                } catch (e) {
-                    // Ignore benign load errors
-                }
+            Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
                 const serialized = await serializeAttachment(attachment, undefined);
                 if (!serialized) {
                     errors.push({
@@ -969,14 +1021,16 @@ export class AgentService {
                         error: 'Attachment not available locally',
                         error_code: 'not_available'
                     });
+                    return null;
                 }
-                return serialized;
+                const status = await computeStatus(attachment);
+                return { attachment: serialized, status };
             }))
         ]);
 
-        // Filter out null attachments
-        const items = itemResults;
-        const attachments = attachmentResults.filter((a): a is AttachmentDataWithMimeType => a !== null);
+        // Filter out null results
+        const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
+        const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
         const response: WSZoteroDataResponse = {
             type: 'zotero_data',
