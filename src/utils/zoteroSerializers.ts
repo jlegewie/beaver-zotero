@@ -292,12 +292,13 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeAttachment(
     item: Zotero.Item,
     clientDateModified: string | undefined,
-    options?: { skipFileHash?: boolean }
+    options?: { skipFileHash?: boolean, skipSyncingFilter?: boolean }
 ): Promise<AttachmentDataWithMimeType | null> {
     const skipFileHash = options?.skipFileHash || false;
+    const skipSyncingFilter = options?.skipSyncingFilter || false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) {
+    if (!item.isAttachment() || !((await syncingItemFilterAsync(item)) || skipSyncingFilter)) {
         if(item.isAttachment()) skippedItemsManager.upsert(item, 'not available locally or on server');
         return null;
     }

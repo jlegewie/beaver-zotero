@@ -1014,7 +1014,7 @@ export class AgentService {
                 return { item: serialized, status };
             })),
             Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-                const serialized = await serializeAttachment(attachment, undefined);
+                const serialized = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                 if (!serialized) {
                     errors.push({
                         reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
