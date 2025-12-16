@@ -914,7 +914,10 @@ export class AgentService {
 
         const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
 
-        // Phase 1: Collect all items and attachments to process
+        // Phase 1: Collect primary items from request (don't access parentID/getAttachments yet)
+        const primaryItems: Zotero.Item[] = [];
+        const referenceToItem = new Map<string, Zotero.Item>();
+        
         for (const reference of request.items) {
             try {
                 const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
@@ -926,7 +929,29 @@ export class AgentService {
                     });
                     continue;
                 }
+                primaryItems.push(zoteroItem);
+                referenceToItem.set(makeKey(reference.library_id, reference.zotero_key), zoteroItem);
+            } catch (error: any) {
+                logger(`AgentService: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                errors.push({
+                    reference,
+                    error: 'Failed to load item',
+                    error_code: 'load_failed'
+                });
+            }
+        }
 
+        // Phase 2: Load data types for primary items BEFORE accessing parentID/getAttachments
+        if (primaryItems.length > 0) {
+            await Zotero.Items.loadDataTypes(primaryItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
+        }
+
+        // Phase 3: Now expand to parents and children (safe to access parentID/getAttachments)
+        for (const reference of request.items) {
+            const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
+            if (!zoteroItem) continue; // Already recorded error in Phase 1
+
+            try {
                 if (zoteroItem.isAttachment()) {
                     const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
                     if (!attachmentKeys.has(key)) {
@@ -974,7 +999,7 @@ export class AgentService {
                     });
                 }
             } catch (error: any) {
-                logger(`AgentService: Failed to collect zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                logger(`AgentService: Failed to expand zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 errors.push({
                     reference,
                     error: 'Failed to load item/attachment',
@@ -983,7 +1008,7 @@ export class AgentService {
             }
         }
 
-        // Phase 2: Load all data and parent data for trash status checks
+        // Phase 4: Load data for all items (including newly discovered parents and children)
         const allItems = [...itemsToSerialize, ...attachmentsToSerialize];
         if (allItems.length > 0) {
             // Load all item data in bulk
