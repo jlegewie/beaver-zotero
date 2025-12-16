@@ -11,6 +11,8 @@ import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
+import { getStorageModeForLibrary } from '../../src/utils/webAPI';
+import { retryUploads } from '../../src/services/FileUploader';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -20,6 +22,7 @@ export const useUpgradeHandler = () => {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasRunConsistencyCheckRef = useRef(false);
     const hasRunCollectionSyncRef = useRef(false);
+    const hasRunWebDAVSyncRef = useRef(false);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const processedVersionsRef = useRef<Set<string>>(new Set());
@@ -93,6 +96,49 @@ export const useUpgradeHandler = () => {
         runCollectionSync();
 
     }, [isAuthenticated, syncLibraryIds, syncWithZotero]);
+
+    // Run retry uploads for WebDAV users after upgrade
+    useEffect(() => {
+        const runWebDAVRetryUploads = async () => {
+            if (!isAuthenticated || !syncLibraryIds || syncLibraryIds.length === 0 || hasRunWebDAVSyncRef.current) return;
+
+            const needsWebDAVSync = getPref('runWebDAVSync');
+            if (!needsWebDAVSync) return;
+
+            // Check if primary library (ID 1) is being synced
+            if (!syncLibraryIds.includes(1)) {
+                // Primary library not synced, clear the flag
+                setPref('runWebDAVSync', false);
+                return;
+            }
+
+            // Check if primary library uses WebDAV
+            const storageMode = getStorageModeForLibrary(1);
+            if (storageMode !== 'webdav') {
+                // Not using WebDAV, clear the flag
+                setPref('runWebDAVSync', false);
+                return;
+            }
+
+            // Mark as run to prevent re-execution in the same session
+            hasRunWebDAVSyncRef.current = true;
+            logger(`useUpgradeHandler: Running retry uploads for WebDAV primary library after upgrade to ${version}.`);
+
+            try {
+                await retryUploads();
+                logger("useUpgradeHandler: Retry uploads completed for WebDAV primary library.");
+            } catch (error) {
+                logger(`useUpgradeHandler: Could not run retry uploads for WebDAV on upgrade: ${error}`, 1);
+                Zotero.logError(error as Error);
+            } finally {
+                // Unset the flag regardless of success or failure to prevent re-running
+                setPref('runWebDAVSync', false);
+            }
+        };
+
+        runWebDAVRetryUploads();
+
+    }, [isAuthenticated, syncLibraryIds]);
 
     // Run version notification popup after upgrade
     useEffect(() => {
