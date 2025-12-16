@@ -155,6 +155,13 @@ export interface WSAgentActionsEvent extends WSBaseEvent {
     actions: import('../../react/agents/agentActions').AgentAction[];
 }
 
+/** Missing Zotero data event sent when referenced items are not available in the backend */
+export interface WSMissingZoteroDataEvent extends WSBaseEvent {
+    event: 'missing_zotero_data';
+    run_id: string;
+    items: ZoteroItemReference[];
+}
+
 export interface WSDataError {
     reference: ZoteroItemReference;
     error: string;
@@ -266,6 +273,7 @@ export type WSEvent =
     | WSWarningEvent
     | WSRetryEvent
     | WSAgentActionsEvent
+    | WSMissingZoteroDataEvent
     | WSAttachmentContentRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest;
@@ -420,6 +428,13 @@ export interface WSCallbacks {
      * @param event The retry event with attempt info and reason
      */
     onRetry?: (event: WSRetryEvent) => void;
+
+    /**
+     * Called when referenced items are not available in the backend cache.
+     * Frontend should determine the reason and display a warning.
+     * @param event The missing zotero data event with item references
+     */
+    onMissingZoteroData?: (event: WSMissingZoteroDataEvent) => void;
 
     /**
      * Called when the WebSocket connection is established
@@ -700,6 +715,10 @@ export class AgentService {
 
                 case 'retry':
                     this.callbacks.onRetry?.(event);
+                    break;
+
+                case 'missing_zotero_data':
+                    this.callbacks.onMissingZoteroData?.(event);
                     break;
 
                 case 'attachment_content_request':
