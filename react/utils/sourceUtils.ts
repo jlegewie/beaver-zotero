@@ -7,6 +7,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { syncLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
+import { isAttachmentOnServer } from '../../src/utils/webAPI';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -174,16 +175,21 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
         
         // (c) Use comprehensive syncing filter
+        if (!(await item.fileExists()) && !isAttachmentOnServer(item)) {
+            return {valid: false, error: "File unavailable locally and on server"};
+        }
+
+        // (d) Use comprehensive syncing filter
         if (!(await syncingItemFilterAsync(item))) {
             return {valid: false, error: "Attachment not synced with Beaver"};
         }
         
-        // (d) If syncWithZotero is true, check whether item has been synced with Zotero
+        // (e) If syncWithZotero is true, check whether item has been synced with Zotero
         if (syncWithZotero && item.version === 0 && !item.synced) {
             return {valid: false, error: "Attachment not yet synced with Zotero and therefore not available in Beaver."};
         }
 
-        // (e) Check whether attachment was added after the last sync
+        // (f) Check whether attachment was added after the last sync
         if (!(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
             return {valid: false, error: "Attachment not yet synced with Beaver. Please wait for sync to complete or sync manually in settings."};
         }
