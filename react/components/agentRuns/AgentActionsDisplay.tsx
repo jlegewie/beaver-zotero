@@ -49,10 +49,12 @@ export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run })
     }
 
     return (
-        <CreateItemAgentActionDisplay
-            runId={run.id}
-            actions={createItemActions}
-        />
+        <div className="px-4">
+            <CreateItemAgentActionDisplay
+                runId={run.id}
+                actions={createItemActions}
+            />
+        </div>
     );
 };
 

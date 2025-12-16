@@ -30,28 +30,30 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
     };
 
     return (
-        <div
-            className="display-flex flex-col p-3 gap-3 rounded-lg"
-            style={{ background: 'var(--tag-red-quinary)' }}
-        >
-            <div className="font-color-red display-flex flex-row gap-3 items-start">
-                <Icon icon={AlertIcon} className="scale-11 mt-020" />
-                <div className="display-flex flex-col flex-1 gap-2 min-w-0">
-                    <div className="text-base">
-                        {parseTextWithLinksAndNewlines(error.message)}
+        <div className="px-4">
+            <div
+                className="display-flex flex-col p-3 gap-3 rounded-lg"
+                style={{ background: 'var(--tag-red-quinary)' }}
+            >
+                <div className="font-color-red display-flex flex-row gap-3 items-start">
+                    <Icon icon={AlertIcon} className="scale-11 mt-020" />
+                    <div className="display-flex flex-col flex-1 gap-2 min-w-0">
+                        <div className="text-base">
+                            {parseTextWithLinksAndNewlines(error.message)}
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div className="display-flex flex-row gap-3 items-center">
-                <div className="flex-1" />
-                <Button
-                    variant="outline"
-                    className="border-error font-color-red"
-                    rightIcon={RepeatIcon}
-                    onClick={handleRetry}
-                >
-                    Retry
-                </Button>
+                <div className="display-flex flex-row gap-3 items-center">
+                    <div className="flex-1" />
+                    <Button
+                        variant="outline"
+                        className="border-error font-color-red"
+                        rightIcon={RepeatIcon}
+                        onClick={handleRetry}
+                    >
+                        Retry
+                    </Button>
+                </div>
             </div>
         </div>
     );

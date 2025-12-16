@@ -68,24 +68,16 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
 
             {/* Error display (includes retry button) */}
             {hasError && run.error && (
-                <div className="px-4">
-                    <RunErrorDisplay runId={run.id} error={run.error} />
-                </div>
+                <RunErrorDisplay runId={run.id} error={run.error} />
             )}
 
             {/* Footer with sources and action buttons (only for completed runs) */}
-            {run.status === 'completed' || run.status === 'canceled' && (
-                <div className="px-4">
-                    <AgentRunFooter run={run} />
-                </div>
+            {(run.status === 'completed' || run.status === 'canceled') && (
+                <AgentRunFooter run={run} />
             )}
 
             {/* Agent actions (e.g., create item from citations) */}
-            {run.status === 'completed' && (
-                <div className="px-4">
-                    <AgentActionsDisplay run={run} />
-                </div>
-            )}
+            {run.status === 'completed' && <AgentActionsDisplay run={run} />}
 
         </div>
     );

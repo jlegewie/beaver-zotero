@@ -271,7 +271,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const isStreaming = run.status === 'in_progress';
 
     return (
-        <>
+        <div className="px-4">
             <div
                 className={`
                     display-flex flex-row items-center pt-2 mr-2
@@ -327,7 +327,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             {sourcesVisible && (
                 <CitedSourcesList citations={uniqueCitations} />
             )}
-        </>
+        </div>
     );
 };
 
