@@ -74,14 +74,14 @@ export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.I
     }
 }
 
-/*
-* Check if an item was added before the last sync
-* @param item The item to check
-* @param syncWithZotero Whether to use Zotero sync
-* @param userID The user ID
-* @returns True if the item was added before the last sync
-*/
-async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
+/**
+ * Check if an item was added before the last sync
+ * @param item The item to check
+ * @param syncWithZotero Whether to use Zotero sync
+ * @param userID The user ID
+ * @returns True if the item was added before the last sync
+ */
+export async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
     let syncLog = null;
     if (syncWithZotero) {
         syncLog = await Zotero.Beaver.db.getSyncLogWithHighestVersion(userID, item.libraryID);
