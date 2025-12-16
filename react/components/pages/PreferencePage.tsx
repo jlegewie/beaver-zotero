@@ -426,7 +426,8 @@ const PreferencePage: React.FC = () => {
             <div className="text-sm font-color-secondary mb-3">
                 Add your own API key to use models from Google, Anthropic, and OpenAI.
                 When you use your own API key, your provider's terms and data-use rules apply.
-                Your keys are only stored locally and never on our server.
+                Your keys are only stored locally and never on our server. Learn more about API keys
+                <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/api-keys')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
             </div>
             <div className="display-flex flex-col gap-3">
                 <ApiKeyInput
