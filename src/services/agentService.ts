@@ -946,6 +946,12 @@ export class AgentService {
                             }
                         }
                     }
+                } else {
+                    errors.push({
+                        reference,
+                        error: 'Item is not a regular item or attachment',
+                        error_code: 'filtered_from_sync'
+                    });
                 }
             } catch (error: any) {
                 logger(`AgentService: Failed to collect zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
