@@ -21,6 +21,7 @@ import {
     WSRetryEvent,
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
+    WSMissingZoteroDataEvent,
 } from '../../src/services/agentService';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
@@ -39,6 +40,7 @@ import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
+import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
@@ -64,6 +66,12 @@ import {
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
+import { store } from '../store';
+import { syncLibraryIdsAtom, syncWithZoteroAtom } from './profile';
+import { syncingItemFilterAsync } from '../../src/utils/sync';
+import { safeIsInTrash } from '../../src/utils/zoteroUtils';
+import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
+import { ZoteroItemReference } from '../types/zotero';
 
 // =============================================================================
 // Helper Functions
@@ -291,6 +299,153 @@ function confirmDeleteAppliedActions(actions: AgentAction[]): boolean {
     });
 
     return buttonIndex === 0;
+}
+
+// =============================================================================
+// Missing Zotero Data Handling
+// =============================================================================
+
+/** Reason why an item might be missing from the backend */
+type MissingItemReason = 
+    | 'not_found'           // Item doesn't exist in Zotero
+    | 'in_trash'            // Item is in trash
+    | 'library_not_synced'  // Library not configured to sync
+    | 'filtered_from_sync'  // Doesn't pass sync filters (e.g., not a PDF)
+    | 'pending_sync'        // Added after last sync
+    | 'file_unavailable_locally_and_on_server' // File unavailable locally and on server
+    | 'unknown';            // Unknown reason
+
+/**
+ * Determine why an item is missing from the backend.
+ * Returns the most likely reason based on item status checks.
+ */
+async function determineMissingReason(ref: ZoteroItemReference, userId: string | null): Promise<MissingItemReason> {
+    try {
+        // Get sync configuration from store
+        const syncLibraryIds = store.get(syncLibraryIdsAtom);
+        const syncWithZotero = store.get(syncWithZoteroAtom);
+
+        // Check if library is synced
+        if (!syncLibraryIds.includes(ref.library_id)) {
+            return 'library_not_synced';
+        }
+
+        // Try to get the item from Zotero
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+        if (!item) {
+            return 'not_found';
+        }
+
+        // Load item and parent item data for proper status checks
+        await Zotero.Items.loadDataTypes([item], ["primaryData"]);
+        if (item.parentID) {
+            const parentItem = await Zotero.Items.getAsync(item.parentID);
+            if (parentItem) {
+                await Zotero.Items.loadDataTypes([parentItem], ["primaryData"]);
+            }
+        }
+
+        // Check if in trash
+        const trashState = safeIsInTrash(item);
+        if (trashState === true) {
+            return 'in_trash';
+        }
+
+        // Check if available locally or on server
+        const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
+        if (!availableLocallyOrOnServer) {
+            return 'file_unavailable_locally_and_on_server';
+        }
+
+        // Check if passes sync filters
+        const passesSyncFilters = await syncingItemFilterAsync(item);
+        if (!passesSyncFilters) {
+            return 'filtered_from_sync';
+        }
+
+        // Check if pending sync (added after last sync)
+        if (userId) {
+            try {
+                const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
+                if (!wasAddedBeforeSync) {
+                    return 'pending_sync';
+                }
+            } catch {
+                // Unable to determine pending status
+            }
+        }
+
+        // If we get here and item exists but wasn't found in backend, it's unknown
+        return 'unknown';
+    } catch (error) {
+        logger(`determineMissingReason: Error checking item ${ref.library_id}-${ref.zotero_key}: ${error}`, 1);
+        return 'unknown';
+    }
+}
+
+/** Human-readable messages for each missing reason */
+const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
+    'not_found': 'Item not found in your Zotero library',
+    'in_trash': 'Item is in trash',
+    'library_not_synced': 'Library is not configured to sync with Beaver',
+    'filtered_from_sync': 'Item type not supported',
+    'pending_sync': 'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
+    'file_unavailable_locally_and_on_server': 'File is unavailable',
+    'unknown': 'Item is not available in Beaver',
+};
+
+/**
+ * Process missing Zotero data event and generate a warning message.
+ * Determines the most common reason and creates a single warning.
+ */
+async function handleMissingZoteroData(
+    event: WSMissingZoteroDataEvent,
+    userId: string | null,
+    addWarning: (params: { run_id: string; type: string; message: string; data?: Record<string, unknown> }) => void
+): Promise<void> {
+    if (event.items.length === 0) return;
+
+    // Determine reasons for each item
+    const reasons = await Promise.all(
+        event.items.map(async (item) => ({
+            item,
+            reason: await determineMissingReason(item, userId)
+        }))
+    );
+    console.log('handleMissingZoteroData: reasons', reasons);
+
+    // Count reasons to find the most common one
+    const reasonCounts = new Map<MissingItemReason, number>();
+    for (const { reason } of reasons) {
+        reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+    }
+
+    // Find the most common reason
+    let primaryReason: MissingItemReason = 'unknown';
+    let maxCount = 0;
+    for (const [reason, count] of reasonCounts.entries()) {
+        if (count > maxCount) {
+            maxCount = count;
+            primaryReason = reason;
+        }
+    }
+
+    // Build the warning message
+    const itemCount = event.items.length;
+    const itemWord = itemCount === 1 ? 'attachment' : 'attachments';
+    const message = `Unable to process ${itemCount} ${itemWord} due to the following reason:\n\n- ${MISSING_REASON_MESSAGES[primaryReason]}`;
+
+    // Add warning
+    addWarning({
+        run_id: event.run_id,
+        type: 'missing_zotero_data',
+        message,
+        data: {
+            items: event.items,
+            primary_reason: primaryReason,
+            reason_counts: Object.fromEntries(reasonCounts),
+        },
+    });
 }
 
 // =============================================================================
@@ -522,6 +677,25 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             autoApplyAnnotationAgentActions(event.run_id, actions);
         },
 
+        onMissingZoteroData: (event: WSMissingZoteroDataEvent) => {
+            logger(`WS onMissingZoteroData: ${event.items.length} items missing for run ${event.run_id}`, 1);
+            console.log('[WS] Missing Zotero data event:', {
+                runId: event.run_id,
+                itemCount: event.items.length,
+                items: event.items,
+            });
+            // Get userId from store for pending sync check
+            const userId = store.get(userIdAtom);
+            // Process asynchronously to determine reasons and add warning
+            handleMissingZoteroData(
+                event,
+                userId,
+                (params) => set(addWarningAtom, params)
+            ).catch(err => 
+                logger(`WS onMissingZoteroData: Failed to handle missing data: ${err}`, 1)
+            );
+        },
+
         onOpen: () => {
             logger('WS onOpen: Connection established, waiting for ready...', 1);
             console.log('[WS] Connection opened, awaiting server validation...');
@@ -684,9 +858,9 @@ export const sendWSMessageAtom = atom(
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
-            ...(attachments.length > 0 ? { attachments } : {}),
+            // ...(attachments.length > 0 ? { attachments } : {}),
             // TESTING ATTACHMENTS
-            // attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
+            attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
             // attachments: [{library_id: 1, zotero_key: 'DYKH3FLH', type: 'source', include: 'fulltext'}], // TRASH ITEM
             // attachments: [{library_id: 3, zotero_key: 'FR35E8GK', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ITEM
             // attachments: [{library_id: 3, zotero_key: 'V4W5CH8S', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ATTACHMENT
