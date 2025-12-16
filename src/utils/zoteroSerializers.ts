@@ -296,7 +296,8 @@ export async function serializeAttachment(
     const skipSyncingFilter = options?.skipSyncingFilter || false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !((await syncingItemFilterAsync(item)) || skipSyncingFilter)) {
+    const passesSyncingFilter = skipSyncingFilter ? true : (await syncingItemFilterAsync(item));
+    if (!item.isAttachment() || !passesSyncingFilter) {
         if(item.isAttachment()) {
             logger(`serializeAttachment: Attachment ${item.key} not available locally or on server. Skipping.`, 1);
             skippedItemsManager.upsert(item, 'not available locally or on server');

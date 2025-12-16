@@ -309,7 +309,10 @@ export class AttachmentsService extends ApiService {
      * @returns Promise with an array of FileHashReference objects for uploads that were reset.
      */
     async retryUploads(resetAll: boolean = false): Promise<FileHashReference[]> {
-        return this.post<FileHashReference[]>(`/api/v1/attachments/retry-uploads?reset_all=${resetAll}`, {});
+        const url = resetAll
+            ? '/api/v1/attachments/retry-uploads?reset_all=true'
+            : '/api/v1/attachments/retry-uploads';
+        return this.post<FileHashReference[]>(url, {});
     }
 
     /**
