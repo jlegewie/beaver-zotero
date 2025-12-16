@@ -24,7 +24,7 @@ export function isAttachmentOnServer(item: Zotero.Item): boolean {
 	if (!item || !item.isStoredFileAttachment()) return false;
 	
 	// File is on server if it has a server hash
-	return item.attachmentSyncedHash !== null;
+	return Boolean(item.attachmentSyncedHash);
 }
 
 /**
