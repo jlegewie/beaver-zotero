@@ -67,7 +67,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 	const baseApiUrl = ZOTERO_CONFIG.API_URL;
 	let apiUrl;
 	if (item.library.isGroup) {
-		apiUrl = `${baseApiUrl}groups/${item.libraryID}/items/${item.key}/file`;
+		apiUrl = `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`;
 	} else {
 		apiUrl = `${baseApiUrl}users/${userID}/items/${item.key}/file`;
 	}
@@ -390,7 +390,7 @@ export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDo
 
 	const base = ZOTERO_CONFIG.API_URL;
 	const apiUrl = item.library.isGroup
-		? `${base}groups/${item.libraryID}/items/${item.key}/file`
+		? `${base}groups/${item.library.id}/items/${item.key}/file`
 		: `${base}users/${userID}/items/${item.key}/file`;
 
 	return await new Promise((resolve) => {
