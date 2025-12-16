@@ -685,6 +685,14 @@ export const sendWSMessageAtom = atom(
         const userPrompt: BeaverAgentPrompt = {
             content: message,
             ...(attachments.length > 0 ? { attachments } : {}),
+            // TESTING ATTACHMENTS
+            // attachments: [{library_id: 1, zotero_key: 'VV4QGPZN', type: 'source', include: 'fulltext'}], // TRASH ATTACHMENT
+            // attachments: [{library_id: 1, zotero_key: 'DYKH3FLH', type: 'source', include: 'fulltext'}], // TRASH ITEM
+            // attachments: [{library_id: 3, zotero_key: 'FR35E8GK', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ITEM
+            // attachments: [{library_id: 3, zotero_key: 'V4W5CH8S', type: 'source', include: 'fulltext'}], // UNSYNCED LIBRARY ATTACHMENT
+            // attachments: [{library_id: 1, zotero_key: 'SUEAB6YR', type: 'source', include: 'fulltext'}], // ZOTERO NOTE
+            // attachments: [{library_id: 1, zotero_key: '85JCJJKS', type: 'source', include: 'fulltext'}], // ZOTERO SCREENSHOT
+            // attachments: [{library_id: 1, zotero_key: '6U4SGES3', type: 'source', include: 'fulltext'}], // UNSYNCED ATTACHMENT
             application_state: applicationState,
             filters: filtersPayload,
             ...(toolRequests ? { tool_requests: toolRequests } : {})
