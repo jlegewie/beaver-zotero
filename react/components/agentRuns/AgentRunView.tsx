@@ -50,7 +50,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
 
             {/* Warning display (dismissable, non-persistent) */}
             {runWarnings.length > 0 && (
-                <div className="px-4 display-flex flex-col gap-2">
+                <div className="px-5 display-flex flex-col gap-2">
                     {runWarnings.map((warning) => (
                         <RunWarningDisplay key={warning.id} warning={warning} />
                     ))}

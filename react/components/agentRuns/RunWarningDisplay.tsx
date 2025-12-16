@@ -27,8 +27,8 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
     const showSettingsButton = warning.type === 'low_credits';
 
     return (
-        <div className="display-flex flex-col p-3 gap-3 rounded-lg bg-senary">
-            <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
+        <div className="display-flex flex-col p-3 gap-3 rounded-lg bg-quinary">
+            <div className="font-color-secondary display-flex flex-row gap-3 items-start">
                 <Icon icon={AlertIcon} className="scale-11 mt-020" />
                 <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                     <div className="display-flex flex-row gap-2 items-start">
