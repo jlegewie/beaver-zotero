@@ -35,6 +35,7 @@ declare namespace _ZoteroTypes {
       "skippedItems": string;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
+      "runWebDAVSync": boolean;
       "pendingVersionNotifications": string;
     };
   }

@@ -45,4 +45,5 @@ pref("skippedItems", "[]")
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);
+pref("runWebDAVSync", false);
 pref("pendingVersionNotifications", "[]");
