@@ -989,7 +989,7 @@ export class AgentService {
             const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
             const trashState = safeIsInTrash(item);
             const isInTrash = trashState === true;
-            const availableLocallyOrOnServer = (await item.fileExists()) || isAttachmentOnServer(item);
+            const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
             const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
             
             // Compute is_pending_sync only if we have a userId
@@ -1007,8 +1007,8 @@ export class AgentService {
             return {
                 is_synced_library: isSyncedLibrary,
                 is_in_trash: isInTrash,
-                passes_sync_filters: passesSyncFilters,
                 available_locally_or_on_server: availableLocallyOrOnServer,
+                passes_sync_filters: passesSyncFilters,
                 is_pending_sync: isPendingSync
             };
         };
