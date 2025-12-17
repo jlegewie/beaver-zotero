@@ -3,8 +3,8 @@ import { useAtomValue } from "jotai";
 import { allRunsAtom } from "../../agents/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
-import { userScrolledAtom } from "../../atoms/ui";
-import { currentThreadScrollPositionAtom } from "../../atoms/threads";
+import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from "../../atoms/threads";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 
@@ -13,6 +13,8 @@ const BOTTOM_THRESHOLD = 120; // pixels
 type ThreadViewProps = {
     /** Optional className for styling */
     className?: string;
+    /** Whether this is rendered in the separate window (uses independent scroll state) */
+    isWindow?: boolean;
 };
 
 /**
@@ -20,14 +22,19 @@ type ThreadViewProps = {
  * Uses allRunsAtom which combines completed runs with any active streaming run.
  */
 export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
-    function ThreadView({ className }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
+    function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
         const runs = useAtomValue(allRunsAtom);
         const restoredFromAtomRef = useRef(false);
-        const storedScrollTop = useAtomValue(currentThreadScrollPositionAtom);
         
-        // Use the auto-scroll hook
+        // Select the correct atoms based on whether we're in the separate window
+        const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
+        const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
+        const storedScrollTop = useAtomValue(scrollPositionAtom);
+        
+        // Use the auto-scroll hook with window-aware state
         const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
-            threshold: BOTTOM_THRESHOLD
+            threshold: BOTTOM_THRESHOLD,
+            isWindow
         });
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
@@ -48,26 +55,26 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
                 
-                // Set userScrolledAtom based on position after restore
+                // Set scroll state based on position after restore
                 const { scrollHeight, clientHeight } = container;
                 const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
                 const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-                store.set(userScrolledAtom, !isNearBottom);
+                store.set(scrolledAtom, !isNearBottom);
             } else {
                 restoredFromAtomRef.current = false;
                 
                 // For small deltas (thread switch with similar position or streaming updates),
-                // ensure userScrolledAtom is false if we're near the bottom.
+                // ensure scroll state is false if we're near the bottom.
                 // This prevents stale userScrolled=true from a previous thread from blocking auto-scroll.
                 // We only set to false (never true) to avoid the original regression where
                 // content growth during streaming would incorrectly disable auto-scroll.
                 const { scrollHeight, clientHeight } = container;
                 const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
                 if (distanceFromBottom <= BOTTOM_THRESHOLD) {
-                    store.set(userScrolledAtom, false);
+                    store.set(scrolledAtom, false);
                 }
             }
-        }, [storedScrollTop]);
+        }, [storedScrollTop, scrolledAtom]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
@@ -77,9 +84,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             }
 
             if (scrollContainerRef.current && runs.length > 0) {
-                scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>);
+                // Pass the correct scroll atom for this context
+                scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, undefined, scrolledAtom);
             }
-        }, [runs]);
+        }, [runs, scrolledAtom]);
 
         if (runs.length === 0) {
             return (

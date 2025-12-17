@@ -42,7 +42,10 @@ export const zoteroServerDownloadErrorAtom = atom(false);
 export const zoteroServerCredentialsErrorAtom = atom(false);
 
 // UI behavior and elements
+// Shared scroll state for library and reader sidebars
 export const userScrolledAtom = atom(false);
+// Independent scroll state for separate window
+export const windowUserScrolledAtom = atom(false);
 
 // Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
 export const previewCloseTimeoutAtom = atom<number | null>(null)

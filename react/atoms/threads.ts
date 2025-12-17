@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom } from "./ui";
+import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
@@ -33,7 +33,7 @@ export const currentThreadIdAtom = atom<string | null>(null);
 export const threadScrollPositionsAtom = atom<Record<string, number>>({});
 
 /**
- * Atom to get the scroll position of the current thread
+ * Atom to get the scroll position of the current thread (for library/reader sidebars)
  */
 export const currentThreadScrollPositionAtom = atom(
     (get) => {
@@ -50,6 +50,40 @@ export const currentThreadScrollPositionAtom = atom(
             return;
         }
         set(threadScrollPositionsAtom, (prevPositions) => {
+            const nextPositions = { ...prevPositions };
+            if (scrollTop === null) {
+                delete nextPositions[threadId];
+            } else {
+                nextPositions[threadId] = scrollTop;
+            }
+            return nextPositions;
+        });
+    }
+);
+
+/**
+ * Atom to store scroll positions for the separate window (independent from sidebar)
+ */
+export const windowScrollPositionsAtom = atom<Record<string, number>>({});
+
+/**
+ * Atom to get the scroll position of the current thread for separate window
+ */
+export const windowScrollPositionAtom = atom(
+    (get) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return undefined;
+        }
+        const positions = get(windowScrollPositionsAtom);
+        return positions[threadId];
+    },
+    (get, set, scrollTop: number | null) => {
+        const threadId = get(currentThreadIdAtom);
+        if (!threadId) {
+            return;
+        }
+        set(windowScrollPositionsAtom, (prevPositions) => {
             const nextPositions = { ...prevPositions };
             if (scrollTop === null) {
                 delete nextPositions[threadId];
@@ -99,7 +133,9 @@ export const newThreadAtom = atom(
         if (!isLibraryTab) {
             await set(updateReaderAttachmentAtom);
         }
+        // Reset scroll state for both sidebar and window
         set(userScrolledAtom, false);
+        set(windowUserScrolledAtom, false);
     }
 );
 
@@ -116,7 +152,9 @@ export const loadThreadAtom = atom(
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
         set(isLoadingThreadAtom, true);
         try {
+            // Reset scroll state for both sidebar and window
             set(userScrolledAtom, false);
+            set(windowUserScrolledAtom, false);
             // Set the current thread ID
             set(currentThreadIdAtom, threadId);
             set(isPreferencePageVisibleAtom, false);

@@ -2,12 +2,12 @@ import React, { useRef, useEffect } from 'react';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { ThreadView } from "./agentRuns";
-import { currentThreadScrollPositionAtom } from '../atoms/threads';
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { allRunsAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { isPreferencePageVisibleAtom, userScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -45,11 +45,15 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         setIsSkippedFilesDialogVisible(false);
     }, []);
     
+    // Select the correct atoms based on whether we're in the separate window
+    const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
+    const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
+
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
-            store.set(userScrolledAtom, false);
+            store.set(scrolledAtom, false);
             // Clear stored scroll position to let natural scroll-to-bottom take over
-            store.set(currentThreadScrollPositionAtom, null);
+            store.set(scrollPositionAtom, null);
             scrollToBottom(messagesContainerRef, false);
         }
     };
@@ -121,7 +125,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
             {/* Thread view with agent runs */}
             {runs.length > 0 ? (
-                <ThreadView ref={messagesContainerRef} />
+                <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
             ) : (
                 <HomePage isWindow={isWindow} />
             )}
@@ -129,7 +133,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             {/* Prompt area (footer) with floating elements */}
             <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                 <PreviewAndPopupContainer />
-                <ScrollDownButton onClick={handleScrollToBottom} />
+                <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
                 <DragDropWrapper>
                     <InputArea inputRef={inputRef} />
                 </DragDropWrapper>

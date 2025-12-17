@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
-import { userScrolledAtom } from '../atoms/ui';
-import { currentThreadScrollPositionAtom } from '../atoms/threads';
+import { userScrolledAtom, windowUserScrolledAtom } from '../atoms/ui';
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 
 const BOTTOM_THRESHOLD = 120; // pixels
 
@@ -26,6 +26,11 @@ interface UseAutoScrollOptions {
      * @default 3
      */
     upScrollConsecutiveRequired?: number;
+    /**
+     * Whether this is being used in the separate window (uses independent scroll state)
+     * @default false
+     */
+    isWindow?: boolean;
 }
 
 interface UseAutoScrollReturn {
@@ -55,8 +60,13 @@ export function useAutoScroll(
         threshold = BOTTOM_THRESHOLD,
         debounceDelay = 150,
         upScrollThreshold = 50,
-        upScrollConsecutiveRequired = 3
+        upScrollConsecutiveRequired = 3,
+        isWindow = false
     } = options;
+
+    // Select the correct atoms based on whether we're in the separate window
+    const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
+    const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const lastScrollTopRef = useRef(0);
@@ -117,7 +127,7 @@ export function useAutoScroll(
             // This filters out layout-induced scroll jumps during streaming
             if (consecutiveUpScrollsRef.current >= upScrollConsecutiveRequired) {
                 clearDebounceTimer();
-                store.set(userScrolledAtom, true);
+                store.set(scrolledAtom, true);
                 lastScrollDirectionRef.current = 'up';
             }
         } else if (distanceFromBottom > threshold) {
@@ -133,7 +143,7 @@ export function useAutoScroll(
                     const { scrollTop: currentScrollTop, scrollHeight: currentScrollHeight, clientHeight: currentClientHeight } = scrollContainerRef.current;
                     const currentDistanceFromBottom = currentScrollHeight - currentScrollTop - currentClientHeight;
                     if (currentDistanceFromBottom > threshold) {
-                        store.set(userScrolledAtom, true);
+                        store.set(scrolledAtom, true);
                     }
                 }
             }, debounceDelay);
@@ -141,13 +151,13 @@ export function useAutoScroll(
             // Near the bottom - user hasn't scrolled
             // Reset consecutive counter when near bottom
             consecutiveUpScrollsRef.current = 0;
-            store.set(userScrolledAtom, false);
+            store.set(scrolledAtom, false);
             lastScrollDirectionRef.current = 'down';
         }
 
-        store.set(currentThreadScrollPositionAtom, scrollTop);
+        store.set(scrollPositionAtom, scrollTop);
         lastScrollTopRef.current = scrollTop;
-    }, [threshold, debounceDelay, upScrollThreshold, upScrollConsecutiveRequired, win]);
+    }, [threshold, debounceDelay, upScrollThreshold, upScrollConsecutiveRequired, win, scrolledAtom, scrollPositionAtom]);
 
     // Cleanup debounce timer on unmount
     useEffect(() => {
