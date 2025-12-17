@@ -42,7 +42,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
 
     // Reading tools
     read_pages: 'Reading',
-    search_in_documents: 'Document search',
+    search_in_documents: 'Search in documents',
 
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
