@@ -109,11 +109,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
         
         // Debug logging for citation matching (level 5 = verbose/trace)
-        if (citationKey && !metadata) {
-            logger(`ZoteroCitation: No metadata for key "${citationKey}" (available: ${Object.keys(citationDataByCitationKey).length} keys)`, 5);
-        } else if (!citationKey) {
-            logger(`ZoteroCitation: No citation_key (att_id=${att_id}, item_id=${item_id}, external_id=${external_id})`, 5);
-        }
+        // if (citationKey && !metadata) {
+        //     logger(`ZoteroCitation: No metadata for key "${citationKey}" (available: ${Object.keys(citationDataByCitationKey).length} keys)`, 5);
+        // } else if (!citationKey) {
+        //     logger(`ZoteroCitation: No citation_key (att_id=${att_id}, item_id=${item_id}, external_id=${external_id})`, 5);
+        // }
         
         // Parse Zotero reference from props (att_id takes priority)
         // Used for click handling and display even before metadata arrives
