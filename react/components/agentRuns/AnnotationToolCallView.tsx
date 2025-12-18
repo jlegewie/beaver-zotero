@@ -469,7 +469,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             }
 
             // Get reader
-            const reader = await getCurrentReaderAndWaitForView() as ZoteroReader | undefined;
+            const reader = await getCurrentReaderAndWaitForView(undefined, true) as ZoteroReader | undefined;
             if (!reader) {
                 setAnnotationPanelState({ key: toolCallId, updates: { isApplying: false } });
                 return;

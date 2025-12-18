@@ -315,7 +315,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         }
 
         try {
-            let reader = await getCurrentReaderAndWaitForView();
+            let reader = await getCurrentReaderAndWaitForView(undefined, true);
             logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
             
             // Check if we need to open or switch to the correct PDF
@@ -336,6 +336,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
 
                 // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
                 await new Promise(resolve => setTimeout(resolve, 300));
+                reader = await getCurrentReaderAndWaitForView(undefined, true);
             }
 
             // Handle the three scenarios
