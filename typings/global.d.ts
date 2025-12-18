@@ -28,6 +28,9 @@ declare const ZOTERO_CONFIG: {
 };
 
 declare namespace Zotero {
+    /** Shared Jotai store for Beaver plugin across all windows */
+    const __beaverJotaiStore: any;
+
     namespace Beaver {
         const pluginVersion: string;
 
