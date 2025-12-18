@@ -339,6 +339,46 @@ export const getAgentActionByIdAtom = atom(
 );
 
 /**
+ * Compare two raw tag strings for equality.
+ * Used to match against the raw_tag from agent actions.
+ */
+function tagsMatch(tag1: string, tag2: string): boolean {
+    const parseTag = (tag: string) => {
+        const match = tag.match(/<(\w+)([^>]*)>/);
+        if (!match) return null;
+        
+        const tagName = match[1];
+        const attrsString = match[2];
+        
+        // Extract attributes
+        const attrs: Record<string, string> = {};
+        const attrRegex = /(\w+)="([^"]*)"/g;
+        let attrMatch;
+        while ((attrMatch = attrRegex.exec(attrsString)) !== null) {
+            attrs[attrMatch[1]] = attrMatch[2];
+        }
+        
+        return { tagName, attrs };
+    };
+    
+    const parsed1 = parseTag(tag1);
+    const parsed2 = parseTag(tag2);
+    
+    if (!parsed1 || !parsed2) return false;
+    if (parsed1.tagName !== parsed2.tagName) return false;
+    
+    // Compare attributes
+    const keys1 = Object.keys(parsed1.attrs).sort();
+    const keys2 = Object.keys(parsed2.attrs).sort();
+    
+    if (keys1.length !== keys2.length) return false;
+    
+    return keys1.every((key, i) => 
+        key === keys2[i] && parsed1.attrs[key] === parsed2.attrs[key]
+    );
+}
+
+/**
  * Get a note agent action by matching raw_tag within a specific run.
  * Used for streaming when note tags don't have an id attribute.
  */
@@ -347,7 +387,7 @@ export const getAgentNoteActionByRawTagAtom = atom(
         return get(threadAgentActionsAtom).find((action) => 
             action.run_id === runId &&
             action.action_type === 'zotero_note' &&
-            action.proposed_data?.raw_tag === rawTag
+            tagsMatch(action.proposed_data?.raw_tag ?? '', rawTag)
         ) ?? null;
     }
 );
