@@ -45,6 +45,9 @@ export const useProfileSync = () => {
             if (profileData.profile.data_version < profileData.required_data_version) {
                 logger(`useProfileSync: Data migration required (current: ${profileData.profile.data_version}, required: ${profileData.required_data_version})`);
                 setIsMigratingData(true);
+
+                // wait for 10 seconds
+                await new Promise(resolve => setTimeout(resolve, 3000));
                 
                 try {
                     const migrationResult = await accountService.migrateData();
