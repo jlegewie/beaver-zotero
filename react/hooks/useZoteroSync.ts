@@ -7,7 +7,7 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction, isCreateItemAgentAction } from "../agents/agentActions";
+import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction, isCreateItemAgentAction, AgentAction } from "../agents/agentActions";
 import { markExternalReferenceDeletedAtom } from "../atoms/externalReferences";
 
 const DEBOUNCE_MS = 2000;
@@ -228,15 +228,15 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                         // Check if this item was created by an agent action
                                         const agentActions = store.get(threadAgentActionsAtom);
                                         const matchingAgentActions = agentActions
-                                            .filter((action) => {
+                                            .filter((action: AgentAction) => {
                                                 const itemRef = getZoteroItemReferenceFromAgentAction(action);
                                                 return itemRef && itemRef.library_id === libraryID && itemRef.zotero_key === key;
                                             });
                                         
                                         // If item was created by an agent action, mark those actions as undone
                                         if (matchingAgentActions.length > 0) {
-                                            logger(`useZoteroSync: Marking agent action(s) as undone: ${matchingAgentActions.map(a => a.id).join(', ')}`, 3);
-                                            matchingAgentActions.forEach(action => {
+                                            logger(`useZoteroSync: Marking agent action(s) as undone: ${matchingAgentActions.map((a: AgentAction) => a.id).join(', ')}`, 3);
+                                            matchingAgentActions.forEach((action: AgentAction) => {
                                                 store.set(undoAgentActionAtom, action.id);
                                                 
                                                 // Also mark the external reference as deleted for create_item actions
