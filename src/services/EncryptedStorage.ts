@@ -299,7 +299,8 @@ export class EncryptedStorage {
      */
     async getItem(key: string): Promise<string | null> {
         if (this.cache.has(key)) {
-            return this.cache.get(key) || null;
+            const cached = this.cache.get(key);
+            return cached !== undefined ? cached : null;
         }
 
         try {

@@ -9,7 +9,22 @@ const zoteroStorage = {
     getItem: async (key: string) => {
         try {
             const data = await encryptedStorage.getItem(key);
-            return data ? JSON.parse(data) : null;
+            if (!data) return null;
+
+            // Migrate double-encoded tokens from old format
+            // Old format: JSON.stringify('{"access_token":"..."}') → "\"{\\"access_token\\"...\""
+            // New format: '{"access_token":"..."}'
+            if (data.startsWith('"') && data.endsWith('"')) {
+                try {
+                    const migrated = JSON.parse(data);
+                    await encryptedStorage.setItem(key, migrated);
+                    return migrated;
+                } catch {
+                    // If parse fails, it's not double-encoded, return as-is
+                }
+            }
+
+            return data;
         } catch (error) {
             console.error('Error getting auth from encrypted storage:', error);
             return null;
@@ -17,7 +32,7 @@ const zoteroStorage = {
     },
     setItem: async (key: string, value: string) => {
         try {
-            await encryptedStorage.setItem(key, JSON.stringify(value));
+            await encryptedStorage.setItem(key, value);
         } catch (error) {
             console.error('Error setting auth in encrypted storage:', error);
         }
