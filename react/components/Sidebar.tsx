@@ -16,7 +16,7 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
-import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom } from '../atoms/profile';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
@@ -40,6 +40,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
+    const isMigratingData = useAtomValue(isMigratingDataAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -58,14 +59,16 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         }
     };
 
-    if (isLoadingThread) {
+    if (isLoadingThread || isMigratingData) {
         return (
             <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
                 <Header isWindow={isWindow} />
                 <div className="display-flex flex-1 items-center justify-center">
                     <div className="display-flex flex-col items-center gap-3">
                         <Spinner size={22}/>
-                        <span className="font-color-tertiary">Loading...</span>
+                        <span className="font-color-tertiary">
+                            {isMigratingData ? "Upgrading your data..." : "Loading..."}
+                        </span>
                     </div>
                 </div>
             </div>
