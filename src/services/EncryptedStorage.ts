@@ -10,6 +10,7 @@ export class EncryptedStorage {
     private storageDirectory: any | null = null;
     private textEncoder = new TextEncoder();
     private textDecoder = new TextDecoder();
+    private cache: Map<string, string> = new Map();
 
     private toArrayBuffer(view: ArrayBufferView): ArrayBuffer {
         const { buffer, byteLength, byteOffset } = view;
@@ -285,6 +286,7 @@ export class EncryptedStorage {
         try {
             const encrypted = await this.encrypt(value);
             await this.writeEncryptedValue(key, encrypted);
+            this.cache.set(key, value);
             this.clearPreferenceKey(key);
         } catch (error) {
             logger(`Encryption failed: ${error}`);
@@ -296,13 +298,23 @@ export class EncryptedStorage {
      * Retrieve and decrypt value from disk (with legacy preference fallback)
      */
     async getItem(key: string): Promise<string | null> {
+        if (this.cache.has(key)) {
+            return this.cache.get(key) || null;
+        }
+
         try {
             const encrypted = await this.readEncryptedValue(key);
             if (encrypted) {
-                return await this.decrypt(encrypted);
+                const decrypted = await this.decrypt(encrypted);
+                this.cache.set(key, decrypted);
+                return decrypted;
             }
 
-            return await this.migrateFromPreferences(key);
+            const migrated = await this.migrateFromPreferences(key);
+            if (migrated) {
+                this.cache.set(key, migrated);
+            }
+            return migrated;
         } catch (error) {
             logger(`Decryption failed: ${error}`);
             return null;
@@ -316,6 +328,7 @@ export class EncryptedStorage {
         try {
             const file = this.getFileForKey(key);
             await Zotero.File.removeIfExists(file.path);
+            this.cache.delete(key);
         } catch (error) {
             logger(`Error removing auth token file: ${error}`);
         }
