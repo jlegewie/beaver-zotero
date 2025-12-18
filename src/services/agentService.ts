@@ -290,6 +290,8 @@ export interface WSAuthMessage {
     type: 'auth';
     /** JWT authentication token */
     token: string;
+    /** frontend version */
+    frontend_version?: string;
 }
 
 /**
@@ -330,8 +332,6 @@ export interface AgentRunRequest {
     custom_instructions?: string;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
-    /** frontend version */
-    frontend_version?: string;
 }
 
 
@@ -512,7 +512,7 @@ export class AgentService {
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string): Promise<void> {
         // Close existing connection if any
         this.close();
 
@@ -521,10 +521,11 @@ export class AgentService {
         try {
             const token = await this.getAuthToken();
 
-            // Auth message now only contains token - model selection is in chat request
+            // Auth message now includes token and frontend version
             const authMessage: WSAuthMessage = {
                 type: 'auth',
                 token,
+                frontend_version: frontendVersion,
             };
 
             // Connect with clean URL (no sensitive data in params)

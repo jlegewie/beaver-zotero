@@ -231,7 +231,6 @@ function createAgentRunShell(
         ...(customModel ? { custom_model: customModel } : {}),
         ...(rewriteFromRunId ? { retry_run_id: rewriteFromRunId } : {}),
         ...(customInstructions ? { custom_instructions: customInstructions } : {}),
-        frontend_version: Zotero.Beaver.pluginVersion || '',
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -744,7 +743,8 @@ async function executeWSRequest(
 
     try {
         console.log('[WS] Starting connection for run:', run.id);
-        await agentService.connect(request, callbacks);
+        const frontendVersion = Zotero.Beaver.pluginVersion || '';
+        await agentService.connect(request, callbacks, frontendVersion);
         console.log('[WS] Connection established and ready');
     } catch (error) {
         logger(`WS connection error: ${error}`, 1);
