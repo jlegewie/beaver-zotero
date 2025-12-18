@@ -121,6 +121,10 @@ export interface SafeProfileModel {
 
     // Indexing status for backend processing mode
     indexing_complete: boolean;
+
+    // Data migration version
+    data_version: number;
+    data_migrated_at: string | null;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {

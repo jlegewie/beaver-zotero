@@ -27,6 +27,7 @@ interface ProfileResponse {
     profile: SafeProfileWithPlan
     model_configs: FullModelConfig[]
     device_requires_authorization: boolean;
+    required_data_version: number;
 }
 
 interface OnboardingRequest {
@@ -49,6 +50,16 @@ interface ErrorReportRequest {
     jotai_atoms?: Record<string, any>;
     preferences?: Record<string, any>;
     local_db_state?: Record<string, any>;
+}
+
+export interface MigrationResponse {
+    success: boolean;
+    threads_migrated: number;
+    runs_created: number;
+    errors: string[];
+    from_version: number;
+    to_version: number;
+    required_version: number;
 }
 
 /**
@@ -215,6 +226,14 @@ export class AccountService extends ApiService {
             preferences,
             local_db_state: localDbState
         } as ErrorReportRequest);
+    }
+
+    /**
+     * Triggers data migration for the user's account
+     * @returns Promise with migration results
+     */
+    async migrateData(): Promise<MigrationResponse> {
+        return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
     }
 }
 
