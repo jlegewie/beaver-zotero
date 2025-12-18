@@ -47,16 +47,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
                 </div>
                 <div className="display-flex flex-row gap-3 items-center">
                     <div className="flex-1" />
-                    {error.type !== "usage_limit_exceeded" ? (
-                        <Button
-                            variant="outline"
-                            className="border-error font-color-red"
-                            rightIcon={RepeatIcon}
-                            onClick={handleRetry}
-                        >
-                            Retry
-                        </Button>
-                    ) : (
+                    {error.type === "usage_limit_exceeded" && (
                         <Button
                             variant="outline"
                             className="border-error font-color-red"
@@ -66,6 +57,15 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
                             Settings
                         </Button>
                     )}
+                    <Button
+                        variant="outline"
+                        className="border-error font-color-red"
+                        rightIcon={RepeatIcon}
+                        onClick={handleRetry}
+                    >
+                        Retry
+                    </Button>
+                    
                 </div>
             </div>
         </div>
