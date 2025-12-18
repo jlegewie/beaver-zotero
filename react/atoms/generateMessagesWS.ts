@@ -1049,6 +1049,9 @@ export const regenerateFromRunAtom = atom(
  * Sends a cancel message to the backend before closing to ensure proper cleanup.
  */
 export const closeWSConnectionAtom = atom(null, async (get, set) => {
+    // Set pending to false immediately for better UI responsiveness
+    set(isWSChatPendingAtom, false);
+
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
     if (activeRun && activeRun.status === 'in_progress') {
@@ -1066,7 +1069,6 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     await agentService.cancel();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
-    set(isWSChatPendingAtom, false);
 });
 
 /**

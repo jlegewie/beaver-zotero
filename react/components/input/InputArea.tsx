@@ -61,12 +61,20 @@ const InputArea: React.FC<InputAreaProps> = ({
         sendWSMessage(message);
     };
 
-    const handleStop = () => {
+    const handleStop = (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
         logger('Stopping chat completion');
         closeWSConnection();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {        
+        if (e.key === 'Meta') {
+            setIsCommandPressed(true);
+        }
+
         // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
@@ -177,10 +185,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </Tooltip>
                         <Button
                             rightIcon={isPending ? StopIcon : undefined}
-                            type={!isCommandPressed && !isPending && messageContent.length > 0 ? "button" : undefined}
+                            type={isPending ? "button" : (!isCommandPressed && messageContent.length > 0 ? "button" : undefined)}
                             variant={!isCommandPressed || isPending ? 'solid' : 'outline'}
                             style={{ padding: '2px 5px' }}
-                            onClick={isPending ? handleStop : handleSubmit}
+                            onClick={isPending ? (e) => handleStop(e as any) : handleSubmit}
                             disabled={(messageContent.length === 0 && !isPending) || !selectedModel}
                         >
                             {isPending
