@@ -1,9 +1,10 @@
 import React from 'react';
 import { useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon } from '../icons/icons';
+import { Icon, AlertIcon, RepeatIcon, SettingsIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
+import { isPreferencePageVisibleAtom } from '../../atoms/ui';
 
 interface RunError {
     type: string;
@@ -24,6 +25,7 @@ interface RunErrorDisplayProps {
  */
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
 
     const handleRetry = async () => {
         await regenerateFromRun(runId);
@@ -45,14 +47,25 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
                 </div>
                 <div className="display-flex flex-row gap-3 items-center">
                     <div className="flex-1" />
-                    <Button
-                        variant="outline"
-                        className="border-error font-color-red"
-                        rightIcon={RepeatIcon}
-                        onClick={handleRetry}
-                    >
-                        Retry
-                    </Button>
+                    {error.type !== "usage_limit_exceeded" ? (
+                        <Button
+                            variant="outline"
+                            className="border-error font-color-red"
+                            rightIcon={RepeatIcon}
+                            onClick={handleRetry}
+                        >
+                            Retry
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="outline"
+                            className="border-error font-color-red"
+                            rightIcon={SettingsIcon}
+                            onClick={() => togglePreferencePage(true)}
+                        >
+                            Settings
+                        </Button>
+                    )}
                 </div>
             </div>
         </div>
