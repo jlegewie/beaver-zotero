@@ -789,9 +789,9 @@ export class AgentService {
     /**
      * Cancel the current run and close the connection.
      * Sends a cancel message to the backend before closing to ensure proper cleanup.
-     * @param waitMs Time to wait after sending cancel before closing (default: 50ms)
+     * @param waitMs Time to wait after sending cancel before closing (default: 250ms)
      */
-    async cancel(waitMs: number = 50): Promise<void> {
+    async cancel(waitMs: number = 250): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot cancel - WebSocket not connected', 1);
             this.close();
