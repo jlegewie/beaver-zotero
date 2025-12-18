@@ -121,6 +121,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         // learnMoreUrl: "https://www.beaverapp.ai/changelog/v0.8",
         // learnMoreLabel: "Learn more",
     },
+    {
+        version: "0.9.0",
+        title: "Beaver Version 0.9.0",
+        text: "New research agent, flexible window mode, and more",
+        featureList: [
+            {
+                title: "New Research Agent",
+                description: "Upgraded to a more powerful agent. This is a major change so please reach out with any feedback or problems!",
+            },
+            {
+                title: "Flexible Window Mode",
+                description: "In addition to the Zotero sidebar, you can now open Beaver in its own separate window.",
+            },
+            {
+                title: "Improved item search",
+                description: "More accurate item search results and improved performance.",
+            }
+        ]
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
