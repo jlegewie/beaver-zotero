@@ -10,7 +10,7 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
-import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction } from '../agents/agentActions';
+import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, AgentAction } from '../agents/agentActions';
 import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**
@@ -227,7 +227,7 @@ export function useReaderTabSelection() {
                         if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                         // Check if this annotation was created by an agent action
                         const agentActions = store.get(threadAgentActionsAtom);
-                        const isFromAgentAction = agentActions.some((action) => {
+                        const isFromAgentAction = agentActions.some((action: AgentAction) => {
                             const ref = getZoteroItemReferenceFromAgentAction(action);
                             return ref?.zotero_key === item.key && ref?.library_id === item.libraryID;
                         });

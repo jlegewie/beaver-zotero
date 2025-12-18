@@ -20,6 +20,7 @@ import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
+import { ZoteroLibrary } from "../../types/zotero";
 
 
 const OnboardingPage: React.FC = () => {
@@ -176,11 +177,11 @@ const OnboardingPage: React.FC = () => {
             // Get updated libraries
             let updatedLibraries = undefined;
             if (overallSyncStatus === 'partially_completed') {
-                const syncStatus = store.get(syncStatusAtom)
-                const completedLibraryIds = Object.values(syncStatus)
-                    .filter(library => library.status === 'completed')
+                const syncStatus = store.get(syncStatusAtom);
+                const completedLibraryIds = Object.values(syncStatus as Record<number, LibrarySyncStatus>)
+                    .filter((library: LibrarySyncStatus) => library.status === 'completed')
                     .map(library => library.libraryID);
-                updatedLibraries = store.get(syncLibrariesAtom).filter(library => completedLibraryIds.includes(library.library_id));
+                updatedLibraries = (store.get(syncLibrariesAtom) as ZoteroLibrary[]).filter((library: ZoteroLibrary) => completedLibraryIds.includes(library.library_id));
             }
             
             // Call the service to complete onboarding
