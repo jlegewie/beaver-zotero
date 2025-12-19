@@ -210,7 +210,7 @@ export class AgentService {
                     if (!hasResolved) {
                         hasResolved = true;
                         this.connecting = false;
-                        reject(new Error(`Connection closed: ${event.reason || 'Unknown reason'}`));
+                        reject(new Error(`Connection closed: ${event.reason || 'Unknown reason. Please try again.'}`));
                     }
                 };
             });
