@@ -513,6 +513,11 @@ export class AgentService {
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
     async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string): Promise<void> {
+        // Log if closing an existing connection
+        if (this.ws) {
+            logger(`AgentService: Closing existing connection before new connect (state=${this.ws.readyState})`, 1);
+        }
+        
         // Close existing connection if any
         this.close();
 
@@ -564,11 +569,27 @@ export class AgentService {
 
                 this.callbacks = wrappedCallbacks;
                 this.ws = new WebSocket(wsUrl);
+                
+                // Capture the WebSocket instance to avoid race conditions if connect()
+                // is called again before auth completes. The second connect() would call
+                // close() which sets this.ws = null, but we need the original instance.
+                const wsInstance = this.ws;
 
                 this.ws.onopen = () => {
                     logger('AgentService: Connection established, sending auth message', 1);
-                    // Send auth message immediately after connection opens
-                    this.ws?.send(JSON.stringify(authMessage));
+                    // Small delay to ensure server has completed accept() before we send
+                    // This prevents a race condition where messages sent immediately in onopen
+                    // may be dropped if the server hasn't finished accepting the connection
+                    setTimeout(() => {
+                        // Use captured wsInstance instead of this.ws to handle case where
+                        // connect() is called again during the delay (which would null this.ws)
+                        if (wsInstance.readyState === WebSocket.OPEN) {
+                            wsInstance.send(JSON.stringify(authMessage));
+                            logger('AgentService: Auth message sent', 1);
+                        } else {
+                            logger(`AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`, 1);
+                        }
+                    }, 50); // 50ms delay to allow server to complete accept()
                     callbacks.onOpen?.();
                     // Note: Don't resolve here - wait for ready event
                 };

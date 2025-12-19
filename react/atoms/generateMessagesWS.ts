@@ -784,6 +784,7 @@ async function executeWSRequest(
 export const sendWSMessageAtom = atom(
     null,
     async (get, set, message: string) => {
+        logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + get(isWSChatPendingAtom) + ')', 1);
         // Reset state
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);
