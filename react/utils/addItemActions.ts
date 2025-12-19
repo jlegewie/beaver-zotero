@@ -213,35 +213,55 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
 }
 
 /**
+ * Wraps a promise with a timeout that rejects if the promise takes too long
+ * Only use this for operations that are safe to timeout (e.g., non-item-creating operations)
+ */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+}
+
+/**
  * Creates a Zotero item from a ExternalReference object.
  * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
  * Falls back to manual creation if translation fails.
  * After item creation, uses Zotero's "Find Full Text" logic to find PDFs.
+ * 
+ * Note: We don't use timeouts on import methods because Zotero's translation
+ * system cannot be canceled. A timed-out import could still complete and create
+ * a duplicate item after we've fallen back to manual creation.
  */
 export async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
     let item: Zotero.Item | null = null;
 
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
+    // No timeout here - let Zotero's translation complete or fail naturally
+    // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
             item = await tryImportFromIdentifiers(reference.identifiers);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: Failed to import via identifier: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via identifier: ${e?.message || e}`, 1);
         }
     }
 
     // 2. Try URL Translation (Semantic Scholar / Article Page)
+    // No timeout here for the same reason as above
     if (!item && reference.url) {
         try {
             item = await importFromUrl(reference.url);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: Failed to import via URL: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via URL: ${e?.message || e}`, 1);
         }
     }
 
@@ -253,6 +273,7 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
 
     // 4. Try to find PDF using Zotero's "Find Full Text" logic
     // This uses all methods: doi (visits publisher page), url, oa (Unpaywall), custom resolvers
+    // Timeout is safe here because PDF finding doesn't create items, just attachments
     const attachmentIds = await item.getAttachments();
     const attachmentPromises = attachmentIds.map(async (attachmentId: number) => {
         return await Zotero.Items.getAsync(attachmentId);
@@ -262,12 +283,18 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     if (!pdfAttachments || pdfAttachments.length === 0) {
         try {
             // addAvailableFile uses the same logic as "Find Full Text" button in Zotero UI
-            const attachment = await (Zotero.Attachments as any).addAvailableFile(item);
+            // Timeout after 30 seconds to prevent hanging on PDF downloads
+            // This is safe because the item already exists and we're just adding an attachment
+            const attachment = await withTimeout(
+                (Zotero.Attachments as any).addAvailableFile(item),
+                30000,
+                'Find PDF'
+            );
             if (attachment) {
                 logger("createZoteroItem: Found PDF via addAvailableFile", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: addAvailableFile failed: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: addAvailableFile failed: ${e?.message || e}`, 1);
         }
     }
 

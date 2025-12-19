@@ -260,6 +260,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
     /**
      * Apply all pending items
+     * Process in smaller batches to avoid overwhelming the system
      */
     const handleApplyAll = useCallback(async () => {
         if (actions.length === 0) return;
@@ -280,37 +281,48 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
             });
 
-            // Apply all items in parallel
-            const applyResults: (AckActionLink | null)[] = await Promise.all(
-                actionsToApply.map(async (action) => {
-                    try {
-                        // Create the item in Zotero with full post-processing
-                        const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
-                        
-                        // Update external reference cache
-                        if (action.proposed_data.item.source_id) {
-                            markExternalReferenceImported(action.proposed_data.item.source_id, {
-                                library_id: result.library_id,
-                                zotero_key: result.zotero_key
-                            });
-                        }
+            // Process items in smaller batches to avoid timeouts
+            // Maximum 3 concurrent imports to prevent overwhelming the system
+            const BATCH_SIZE = 3;
+            const applyResults: (AckActionLink | null)[] = [];
+            
+            for (let i = 0; i < actionsToApply.length; i += BATCH_SIZE) {
+                const batch = actionsToApply.slice(i, i + BATCH_SIZE);
+                logger(`handleApplyAll: Processing batch ${i / BATCH_SIZE + 1} of ${Math.ceil(actionsToApply.length / BATCH_SIZE)} (${batch.length} items)`, 1);
+                
+                const batchResults = await Promise.all(
+                    batch.map(async (action) => {
+                        try {
+                            // Create the item in Zotero with full post-processing
+                            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
+                            
+                            // Update external reference cache
+                            if (action.proposed_data.item.source_id) {
+                                markExternalReferenceImported(action.proposed_data.item.source_id, {
+                                    library_id: result.library_id,
+                                    zotero_key: result.zotero_key
+                                });
+                            }
 
-                        logger(`handleApplyAll: created item ${action.id}: ${JSON.stringify(result)}`, 1);
-                        return {
-                            action_id: action.id,
-                            result_data: result
-                        } as AckActionLink;
-                    } catch (error: any) {
-                        const errorMessage = error?.message || 'Failed to create item';
-                        logger(`handleApplyAll: failed to create item ${action.id}: ${errorMessage}`, 1);
-                        setAgentActionsToError([action.id], errorMessage);
-                        return null;
-                    } finally {
-                        // Clear busy state for this item
-                        setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
-                    }
-                })
-            );
+                            logger(`handleApplyAll: created item ${action.id}: ${JSON.stringify(result)}`, 1);
+                            return {
+                                action_id: action.id,
+                                result_data: result
+                            } as AckActionLink;
+                        } catch (error: any) {
+                            const errorMessage = error?.message || 'Failed to create item';
+                            logger(`handleApplyAll: failed to create item ${action.id}: ${errorMessage}`, 1);
+                            setAgentActionsToError([action.id], errorMessage);
+                            return null;
+                        } finally {
+                            // Clear busy state for this item
+                            setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
+                        }
+                    })
+                );
+                
+                applyResults.push(...batchResults);
+            }
 
             // Acknowledge successfully created items
             const successfulResults = applyResults.filter((result): result is AckActionLink => result !== null);
@@ -341,7 +353,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             logger(`handleApplyAll: unexpected error: ${error}`, 1);
             setPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [ackAgentActions, actions, groupId, markExternalReferenceImported, runId, setPanelState, setAgentActionsToError]);
+    }, [ackAgentActions, actions, groupId, markExternalReferenceImported, runId, setPanelState, setAgentActionsToError, setBusyState]);
 
     /**
      * Handle rejecting an item (for pending items) or deleting (for applied items)
