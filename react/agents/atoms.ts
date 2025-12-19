@@ -15,7 +15,7 @@ import {
     WSToolReturnEvent,
     WSRunCompleteEvent,
     WSToolCallProgressEvent,
-} from "../../src/services/agentService";
+} from "../../src/services/agentProtocol";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 
 // =============================================================================
