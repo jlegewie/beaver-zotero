@@ -19,6 +19,8 @@ import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
+import { ZoteroItemReference } from '../../types/zotero';
+import { revealSource } from '../../utils/sourceUtils';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -165,6 +167,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         ? externalReferenceToZoteroItem[citationMetadata.external_source_id!]
         : undefined;
     
+    // Compute effective libraryID and itemKey (accounting for mapped external citations)
+    const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;
+    const effectiveItemKey = itemKey || mappedZoteroItem?.zotero_key || '';
+    
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
 
@@ -261,13 +267,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         await BeaverTemporaryAnnotations.cleanupAll();
         
         // Use the already-computed identity (no need to re-parse from DOM)
-        if (!libraryID || !itemKey) {
+        if (!effectiveLibraryID || !effectiveItemKey) {
             logger('ZoteroCitation: No valid item reference');
             return;
         }
 
-        logger(`ZoteroCitation: Zotero Item (${libraryID}, ${itemKey})`);
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey);
+        logger(`ZoteroCitation: Zotero Item (${effectiveLibraryID}, ${effectiveItemKey})`);
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(effectiveLibraryID, effectiveItemKey);
 
         if (!item) {
             logger(`ZoteroCitation: Failed to get Zotero item (${libraryID}, ${itemKey})`);
@@ -284,7 +290,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         // Handle regular items
         if (item.isRegularItem()) {
             logger(`ZoteroCitation: Selecting regular item (${item.id})`);
-            await selectItemById(item.id);
+            // await selectItemById(item.id);
+            revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             return;
         }
 
@@ -410,12 +417,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return (<span>{`(${citation})`}</span>);
         }
         
-        const libraryIDToUse = libraryID || mappedZoteroItem?.library_id;
-        const itemKeyToUse = itemKey || mappedZoteroItem?.zotero_key;
-
         // For Zotero citations, use proper CSL format
-        if (!libraryIDToUse || !itemKeyToUse) return null;
-        const item = Zotero.Items.getByLibraryAndKey(libraryIDToUse, itemKeyToUse);
+        if (!effectiveLibraryID || !effectiveItemKey) return null;
+        const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
         if (!item) return null;
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
         const startPage = Array.isArray(pages) ? pages[0] : pages; 
