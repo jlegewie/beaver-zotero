@@ -275,6 +275,11 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 return;
             }
 
+            // Mark all items as busy before starting
+            actionsToApply.forEach(action => {
+                setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
+            });
+
             // Apply all items in parallel
             const applyResults: (AckActionLink | null)[] = await Promise.all(
                 actionsToApply.map(async (action) => {
@@ -300,6 +305,9 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                         logger(`handleApplyAll: failed to create item ${action.id}: ${errorMessage}`, 1);
                         setAgentActionsToError([action.id], errorMessage);
                         return null;
+                    } finally {
+                        // Clear busy state for this item
+                        setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
                     }
                 })
             );
