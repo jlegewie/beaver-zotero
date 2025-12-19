@@ -52,6 +52,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
     ) => {
         e.preventDefault();
+        // Guard against double submission
+        if (isPending) {
+            logger('handleSubmit: Blocked - request already in progress');
+            return;
+        }
         sendMessage(messageContent);
     };
 
@@ -158,8 +163,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         className="chat-input"
                         onKeyDown={(e) => {
                             handleKeyDown(e);
-                            // Submit on Enter (without Shift)
-                            if (e.key === 'Enter' && !e.shiftKey) {
+                            // Submit on Enter (without Shift) - guard against pending to prevent race with button click
+                            if (e.key === 'Enter' && !e.shiftKey && !isPending) {
                                 e.preventDefault();
                                 handleSubmit(e as any);
                             }

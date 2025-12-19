@@ -784,7 +784,15 @@ async function executeWSRequest(
 export const sendWSMessageAtom = atom(
     null,
     async (get, set, message: string) => {
-        logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + get(isWSChatPendingAtom) + ')', 1);
+        const isPending = get(isWSChatPendingAtom);
+        logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
+        
+        // Guard: Don't allow concurrent requests
+        if (isPending) {
+            logger('sendWSMessageAtom: Blocked - already have request in progress', 1);
+            return;
+        }
+        
         // Reset state
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);

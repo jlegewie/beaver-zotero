@@ -6,7 +6,7 @@ import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../agents/atoms';
-import { sendWSMessageAtom } from '../../atoms/generateMessagesWS';
+import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/generateMessagesWS';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
@@ -19,6 +19,7 @@ interface HomePageProps {
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -31,7 +32,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const handleCustomPrompt = async (
         prompt: CustomPrompt
     ) => {
-        if (isStreaming || prompt.text.length === 0) return;
+        if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0) return;
 
         // Send message via WebSocket
@@ -65,7 +66,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         key={index}
                         variant="ghost-secondary"
                         onClick={() => handleCustomPrompt(prompt)}
-                        disabled={prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
+                        disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
                     >
                         <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                             {`${shortcutKey}${prompt.index}`}

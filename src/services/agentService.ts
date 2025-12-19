@@ -458,6 +458,7 @@ export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
+    private connecting: boolean = false;
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
@@ -513,6 +514,13 @@ export class AgentService {
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
     async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string): Promise<void> {
+        // Guard: Don't allow overlapping connect attempts
+        if (this.connecting) {
+            logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
+            return;
+        }
+        this.connecting = true;
+
         // Log if closing an existing connection
         if (this.ws) {
             logger(`AgentService: Closing existing connection before new connect (state=${this.ws.readyState})`, 1);
@@ -553,6 +561,7 @@ export class AgentService {
                         // Resolve the connect promise
                         if (!hasResolved) {
                             hasResolved = true;
+                            this.connecting = false;
                             resolve();
                         }
                     },
@@ -562,6 +571,7 @@ export class AgentService {
                         // If we haven't resolved yet, this is a connection-phase error
                         if (!hasResolved) {
                             hasResolved = true;
+                            this.connecting = false;
                             reject(new Error(`${event.type}: ${event.message}`));
                         }
                     }
@@ -604,6 +614,7 @@ export class AgentService {
                     // The actual error will come through onclose
                     if (!hasResolved) {
                         hasResolved = true;
+                        this.connecting = false;
                         reject(new Error('Connecting to Beaver failed'));
                     }
                 };
@@ -616,12 +627,14 @@ export class AgentService {
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
                         hasResolved = true;
+                        this.connecting = false;
                         reject(new Error(`Connection closed: ${event.reason || 'Unknown reason'}`));
                     }
                 };
             });
         } catch (error) {
             logger(`AgentService: Connection setup error: ${error}`, 1);
+            this.connecting = false;
             throw error;
         }
     }
