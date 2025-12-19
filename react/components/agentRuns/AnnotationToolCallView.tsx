@@ -603,8 +603,9 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
     // Button text
     const getButtonText = () => {
-        if (isHighlightAnnotationPart) return isError ? 'Highlights: Error' : `${totalAnnotations} Highlight${totalAnnotations === 1 ? '' : 's'}`;
-        if (isNoteAnnotationPart) return isError ? 'Notes: Error' : `${totalAnnotations} Note${totalAnnotations === 1 ? '' : 's'}`;
+        const annotationCount = status === 'completed' ? `${totalAnnotations} ` : "";
+        if (isHighlightAnnotationPart) return isError ? 'Highlights: Error' : `${annotationCount}Highlight${totalAnnotations === 1 ? '' : 's'}`;
+        if (isNoteAnnotationPart) return isError ? 'Notes: Error' : `${annotationCount}Note${totalAnnotations === 1 ? '' : 's'}`;
         if (isError) return 'Annotations: Error';
         return 'Annotations';
     };
