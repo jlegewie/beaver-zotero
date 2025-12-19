@@ -669,13 +669,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onRetry: (event: WSRetryEvent) => {
             logger(`WS onRetry: attempt ${event.attempt}/${event.max_attempts} - ${event.reason}`, 1);
             console.log('[WS] Retry event:', event);
-            set(wsRetryAtom, {
-                runId: event.run_id,
-                attempt: event.attempt,
-                maxAttempts: event.max_attempts,
-                reason: event.reason,
-                waitSeconds: event.wait_seconds,
-            });
+            // set(wsRetryAtom, {
+            //     runId: event.run_id,
+            //     attempt: event.attempt,
+            //     maxAttempts: event.max_attempts,
+            //     reason: event.reason,
+            //     waitSeconds: event.wait_seconds,
+            // });
         },
 
         onAgentActions: (event: WSAgentActionsEvent) => {
