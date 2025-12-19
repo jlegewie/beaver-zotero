@@ -7,6 +7,7 @@ import {
     Spinner,
     TickIcon,
     CancelIcon,
+    AlertIcon,
 } from '../icons/icons';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
@@ -261,6 +262,21 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
             {isLoading && (
                 <Spinner className="scale-12 -mr-1" />
+            )}
+
+            {action.status === 'error' && !isLoading && (
+                <Tooltip content="Retry creating item" singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={AlertIcon}
+                        className={`font-color-secondary ${className}`}
+                        iconClassName="scale-90"
+                        ariaLabel="Error creating item"
+                        onClick={onApply}
+                        disabled={isLoading}
+                        style={{ padding: '2px' }}
+                    />
+                </Tooltip>
             )}
 
             {/* Pending: Reject button */}

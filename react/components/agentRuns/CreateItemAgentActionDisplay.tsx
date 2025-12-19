@@ -91,8 +91,11 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
     if (isHovered) {
         baseClasses.push('bg-quinary');
     }
+
+    // Apply opacity to the metadata display wrapper instead of the entire container
+    const metadataWrapperClasses = ['display-flex', 'flex-col', 'gap-2', 'min-w-0'];
     if (action.status === 'rejected' || action.status === 'undone' || action.status === 'error') {
-        baseClasses.push('opacity-60');
+        metadataWrapperClasses.push('opacity-60');
     }
 
     const getTextClasses = (defaultClass: string = 'font-color-primary') => {
@@ -106,7 +109,7 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >
-            <div className="display-flex flex-col gap-2 min-w-0">
+            <div className={metadataWrapperClasses.join(' ')}>
                 <ReferenceMetadataDisplay
                     title={item.title}
                     authors={item.authors}
@@ -114,14 +117,14 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
                     year={item.year}
                     getTextClasses={getTextClasses}
                 />
-                <AgentActionItemButtons
-                    action={action}
-                    isBusy={isBusy}
-                    onApply={handleApply}
-                    onReject={handleReject}
-                    onExistingMatch={handleExistingMatch}
-                />
             </div>
+            <AgentActionItemButtons
+                action={action}
+                isBusy={isBusy}
+                onApply={handleApply}
+                onReject={handleReject}
+                onExistingMatch={handleExistingMatch}
+            />
         </div>
     );
 };
