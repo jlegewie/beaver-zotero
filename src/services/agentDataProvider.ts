@@ -26,6 +26,9 @@ import {
     WSExternalReferenceCheckRequest,
     WSExternalReferenceCheckResponse,
     ExternalReferenceCheckResult,
+    WSAttachmentContentRequest,
+    WSAttachmentContentResponse,
+    WSPageContent,
 } from './agentProtocol';
 
 /**
@@ -228,6 +231,33 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     };
 
     return response;   
+}
+
+
+/**
+ * Handle attachment_content_request event.
+ * Currently returns placeholder content until full extraction is implemented.
+ */
+export async function handleAttachmentContentRequest(request: WSAttachmentContentRequest): Promise<WSAttachmentContentResponse> {
+    const pageNumbers = request.page_numbers && request.page_numbers.length > 0
+        ? request.page_numbers
+        : [1];
+
+    const pages: WSPageContent[] = pageNumbers.map((pageNumber) => ({
+        page_number: pageNumber,
+        content: 'Attachment content retrieval not implemented yet.'
+    }));
+
+    const response: WSAttachmentContentResponse = {
+        type: 'attachment_content',
+        request_id: request.request_id,
+        attachment: request.attachment,
+        pages,
+        total_pages: null,
+        error: 'Attachment content retrieval not implemented'
+    };
+
+    return response;
 }
 
 

@@ -13,7 +13,11 @@ import { logger } from '../utils/logger';
 import { AgentRun } from '../../react/agents/types';
 import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
 import { ApiService } from './apiService';
-import { handleZoteroDataRequest, handleExternalReferenceCheckRequest } from './agentDataProvider';
+import { 
+    handleZoteroDataRequest, 
+    handleExternalReferenceCheckRequest,
+    handleAttachmentContentRequest,
+} from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
     WSEvent,
@@ -335,14 +339,9 @@ export class AgentService {
                     break;
 
                 case 'attachment_content_request':
-                    this.handleAttachmentContentRequest(event).catch((error) => {
-                        logger(`AgentService: Failed to handle attachment_content_request: ${error}`, 1);
-                        this.callbacks?.onError({
-                            event: 'error',
-                            type: 'attachment_content_request_failed',
-                            message: String(error),
-                        });
-                    });
+                    handleAttachmentContentRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => this.handleProviderError(err, 'attachment_content_request_failed'));
                     break;
 
                 case 'external_reference_check_request':
@@ -409,32 +408,6 @@ export class AgentService {
 
         // Close the connection
         this.close(1000, 'User cancelled');
-    }
-
-    /**
-     * Handle attachment_content_request event.
-     * Currently returns placeholder content until full extraction is implemented.
-     */
-    private async handleAttachmentContentRequest(request: WSAttachmentContentRequest): Promise<void> {
-        const pageNumbers = request.page_numbers && request.page_numbers.length > 0
-            ? request.page_numbers
-            : [1];
-
-        const pages: WSPageContent[] = pageNumbers.map((pageNumber) => ({
-            page_number: pageNumber,
-            content: 'Attachment content retrieval not implemented yet.'
-        }));
-
-        const response: WSAttachmentContentResponse = {
-            type: 'attachment_content',
-            request_id: request.request_id,
-            attachment: request.attachment,
-            pages,
-            total_pages: null,
-            error: 'Attachment content retrieval not implemented'
-        };
-
-        this.send(response);
     }
 
     private handleProviderError(error: any, event: string) {
