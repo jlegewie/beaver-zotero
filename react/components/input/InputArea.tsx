@@ -3,7 +3,7 @@ import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom } from '../../atoms/generateMessagesWS';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom } from '../../atoms/agentRunAtoms';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';

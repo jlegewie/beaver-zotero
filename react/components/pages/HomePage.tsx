@@ -6,7 +6,7 @@ import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../agents/atoms';
-import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/generateMessagesWS';
+import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";

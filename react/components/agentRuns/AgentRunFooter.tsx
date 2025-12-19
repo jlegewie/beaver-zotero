@@ -18,7 +18,7 @@ import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
+import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 

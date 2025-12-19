@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import Button from '../ui/Button';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '../../agents/types';
-import { wsRetryAtom } from '../../atoms/generateMessagesWS';
+import { wsRetryAtom } from '../../atoms/agentRunAtoms';
 
 interface RunStatusIndicatorProps {
     status: AgentRunStatus;

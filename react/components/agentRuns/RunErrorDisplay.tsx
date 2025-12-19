@@ -3,7 +3,7 @@ import { useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, SettingsIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
-import { regenerateFromRunAtom } from '../../atoms/generateMessagesWS';
+import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
 
 interface RunError {
