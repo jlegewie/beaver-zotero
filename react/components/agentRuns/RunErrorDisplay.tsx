@@ -31,6 +31,11 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
         await regenerateFromRun(runId);
     };
 
+    // Strip error type prefix if it exists in the message (e.g. "internal_error: message" -> "message")
+    const displayMessage = error.message.startsWith(`${error.type}: `)
+        ? error.message.substring(error.type.length + 2)
+        : error.message;
+
     return (
         <div className="px-4">
             <div
@@ -41,7 +46,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
                     <Icon icon={AlertIcon} className="scale-11 mt-020" />
                     <div className="display-flex flex-col flex-1 gap-2 min-w-0">
                         <div className="text-base">
-                            {parseTextWithLinksAndNewlines(error.message)}
+                            {parseTextWithLinksAndNewlines(displayMessage)}
                         </div>
                     </div>
                 </div>
