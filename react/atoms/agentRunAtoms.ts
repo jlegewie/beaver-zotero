@@ -7,8 +7,8 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
+import { agentService } from '../../src/services/agentService';
 import {
-    agentService,
     WSCallbacks,
     AgentRunRequest,
     WSReadyData,
@@ -22,7 +22,7 @@ import {
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
-} from '../../src/services/agentService';
+} from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, FullModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';

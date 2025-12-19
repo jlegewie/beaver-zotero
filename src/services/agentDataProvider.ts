@@ -13,13 +13,20 @@ import { safeIsInTrash } from '../utils/zoteroUtils';
 import { syncingItemFilterAsync } from '../utils/sync';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
-import { WSZoteroDataRequest, WSDataError, WSZoteroDataResponse, ExternalReferenceCheckResult, WSExternalReferenceCheckRequest, WSExternalReferenceCheckResponse } from './agentService';
+
 import { store } from '../../react/store';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../react/utils/sourceUtils';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
 import { FindReferenceData, findExistingReference } from '../../react/utils/findExistingReference';
-
+import {
+    WSZoteroDataRequest,
+    WSZoteroDataResponse,
+    WSDataError,
+    WSExternalReferenceCheckRequest,
+    WSExternalReferenceCheckResponse,
+    ExternalReferenceCheckResult,
+} from './agentProtocol';
 
 /**
  * Handle zotero_data_request event.
