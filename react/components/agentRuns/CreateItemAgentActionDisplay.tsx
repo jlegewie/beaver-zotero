@@ -402,10 +402,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
     // Determine which icon to show
     const getIcon = () => {
-        if (isApplying || anyBusy) return Spinner;
-        if (allErrors) return AlertIcon;
-        if (resultsVisible) return ArrowDownIcon;
         if (isButtonHovered && totalItems > 0) return ArrowRightIcon;
+        if (isApplying || anyBusy) return Spinner;
+        if (resultsVisible) return ArrowDownIcon;
+        if (allErrors) return AlertIcon;
         if (totalItems === 0) return AlertIcon;
         return DocumentValidationIcon;
     };
@@ -414,6 +414,9 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     const getButtonText = () => {
         if (pendingCount > 0) {
             return `Import ${pendingCount} Item${pendingCount === 1 ? '' : 's'}`;
+        }
+        if (allErrors) {
+            return `Error importing ${totalItems} Item${totalItems === 1 ? '' : 's'}`;
         }
         return `Imported ${appliedCount} Item${appliedCount === 1 ? '' : 's'}`;
     };
@@ -453,7 +456,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 </div>
 
                 {/* Apply/Reject all buttons */}
-                {showApplyButton && (
+                {showApplyButton && !allErrors && (
                     <div className="display-flex flex-row items-center gap-3 mr-015">
                         <Tooltip content="Reject all" showArrow singleLine>
                             <IconButton

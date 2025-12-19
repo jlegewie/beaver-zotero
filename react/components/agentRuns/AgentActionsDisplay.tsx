@@ -41,8 +41,7 @@ export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run })
         createItemActions.every(
             (action) =>
                 action.status === 'rejected' ||
-                action.status === 'undone' ||
-                action.status === 'error'
+                action.status === 'undone'
         )
     ) {
         return null;
