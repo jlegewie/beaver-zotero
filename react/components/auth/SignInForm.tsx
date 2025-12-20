@@ -254,11 +254,17 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     )
   }
 
+  // If we are in OTP step but not in code method, reset to initial
+  if (step === 'otp' && authMethod !== 'code') {
+    resetToInitial();
+    return null;
+  }
+
   // Render main login form
   return (
     <div className="webapp-space-y-6">
       {/* Initial login form with email and method selection */}
-      {authMethod === 'initial' && (
+      {(authMethod === 'initial' || (authMethod === 'code' && step === 'method-selection')) && (
         <form onSubmit={(e) => {
           e.preventDefault()
           handleSendEmailCode()

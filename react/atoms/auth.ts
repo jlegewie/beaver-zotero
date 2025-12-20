@@ -20,11 +20,12 @@ export type LoginStep = 'method-selection' | 'otp' | 'forgot-password';
 
 /**
  * Determines the authentication method shown in the login form
- * Synced with preferences for persistence
+ * Synced with preferences for persistence. 
+ * Note: 'code' is a transient state and defaults to 'initial' on restart.
  */
 const getInitialAuthMethod = (): AuthMethod => {
     const stored = getPref("authMethod");
-    return (stored === 'password' || stored === 'code') ? stored : 'initial';
+    return (stored === 'password') ? stored : 'initial';
 };
 
 export const authMethodAtom = atom<AuthMethod>(getInitialAuthMethod());
