@@ -123,6 +123,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const isButtonDisabled = isInProgress || (hasError && !hasResult);
     const hasExpandedResult = effectiveExpanded && canExpand;
+    const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
 
     return (
         <div
@@ -156,7 +157,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             <Icon icon={getIcon()} />
                         </div>
                         
-                        <div className={`display-flex ${effectiveExpanded ? 'font-color-primary' : ''} ${isInProgress ? 'shimmer-text' : ''}`}>
+                        <div className={`display-flex ${effectiveExpanded ? 'font-color-primary' : ''} ${isShimmering ? 'shimmer-text' : ''}`}>
                             {label}
                         </div>
                     </div>
