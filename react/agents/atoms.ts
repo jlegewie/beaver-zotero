@@ -277,3 +277,14 @@ export function updateRunComplete(run: AgentRun, event: WSRunCompleteEvent): Age
         completed_at: new Date().toISOString(),
     };
 }
+
+/**
+ * Reset run messages to initial state.
+ * Used when a retry event requests a reset of streamed content.
+ */
+export function resetRunMessages(run: AgentRun): AgentRun {
+    return {
+        ...run,
+        model_messages: [],
+    };
+}

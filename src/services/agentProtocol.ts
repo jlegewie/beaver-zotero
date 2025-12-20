@@ -117,6 +117,8 @@ export interface WSRetryEvent extends WSBaseEvent {
     reason: string;
     /** How long we're waiting before retry (if known) */
     wait_seconds?: number | null;
+    /** If true, frontend should clear any partial content streamed before this retry */
+    reset: boolean;
 }
 
 /** Agent action event sent when an action is detected during streaming */

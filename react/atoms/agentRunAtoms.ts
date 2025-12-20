@@ -51,6 +51,7 @@ import {
     updateRunComplete,
     updateRunWithToolCallProgress,
     allUserAttachmentKeysAtom,
+    resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
 import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
@@ -669,13 +670,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onRetry: (event: WSRetryEvent) => {
             logger(`WS onRetry: attempt ${event.attempt}/${event.max_attempts} - ${event.reason}`, 1);
             console.log('[WS] Retry event:', event);
-            // set(wsRetryAtom, {
-            //     runId: event.run_id,
-            //     attempt: event.attempt,
-            //     maxAttempts: event.max_attempts,
-            //     reason: event.reason,
-            //     waitSeconds: event.wait_seconds,
-            // });
+            set(wsRetryAtom, {
+                runId: event.run_id,
+                attempt: event.attempt,
+                maxAttempts: event.max_attempts,
+                reason: event.reason,
+                waitSeconds: event.wait_seconds,
+            });
+
+            // If reset is true, clear any partial content that was streamed
+            if (event.reset) {
+                logger(`WS onRetry: resetting run messages for run ${event.run_id}`, 1);
+                set(activeRunAtom, (prev) => prev ? resetRunMessages(prev) : prev);
+            }
         },
 
         onAgentActions: (event: WSAgentActionsEvent) => {
@@ -721,7 +728,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onClose: (code: number, reason: string, wasClean: boolean) => {
             logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
-            console.log('[WS] Connection closed:', { code, reason, wasClean });
+            // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
             set(isWSChatPendingAtom, false);

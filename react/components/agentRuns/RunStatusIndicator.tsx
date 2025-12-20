@@ -26,11 +26,10 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
     if (status !== 'in_progress' && status !== 'awaiting_deferred') {
         return null;
     }
-
-    const icon = isRetrying ? RepeatIcon : Spinner;
     
     const text = isRetrying
-        ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
+        // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
+        ? `Retrying...`
         : status === 'awaiting_deferred'
             ? 'Processing'
             : 'Generating';
@@ -47,10 +46,10 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
                         disabled={true}
                     >
                         <div className="display-flex flex-row px-3 gap-2">
-                            <div className={`flex-1 display-flex mt-010 ${isRetrying ? 'text-amber-600' : ''}`}>
-                                <Icon icon={icon} />
+                            <div className="flex-1 display-flex mt-010">
+                                <Icon icon={Spinner} />
                             </div>
-                            <div className={`display-flex ${isRetrying ? 'text-amber-600' : 'shimmer-text'}`}>
+                            <div className="display-flex shimmer-text">
                                 {text}
                             </div>
                         </div>
