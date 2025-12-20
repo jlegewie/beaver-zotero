@@ -128,6 +128,7 @@ export const authLoadingAtom = atom<boolean>(true);
 
 /**
  * Atom setter for logging out, setting session and user atoms to null
+ * Also resets all login form state (except email for convenience)
  */
 export const logoutAtom = atom(
     null,
@@ -135,5 +136,15 @@ export const logoutAtom = atom(
         supabase.auth.signOut();
         set(profileWithPlanAtom, null);
         set(isProfileLoadedAtom, false);
+        
+        // Reset login form state (keep email for convenience)
+        set(authMethodAtom, 'initial');
+        set(loginStepAtom, 'method-selection');
+        set(loginPasswordAtom, '');
+        set(loginErrorAtom, null);
+        set(loginLoadingAtom, false);
+        set(otpResendCountdownAtom, 0);
+        set(isWaitingForProfileAtom, false);
+        setPref("authMethod", "initial");
     }
 );
