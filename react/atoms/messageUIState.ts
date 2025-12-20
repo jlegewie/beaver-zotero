@@ -137,6 +137,35 @@ export const setThinkingVisibilityAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
+// Run error visibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility of run error details by runId
+ */
+export const runErrorVisibilityAtom = atom<BooleanMap>({});
+
+/**
+ * Toggle visibility of a run's error details
+ */
+export const toggleRunErrorVisibilityAtom = atom(
+    null,
+    (get, set, runId: string) => {
+        const current = get(runErrorVisibilityAtom);
+        const next = !(current[runId] ?? false);
+        set(runErrorVisibilityAtom, { ...current, [runId]: next });
+    }
+);
+
+export const setRunErrorVisibilityAtom = atom(
+    null,
+    (get, set, { runId, visible }: { runId: string; visible: boolean }) => {
+        const current = get(runErrorVisibilityAtom);
+        set(runErrorVisibilityAtom, { ...current, [runId]: visible });
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Annotation groups (button + busy states)
 // ---------------------------------------------------------------------------
 
@@ -245,6 +274,7 @@ export const resetMessageUIStateAtom = atom(
         set(searchToolVisibilityAtom, {});
         set(messageSourcesVisibilityAtom, {});
         set(thinkingVisibilityAtom, {});
+        set(runErrorVisibilityAtom, {});
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});

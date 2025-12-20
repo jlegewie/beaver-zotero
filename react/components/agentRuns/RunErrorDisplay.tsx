@@ -1,10 +1,11 @@
-import React from 'react';
-import { useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon, SettingsIcon } from '../icons/icons';
+import React, { useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
+import { runErrorVisibilityAtom, toggleRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 
 interface RunError {
     type: string;
@@ -12,23 +13,87 @@ interface RunError {
     details?: string;
     is_retryable?: boolean;
     retry_after?: number;
+    is_resumable?: boolean;
 }
 
 interface RunErrorDisplayProps {
     runId: string;
     error: RunError;
+    isLastRun: boolean;
+}
+
+const typeMap: Record<string, string> = {
+    // Account & Auth
+    profile_not_found: 'Account Error',
+    auth_failed: 'Account Error',
+    invalid_auth: 'Account Error',
+    auth_timeout: 'Account Error',
+    inactive_subscription: 'Subscription Required',
+
+    // Model Availability
+    invalid_model: 'Model Not Available',
+    llm_invalid_model: 'Model Not Available',
+    llm_model_access_denied: 'Model Not Available',
+    llm_tool_use_not_supported: 'Model Not Supported',
+    model_requires_api_key: 'API Key Required',
+
+    // Usage & Billing
+    usage_limit_exceeded: 'Limit Reached',
+    usage_billing_limit: 'Limit Reached',
+    llm_insufficient_credits: 'Limit Reached',
+    llm_quota_exceeded: 'Limit Reached',
+    llm_rate_limit: 'Rate Limit Exceeded',
+    llm_tier_limit: 'Rate Limit Exceeded',
+
+    // API Key Issues
+    llm_auth_error: 'API Key Issue',
+    llm_verification_required: 'API Key Issue',
+
+    // AI Service Problems
+    llm_service_unavailable: 'AI Service Problem',
+    llm_timeout: 'AI Service Problem',
+    llm_connection_error: 'AI Service Problem',
+    llm_streaming_error: 'AI Service Problem',
+
+    // Request & Content
+    llm_context_window_exceeded: 'Context Limit Reached',
+    llm_content_filtered: 'Content Blocked',
+    invalid_request: 'Request Problem',
+    custom_model_missing: 'Request Problem',
+    custom_model_conflict: 'Request Problem',
+    llm_data_policy_error: 'Request Problem',
+    llm_encoding_error: 'Request Problem',
+
+    // System Errors
+    internal_error: 'System Error',
+    llm_unexpected_error: 'System Error',
+    llm_internal_error: 'System Error',
+    llm_auth_error_internal: 'System Error',
+    llm_server_error: 'Server Error',
+    llm_client_error: 'Client Error',
 }
 
 /**
  * Displays an error message for a failed agent run.
- * Shows the error message (which may contain HTML links) and a retry button.
+ * Shows a collapsible error message and a retry button.
  */
-export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }) => {
+export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    
+    // Visibility state
+    const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
+    const toggleVisibility = useSetAtom(toggleRunErrorVisibilityAtom);
+    const isExpanded = runErrorVisibility[runId] ?? isLastRun;
+
+    const [isHovered, setIsHovered] = useState(false);
 
     const handleRetry = async () => {
         await regenerateFromRun(runId);
+    };
+
+    const handleToggle = () => {
+        toggleVisibility(runId);
     };
 
     // Strip error type prefix if it exists in the message (e.g. "internal_error: message" -> "message")
@@ -36,46 +101,92 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error }
         ? error.message.substring(error.type.length + 2)
         : error.message;
 
+    // Generic header title
+    const headerTitle = typeMap[error.type] || "An error occurred";
+
     return (
         <div className="px-4">
-            <div
-                className="display-flex flex-col p-3 gap-3 rounded-lg"
+             <div
+                id={`run-error-${runId}`}
+                className={`
+                    rounded-md flex flex-col min-w-0 border-error
+                    ${isExpanded ? 'mb-2' : ''}
+                `}
                 style={{ background: 'var(--tag-red-quinary)' }}
             >
-                <div className="font-color-red display-flex flex-row gap-3 items-start">
-                    <Icon icon={AlertIcon} className="scale-11 mt-020" />
-                    <div className="display-flex flex-col flex-1 gap-2 min-w-0">
-                        <div className="text-base">
-                            {parseTextWithLinksAndNewlines(displayMessage)}
+                <div
+                    className="display-flex flex-row py-15"
+                    style={{ 
+                        borderBottom: isExpanded ? '1px solid var(--tag-red-quarternary)' : 'none'
+                    }}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
+                >
+                    <Button
+                        variant="ghost-secondary"
+                        onClick={handleToggle}
+                        className={`
+                            text-base scale-105 w-full min-w-0 align-start text-left
+                        `}
+                        style={{ padding: '2px 6px', maxHeight: 'none' }}
+                    >
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className="flex-1 display-flex mt-010 font-color-red">
+                                <Icon icon={isHovered ? (isExpanded ? ArrowDownIcon : ArrowRightIcon) : AlertIcon} />
+                            </div>
+                            
+                            <div className="display-flex font-color-red font-medium">
+                                {headerTitle}
+                            </div>
+                        </div>
+                    </Button>
+                </div>
+
+                {/* Expanded Content */}
+                {isExpanded && (
+                    <div className="p-3">
+                        <div className="display-flex flex-col gap-3">
+                            <div className="text-base font-color-red">
+                                {parseTextWithLinksAndNewlines(displayMessage)}
+                            </div>
+
+                            <div className="display-flex flex-row gap-3 items-center">
+                                <div className="flex-1" />
+                                {error.type === "usage_limit_exceeded" && (
+                                    <Button
+                                        variant="outline"
+                                        className="border-error font-color-red"
+                                        rightIcon={SettingsIcon}
+                                        onClick={() => togglePreferencePage(true)}
+                                    >
+                                        Settings
+                                    </Button>
+                                )}
+                                {error.is_resumable && (
+                                    <Button
+                                        variant="outline"
+                                        className="border-error font-color-red"
+                                        rightIcon={RepeatIcon}
+                                        onClick={handleRetry}
+                                    >
+                                        Resume
+                                    </Button>
+                                )}
+                                <Button
+                                    variant="outline"
+                                    className="border-error font-color-red"
+                                    rightIcon={RepeatIcon}
+                                    onClick={handleRetry}
+                                >
+                                    Retry
+                                </Button>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div className="display-flex flex-row gap-3 items-center">
-                    <div className="flex-1" />
-                    {error.type === "usage_limit_exceeded" && (
-                        <Button
-                            variant="outline"
-                            className="border-error font-color-red"
-                            rightIcon={SettingsIcon}
-                            onClick={() => togglePreferencePage(true)}
-                        >
-                            Settings
-                        </Button>
-                    )}
-                    <Button
-                        variant="outline"
-                        className="border-error font-color-red"
-                        rightIcon={RepeatIcon}
-                        onClick={handleRetry}
-                    >
-                        Retry
-                    </Button>
-                    
-                </div>
+                )}
             </div>
         </div>
     );
 };
 
 export default RunErrorDisplay;
-

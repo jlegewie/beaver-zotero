@@ -647,6 +647,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     details: event.details,
                     is_retryable: event.is_retryable,
                     retry_after: event.retry_after,
+                    is_resumable: event.is_resumable,
                 }
             } : prev);
             set(isWSChatPendingAtom, false);

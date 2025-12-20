@@ -94,6 +94,8 @@ export interface WSErrorEvent extends WSBaseEvent {
     is_retryable?: boolean;
     /** Seconds to wait before retrying (optional) */
     retry_after?: number;
+    /** Whether the run can be resumed from the point of failure */
+    is_resumable?: boolean;
 }
 
 /** Warning event for non-fatal issues */
