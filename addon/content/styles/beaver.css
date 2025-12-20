@@ -1153,6 +1153,26 @@
     flex-shrink: 0;
 }
 
+
+/* Button: Error variant */
+[id^="beaver-pane-"] .variant-error {
+    cursor: pointer;
+    border: 1px solid var(--tag-red-tertiary);
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+    font-size: 0.9rem;
+    background-color: transparent;
+    color: var(--tag-red);
+    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+[id^="beaver-pane-"] .variant-error:hover {
+    background-color: var(--tag-red-quarternary);
+}
+
 /* Button: Outline variant */
 [id^="beaver-pane-"] .variant-outline {
     cursor: pointer;
