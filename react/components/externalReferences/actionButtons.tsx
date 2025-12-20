@@ -13,7 +13,6 @@ import {
     selectedExternalReferenceAtom 
 } from '../../atoms/ui';
 import Button from '../ui/Button';
-import { ExternalReferenceResult } from '../../types/chat/apiTypes';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
@@ -21,7 +20,7 @@ import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { revealSource } from '../../utils/sourceUtils';
 import { 
     checkExternalReferenceAtom, 
-    getCachedReferenceForObjectAtom,
+    externalReferenceItemMappingAtom,
     isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../atoms/externalReferences';
@@ -29,12 +28,19 @@ import { ButtonVariant } from '../ui/Button';
 import { createZoteroItem } from '../../utils/addItemActions';
 import { logger } from '../../../src/utils/logger';
 import { ensureItemSynced } from '../../../src/utils/sync';
+import { 
+    getPendingCreateItemActionBySourceIdAtom,
+    ackAgentActionsAtom,
+} from '../../agents/agentActions';
+import { CreateItemResultData } from '../../types/agentActions/items';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
 
+const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
+
 interface ActionButtonsProps {
-    item: ExternalReference | ExternalReferenceResult;
+    item: ExternalReference;
     /** Button variant */
     buttonVariant?: ButtonVariant;
     /** Button size */
@@ -67,9 +73,17 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
     const checkReference = useSetAtom(checkExternalReferenceAtom);
-    const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
+    const externalReferenceCache = useAtomValue(externalReferenceItemMappingAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
+    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    
+    // Get cached reference directly from the cache for this item's source_id
+    const sourceId = item.source_id;
+    const cachedRef = sourceId && sourceId in externalReferenceCache 
+        ? externalReferenceCache[sourceId] 
+        : undefined;
     
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
@@ -103,6 +117,22 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             // Update cache
             if (item.source_id) {
                 markExternalReferenceImported(item.source_id, newZoteroRef);
+                
+                // Check for matching pending agent action and acknowledge it
+                const matchingAction = getPendingCreateItemAction(item.source_id);
+                if (matchingAction) {
+                    logger(`ActionButtons: Found matching agent action ${matchingAction.id}, acknowledging`, 1);
+                    const resultData: CreateItemResultData = {
+                        library_id: libraryId,
+                        zotero_key: newItem.key
+                    };
+                    ackAgentActions(matchingAction.run_id, [{
+                        action_id: matchingAction.id,
+                        result_data: resultData
+                    }]).catch(err => {
+                        logger(`ActionButtons: Failed to acknowledge agent action: ${err}`, 2);
+                    });
+                }
             }
             
             // Sync the newly created item to backend immediately
@@ -133,29 +163,39 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, markExternalReferenceImported]);
+    }, [item, isImporting, isLoading, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
     
+    // React to cache changes (e.g., when item is deleted and cache is invalidated)
+    useEffect(() => {
+        if (cachedRef === undefined) {
+            // Not in cache yet - will be handled by the check effect below
+            return;
+        }
+        
+        // Cache was updated (either set to a value or cleared to null)
+        setItemExists(cachedRef !== null);
+        setZoteroItemRef(cachedRef);
+        
+        // Check for best attachment if item exists
+        if (cachedRef !== null) {
+            const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
+            if (zoteroItem && zoteroItem.isRegularItem()) {
+                zoteroItem.getBestAttachment().then(attachment => {
+                    setBestAttachment(attachment || null);
+                });
+            }
+        } else {
+            // Item was deleted, clear attachment
+            setBestAttachment(null);
+        }
+    }, [cachedRef]);
+
     // Check cache and validate on mount
     useEffect(() => {
-        const refId = item.source_id;
-        if (!refId) return;
+        if (!sourceId) return;
         
-        const cached = getCachedReference(item);
-        
-        // If we have cached data, use it
-        if (cached !== undefined) {
-            setItemExists(cached !== null);
-            setZoteroItemRef(cached);
-            
-            // Check for best attachment if item exists
-            if (cached !== null) {
-                const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
-                if (zoteroItem && zoteroItem.isRegularItem()) {
-                    zoteroItem.getBestAttachment().then(attachment => {
-                        setBestAttachment(attachment || null);
-                    });
-                }
-            }
+        // If we have cached data, the above effect handles it
+        if (cachedRef !== undefined) {
             return;
         }
         
@@ -182,33 +222,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         } else {
             setIsLoading(true);
         }
-    }, [item, getCachedReference, checkReference, isChecking]);
+    }, [item, sourceId, cachedRef, checkReference, isChecking]);
     
     // Update loading state when checking state changes
     useEffect(() => {
         const checking = isChecking(item);
         if (checking) {
             setIsLoading(true);
-        } else {
-            // When checking completes, update from cache
-            const cached = getCachedReference(item);
-            if (cached !== undefined) {
-                setItemExists(cached !== null);
-                setZoteroItemRef(cached);
-                setIsLoading(false);
-                
-                // Check for best attachment if item exists
-                if (cached !== null) {
-                    const zoteroItem = Zotero.Items.getByLibraryAndKey(cached.library_id, cached.zotero_key);
-                    if (zoteroItem && zoteroItem.isRegularItem()) {
-                        zoteroItem.getBestAttachment().then(attachment => {
-                            setBestAttachment(attachment || null);
-                        });
-                    }
-                }
-            }
+        } else if (cachedRef !== undefined) {
+            // Checking completed and we have cached data
+            setIsLoading(false);
         }
-    }, [isChecking(item), getCachedReference, item]);
+    }, [isChecking(item), cachedRef, item]);
 
     // Helper to render a button in different modes
     const renderButton = (
@@ -305,8 +330,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             )}
             
             {/* Citation count */}
-            {showCitationCount && (
-                <div className="font-color-tertiary">Cited by {(item.citation_count || 0).toLocaleString()}</div>
+            {showCitationCount && item.citation_count !== undefined && item.citation_count > 0 && (
+                <a
+                    onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
+                    className="text-link-muted text-sm"
+                >
+                    Cited by {item.citation_count.toLocaleString()}
+                </a>
+            )}
+            {showCitationCount && item.citation_count !== undefined && item.citation_count === 0 && (
+                <div className="font-color-tertiary text-sm">
+                    Cited by {item.citation_count.toLocaleString()}
+                </div>
             )}
             <div className="flex-1"/>
 

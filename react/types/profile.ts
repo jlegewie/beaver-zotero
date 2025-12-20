@@ -58,6 +58,26 @@ export enum ProcessingTier {
 }
 
 /**
+ * Charge type for chat requests (determines billing method)
+ */
+export enum ChargeType {
+    SUBSCRIPTION_CREDIT = "subscription_credit",
+    USER_API_KEY = "user_api_key",
+    USAGE_BASED_BILLING = "usage_based_billing",
+    APP_KEY_FALLBACK = "app_key_fallback"
+}
+
+/**
+ * Processing mode determines where document processing happens
+ * - FRONTEND: Documents processed client-side (free users, paid users before indexing)
+ * - BACKEND: Pre-indexed server-side data (paid users after indexing complete)
+ */
+export enum ProcessingMode {
+    FRONTEND = "frontend",
+    BACKEND = "backend"
+}
+
+/**
  * Profile interface representing user profile data (based on SafeProfileModel)
  */
 export interface SafeProfileModel {
@@ -98,6 +118,13 @@ export interface SafeProfileModel {
     usage_based_billing_enabled: boolean;
     usage_based_billing_limit: number;
     usage_based_billing_cost: number;
+
+    // Indexing status for backend processing mode
+    indexing_complete: boolean;
+
+    // Data migration version
+    data_version: number;
+    data_migrated_at: string | null;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {

@@ -1,4 +1,4 @@
-import { KeyModifier } from "zotero-plugin-toolkit/dist/managers/keyboard";
+import { KeyModifier } from "zotero-plugin-toolkit";
 
 /**
  * Custom keyboard manager that properly handles accelerator key combinations

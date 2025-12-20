@@ -1,8 +1,10 @@
-import React from 'react';
-import { CancelIcon, PlusSignIcon, SettingsIcon } from './icons/icons';
+import React, { useRef, useCallback } from 'react';
+import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { newThreadAtom, threadMessagesAtom } from '../atoms/threads';
+import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
+import { newThreadAtom } from '../atoms/threads';
+import { runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
@@ -12,24 +14,37 @@ import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
+import { getWindowFromElement } from '../utils/windowContext';
 
 interface HeaderProps {
     onClose?: () => void;
     settingsPage?: boolean;
+    isWindow?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
-    const threadMessages = useAtomValue(threadMessagesAtom);
+const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false }) => {
+    const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
         await newThread();
     }
+
+    const handleClose = useCallback(() => {
+        if (isWindow) {
+            // Get the actual window where the button is rendered, not the main window
+            const currentWindow = getWindowFromElement(closeButtonRef.current);
+            currentWindow.close();
+        } else {
+            triggerToggleChat(Zotero.getMainWindow());
+        }
+    }, [isWindow]);
 
     // Get platform-specific shortcut text
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
@@ -39,16 +54,24 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
             <div className="flex-1 display-flex gap-4">
 
-                {/* Close chat */}
-                <Tooltip content="Close chat" secondaryContent={closeChatShortcut} showArrow singleLine>
-                    <IconButton
-                        icon={CancelIcon}
-                        onClick={() => triggerToggleChat(Zotero.getMainWindow())}
-                        className="scale-14"
-                        ariaLabel="Close chat"
-                    />
-                </Tooltip>
-
+                {/* Close chat / Close window */}
+                {!isWindow && (
+                    <Tooltip 
+                        content={isWindow ? "Close window" : "Close chat"} 
+                        secondaryContent={isWindow ? undefined : closeChatShortcut} 
+                        showArrow 
+                        singleLine
+                    >
+                        <IconButton
+                            ref={closeButtonRef}
+                            icon={CancelIcon}
+                            onClick={handleClose}
+                            className="scale-14"
+                            ariaLabel={isWindow ? "Close window" : "Close chat"}
+                        />
+                    </Tooltip>
+                )}
+                
                 {/* New chat and chat history */}
                 {isAuthenticated && hasCompletedOnboarding && (
                     <>
@@ -58,14 +81,22 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
                             onClick={handleNewThread}
                             className="scale-14"
                             ariaLabel="New thread"
-                            disabled={threadMessages.length === 0 && !isPreferencePageVisible}
+                            disabled={runsCount === 0 && !isPreferencePageVisible}
                         />
                     </Tooltip>
-                    <ThreadsMenu
-                        className="scale-14"
-                        ariaLabel="Show chat history"
-                    />
                     </>
+                )}
+
+                {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
+                {!isWindow && isAuthenticated && hasCompletedOnboarding && (
+                    <Tooltip content="Open in Separate Window" showArrow singleLine>
+                        <IconButton
+                            icon={Share05Icon}
+                            onClick={openBeaverWindow}
+                            className="scale-13"
+                            ariaLabel="Open in Separate Window"
+                        />
+                    </Tooltip>
                 )}
             </div>
 
@@ -73,10 +104,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage }) => {
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
                     {planFeatures.databaseSync && hasCompletedOnboarding &&
-                        <Tooltip content="Sync with Beaver" showArrow singleLine>
-                            <DatabaseStatusButton />
-                        </Tooltip>
+                        <DatabaseStatusButton />
                     }
+                    {isAuthenticated && hasCompletedOnboarding && (
+                        <ThreadsMenu
+                            className="scale-14"
+                            ariaLabel="Show chat history"
+                        />
+                    )}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

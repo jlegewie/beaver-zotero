@@ -1,7 +1,6 @@
 import { truncateText } from './stringUtils';
 import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
-import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
@@ -55,7 +54,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -76,14 +75,14 @@ export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment
     }
 }
 
-/*
-* Check if an item was added before the last sync
-* @param item The item to check
-* @param syncWithZotero Whether to use Zotero sync
-* @param userID The user ID
-* @returns True if the item was added before the last sync
-*/
-async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
+/**
+ * Check if an item was added before the last sync
+ * @param item The item to check
+ * @param syncWithZotero Whether to use Zotero sync
+ * @param userID The user ID
+ * @returns True if the item was added before the last sync
+ */
+export async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
     let syncLog = null;
     if (syncWithZotero) {
         syncLog = await Zotero.Beaver.db.getSyncLogWithHighestVersion(userID, item.libraryID);

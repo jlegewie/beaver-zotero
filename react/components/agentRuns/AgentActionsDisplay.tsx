@@ -1,0 +1,61 @@
+import React from 'react';
+import { useAtomValue } from 'jotai';
+import { AgentRun } from '../../agents/types';
+import {
+    getAgentActionsByRunAtom,
+    isCreateItemAgentAction,
+    CreateItemAgentAction,
+} from '../../agents/agentActions';
+import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
+
+interface AgentActionsDisplayProps {
+    run: AgentRun;
+}
+
+/**
+ * Displays agent actions for a completed run.
+ * Currently supports create_item actions from citations.
+ */
+export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run }) => {
+    const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
+
+    // Get create item actions with toolcall_id 'citations' (from citation extraction)
+    // Sort by citation count (descending) for consistent ordering
+    const createItemActions = (getAgentActionsByRun(
+        run.id,
+        (action) => isCreateItemAgentAction(action) && action.toolcall_id === 'citations'
+    ) as CreateItemAgentAction[]).sort((a, b) => {
+        const countA = a.proposed_data.item.citation_count ?? 0;
+        const countB = b.proposed_data.item.citation_count ?? 0;
+        return countB - countA;
+    });
+
+    // Don't show during streaming
+    if (run.status === 'in_progress') {
+        return null;
+    }
+
+    // Don't show if no actions or all are rejected/undone/error
+    if (
+        createItemActions.length === 0 ||
+        createItemActions.every(
+            (action) =>
+                action.status === 'rejected' ||
+                action.status === 'undone'
+        )
+    ) {
+        return null;
+    }
+
+    return (
+        <div className="px-4">
+            <CreateItemAgentActionDisplay
+                runId={run.id}
+                actions={createItemActions}
+            />
+        </div>
+    );
+};
+
+export default AgentActionsDisplay;
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
 import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -10,12 +10,14 @@ import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
+import { getWindowFromElement } from '../../../utils/windowContext';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
 }
 
 const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
     const removeMessage = useSetAtom(removePopupMessageAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
@@ -28,16 +30,19 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
 
     // Timer effect - sets the timerExpired flag when duration elapses
     useEffect(() => {
+        // Get the correct window context for this component
+        const win = getWindowFromElement(containerRef.current);
+        
         let timerId: number | null = null;
         if (message.expire !== false) { // Default to true if undefined
-            timerId = Zotero.getMainWindow().setTimeout(() => {
+            timerId = win.setTimeout(() => {
                 setTimerExpired(true);
             }, message.duration || POPUP_MESSAGE_DURATION);
         }
 
         return () => {
             if (timerId) {
-                Zotero.getMainWindow().clearTimeout(timerId);
+                win.clearTimeout(timerId);
             }
         };
     }, [message]);
@@ -111,6 +116,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
 
     return (
         <div
+            ref={containerRef}
             className="source-preview border-popup shadow-md mx-0 w-full"
             style={{
                 background: backgroundColor,

@@ -5,6 +5,7 @@ import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
+import WindowSidebar from './components/WindowSidebar';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
@@ -95,6 +96,30 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
         </Provider>
     );
     
+    return root;
+}
+
+/**
+ * Renders the WindowSidebar into the separate Beaver window.
+ * Uses the shared Jotai store for consistent state.
+ */
+export function renderWindowSidebar(domElement: HTMLElement) {
+    // Clean up any existing root first
+    const existingRoot = rootsMap.get(domElement);
+    if (existingRoot) {
+        existingRoot.unmount();
+        rootsMap.delete(domElement);
+    }
+
+    const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
+
+    root.render(
+        <Provider store={store}>
+            <WindowSidebar />
+        </Provider>
+    );
+
     return root;
 }
 

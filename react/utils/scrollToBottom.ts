@@ -1,5 +1,6 @@
 import { store } from "../store";
 import { userScrolledAtom } from "../atoms/ui";
+import type { WritableAtom } from "jotai";
 
 // Function to scroll to the bottom of the chat container
 // const scrollToBottom = () => {
@@ -10,9 +11,11 @@ import { userScrolledAtom } from "../atoms/ui";
 
 export const scrollToBottom = (
     containerRef: React.RefObject<HTMLElement>,
-    userScrolledOverride?: boolean
+    userScrolledOverride?: boolean,
+    customScrolledAtom?: WritableAtom<boolean, [boolean], void>
 ) => {
-    const userScrolled = userScrolledOverride !== undefined ? userScrolledOverride : store.get(userScrolledAtom);
+    const atomToRead = customScrolledAtom ?? userScrolledAtom;
+    const userScrolled = userScrolledOverride !== undefined ? userScrolledOverride : store.get(atomToRead);
     // If user has manually scrolled, or container doesn't exist, don't auto-scroll
     if (!containerRef.current || userScrolled) {
         return;

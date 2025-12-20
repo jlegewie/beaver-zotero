@@ -1,13 +1,18 @@
-import { citationMetadataAtom, citationDataListAtom } from "../atoms/citations"
+import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
-import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, inputAttachmentCountAtom } from "../atoms/messageComposition"
+import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
-import { userAttachmentsAtom, toolAttachmentsAtom, isChatRequestPendingAtom, isStreamingAtom, isCancellableAtom, isCancellingAtom, recentThreadsAtom, currentThreadIdAtom, currentAssistantMessageIdAtom, threadMessagesAtom } from "../atoms/threads"
+import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
+
+// Agent-related atoms
+import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "../agents/atoms"
+import { threadAgentActionsAtom, agentActionsByToolcallAtom, agentActionsByRunAtom } from "../agents/agentActions"
+import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsRequestAckDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/agentRunAtoms"
 
 export const atomRegistry = {
     // Auth
@@ -15,9 +20,31 @@ export const atomRegistry = {
     user: userAtom,
     authLoading: authLoadingAtom,
 
+    // Agent Runs
+    threadRuns: threadRunsAtom,
+    activeRun: activeRunAtom,
+    allRuns: allRunsAtom,
+    isAgentStreaming: isAgentStreamingAtom,
+    toolResultsMap: toolResultsMapAtom,
+
+    // Agent Actions
+    threadAgentActions: threadAgentActionsAtom,
+    agentActionsByToolcall: agentActionsByToolcallAtom,
+    agentActionsByRun: agentActionsByRunAtom,
+
+    // WebSocket State
+    isWSChatPending: isWSChatPendingAtom,
+    isWSConnected: isWSConnectedAtom,
+    isWSReady: isWSReadyAtom,
+    wsReadyData: wsReadyDataAtom,
+    wsRequestAckData: wsRequestAckDataAtom,
+    wsError: wsErrorAtom,
+    wsWarning: wsWarningAtom,
+
     // Citations
     citationMetadata: citationMetadataAtom,
     citationMetadataView: citationDataListAtom,
+    citationsByRunId: citationsByRunIdAtom,
 
     // Files
     fileStatus: fileStatusAtom,
@@ -34,7 +61,6 @@ export const atomRegistry = {
     currentMessageContent: currentMessageContentAtom,
     currentReaderAttachment: currentReaderAttachmentAtom,
     currentReaderAttachmentKey: currentReaderAttachmentKeyAtom,
-    inputAttachmentCount: inputAttachmentCountAtom,
     readerTextSelection: readerTextSelectionAtom,
 
     // Models
@@ -62,16 +88,8 @@ export const atomRegistry = {
     overallSyncStatus: overallSyncStatusAtom,
 
     // Threads
-    userAttachments: userAttachmentsAtom,
-    toolAttachments: toolAttachmentsAtom,
-    isChatRequestPending: isChatRequestPendingAtom,
-    isStreaming: isStreamingAtom,
-    isCancellable: isCancellableAtom,
-    isCancelling: isCancellingAtom,
     recentThreads: recentThreadsAtom,
-    threadMessages: threadMessagesAtom,
     currentThreadId: currentThreadIdAtom,
-    currentAssistantMessageId: currentAssistantMessageIdAtom,
 
     // UI
     isSidebarVisible: isSidebarVisibleAtom,

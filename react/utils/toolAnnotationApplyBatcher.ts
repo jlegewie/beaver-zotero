@@ -1,23 +1,36 @@
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { proposedActionsService, AckLink } from '../../src/services/proposedActionsService';
+import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { logger } from '../../src/utils/logger';
-import { AnnotationProposedAction, AnnotationResultData } from '../types/proposedActions/base';
-import { updateProposedActionsAtom, ProposedActionUpdate } from '../atoms/proposedActions';
+import { AnnotationResultData } from '../types/agentActions/base';
+import { updateAgentActionsAtom, AgentAction, AgentActionUpdate, isAnnotationAgentAction } from '../agents/agentActions';
 import { applyAnnotation } from './annotationActions';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;
 const MAX_QUEUE_SIZE = 50;
 
+/**
+ * Typed agent action for annotations (mirrors AnnotationProposedAction structure)
+ */
+type AnnotationAgentAction = AgentAction & {
+    action_type: 'highlight_annotation' | 'note_annotation';
+    proposed_data: {
+        library_id: number;
+        attachment_key: string;
+        [key: string]: any;
+    };
+    result_data?: AnnotationResultData;
+};
+
 type AnnotationBatchItem = {
-    messageId: string;
+    runId: string;
     toolcallId: string;
-    actions: AnnotationProposedAction[];
+    actions: AnnotationAgentAction[];
 };
 
 type AckEntry = {
     toolcallId: string;
-    action: AnnotationProposedAction;
+    action: AnnotationAgentAction;
 };
 
 export class ToolAnnotationApplyBatcher {
@@ -106,8 +119,7 @@ export class ToolAnnotationApplyBatcher {
 
         const ackRequests = new Map<string, AckEntry[]>();
         const ackIndex = new Map<string, AckEntry>();
-        const errorActionsToUpdate: ProposedActionUpdate[] = [];
-        const ackErrorUpdates: ProposedActionUpdate[] = [];
+        const ackErrorUpdates: AgentActionUpdate[] = [];
         const errorActionsToPersist: Array<{ actionId: string; errorMessage: string }> = [];
         const ackErrorsToPersist: Array<{ actionId: string; detail: string }> = [];
 
@@ -117,7 +129,7 @@ export class ToolAnnotationApplyBatcher {
             );
 
             // Update state for all actions in this batch item
-            store.set(updateProposedActionsAtom, 
+            store.set(updateAgentActionsAtom, 
                 appliedActions.map((action) => ({
                     id: action.id,
                     status: action.status,
@@ -136,21 +148,16 @@ export class ToolAnnotationApplyBatcher {
                     }
 
                     const entry: AckEntry = { toolcallId: item.toolcallId, action };
-                    if (!ackRequests.has(item.messageId)) {
-                        ackRequests.set(item.messageId, []);
+                    if (!ackRequests.has(item.runId)) {
+                        ackRequests.set(item.runId, []);
                     }
-                    ackRequests.get(item.messageId)!.push(entry);
+                    ackRequests.get(item.runId)!.push(entry);
                     ackIndex.set(action.id, entry);
                 });
 
             appliedActions
                 .filter((action) => action.status === 'error')
                 .forEach((action) => {
-                    errorActionsToUpdate.push({
-                        id: action.id,
-                        status: 'error',
-                        error_message: action.error_message || 'Failed to apply action',
-                    });
                     errorActionsToPersist.push({
                         actionId: action.id,
                         errorMessage: action.error_message || 'Failed to apply action',
@@ -158,14 +165,14 @@ export class ToolAnnotationApplyBatcher {
                 });
         }
 
-        for (const [messageId, entries] of ackRequests.entries()) {
+        for (const [runId, entries] of ackRequests.entries()) {
             try {
-                const links: AckLink[] = entries.map(({ action }) => ({
+                const links: AckActionLink[] = entries.map(({ action }) => ({
                     action_id: action.id,
                     result_data: action.result_data as AnnotationResultData,
                 }));
 
-                const response = await proposedActionsService.acknowledgeActions(messageId, links);
+                const response = await agentActionsService.acknowledgeActions(runId, links);
 
                 if (response.errors.length > 0) {
                     response.errors.forEach((ackError) => {
@@ -191,14 +198,14 @@ export class ToolAnnotationApplyBatcher {
                 }
             } catch (error: any) {
                 logger(
-                    `AnnotationBatcher: failed to acknowledge actions for message ${messageId}: ${error?.message || error}`,
+                    `AnnotationBatcher: failed to acknowledge actions for run ${runId}: ${error?.message || error}`,
                     1
                 );
             }
         }
 
         if (ackErrorUpdates.length > 0) {
-            store.set(updateProposedActionsAtom, ackErrorUpdates);
+            store.set(updateAgentActionsAtom, ackErrorUpdates);
         }
 
         const backendUpdatePromises: Promise<void>[] = [];
@@ -206,7 +213,7 @@ export class ToolAnnotationApplyBatcher {
         errorActionsToPersist.forEach(({ actionId, errorMessage }) => {
             backendUpdatePromises.push((async () => {
                 try {
-                    await proposedActionsService.updateAction(actionId, {
+                    await agentActionsService.updateAction(actionId, {
                         status: 'error',
                         error_message: errorMessage,
                     });
@@ -222,7 +229,7 @@ export class ToolAnnotationApplyBatcher {
         ackErrorsToPersist.forEach(({ actionId, detail }) => {
             backendUpdatePromises.push((async () => {
                 try {
-                    await proposedActionsService.updateAction(actionId, {
+                    await agentActionsService.updateAction(actionId, {
                         status: 'error',
                         error_message: detail,
                     });
@@ -241,9 +248,9 @@ export class ToolAnnotationApplyBatcher {
     }
 
     private async applySingleAction(
-        action: AnnotationProposedAction,
+        action: AnnotationAgentAction,
         currentReaderKey: string | null
-    ): Promise<AnnotationProposedAction> {
+    ): Promise<AnnotationAgentAction> {
         if (!currentReaderKey || !action.proposed_data?.attachment_key) {
             return action;
         }
@@ -253,7 +260,9 @@ export class ToolAnnotationApplyBatcher {
         }
 
         try {
-            const result = await applyAnnotation(action);
+            // Cast to AnnotationProposedAction for applyAnnotation compatibility
+            // Both AgentAction and ProposedAction share the same proposed_data structure
+            const result = await applyAnnotation(action as any);
             logger(`AnnotationBatcher: applied action ${action.id}`, 1);
 
             return {
@@ -282,3 +291,10 @@ export class ToolAnnotationApplyBatcher {
 }
 
 export const toolAnnotationApplyBatcher = new ToolAnnotationApplyBatcher();
+
+/**
+ * Helper to filter annotation agent actions from a list
+ */
+export function filterAnnotationAgentActions(actions: AgentAction[]): AnnotationAgentAction[] {
+    return actions.filter(isAnnotationAgentAction) as AnnotationAgentAction[];
+}

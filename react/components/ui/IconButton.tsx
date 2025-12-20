@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { Icon, Spinner } from '../icons/icons';
 import { ButtonVariant } from './Button';
 
@@ -33,7 +33,7 @@ interface IconButtonProps {
 /**
 * A button that displays an icon with multiple variant options
 */
-const IconButton: React.FC<IconButtonProps> = ({
+const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
     icon,
     variant = 'ghost',
     onClick,
@@ -46,7 +46,7 @@ const IconButton: React.FC<IconButtonProps> = ({
     title,
     onMouseEnter,
     onMouseLeave
-}) => {
+}, ref) => {
     // Use the existing icon-button class for ghost variant for compatibility
     // Use the variant-{type} classes for the other variants
     // const buttonClass = variant === 'ghost' 
@@ -56,6 +56,7 @@ const IconButton: React.FC<IconButtonProps> = ({
     
     return (
         <button
+            ref={ref}
             className={buttonClass}
             onClick={onClick}
             aria-label={ariaLabel}
@@ -69,6 +70,8 @@ const IconButton: React.FC<IconButtonProps> = ({
             <Icon icon={!loading ? icon : Spinner} className={iconClassName} />
         </button>
     );
-};
+});
+
+IconButton.displayName = 'IconButton';
 
 export default IconButton;

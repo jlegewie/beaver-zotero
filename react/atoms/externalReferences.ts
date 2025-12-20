@@ -3,6 +3,7 @@ import { ExternalReference, extractAuthorLastName } from '../types/externalRefer
 import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
@@ -66,64 +67,77 @@ export const checkExternalReferenceAtom = atom(
         
         try {
             let result: ZoteroItemReference | null = null;
+            let foundItem: Zotero.Item | null = null;
             
             // First, validate backend data if library_items exist
             if (externalRef.library_items && externalRef.library_items.length > 0) {
                 const firstItem = externalRef.library_items[0];
                 logger(`checkExternalReference: Validating backend data for ${refId}`, 1);
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstItem.library_id,
-                    firstItem.zotero_key
-                );
-                
-                if (item && !item.deleted) {
-                    result = {
-                        library_id: firstItem.library_id,
-                        zotero_key: firstItem.zotero_key
-                    };
-                    logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
-                } else {
-                    logger(`checkExternalReference: Backend data invalid for ${refId}, item not found`, 1);
+                try {
+                    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                        firstItem.library_id,
+                        firstItem.zotero_key
+                    );
+                    
+                    if (item && !item.deleted) {
+                        result = {
+                            library_id: firstItem.library_id,
+                            zotero_key: firstItem.zotero_key
+                        };
+                        foundItem = item;
+                        logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
+                    } else {
+                        logger(`checkExternalReference: Backend data invalid for ${refId}, item not found`, 1);
+                    }
+                } catch (backendError) {
+                    logger(`checkExternalReference: Backend validation failed for ${refId}: ${backendError}`, 2);
                 }
             }
             
             // Fall back to findExistingReference if backend validation failed
             if (!result) {
                 logger(`checkExternalReference: Searching for ${refId}`, 1);
-                const existingItem = await findExistingReference(1, {
-                    title: externalRef.title,
-                    date: externalRef.publication_date,
-                    DOI: externalRef.identifiers?.doi,
-                    ISBN: externalRef.identifiers?.isbn,
-                    creators: externalRef.authors?.map(author => extractAuthorLastName(author))
-                } as FindReferenceData);
+                try {
+                    const existingItem = await findExistingReference(1, {
+                        title: externalRef.title,
+                        date: externalRef.publication_date,
+                        DOI: externalRef.identifiers?.doi,
+                        ISBN: externalRef.identifiers?.isbn,
+                        creators: externalRef.authors?.map(author => extractAuthorLastName(author))
+                    } as FindReferenceData);
 
-                if (existingItem) {
-                    result = {
-                        library_id: existingItem.libraryID,
-                        zotero_key: existingItem.key
-                    };
-                }
-
-                if (result) {
-                    logger(`checkExternalReference: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
-                } else {
-                    logger(`checkExternalReference: No match found for ${refId}`, 1);
+                    if (existingItem) {
+                        result = {
+                            library_id: existingItem.libraryID,
+                            zotero_key: existingItem.key
+                        };
+                        foundItem = existingItem;
+                        logger(`checkExternalReference: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
+                    } else {
+                        logger(`checkExternalReference: No match found for ${refId}`, 1);
+                    }
+                } catch (searchError) {
+                    logger(`checkExternalReference: Search failed for ${refId}: ${searchError}`, 2);
                 }
             }
             
-            // Update cache
+            // Load full item data if found (needed for getBestAttachment and display)
+            if (foundItem) {
+                await loadFullItemDataWithAllTypes([foundItem]);
+            }
+            
+            // Update cache (even on error, cache null to prevent repeated failed attempts)
             set(externalReferenceItemMappingAtom, {
-                ...cache,
+                ...get(externalReferenceItemMappingAtom),
                 [refId]: result
             });
             
             return result;
         } finally {
-            // Remove from checking set
-            const newChecking = new Set(checking);
-            newChecking.delete(refId);
-            set(checkingExternalReferencesAtom, newChecking);
+            // Remove from checking set - read latest value to avoid overwriting concurrent updates
+            const currentChecking = new Set(get(checkingExternalReferencesAtom));
+            currentChecking.delete(refId);
+            set(checkingExternalReferencesAtom, currentChecking);
         }
     }
 );
@@ -159,52 +173,76 @@ export const checkExternalReferencesAtom = atom(
         set(checkingExternalReferencesAtom, newChecking);
         
         try {
-            // Check all references in parallel
+            // Collect found items for batch data loading
+            const foundItems: Zotero.Item[] = [];
+            
+            // Check all references in parallel, with individual error handling
             const results = await Promise.all(
                 refsToCheck.map(async (ref): Promise<[string, ZoteroItemReference | null] | null> => {
                     const refId = ref.source_id;
                     if (!refId) return null;
                     
-                    let result: ZoteroItemReference | null = null;
-                    
-                    // Validate backend data first
-                    if (ref.library_items && ref.library_items.length > 0) {
-                        const firstItem = ref.library_items[0];
-                        const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                            firstItem.library_id,
-                            firstItem.zotero_key
-                        );
+                    try {
+                        let result: ZoteroItemReference | null = null;
                         
-                        if (item) {
-                            result = {
-                                library_id: firstItem.library_id,
-                                zotero_key: firstItem.zotero_key
-                            };
+                        // Validate backend data first
+                        if (ref.library_items && ref.library_items.length > 0) {
+                            const firstItem = ref.library_items[0];
+                            try {
+                                const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                                    firstItem.library_id,
+                                    firstItem.zotero_key
+                                );
+                                
+                                if (item) {
+                                    result = {
+                                        library_id: firstItem.library_id,
+                                        zotero_key: firstItem.zotero_key
+                                    };
+                                    foundItems.push(item);
+                                }
+                            } catch (backendError) {
+                                logger(`checkExternalReferences: Backend validation failed for ${refId}: ${backendError}`, 2);
+                            }
                         }
-                    }
-                    
-                    // Fall back to findExistingReference
-                    if (!result) {
-                        const existingItem = await findExistingReference(1, {
-                            title: ref.title,
-                            date: ref.publication_date,
-                            DOI: ref.identifiers?.doi,
-                            ISBN: ref.identifiers?.isbn,
-                            creators: ref.authors?.map(author => extractAuthorLastName(author))
-                        } as FindReferenceData);
-                        if (existingItem) {
-                            result = {
-                                library_id: existingItem.libraryID,
-                                zotero_key: existingItem.key
-                            };
+                        
+                        // Fall back to findExistingReference
+                        if (!result) {
+                            try {
+                                const existingItem = await findExistingReference(1, {
+                                    title: ref.title,
+                                    date: ref.publication_date,
+                                    DOI: ref.identifiers?.doi,
+                                    ISBN: ref.identifiers?.isbn,
+                                    creators: ref.authors?.map(author => extractAuthorLastName(author))
+                                } as FindReferenceData);
+                                if (existingItem) {
+                                    result = {
+                                        library_id: existingItem.libraryID,
+                                        zotero_key: existingItem.key
+                                    };
+                                    foundItems.push(existingItem);
+                                }
+                            } catch (searchError) {
+                                logger(`checkExternalReferences: Search failed for ${refId}: ${searchError}`, 2);
+                            }
                         }
+                        
+                        return [refId, result];
+                    } catch (error) {
+                        // Catch any unexpected errors and return null for this reference
+                        logger(`checkExternalReferences: Unexpected error for ${refId}: ${error}`, 2);
+                        return [refId, null];
                     }
-                    
-                    return [refId, result];
                 })
             );
             
-            // Update cache with all results
+            // Load full item data for all found items (needed for getBestAttachment and display)
+            if (foundItems.length > 0) {
+                await loadFullItemDataWithAllTypes(foundItems);
+            }
+            
+            // Update cache with all results (including failed ones as null)
             const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] => r !== null));
             set(externalReferenceItemMappingAtom, {
                 ...get(externalReferenceItemMappingAtom),
@@ -237,6 +275,23 @@ export const markExternalReferenceImportedAtom = atom(
             [sourceId]: itemReference
         });
         logger(`markExternalReferenceImported: ${sourceId} -> ${itemReference.library_id}-${itemReference.zotero_key}`, 1);
+    }
+);
+
+/**
+ * Mark external reference as deleted (no longer exists in Zotero)
+ * Sets cache to null so UI immediately updates to show Import button
+ * Uses source_id as the cache key
+ */
+export const markExternalReferenceDeletedAtom = atom(
+    null,
+    (get, set, sourceId: string) => {
+        const cache = get(externalReferenceItemMappingAtom);
+        set(externalReferenceItemMappingAtom, {
+            ...cache,
+            [sourceId]: null
+        });
+        logger(`markExternalReferenceDeleted: ${sourceId} -> null`, 1);
     }
 );
 
