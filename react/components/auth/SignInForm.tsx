@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { isProfileLoadedAtom, isProfileInvalidAtom } from '../../atoms/profile'
+import {
+  authMethodAtom,
+  loginStepAtom,
+  loginEmailAtom,
+  loginPasswordAtom,
+  loginErrorAtom,
+  loginLoadingAtom,
+  otpResendCountdownAtom,
+  isWaitingForProfileAtom,
+  resetLoginFormAtom,
+  setAuthMethodAtom,
+} from '../../atoms/auth'
 import { OTPVerification } from './OTPVerification'
 import { sendOTP, verifyOTP, getOTPErrorMessage } from './otp'
-import { getPref, setPref } from '../../../src/utils/prefs'
-
-type AuthMethod = 'initial' | 'code' | 'password'
-type LoginStep = 'method-selection' | 'otp' | 'forgot-password'
+import { getPref } from '../../../src/utils/prefs'
 
 interface SignInFormProps {
   setErrorMsg: (errorMsg: string | null) => void;
@@ -15,17 +24,18 @@ interface SignInFormProps {
 }
 
 export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormProps) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [authMethod, setAuthMethod] = useState<AuthMethod>(() => {
-    const storedAuthMethod = getPref("authMethod");
-    return (storedAuthMethod === 'password' || storedAuthMethod === 'code') ? storedAuthMethod : 'initial';
-  })
-  const [step, setStep] = useState<LoginStep>('method-selection')
-  const [resendCountdown, setResendCountdown] = useState(0)
-  const [isWaitingForProfile, setIsWaitingForProfile] = useState(false)
+  // Shared atoms for login form state
+  const [email, setEmail] = useAtom(loginEmailAtom)
+  const [password, setPassword] = useAtom(loginPasswordAtom)
+  const [isLoading, setIsLoading] = useAtom(loginLoadingAtom)
+  const [error, setError] = useAtom(loginErrorAtom)
+  const [authMethod] = useAtom(authMethodAtom)
+  const setAuthMethod = useSetAtom(setAuthMethodAtom)
+  const [step, setStep] = useAtom(loginStepAtom)
+  const [resendCountdown, setResendCountdown] = useAtom(otpResendCountdownAtom)
+  const [isWaitingForProfile, setIsWaitingForProfile] = useAtom(isWaitingForProfileAtom)
+  const resetLoginForm = useSetAtom(resetLoginFormAtom)
+  
   // Store the associated email at mount time for error messages
   const [associatedEmail] = useState<string | undefined>(() => getPref("userEmail"))
   const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
@@ -214,11 +224,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
   // Reset to initial state
   const resetToInitial = () => {
-    setAuthMethod('initial')
-    setStep('method-selection')
-    setError(null)
-    setPassword('')
-    setPref("authMethod", "initial")
+    resetLoginForm()
   }
 
   // Show loading while waiting for profile
@@ -304,7 +310,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                       setAuthMethod('password')
                       setError(null)
                       setErrorMsg(null)
-                      setPref("authMethod", "password")
                     }}
                     disabled={isLoading}
                     className="text-link-muted text-sm"
@@ -366,7 +371,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
             
             <button
               type="submit"
-              onClick={() => setPref("authMethod", "password")}
+              onClick={() => setAuthMethod('password')}
               disabled={isLoading}
               className="webapp-btn webapp-btn-primary"
             >

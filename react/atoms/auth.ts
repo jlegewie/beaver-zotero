@@ -2,12 +2,96 @@ import { atom } from 'jotai';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../../src/services/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
+import { getPref, setPref } from '../../src/utils/prefs';
 
 /**
  * Atom representing the current authentication session
  * Null when no active session exists
  */
 export const sessionAtom = atom<Session | null>(null);
+
+// =============================================================================
+// Login Form State Atoms
+// These atoms manage shared state for the login form across all windows
+// =============================================================================
+
+export type AuthMethod = 'initial' | 'code' | 'password';
+export type LoginStep = 'method-selection' | 'otp' | 'forgot-password';
+
+/**
+ * Determines the authentication method shown in the login form
+ * Synced with preferences for persistence
+ */
+const getInitialAuthMethod = (): AuthMethod => {
+    const stored = getPref("authMethod");
+    return (stored === 'password' || stored === 'code') ? stored : 'initial';
+};
+
+export const authMethodAtom = atom<AuthMethod>(getInitialAuthMethod());
+
+/**
+ * Write atom to update authMethod and persist to preferences
+ */
+export const setAuthMethodAtom = atom(
+    null,
+    (get, set, method: AuthMethod) => {
+        set(authMethodAtom, method);
+        setPref("authMethod", method);
+    }
+);
+
+/**
+ * Current step in the login flow
+ */
+export const loginStepAtom = atom<LoginStep>('method-selection');
+
+/**
+ * Email input value for login form (shared across windows)
+ */
+const getInitialEmail = (): string => {
+    return getPref("userEmail") || '';
+};
+
+export const loginEmailAtom = atom<string>(getInitialEmail());
+
+/**
+ * Password input value for login form
+ */
+export const loginPasswordAtom = atom<string>('');
+
+/**
+ * Error message for authentication forms
+ */
+export const loginErrorAtom = atom<string | null>(null);
+
+/**
+ * Loading state for authentication operations
+ */
+export const loginLoadingAtom = atom<boolean>(false);
+
+/**
+ * Countdown timer for OTP resend (in seconds)
+ */
+export const otpResendCountdownAtom = atom<number>(0);
+
+/**
+ * Whether we're waiting for profile to load after successful auth
+ */
+export const isWaitingForProfileAtom = atom<boolean>(false);
+
+/**
+ * Reset login form to initial state
+ */
+export const resetLoginFormAtom = atom(
+    null,
+    (get, set) => {
+        set(authMethodAtom, 'initial');
+        set(loginStepAtom, 'method-selection');
+        set(loginErrorAtom, null);
+        set(loginPasswordAtom, '');
+        setPref("authMethod", "initial");
+    }
+);
 
 /**
  * Derived atom that determines if the user is authenticated
