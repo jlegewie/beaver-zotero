@@ -1091,6 +1091,116 @@ export const regenerateFromRunAtom = atom(
 );
 
 /**
+ * Resume a failed run from its error point.
+ * 
+ * Flow:
+ * 1. Find the failed run
+ * 2. Create a new run with is_resume=true and empty content
+ * 3. Execute via WebSocket
+ * 
+ * The backend will continue from where it left off and the UI will hide the error run
+ * when displaying the resumed run.
+ */
+export const resumeFromRunAtom = atom(
+    null,
+    async (get, set, failedRunId: string) => {
+        logger(`resumeFromRunAtom: Resuming from run ${failedRunId}`, 1);
+
+        try {
+            // Get current model
+            const model = get(selectedModelAtom);
+            if (!model) {
+                logger('resumeFromRunAtom: No model selected', 1);
+                return;
+            }
+
+            // Get user ID
+            const userId = get(userIdAtom);
+            if (!userId) {
+                logger('resumeFromRunAtom: No user ID found', 1);
+                return;
+            }
+
+            // Find the failed run
+            const threadRuns = get(threadRunsAtom);
+            const activeRun = get(activeRunAtom);
+            
+            let failedRun: AgentRun | null = null;
+            const failedRunIndex = threadRuns.findIndex(r => r.id === failedRunId);
+            
+            if (failedRunIndex >= 0) {
+                failedRun = threadRuns[failedRunIndex];
+            } else if (activeRun?.id === failedRunId) {
+                failedRun = activeRun;
+            }
+            
+            if (!failedRun) {
+                logger(`resumeFromRunAtom: Failed run ${failedRunId} not found`, 1);
+                return;
+            }
+
+            // Verify it's an error run that can be resumed
+            if (failedRun.status !== 'error' || !failedRun.error?.is_resumable) {
+                logger(`resumeFromRunAtom: Run ${failedRunId} is not resumable`, 1);
+                return;
+            }
+
+            // Get thread ID
+            const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
+            if (!threadId) {
+                logger('resumeFromRunAtom: No thread ID found', 1);
+                return;
+            }
+
+            // Reset WS state and set pending
+            set(resetWSStateAtom);
+            set(isWSChatPendingAtom, true);
+
+            // Build model selection options
+            const modelOptions = buildModelSelectionOptions(model);
+            const customInstructions = getPref('customInstructions') || undefined;
+
+            // Create resume prompt with empty content
+            const resumePrompt: BeaverAgentPrompt = {
+                content: '',
+                is_resume: true,
+                resumes_run_id: failedRunId,
+            };
+
+            // Create new AgentRun shell with the resume prompt
+            const { run: newRun, request } = createAgentRunShell(
+                resumePrompt,
+                threadId,
+                userId,
+                model.name,
+                modelOptions,
+                model.provider,
+                customInstructions,
+                model.is_custom ? model.custom_model : undefined,
+            );
+
+            // Set active run - UI now shows spinner
+            set(activeRunAtom, newRun);
+
+            // Execute the WebSocket request
+            await executeWSRequest(newRun, request, set);
+        } catch (error) {
+            // Catch any unexpected errors during resume
+            logger(`resumeFromRunAtom: Unexpected error: ${error}`, 1);
+            console.error('[WS] Unexpected error in resumeFromRunAtom:', error);
+            set(wsErrorAtom, {
+                event: 'error',
+                type: 'resume_error',
+                message: error instanceof Error ? error.message : 'Failed to resume run',
+                is_retryable: true,
+            });
+            set(activeRunAtom, null);
+            set(isWSChatPendingAtom, false);
+        }
+    }
+);
+
+/**
  * Close the WebSocket connection with proper cancellation.
  * Sends a cancel message to the backend before closing to ensure proper cleanup.
  */

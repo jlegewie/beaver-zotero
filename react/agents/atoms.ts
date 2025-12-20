@@ -43,6 +43,20 @@ export const allRunsAtom = atom((get) => {
     return active ? [...completed, active] : completed;
 });
 
+/** Set of run IDs that were resumed (for hiding error runs that were resumed) */
+export const resumedRunIdsAtom = atom((get) => {
+    const runs = get(allRunsAtom);
+    const resumedIds = new Set<string>();
+    
+    for (const run of runs) {
+        if (run.user_prompt.is_resume && run.user_prompt.resumes_run_id) {
+            resumedIds.add(run.user_prompt.resumes_run_id);
+        }
+    }
+    
+    return resumedIds;
+});
+
 /** Total number of runs in the thread */
 export const runsCountAtom = atom((get) => get(allRunsAtom).length);
 

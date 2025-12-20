@@ -67,6 +67,10 @@ export interface BeaverAgentPrompt {
     filters?: MessageSearchFilters;
     /** Explicit tool requests from the user (e.g., search_external_references) */
     tool_requests?: ToolRequest[];
+    /** Whether this is a resume request */
+    is_resume?: boolean;
+    /** The run ID this request resumes (for resume requests) */
+    resumes_run_id?: string;
 }
 
 // ============================================================================

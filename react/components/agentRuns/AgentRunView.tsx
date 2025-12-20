@@ -7,7 +7,9 @@ import { AgentRunFooter } from './AgentRunFooter';
 import { AgentActionsDisplay } from './AgentActionsDisplay';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
+import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
+import { resumedRunIdsAtom } from '../../agents/atoms';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -39,14 +41,28 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     const hasError = run.status === 'error';
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id);
+    const resumedRunIds = useAtomValue(resumedRunIdsAtom);
+    
+    // Check if this error run was resumed (to hide error display)
+    const wasResumed = hasError && resumedRunIds.has(run.id);
+
+    // Don't show user message for resume runs (empty content)
+    const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
     // Only show spinner when streaming AND no visible content yet (not for errors)
     const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run);
 
+    // Show agent run footer
+    const showAgentRunFooter = 
+        run.status === 'completed' ||
+        run.status === 'canceled' ||
+        (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
+        (run.status === 'error' && !isLastRun);
+
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
             {/* User's message */}
-            <UserRequestView userPrompt={run.user_prompt} runId={run.id} />
+            {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} />}
 
             {/* Warning display (dismissable, non-persistent) */}
             {runWarnings.length > 0 && (
@@ -66,18 +82,21 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                 status={run.status}
             />
 
-            {/* Error display (includes retry button) */}
-            {hasError && run.error && (
+            {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
+            {hasError && run.error && !wasResumed && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
-            {/* Footer with sources and action buttons (only for completed runs) */}
-            {(run.status === 'completed' || run.status === 'canceled'  || (run.status === 'error' && !isLastRun)) && (
+            {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
+            {(showAgentRunFooter && !wasResumed) && (
                 <AgentRunFooter run={run} />
             )}
 
             {/* Agent actions (e.g., create item from citations) */}
             {run.status === 'completed' && <AgentActionsDisplay run={run} />}
+
+            {/* Resuming failed request display */}
+            {wasResumed && <RunResumeDisplay runId={run.id} />}
 
         </div>
     );

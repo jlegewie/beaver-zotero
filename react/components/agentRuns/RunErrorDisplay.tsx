@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
-import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
 import { runErrorVisibilityAtom, toggleRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 
@@ -75,10 +75,11 @@ const typeMap: Record<string, string> = {
 
 /**
  * Displays an error message for a failed agent run.
- * Shows a collapsible error message and a retry button.
+ * Shows a collapsible error message with retry and resume buttons.
  */
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    const resumeFromRun = useSetAtom(resumeFromRunAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     
     // Visibility state
@@ -90,6 +91,10 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const handleRetry = async () => {
         await regenerateFromRun(runId);
+    };
+
+    const handleResume = async () => {
+        await resumeFromRun(runId);
     };
 
     const handleToggle = () => {
@@ -162,24 +167,26 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         Settings
                                     </Button>
                                 )}
-                                {error.is_resumable && (
+                                {error.is_resumable && isLastRun && (
                                     <Button
-                                        variant="outline"
-                                        className="border-error font-color-red"
-                                        rightIcon={RepeatIcon}
-                                        onClick={handleRetry}
+                                        variant="error"
+                                        iconClassName="font-color-red"
+                                        rightIcon={LinkForwardIcon}
+                                        onClick={handleResume}
                                     >
                                         Resume
                                     </Button>
                                 )}
-                                <Button
-                                    variant="outline"
-                                    className="border-error font-color-red"
-                                    rightIcon={RepeatIcon}
-                                    onClick={handleRetry}
-                                >
-                                    Retry
-                                </Button>
+                                {isLastRun && (
+                                    <Button
+                                        variant="error"
+                                        iconClassName="font-color-red"
+                                        rightIcon={RepeatIcon}
+                                        onClick={handleRetry}
+                                    >
+                                        <span className="font-color-red">Retry</span>
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </div>
