@@ -315,11 +315,17 @@ export class AgentService {
                     break;
 
                 case 'error':
-                    // Call onError first, then clear callbacks before closing
-                    // to prevent race conditions during close handshake
+                    // Call onError callback
                     this.callbacks.onError(event);
-                    this.callbacks = null;
-                    this.close(1011, `Server error: ${event.type}`);
+                    // Backend behavior: some errors close connection (auth, internal), 
+                    // others keep it open (LLM errors, rate limits, invalid_request).
+                    // Since each connect() is for a single run (for now), close on any error.
+                    // Use a small delay to avoid race with server-initiated close.
+                    setTimeout(() => {
+                        if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+                            this.close(1011, `Client closing after error: ${event.type}`);
+                        }
+                    }, 100);
                     break;
 
                 case 'warning':
@@ -380,8 +386,19 @@ export class AgentService {
      */
     close(code: number = 1000, reason: string = 'Client closing'): void {
         if (this.ws) {
-            logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
-            this.ws.close(code, reason);
+            // Only attempt to close if not already closing/closed
+            // CLOSING = 2, CLOSED = 3
+            if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+                logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
+                try {
+                    this.ws.close(code, reason);
+                } catch (error) {
+                    // Log but don't throw - the connection may already be closing from server side
+                    logger(`AgentService: Error closing WebSocket (state=${this.ws.readyState}): ${error}`, 1);
+                }
+            } else {
+                logger(`AgentService: WebSocket already closing/closed (state=${this.ws.readyState})`, 1);
+            }
             this.ws = null;
         }
         this.callbacks = null;
