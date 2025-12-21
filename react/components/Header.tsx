@@ -1,5 +1,6 @@
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
+import PdfIcon from './icons/PdfIcon';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
@@ -15,6 +16,7 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
+import { PDFExtractor } from '../../src/services/pdf';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -45,6 +47,54 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             triggerToggleChat(Zotero.getMainWindow());
         }
     }, [isWindow]);
+
+    // TEMPORARY: Test PDF extraction
+    const handleTestPdfExtraction = useCallback(async () => {
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        
+        if (selectedItems.length === 0) {
+            console.log("[PDF Test] No item selected");
+            return;
+        }
+
+        let pdfItem = selectedItems[0];
+
+        // If it's a parent item, try to get the first PDF attachment
+        if (!pdfItem.isPDFAttachment()) {
+            const attachmentIDs = pdfItem.getAttachments();
+            const pdfAttachment = attachmentIDs
+                .map(id => Zotero.Items.get(id))
+                .find(item => item.isPDFAttachment());
+            
+            if (!pdfAttachment) {
+                console.log("[PDF Test] Selected item is not a PDF and has no PDF attachments");
+                return;
+            }
+            pdfItem = pdfAttachment;
+        }
+
+        console.log("[PDF Test] Starting extraction for:", pdfItem.getField("title") || pdfItem.getDisplayTitle());
+
+        try {
+            const filePath = await pdfItem.getFilePathAsync();
+            if (!filePath) {
+                console.log("[PDF Test] File path not found");
+                return;
+            }
+
+            const pdfData = await IOUtils.read(filePath);
+            const extractor = new PDFExtractor();
+            const result = await extractor.extract(pdfData, { checkTextLayer: false });
+
+            console.log("[PDF Test] Extraction complete!");
+            console.log("[PDF Test] Page count:", result.analysis.pageCount);
+            console.log("[PDF Test] Has text layer:", result.analysis.hasTextLayer);
+            console.log("[PDF Test] Full text (first 2000 chars):", result.fullText.slice(0, 2000));
+            console.log("[PDF Test] Full result:", result);
+        } catch (error) {
+            console.error("[PDF Test] Extraction failed:", error);
+        }
+    }, []);
 
     // Get platform-specific shortcut text
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
@@ -98,6 +148,16 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                         />
                     </Tooltip>
                 )}
+
+                {/* TEMPORARY: Test PDF extraction button - REMOVE BEFORE RELEASE */}
+                <Tooltip content="[DEV] Test PDF Extraction" showArrow singleLine>
+                    <IconButton
+                        icon={PdfIcon}
+                        onClick={handleTestPdfExtraction}
+                        className="scale-14"
+                        ariaLabel="Test PDF extraction"
+                    />
+                </Tooltip>
             </div>
 
             {/* Database status and user account menu */}
