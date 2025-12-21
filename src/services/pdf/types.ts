@@ -48,6 +48,10 @@ export interface ExtractionSettings {
     margins?: MarginSettings;
     /** Margin zone for smart filtering (collect elements for analysis) */
     marginZone?: MarginSettings;
+    /** Minimum pages a text must appear on to be considered "repeating" */
+    repeatThreshold?: number;
+    /** Whether to detect and remove page number sequences */
+    detectPageSequences?: boolean;
     /** Number of pages to sample for style analysis (0 = all pages) */
     styleSampleSize?: number;
 }
@@ -59,6 +63,8 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     minTextPerPage: 100,
     margins: DEFAULT_MARGINS,
     marginZone: DEFAULT_MARGIN_ZONE,
+    repeatThreshold: 3,
+    detectPageSequences: true,
     styleSampleSize: 100,
 };
 
@@ -221,6 +227,34 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+}
+
+/**
+ * Element identified for removal with metadata.
+ */
+export interface RemovalCandidate {
+    /** Normalized text that should be removed */
+    text: string;
+    /** Original (non-normalized) text samples */
+    originalText: string;
+    /** Page indices where this text appears */
+    pageIndices: number[];
+    /** Reason for removal */
+    reason: "repeat" | "page_number";
+    /** Which margin zone */
+    position: MarginPosition;
+}
+
+/**
+ * Result of smart margin removal analysis.
+ */
+export interface MarginRemovalResult {
+    /** Candidates identified for removal */
+    candidates: RemovalCandidate[];
+    /** Set of normalized text strings to remove */
+    textsToRemove: Set<string>;
+    /** Map of pageIndex -> set of texts to remove on that page */
+    removalsByPage: Map<number, Set<string>>;
 }
 
 // ============================================================================

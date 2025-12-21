@@ -2,8 +2,8 @@
  * Margin Filter
  *
  * Handles margin-based filtering of text content:
- * 1. Simple filtering: Exclude content outside margin thresholds
- * 2. Smart filtering: Collect elements in margin zones for analysis
+ * 1. Simple filtering: Exclude content entirely within margin thresholds
+ * 2. Smart filtering: Identify and remove repeating elements in margin zones
  */
 
 import type {
@@ -14,24 +14,73 @@ import type {
     MarginPosition,
     MarginElement,
     MarginAnalysis,
+    RemovalCandidate,
+    MarginRemovalResult,
 } from "./types";
+
+// ============================================================================
+// Page Number Detection Patterns
+// ============================================================================
+
+/** Patterns for detecting page numbers */
+const PAGE_NUMBER_PATTERNS = [
+    /^\d+$/,                          // Pure digits: "1", "42", "100"
+    /^page\s*\d+$/i,                  // "Page 1", "page42"
+    /^p\.?\s*\d+$/i,                  // "P. 1", "p1"
+    /^\d+\s*(of|\/|-)\s*\d+$/i,       // "1 of 10", "5/20", "3-15"
+    /^[ivxlcdm]+$/i,                  // Roman numerals: "iv", "XII"
+];
+
+/** Check if text matches a page number pattern */
+function isPageNumberPattern(text: string): boolean {
+    const normalized = text.trim().toLowerCase();
+    return PAGE_NUMBER_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
+/** Parse numeric value from page-like text (returns null if not parseable) */
+function parsePageNumber(text: string): number | null {
+    const normalized = text.trim().toLowerCase();
+    
+    // Pure digits
+    if (/^\d+$/.test(normalized)) {
+        return parseInt(normalized, 10);
+    }
+    
+    // "Page X" or "P. X" patterns
+    const match = normalized.match(/(?:page|p\.?)\s*(\d+)/i);
+    if (match) {
+        return parseInt(match[1], 10);
+    }
+    
+    // Roman numerals (simplified - just common ones)
+    const romanMap: Record<string, number> = {
+        i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10,
+        xi: 11, xii: 12, xiii: 13, xiv: 14, xv: 15, xvi: 16, xvii: 17, xviii: 18, xix: 19, xx: 20,
+    };
+    if (romanMap[normalized] !== undefined) {
+        return romanMap[normalized];
+    }
+    
+    return null;
+}
+
+/** Check if numbers form a strictly increasing sequence */
+function isIncreasingSequence(numbers: number[]): boolean {
+    if (numbers.length < 2) return false;
+    for (let i = 1; i < numbers.length; i++) {
+        if (numbers[i] <= numbers[i - 1]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ============================================================================
+// Margin Zone Detection
+// ============================================================================
 
 /**
  * Check if a bounding box is ENTIRELY within a specific margin zone.
- * The element must be fully contained in the margin area.
- *
- * For margins:
- * - Left: entire element (including right edge) must be within left margin
- * - Right: entire element (including left edge) must be within right margin
- * - Top: entire element (including bottom edge) must be within top margin
- * - Bottom: entire element (including top edge) must be within bottom margin
- *
- * @param bbox - Element bounding box
- * @param pageWidth - Page width in points
- * @param pageHeight - Page height in points
- * @param margins - Margin thresholds
- * @param position - Which margin to check (or undefined for any)
- * @returns true if element is entirely within the specified margin zone
  */
 function isEntirelyInMarginZone(
     bbox: RawBBox,
@@ -45,14 +94,9 @@ function isEntirelyInMarginZone(
     const x1 = bbox.x + bbox.w;
     const y1 = bbox.y + bbox.h;
 
-    // Check if element is ENTIRELY within each margin zone
-    // For top: bottom edge (y1) must be within top margin
     const inTop = y1 <= margins.top;
-    // For bottom: top edge (y0) must be within bottom margin zone
     const inBottom = y0 >= pageHeight - margins.bottom;
-    // For left: right edge (x1) must be within left margin
     const inLeft = x1 <= margins.left;
-    // For right: left edge (x0) must be within right margin zone
     const inRight = x0 >= pageWidth - margins.right;
 
     if (position) {
@@ -69,8 +113,6 @@ function isEntirelyInMarginZone(
 
 /**
  * Determine which margin zone an element is ENTIRELY within.
- * Returns the primary position (prioritizes top/bottom over left/right).
- * Element must be fully contained in the margin zone.
  */
 function getMarginPosition(
     bbox: RawBBox,
@@ -83,8 +125,6 @@ function getMarginPosition(
     const x0 = bbox.x;
     const x1 = bbox.x + bbox.w;
 
-    // Prioritize top/bottom (more common for headers/footers)
-    // Element must be ENTIRELY within the margin zone
     if (y1 <= margins.top) return "top";
     if (y0 >= pageHeight - margins.bottom) return "bottom";
     if (x1 <= margins.left) return "left";
@@ -93,18 +133,21 @@ function getMarginPosition(
     return null;
 }
 
+/** Normalize text for comparison */
+function normalizeText(text: string): string {
+    return text.trim().toLowerCase();
+}
+
+// ============================================================================
+// MarginFilter Class
+// ============================================================================
+
 /**
  * MarginFilter class for handling margin-based content filtering.
  */
 export class MarginFilter {
     /**
-     * Simple filter: Check if a line is inside the content area (not entirely in margins).
-     *
-     * @param line - The line to check
-     * @param pageWidth - Page width in points
-     * @param pageHeight - Page height in points
-     * @param margins - Margin thresholds
-     * @returns true if line is inside content area (should be kept)
+     * Simple filter: Check if a line is inside the content area.
      */
     static isInsideContentArea(
         line: RawLine,
@@ -116,11 +159,7 @@ export class MarginFilter {
     }
 
     /**
-     * Simple filter: Filter a page's lines to exclude those in margins.
-     *
-     * @param page - Raw page data
-     * @param margins - Margin thresholds
-     * @returns Filtered page with lines outside margins removed
+     * Simple filter: Filter a page's lines to exclude those entirely in margins.
      */
     static filterPageByMargins(
         page: RawPageData,
@@ -140,7 +179,6 @@ export class MarginFilter {
                 lines: filteredLines,
             };
         }).filter(block => {
-            // Remove empty text blocks
             if (block.type === "text") {
                 return block.lines && block.lines.length > 0;
             }
@@ -155,11 +193,6 @@ export class MarginFilter {
 
     /**
      * Smart filter: Collect all elements in margin zones for analysis.
-     * This is the first step of smart filtering - gather candidates.
-     *
-     * @param pages - All raw page data
-     * @param marginZone - Margin zone thresholds (larger than simple margins)
-     * @returns Analysis of elements in margin zones
      */
     static collectMarginElements(
         pages: RawPageData[],
@@ -177,7 +210,6 @@ export class MarginFilter {
                 if (block.type !== "text" || !block.lines) continue;
 
                 for (const line of block.lines) {
-                    // Skip empty or whitespace-only text
                     const trimmedText = (line.text || "").trim();
                     if (!trimmedText) continue;
 
@@ -189,21 +221,18 @@ export class MarginFilter {
                     );
 
                     if (position) {
-                        const element: MarginElement = {
+                        elements.get(position)!.push({
                             text: trimmedText,
                             position,
                             bbox: line.bbox,
                             pageIndex: page.pageIndex,
                             line,
-                        };
-
-                        elements.get(position)!.push(element);
+                        });
                     }
                 }
             }
         }
 
-        // Calculate counts
         const counts: Record<MarginPosition, number> = {
             top: elements.get("top")!.length,
             bottom: elements.get("bottom")!.length,
@@ -215,38 +244,220 @@ export class MarginFilter {
     }
 
     /**
-     * Log margin analysis for debugging.
-     * Shows what elements were found in each margin zone.
+     * Identify elements to remove based on frequency and page number detection.
+     *
+     * @param analysis - Margin analysis results
+     * @param requiredCount - Minimum pages for text to be considered repeating
+     * @param detectPageSequences - Whether to detect page number sequences
+     * @returns Removal result with candidates and lookup structures
      */
-    static logMarginAnalysis(analysis: MarginAnalysis): void {
-        console.log("[MarginFilter] Margin zone analysis:");
-        console.log(`  Top zone: ${analysis.counts.top} elements`);
-        console.log(`  Bottom zone: ${analysis.counts.bottom} elements`);
-        console.log(`  Left zone: ${analysis.counts.left} elements`);
-        console.log(`  Right zone: ${analysis.counts.right} elements`);
+    static identifyElementsToRemove(
+        analysis: MarginAnalysis,
+        requiredCount: number = 3,
+        detectPageSequences: boolean = true
+    ): MarginRemovalResult {
+        const candidates: RemovalCandidate[] = [];
+        const textsToRemove = new Set<string>();
+        const removalsByPage = new Map<number, Set<string>>();
 
-        // Log sample of elements per zone
+        // Process each margin position
         for (const [position, elements] of analysis.elements) {
-            if (elements.length > 0) {
-                console.log(`\n[MarginFilter] ${position.toUpperCase()} zone elements:`);
+            // Group by normalized text
+            const textGroups = new Map<string, { original: string; pageIndices: Set<number> }>();
 
-                // Group by unique text to show frequency
-                const textCounts = new Map<string, number>();
+            for (const el of elements) {
+                const normalized = normalizeText(el.text);
+                const existing = textGroups.get(normalized);
+
+                if (existing) {
+                    existing.pageIndices.add(el.pageIndex);
+                } else {
+                    textGroups.set(normalized, {
+                        original: el.text,
+                        pageIndices: new Set([el.pageIndex]),
+                    });
+                }
+            }
+
+            // Identify repeating elements (frequency >= requiredCount)
+            for (const [normalized, { original, pageIndices }] of textGroups) {
+                if (pageIndices.size >= requiredCount) {
+                    const pages = Array.from(pageIndices).sort((a, b) => a - b);
+
+                    candidates.push({
+                        text: normalized,
+                        originalText: original,
+                        pageIndices: pages,
+                        reason: "repeat",
+                        position,
+                    });
+
+                    textsToRemove.add(normalized);
+
+                    // Add to per-page lookup
+                    for (const pageIdx of pages) {
+                        if (!removalsByPage.has(pageIdx)) {
+                            removalsByPage.set(pageIdx, new Set());
+                        }
+                        removalsByPage.get(pageIdx)!.add(normalized);
+                    }
+                }
+            }
+
+            // Detect page number sequences
+            if (detectPageSequences) {
+                // Collect elements that match page number patterns
+                const pageNumberElements: { el: MarginElement; value: number }[] = [];
+
                 for (const el of elements) {
-                    const text = el.text.trim().slice(0, 50); // Truncate for display
-                    textCounts.set(text, (textCounts.get(text) || 0) + 1);
+                    if (isPageNumberPattern(el.text)) {
+                        const value = parsePageNumber(el.text);
+                        if (value !== null) {
+                            pageNumberElements.push({ el, value });
+                        }
+                    }
                 }
 
-                // Show top 5 most frequent
-                const sorted = Array.from(textCounts.entries())
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 5);
+                if (pageNumberElements.length >= requiredCount) {
+                    // Sort by page index
+                    pageNumberElements.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
 
-                for (const [text, count] of sorted) {
-                    console.log(`    "${text}" (${count} occurrences)`);
+                    // Check if values form an increasing sequence
+                    const values = pageNumberElements.map(p => p.value);
+                    
+                    if (isIncreasingSequence(values)) {
+                        // These are page numbers - mark all for removal
+                        const pageIndices = pageNumberElements.map(p => p.el.pageIndex);
+
+                        // Group by normalized text to avoid duplicates
+                        const seenTexts = new Set<string>();
+                        for (const { el } of pageNumberElements) {
+                            const normalized = normalizeText(el.text);
+                            
+                            if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {
+                                seenTexts.add(normalized);
+                                
+                                candidates.push({
+                                    text: normalized,
+                                    originalText: el.text,
+                                    pageIndices: [el.pageIndex],
+                                    reason: "page_number",
+                                    position,
+                                });
+                            }
+
+                            textsToRemove.add(normalized);
+
+                            if (!removalsByPage.has(el.pageIndex)) {
+                                removalsByPage.set(el.pageIndex, new Set());
+                            }
+                            removalsByPage.get(el.pageIndex)!.add(normalized);
+                        }
+
+                        // Log the page number sequence detection
+                        console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
+                    }
                 }
+            }
+        }
+
+        return { candidates, textsToRemove, removalsByPage };
+    }
+
+    /**
+     * Filter a page using smart removal results.
+     * Removes lines that match identified repeating/page-number elements.
+     */
+    static filterPageWithSmartRemoval(
+        page: RawPageData,
+        margins: MarginSettings,
+        marginZone: MarginSettings,
+        removalResult: MarginRemovalResult
+    ): RawPageData {
+        const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
+
+        const filteredBlocks = page.blocks.map(block => {
+            if (block.type !== "text" || !block.lines) {
+                return block;
+            }
+
+            const filteredLines = block.lines.filter(line => {
+                // Always remove if entirely in simple margins
+                if (!this.isInsideContentArea(line, page.width, page.height, margins)) {
+                    return false;
+                }
+
+                // Check if line is in margin zone and matches removal candidate
+                if (pageRemovals && pageRemovals.size > 0) {
+                    const position = getMarginPosition(
+                        line.bbox,
+                        page.width,
+                        page.height,
+                        marginZone
+                    );
+
+                    if (position) {
+                        const normalized = normalizeText(line.text || "");
+                        if (pageRemovals.has(normalized)) {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            });
+
+            return {
+                ...block,
+                lines: filteredLines,
+            };
+        }).filter(block => {
+            if (block.type === "text") {
+                return block.lines && block.lines.length > 0;
+            }
+            return true;
+        });
+
+        return {
+            ...page,
+            blocks: filteredBlocks,
+        };
+    }
+
+    /**
+     * Log what elements will be removed.
+     */
+    static logRemovalCandidates(result: MarginRemovalResult): void {
+        if (result.candidates.length === 0) {
+            console.log("[MarginFilter] No margin elements identified for removal");
+            return;
+        }
+
+        console.log(`[MarginFilter] Identified ${result.candidates.length} elements for removal:`);
+
+        // Group by position for cleaner output
+        const byPosition = new Map<MarginPosition, RemovalCandidate[]>();
+        for (const candidate of result.candidates) {
+            if (!byPosition.has(candidate.position)) {
+                byPosition.set(candidate.position, []);
+            }
+            byPosition.get(candidate.position)!.push(candidate);
+        }
+
+        for (const [position, candidates] of byPosition) {
+            console.log(`\n  ${position.toUpperCase()} zone:`);
+
+            for (const candidate of candidates) {
+                const pages = candidate.pageIndices;
+                const pageStr = pages.length > 10
+                    ? `pages ${pages.slice(0, 5).join(", ")}... (${pages.length} total)`
+                    : `pages ${pages.join(", ")}`;
+                
+                const reasonTag = candidate.reason === "page_number" ? " [PAGE#]" : "";
+                const displayText = candidate.originalText.slice(0, 50);
+
+                console.log(`    "${displayText}"${reasonTag} (${pageStr})`);
             }
         }
     }
 }
-

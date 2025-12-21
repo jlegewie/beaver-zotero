@@ -21,6 +21,7 @@ import {
     DocumentAnalysis,
     ProcessedPage,
     RawDocumentData,
+    MarginRemovalResult,
     ExtractionError,
     ExtractionErrorCode,
     DEFAULT_EXTRACTION_SETTINGS,
@@ -105,7 +106,7 @@ export class PDFExtractor {
                 0.15, // thresholdPerc
                 opts.styleSampleSize
             );
-            console.log('[PDFExtractor] styleProfile', styleProfile);
+            StyleAnalyzer.logStyleProfile(styleProfile);
 
             // 5b. Margin analysis (smart filtering - collect elements)
             console.log("[PDFExtractor] Analyzing margins...");
@@ -113,18 +114,31 @@ export class PDFExtractor {
                 rawData.pages,
                 opts.marginZone
             );
-            MarginFilter.logMarginAnalysis(marginAnalysis);
 
-            // 6. PAGE PROCESSING: Process each page with filtering
-            console.log("[PDFExtractor] Processing pages...");
-            const pageExtractor = new PageExtractor({
-                styleProfile,
-                margins: opts.margins, // Simple margin filtering
-            });
-
-            const pages: ProcessedPage[] = rawData.pages.map(rawPage =>
-                pageExtractor.extractPage(rawPage)
+            // 5c. Identify repeating elements for smart removal
+            console.log("[PDFExtractor] Identifying repeating margin elements...");
+            const removalResult = MarginFilter.identifyElementsToRemove(
+                marginAnalysis,
+                opts.repeatThreshold,
+                opts.detectPageSequences
             );
+            MarginFilter.logRemovalCandidates(removalResult);
+
+            // 6. PAGE PROCESSING: Process each page with smart filtering
+            console.log("[PDFExtractor] Processing pages with smart margin removal...");
+            const pages: ProcessedPage[] = rawData.pages.map(rawPage => {
+                // Apply smart margin filtering
+                const filteredPage = MarginFilter.filterPageWithSmartRemoval(
+                    rawPage,
+                    opts.margins,
+                    opts.marginZone,
+                    removalResult
+                );
+
+                // Use PageExtractor for additional processing
+                const pageExtractor = new PageExtractor({ styleProfile });
+                return pageExtractor.extractPage(filteredPage);
+            });
 
             // 7. Combine results
             const fullText = pages.map(p => p.content).join("\n\n");
