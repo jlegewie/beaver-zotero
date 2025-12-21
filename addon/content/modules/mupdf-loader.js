@@ -23,6 +23,31 @@ var MuPDFLoader = {
         return this._initPromise;
     },
 
+    /**
+     * Clear cached module and promise.
+     * Allows GC to reclaim WASM memory if no other references exist.
+     * 
+     * NOTE: Callers should ensure all MuPDF objects (Documents, Pages, StructuredText)
+     * have been properly destroyed via their .destroy() methods before calling this.
+     * Otherwise, WASM memory may not be fully reclaimed.
+     * 
+     * @returns {Promise<void>}
+     */
+    async dispose() {
+        // Wait for any in-flight initialization to complete before disposing
+        // to avoid race conditions where WASM module is orphaned
+        if (this._initPromise) {
+            try {
+                await this._initPromise;
+            } catch (e) {
+                // Ignore initialization errors during disposal
+            }
+        }
+        
+        this._libmupdf = null;
+        this._initPromise = null;
+    },
+
     async _doInit(rootURI) {
         const base = rootURI.endsWith("/") ? rootURI : `${rootURI}/`;
         const wasmURL = `${base}lib/mupdf-wasm.wasm`;

@@ -239,7 +239,7 @@ async function onShutdown(): Promise<void> {
 		ztoolkit.log("Cleaning up Beaver during shutdown.");
 				
 		// Clear MuPDF module cache to allow GC to reclaim WASM memory
-		disposeMuPDF();
+		await disposeMuPDF();
 
 		// Close database connection if it exists
 		if (addon.db) {

@@ -32,9 +32,23 @@ export async function getMuPDF(): Promise<MuPDFModule> {
 /**
  * Clear the cached MuPDF module reference.
  * Call this during plugin shutdown to let GC collect the WASM instance.
+ * 
+ * NOTE: Before calling this, ensure all MuPDF objects (Documents, Pages, StructuredText)
+ * created via getMuPDF() have been properly destroyed using their .destroy() methods.
+ * This ensures WASM memory is released before the module reference is cleared.
  */
-export function disposeMuPDF(): void {
+export async function disposeMuPDF(): Promise<void> {
     mupdfPromise = null;
+    
+    try {
+        const win = Zotero.getMainWindow();
+        const { MuPDFLoader } = await win.ChromeUtils.importESModule(
+            "chrome://beaver/content/modules/mupdf-loader.js"
+        );
+        await MuPDFLoader.dispose();
+    } catch (e) {
+        // Silently fail if loader is already gone or not loaded
+    }
 }
 
 /**
