@@ -15,6 +15,7 @@ import { DocumentAnalyzer } from "./DocumentAnalyzer";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { MarginFilter } from "./MarginFilter";
 import { PageExtractor } from "./PageExtractor";
+import { detectColumns, logColumnDetection } from "./ColumnDetector";
 import {
     ExtractionSettings,
     ExtractionResult,
@@ -34,6 +35,8 @@ export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
 export { MarginFilter } from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
+export { detectColumns, logColumnDetection } from "./ColumnDetector";
+export type { Rect, ColumnDetectionResult, ColumnDetectionOptions } from "./ColumnDetector";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -124,8 +127,8 @@ export class PDFExtractor {
             );
             MarginFilter.logRemovalCandidates(removalResult);
 
-            // 6. PAGE PROCESSING: Process each page with smart filtering
-            console.log("[PDFExtractor] Processing pages with smart margin removal...");
+            // 6. PAGE PROCESSING: Process each page with smart filtering and column detection
+            console.log("[PDFExtractor] Processing pages with smart margin removal and column detection...");
             const pages: ProcessedPage[] = rawData.pages.map(rawPage => {
                 // Apply smart margin filtering
                 const filteredPage = MarginFilter.filterPageWithSmartRemoval(
@@ -135,7 +138,12 @@ export class PDFExtractor {
                     removalResult
                 );
 
+                // Detect columns
+                const columnResult = detectColumns(filteredPage);
+                logColumnDetection(rawPage.pageIndex, columnResult);
+
                 // Use PageExtractor for additional processing
+                // TODO: Use column detection results to order text extraction
                 const pageExtractor = new PageExtractor({ styleProfile });
                 return pageExtractor.extractPage(filteredPage);
             });
